@@ -1,0 +1,190 @@
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use surrealdb::{Surreal, engine::local::Db};
+use surrealdb_types::SurrealValue;
+
+use crate::domain::errors::{Result, StasisError};
+use crate::domain::runtime::outbox::{OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType};
+use crate::ports::outbound::runtime::outbox_store::OutboxStore;
+
+#[derive(Clone)]
+pub struct SurrealOutboxStore {
+    db: Surreal<Db>,
+    table: String,
+}
+
+impl SurrealOutboxStore {
+    pub fn new(db: Surreal<Db>) -> Self {
+        Self {
+            db,
+            table: "outbox_event".to_string(),
+        }
+    }
+
+    fn port_err(prefix: &str, err: impl std::fmt::Display) -> StasisError {
+        StasisError::PortFailure(format!("{prefix}: {err}"))
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
+struct OutboxRecord {
+    event_id: String,
+    status: String,
+    publish_attempts: u32,
+    published_at: Option<DateTime<Utc>>,
+    event_type: String,
+    job_id: String,
+    correlation_id: String,
+    causation_id: String,
+    trace_id: String,
+    sttp_input_node_id: String,
+    sttp_output_node_id: Option<String>,
+    occurred_at: DateTime<Utc>,
+    message: Option<String>,
+}
+
+impl From<OutboxEvent> for OutboxRecord {
+    fn from(value: OutboxEvent) -> Self {
+        Self {
+            event_id: value.event_id,
+            status: match value.status {
+                OutboxStatus::Pending => "pending".to_string(),
+                OutboxStatus::Published => "published".to_string(),
+                OutboxStatus::Failed => "failed".to_string(),
+            },
+            publish_attempts: value.publish_attempts,
+            published_at: value.published_at,
+            event_type: match value.event.event_type {
+                RuntimeEventType::JobSucceeded => "job_succeeded".to_string(),
+                RuntimeEventType::JobRetryScheduled => "job_retry_scheduled".to_string(),
+                RuntimeEventType::JobDeadLettered => "job_dead_lettered".to_string(),
+            },
+            job_id: value.event.job_id,
+            correlation_id: value.event.correlation_id,
+            causation_id: value.event.causation_id,
+            trace_id: value.event.trace_id,
+            sttp_input_node_id: value.event.sttp_input_node_id,
+            sttp_output_node_id: value.event.sttp_output_node_id,
+            occurred_at: value.event.occurred_at,
+            message: value.event.message,
+        }
+    }
+}
+
+impl TryFrom<OutboxRecord> for OutboxEvent {
+    type Error = StasisError;
+
+    fn try_from(value: OutboxRecord) -> std::result::Result<Self, Self::Error> {
+        let status = match value.status.as_str() {
+            "pending" => OutboxStatus::Pending,
+            "published" => OutboxStatus::Published,
+            "failed" => OutboxStatus::Failed,
+            other => {
+                return Err(StasisError::PortFailure(format!(
+                    "invalid outbox status: {other}"
+                )));
+            }
+        };
+
+        let event_type = match value.event_type.as_str() {
+            "job_succeeded" => RuntimeEventType::JobSucceeded,
+            "job_retry_scheduled" => RuntimeEventType::JobRetryScheduled,
+            "job_dead_lettered" => RuntimeEventType::JobDeadLettered,
+            other => {
+                return Err(StasisError::PortFailure(format!(
+                    "invalid runtime event type: {other}"
+                )));
+            }
+        };
+
+        Ok(Self {
+            event_id: value.event_id,
+            status,
+            publish_attempts: value.publish_attempts,
+            published_at: value.published_at,
+            event: RuntimeEvent {
+                event_type,
+                job_id: value.job_id,
+                correlation_id: value.correlation_id,
+                causation_id: value.causation_id,
+                trace_id: value.trace_id,
+                sttp_input_node_id: value.sttp_input_node_id,
+                sttp_output_node_id: value.sttp_output_node_id,
+                occurred_at: value.occurred_at,
+                message: value.message,
+            },
+        })
+    }
+}
+
+#[async_trait]
+impl OutboxStore for SurrealOutboxStore {
+    async fn insert(&self, event: OutboxEvent) -> Result<()> {
+        let record: OutboxRecord = event.into();
+        self.db
+            .query("UPSERT type::record($table, $id) CONTENT $data")
+            .bind(("table", self.table.clone()))
+            .bind(("id", record.event_id.clone()))
+            .bind(("data", record))
+            .await
+            .map_err(|e| Self::port_err("insert outbox event", e))?;
+
+        Ok(())
+    }
+
+    async fn list_pending(&self, limit: usize) -> Result<Vec<OutboxEvent>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::table($table)")
+            .bind(("table", self.table.clone()))
+            .await
+            .map_err(|e| Self::port_err("list outbox events", e))?;
+
+        let rows: Vec<OutboxRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode outbox events", e))?;
+
+        let mut events: Vec<OutboxEvent> = rows
+            .into_iter()
+            .filter_map(|row| OutboxEvent::try_from(row).ok())
+            .filter(|evt| evt.status == OutboxStatus::Pending)
+            .collect();
+
+        events.sort_by_key(|evt| evt.event.occurred_at);
+        events.truncate(limit);
+        Ok(events)
+    }
+
+    async fn mark_published(&self, event_id: &str, published_at: DateTime<Utc>) -> Result<()> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::record($table, $id)")
+            .bind(("table", self.table.clone()))
+            .bind(("id", event_id.to_string()))
+            .await
+            .map_err(|e| Self::port_err("load outbox event", e))?;
+
+        let row: Option<OutboxRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode outbox event", e))?;
+
+        let Some(mut event) = row else {
+            return Ok(());
+        };
+
+        event.status = "published".to_string();
+        event.publish_attempts = event.publish_attempts.saturating_add(1);
+        event.published_at = Some(published_at);
+
+        self.db
+            .query("UPSERT type::record($table, $id) CONTENT $data")
+            .bind(("table", self.table.clone()))
+            .bind(("id", event.event_id.clone()))
+            .bind(("data", event))
+            .await
+            .map_err(|e| Self::port_err("mark outbox published", e))?;
+
+        Ok(())
+    }
+}

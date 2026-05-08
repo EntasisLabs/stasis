@@ -1,0 +1,1038 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Stasis Architecture Book</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-2459343d.css">
+        <link rel="stylesheet" href="css/chrome-ae938929.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-045a4fad.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-6f90a697.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Stasis Architecture Book</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
+<p>Stasis is an agentic framework SDK with a durable job orchestration runtime.</p>
+<p>This book is the architecture reference for the runtime and covers:</p>
+<ol>
+<li>System architecture and decision boundaries.</li>
+<li>Runtime behavior and reliability semantics.</li>
+<li>SurrealDB schema contracts.</li>
+<li>Architecture Decision Records (ADRs).</li>
+</ol>
+<h2 id="how-to-read-this-book"><a class="header" href="#how-to-read-this-book">How to Read This Book</a></h2>
+<ol>
+<li>Start with Architecture Overview for context and execution flow.</li>
+<li>Read Runtime Draft and Job Runtime Design for implementation behavior.</li>
+<li>Use SurrealDB Schema as the source of truth for data contracts.</li>
+<li>Review ADRs for rationale and tradeoffs.</li>
+</ol>
+<h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
+<p>This book documents V1 runtime architecture and operational semantics. It does not define production deployment topology or UI dashboard design.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="stasis-architecture-overview"><a class="header" href="#stasis-architecture-overview">Stasis Architecture Overview</a></h1>
+<h2 id="document-status"><a class="header" href="#document-status">Document Status</a></h2>
+<ul>
+<li>Version: v1-draft</li>
+<li>Audience: Engineering, Platform, SRE, Security</li>
+<li>Scope: Runtime architecture for durable job orchestration in Stasis</li>
+</ul>
+<h2 id="executive-summary"><a class="header" href="#executive-summary">Executive Summary</a></h2>
+<p>Stasis uses DDD + Hexagonal architecture and an event-driven runtime backed by SurrealDB. The runtime is designed for at-least-once job execution with deterministic idempotent handlers, durable leases, retries, and dead-letter handling.</p>
+<h2 id="architecture-principles"><a class="header" href="#architecture-principles">Architecture Principles</a></h2>
+<ol>
+<li>Durable by default: critical execution state lives in SurrealDB.</li>
+<li>Event-driven orchestration: capabilities coordinate via events, not direct coupling.</li>
+<li>Local determinism: chain-of-responsibility pipelines are used inside a single job execution path.</li>
+<li>Context by reference: STTP node IDs are passed across job boundaries rather than large payload blobs.</li>
+<li>Replaceable infrastructure: adapters implement ports so backends can evolve without domain rewrites.</li>
+</ol>
+<h2 id="system-context"><a class="header" href="#system-context">System Context</a></h2>
+<pre class="mermaid">flowchart LR
+  subgraph Clients
+    API[API Client]
+    CRON[Scheduler API]
+    OPS[Ops Replay Tool]
+  end
+
+  subgraph StasisSDK[Stasis Runtime]
+    CMD[Command Layer]
+    CORESVC[Application Use Cases]
+    BUS[Event Bus Port]
+    WORKER[Worker Runtime]
+    SCH[Recurring Scheduler]
+  end
+
+  subgraph DataPlane[Durable Data Plane]
+    SDB[(SurrealDB)]
+    LOCUS[Locus SDK]
+  end
+
+  API --&gt; CMD
+  CRON --&gt; CMD
+  OPS --&gt; CMD
+  CMD --&gt; CORESVC
+  CORESVC --&gt; BUS
+  BUS --&gt; WORKER
+  SCH --&gt; BUS
+  WORKER --&gt; SDB
+  SCH --&gt; SDB
+  WORKER --&gt; LOCUS
+  LOCUS --&gt; SDB
+</pre>
+
+<h2 id="runtime-components"><a class="header" href="#runtime-components">Runtime Components</a></h2>
+<ol>
+<li>Command Layer</li>
+</ol>
+<ul>
+<li>Accepts job commands, validates contracts, and routes to use cases.</li>
+</ul>
+<ol start="2">
+<li>Application Use Cases</li>
+</ol>
+<ul>
+<li>Coordinates domain invariants and state transitions through ports.</li>
+</ul>
+<ol start="3">
+<li>Worker Runtime</li>
+</ol>
+<ul>
+<li>Leases jobs, executes handlers, heartbeats, and writes results.</li>
+</ul>
+<ol start="4">
+<li>Recurring Scheduler</li>
+</ol>
+<ul>
+<li>Materializes due recurring definitions into executable jobs.</li>
+</ul>
+<ol start="5">
+<li>Outbox Publisher</li>
+</ol>
+<ul>
+<li>Publishes committed runtime/domain events safely after persistence.</li>
+</ul>
+<ol start="6">
+<li>Observability Pipeline</li>
+</ol>
+<ul>
+<li>Emits metrics and traces keyed by correlation and trace IDs.</li>
+</ul>
+<h2 id="request-and-execution-flow"><a class="header" href="#request-and-execution-flow">Request and Execution Flow</a></h2>
+<pre class="mermaid">sequenceDiagram
+  autonumber
+  participant C as Client
+  participant A as API/Command Layer
+  participant J as JobStore
+  participant W as Worker
+  participant L as Locus SDK
+  participant O as Outbox
+
+  C-&gt;&gt;A: enqueue_job(command, sttp_input_node_id)
+  A-&gt;&gt;J: insert job(state=enqueued)
+  A--&gt;&gt;C: accepted(job_id)
+
+  W-&gt;&gt;J: lease due job
+  J--&gt;&gt;W: lease granted(job_id, lease_expires_at)
+  W-&gt;&gt;J: transition leased-&gt;running + heartbeat start
+  W-&gt;&gt;L: resolve STTP context by sttp_input_node_id
+  L--&gt;&gt;W: context payload
+  W-&gt;&gt;W: execute CoR + handler
+  W-&gt;&gt;L: persist output STTP node
+  L--&gt;&gt;W: sttp_output_node_id
+  W-&gt;&gt;J: transition running-&gt;succeeded
+  W-&gt;&gt;O: append JobSucceeded event
+</pre>
+
+<h2 id="job-lifecycle"><a class="header" href="#job-lifecycle">Job Lifecycle</a></h2>
+<pre class="mermaid">stateDiagram-v2
+  [*] --&gt; enqueued
+  enqueued --&gt; leased: lease acquired
+  leased --&gt; running: worker starts
+  running --&gt; succeeded: handler success
+  running --&gt; failed: handler error
+  failed --&gt; enqueued: retry scheduled
+  failed --&gt; dead_letter: retries exhausted
+  enqueued --&gt; canceled: canceled before lease
+  leased --&gt; enqueued: lease timeout recovery
+  dead_letter --&gt; enqueued: operator replay
+  succeeded --&gt; [*]
+  canceled --&gt; [*]
+</pre>
+
+<h2 id="chain-of-responsibility-boundary"><a class="header" href="#chain-of-responsibility-boundary">Chain of Responsibility Boundary</a></h2>
+<p>Use CoR for ordered, in-process concerns inside one job execution:</p>
+<ul>
+<li>request validation</li>
+<li>policy and guardrails</li>
+<li>prompt/context enrichment</li>
+<li>result shaping</li>
+</ul>
+<p>Use events and jobs for cross-capability orchestration:</p>
+<ul>
+<li>planner to executor handoffs</li>
+<li>asynchronous tool operations</li>
+<li>delayed and recurring workloads</li>
+<li>saga compensation and replay</li>
+</ul>
+<h2 id="reliability-and-slo-controls"><a class="header" href="#reliability-and-slo-controls">Reliability and SLO Controls</a></h2>
+<ul>
+<li>Delivery semantics: at-least-once.</li>
+<li>Lease safety: owner token + expiration + heartbeat.</li>
+<li>Duplicate safety: idempotency key + deterministic handlers.</li>
+<li>Failure isolation: retry with backoff and dead-letter queue.</li>
+<li>Recovery: operator replay with full causation chain.</li>
+</ul>
+<h2 id="security-and-compliance-considerations"><a class="header" href="#security-and-compliance-considerations">Security and Compliance Considerations</a></h2>
+<ol>
+<li>Restrict sensitive secrets in job payload metadata.</li>
+<li>Keep tenant and auth context explicit in command contracts.</li>
+<li>Preserve immutable audit fields for state transitions.</li>
+<li>Apply queue-level policy controls for privileged job types.</li>
+</ol>
+<h2 id="decision-diagram"><a class="header" href="#decision-diagram">Decision Diagram</a></h2>
+<pre class="mermaid">flowchart TD
+  START([Need new runtime behavior]) --&gt; D1{Single request scope?}
+  D1 -- Yes --&gt; D2{Order-sensitive pipeline?}
+  D2 -- Yes --&gt; C1[Use local CoR middleware]
+  D2 -- No --&gt; C2[Use direct use case call]
+  D1 -- No --&gt; D3{Durability required?}
+  D3 -- Yes --&gt; C3[Create durable job + event]
+  D3 -- No --&gt; C4[Use transient event path]
+  C3 --&gt; D4{Periodic schedule?}
+  D4 -- Yes --&gt; C5[Model as recurring definition]
+  D4 -- No --&gt; C6[Model as one-off job]
+</pre>
+
+<h2 id="related-documents"><a class="header" href="#related-documents">Related Documents</a></h2>
+<ul>
+<li>Runtime draft: <a href="#stasis-v1-runtime-draft">Runtime V1 Draft</a></li>
+<li>Job runtime design: <a href="#stasis-job-runtime-design">Job Runtime Design</a></li>
+<li>Database schema: <a href="#surrealdb-schema-specification">SurrealDB Schema</a></li>
+<li>ADR index: <a href="#architecture-decision-records">Architecture Decision Records</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="stasis-v1-runtime-draft"><a class="header" href="#stasis-v1-runtime-draft">Stasis V1 Runtime Draft</a></h1>
+<h2 id="purpose"><a class="header" href="#purpose">Purpose</a></h2>
+<p>Define a V1 execution runtime for Stasis that combines DDD + Hexagonal boundaries with a durable, SurrealDB-backed job system inspired by Hangfire.</p>
+<h2 id="problem-statement"><a class="header" href="#problem-statement">Problem Statement</a></h2>
+<p>Linear orchestration is insufficient for agentic workloads that require retries, fan-out, delayed execution, and recurring automation. We need a durable runtime that can survive process crashes while preserving context continuity via STTP references.</p>
+<h2 id="v1-goals"><a class="header" href="#v1-goals">V1 Goals</a></h2>
+<ol>
+<li>Durable job queue backed by SurrealDB.</li>
+<li>Event-driven orchestration between agent capabilities.</li>
+<li>STTP node references as job input and output handles.</li>
+<li>Reliable retry, leasing, and dead-letter behavior.</li>
+<li>Recurring job support for periodic automations such as web scraping.</li>
+</ol>
+<h2 id="v1-non-goals"><a class="header" href="#v1-non-goals">V1 Non-Goals</a></h2>
+<ol>
+<li>Multi-region consensus scheduling.</li>
+<li>Exactly-once delivery guarantees.</li>
+<li>Full visual dashboard UI.</li>
+<li>Hard real-time execution guarantees.</li>
+</ol>
+<h2 id="architecture-summary"><a class="header" href="#architecture-summary">Architecture Summary</a></h2>
+<ul>
+<li>Local request path uses chain-of-responsibility for deterministic per-request processing.</li>
+<li>Cross-capability orchestration uses jobs and events.</li>
+<li>Jobs are persisted in SurrealDB and processed by leased workers.</li>
+<li>Large payloads are not inlined in job records; STTP and artifact references are stored instead.</li>
+</ul>
+<h2 id="job-classes"><a class="header" href="#job-classes">Job Classes</a></h2>
+<ol>
+<li>Fire-and-forget</li>
+<li>Delayed</li>
+<li>Recurring</li>
+<li>Continuation</li>
+<li>Compensation</li>
+</ol>
+<h2 id="runtime-components-1"><a class="header" href="#runtime-components-1">Runtime Components</a></h2>
+<ol>
+<li>Job Store</li>
+</ol>
+<ul>
+<li>Persists jobs, state transitions, leases, and run metadata.</li>
+</ul>
+<ol start="2">
+<li>Queue Dispatcher</li>
+</ol>
+<ul>
+<li>Polls due jobs by queue and attempts lease acquisition.</li>
+</ul>
+<ol start="3">
+<li>Worker Runtime</li>
+</ol>
+<ul>
+<li>Executes jobs, updates heartbeats, records outputs, and emits events.</li>
+</ul>
+<ol start="4">
+<li>Scheduler</li>
+</ol>
+<ul>
+<li>Materializes recurring definitions into concrete jobs.</li>
+</ul>
+<ol start="5">
+<li>Event Bus Port</li>
+</ol>
+<ul>
+<li>Publishes domain and runtime events to internal subscribers.</li>
+</ul>
+<ol start="6">
+<li>Outbox Port</li>
+</ol>
+<ul>
+<li>Ensures event publication consistency with state transitions.</li>
+</ul>
+<h2 id="state-machine"><a class="header" href="#state-machine">State Machine</a></h2>
+<p>Allowed states:</p>
+<ul>
+<li>enqueued</li>
+<li>leased</li>
+<li>running</li>
+<li>succeeded</li>
+<li>failed</li>
+<li>dead_letter</li>
+<li>canceled</li>
+</ul>
+<p>Core transitions:</p>
+<ul>
+<li>enqueued -&gt; leased</li>
+<li>leased -&gt; running</li>
+<li>running -&gt; succeeded</li>
+<li>running -&gt; failed</li>
+<li>failed -&gt; enqueued (retry)</li>
+<li>failed -&gt; dead_letter (attempts exhausted)</li>
+</ul>
+<h2 id="reliability-model"><a class="header" href="#reliability-model">Reliability Model</a></h2>
+<ul>
+<li>Delivery semantics: at-least-once.</li>
+<li>Safety mechanism: idempotency_key and deterministic handlers.</li>
+<li>Recovery: lease timeout and heartbeat expiry trigger re-queue.</li>
+<li>Failure handling: bounded retries + exponential backoff + dead-letter queue.</li>
+</ul>
+<h2 id="sttp-and-locus-integration"><a class="header" href="#sttp-and-locus-integration">STTP and Locus Integration</a></h2>
+<p>Input contract:</p>
+<ul>
+<li>sttp_input_node_id references the memory/context node required for execution.</li>
+</ul>
+<p>Output contract:</p>
+<ul>
+<li>sttp_output_node_id references a node produced by the worker after execution.</li>
+</ul>
+<p>A2A continuity:</p>
+<ul>
+<li>Downstream jobs consume the upstream output reference via correlation identifiers.</li>
+</ul>
+<h2 id="recurring-jobs-v1"><a class="header" href="#recurring-jobs-v1">Recurring Jobs V1</a></h2>
+<p>Recurring definition fields:</p>
+<ul>
+<li>recurring_id</li>
+<li>cron_expr</li>
+<li>timezone</li>
+<li>jitter_seconds</li>
+<li>enabled</li>
+<li>next_run_at</li>
+<li>last_run_at</li>
+</ul>
+<p>Execution rule:</p>
+<ul>
+<li>Scheduler acquires a lease, computes due definitions, and enqueues concrete jobs.</li>
+<li>Jitter spreads schedule bursts to avoid thundering-herd effects.</li>
+</ul>
+<h2 id="observability-v1"><a class="header" href="#observability-v1">Observability V1</a></h2>
+<p>Metrics:</p>
+<ul>
+<li>queue_depth by queue</li>
+<li>job_latency_ms</li>
+<li>success_rate</li>
+<li>retry_count</li>
+<li>dead_letter_count</li>
+<li>lease_timeout_recoveries</li>
+</ul>
+<p>Tracing fields:</p>
+<ul>
+<li>correlation_id</li>
+<li>causation_id</li>
+<li>trace_id</li>
+</ul>
+<h2 id="security-and-safety"><a class="header" href="#security-and-safety">Security and Safety</a></h2>
+<ol>
+<li>Avoid inline secret payloads in job rows.</li>
+<li>Encrypt sensitive artifacts outside job metadata if needed.</li>
+<li>Enforce queue-specific execution policies.</li>
+<li>Keep worker behavior idempotent.</li>
+</ol>
+<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
+<ol>
+<li>Implement in-memory behavior-compatible adapters for fast tests.</li>
+<li>Implement SurrealDB job store and recurring definitions.</li>
+<li>Add worker lease and heartbeat loop.</li>
+<li>Add outbox and event bus publication path.</li>
+<li>Enable recurring jobs for web scraping workloads.</li>
+</ol>
+<h2 id="exit-criteria-for-v1"><a class="header" href="#exit-criteria-for-v1">Exit Criteria for V1</a></h2>
+<ol>
+<li>Jobs survive process restart and continue execution.</li>
+<li>Retry/backoff/dead-letter paths are validated by tests.</li>
+<li>Recurring jobs materialize and execute on schedule.</li>
+<li>STTP input/output references are persisted per run.</li>
+<li>Event-driven continuation jobs are demonstrated end-to-end.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="stasis-job-runtime-design"><a class="header" href="#stasis-job-runtime-design">Stasis Job Runtime Design</a></h1>
+<h2 id="scope-1"><a class="header" href="#scope-1">Scope</a></h2>
+<p>This document defines the implementation-facing design for a SurrealDB-backed distributed job runtime used by Stasis.</p>
+<h2 id="domain-concepts"><a class="header" href="#domain-concepts">Domain Concepts</a></h2>
+<p>Job:</p>
+<ul>
+<li>Durable execution unit for agent work.</li>
+</ul>
+<p>Recurring Definition:</p>
+<ul>
+<li>Schedule template that generates concrete jobs.</li>
+</ul>
+<p>Run Attempt:</p>
+<ul>
+<li>Single execution attempt of a job with timing and outcome metadata.</li>
+</ul>
+<p>Lease:</p>
+<ul>
+<li>Time-bounded ownership token for safe distributed processing.</li>
+</ul>
+<h2 id="data-model"><a class="header" href="#data-model">Data Model</a></h2>
+<h3 id="job-record"><a class="header" href="#job-record">Job Record</a></h3>
+<p>Suggested fields:</p>
+<ul>
+<li>job_id: string</li>
+<li>queue: string</li>
+<li>job_type: string</li>
+<li>payload_ref: string</li>
+<li>state: string</li>
+<li>priority: int</li>
+<li>attempts: int</li>
+<li>max_attempts: int</li>
+<li>backoff_policy: object</li>
+<li>idempotency_key: string</li>
+<li>correlation_id: string</li>
+<li>causation_id: string</li>
+<li>trace_id: string</li>
+<li>sttp_input_node_id: string</li>
+<li>sttp_output_node_id: string | null</li>
+<li>lease_owner: string | null</li>
+<li>lease_expires_at: datetime | null</li>
+<li>heartbeat_at: datetime | null</li>
+<li>scheduled_at: datetime</li>
+<li>started_at: datetime | null</li>
+<li>finished_at: datetime | null</li>
+<li>last_error: object | null</li>
+</ul>
+<h3 id="recurring-definition"><a class="header" href="#recurring-definition">Recurring Definition</a></h3>
+<p>Suggested fields:</p>
+<ul>
+<li>recurring_id: string</li>
+<li>queue: string</li>
+<li>job_type: string</li>
+<li>payload_template_ref: string</li>
+<li>cron_expr: string</li>
+<li>timezone: string</li>
+<li>jitter_seconds: int</li>
+<li>enabled: bool</li>
+<li>next_run_at: datetime</li>
+<li>last_run_at: datetime | null</li>
+<li>lease_owner: string | null</li>
+<li>lease_expires_at: datetime | null</li>
+</ul>
+<h3 id="job-event-outbox"><a class="header" href="#job-event-outbox">Job Event (Outbox)</a></h3>
+<p>Suggested fields:</p>
+<ul>
+<li>event_id: string</li>
+<li>event_type: string</li>
+<li>job_id: string</li>
+<li>aggregate_type: string</li>
+<li>aggregate_id: string</li>
+<li>payload: object</li>
+<li>status: string</li>
+<li>created_at: datetime</li>
+<li>published_at: datetime | null</li>
+</ul>
+<h2 id="ports"><a class="header" href="#ports">Ports</a></h2>
+<p>Outbound ports:</p>
+<ul>
+<li>JobStore</li>
+<li>RecurringStore</li>
+<li>OutboxStore</li>
+<li>EventPublisher</li>
+<li>Clock</li>
+<li>IdGenerator</li>
+</ul>
+<p>Inbound ports:</p>
+<ul>
+<li>JobCommands</li>
+<li>SchedulerCommands</li>
+</ul>
+<h2 id="core-algorithms"><a class="header" href="#core-algorithms">Core Algorithms</a></h2>
+<h3 id="lease-acquisition"><a class="header" href="#lease-acquisition">Lease Acquisition</a></h3>
+<ol>
+<li>Select due enqueued job where scheduled_at &lt;= now and lease_expires_at is null or expired.</li>
+<li>Attempt compare-and-set update to assign lease_owner and lease_expires_at.</li>
+<li>Proceed only when update affects one record.</li>
+</ol>
+<h3 id="worker-execution"><a class="header" href="#worker-execution">Worker Execution</a></h3>
+<ol>
+<li>Move leased job to running.</li>
+<li>Heartbeat every lease_interval/2.</li>
+<li>Execute handler with idempotency context.</li>
+<li>On success:</li>
+</ol>
+<ul>
+<li>persist result reference sttp_output_node_id</li>
+<li>mark succeeded</li>
+<li>write outbox events</li>
+</ul>
+<ol start="5">
+<li>On failure:</li>
+</ol>
+<ul>
+<li>increment attempts</li>
+<li>if attempts &lt; max_attempts, compute backoff and re-enqueue</li>
+<li>otherwise mark dead_letter and write failure event</li>
+</ul>
+<h3 id="recurring-materialization"><a class="header" href="#recurring-materialization">Recurring Materialization</a></h3>
+<ol>
+<li>Scheduler leases recurring definitions that are due.</li>
+<li>For each definition, enqueue concrete job with scheduled_at = now + jitter.</li>
+<li>Compute and persist next_run_at from cron_expr and timezone.</li>
+<li>Release definition lease.</li>
+</ol>
+<h2 id="idempotency-contract"><a class="header" href="#idempotency-contract">Idempotency Contract</a></h2>
+<ul>
+<li>idempotency_key must be unique per logical operation.</li>
+<li>Handlers must be safe under duplicate delivery.</li>
+<li>Store execution fingerprints to detect duplicate side effects.</li>
+</ul>
+<h2 id="event-contract"><a class="header" href="#event-contract">Event Contract</a></h2>
+<p>Minimum event envelope:</p>
+<ul>
+<li>event_type</li>
+<li>occurred_at</li>
+<li>correlation_id</li>
+<li>causation_id</li>
+<li>trace_id</li>
+<li>job_id</li>
+<li>sttp_input_node_id</li>
+<li>sttp_output_node_id</li>
+</ul>
+<h2 id="failure-semantics"><a class="header" href="#failure-semantics">Failure Semantics</a></h2>
+<ul>
+<li>At-least-once processing is expected.</li>
+<li>Lease expiration enables recovery after worker crash.</li>
+<li>Dead-letter records must retain full diagnostics and replay metadata.</li>
+</ul>
+<h2 id="surrealdb-notes"><a class="header" href="#surrealdb-notes">SurrealDB Notes</a></h2>
+<ul>
+<li>Prefer indexed fields: state, queue, scheduled_at, lease_expires_at.</li>
+<li>Keep payload_ref small and immutable.</li>
+<li>Keep state changes append-observable via outbox/event rows.</li>
+</ul>
+<h2 id="testing-matrix"><a class="header" href="#testing-matrix">Testing Matrix</a></h2>
+<ol>
+<li>Lease contention with multiple workers.</li>
+<li>Heartbeat expiry and recovery.</li>
+<li>Retry and backoff correctness.</li>
+<li>Dead-letter transition on attempt exhaustion.</li>
+<li>Recurring materialization correctness with timezone and jitter.</li>
+<li>Idempotent replay behavior.</li>
+<li>STTP input/output reference continuity across continuation jobs.</li>
+</ol>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ol>
+<li>Cron parser choice for Rust runtime.</li>
+<li>Preferred queue partition strategy.</li>
+<li>Replay API shape for dead-letter processing.</li>
+<li>Backoff policy defaults per queue class.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
+<h2 id="purpose-1"><a class="header" href="#purpose-1">Purpose</a></h2>
+<p>Define the V1 SurrealDB schema and indexing strategy for Stasis durable job orchestration.</p>
+<h2 id="design-constraints"><a class="header" href="#design-constraints">Design Constraints</a></h2>
+<ol>
+<li>Fast lookup for due and lease-expired jobs.</li>
+<li>Append-observable state transitions via events/outbox.</li>
+<li>Small hot rows with reference-based payload model.</li>
+<li>Explicit keys for correlation, causation, and idempotency.</li>
+</ol>
+<h2 id="logical-entity-relationship"><a class="header" href="#logical-entity-relationship">Logical Entity Relationship</a></h2>
+<pre class="mermaid">erDiagram
+  JOB ||--o{ JOB_ATTEMPT : has
+  JOB ||--o{ OUTBOX_EVENT : emits
+  RECURRING_DEFINITION ||--o{ JOB : materializes
+  JOB ||--o| STTP_REFERENCE : consumes
+  JOB ||--o| STTP_REFERENCE : produces
+
+  JOB {
+    string id PK
+    string queue
+    string job_type
+    string state
+    int priority
+    int attempts
+    int max_attempts
+    string idempotency_key
+    datetime scheduled_at
+    datetime lease_expires_at
+    datetime heartbeat_at
+    datetime started_at
+    datetime finished_at
+    string correlation_id
+    string causation_id
+    string trace_id
+    string sttp_input_node_id
+    string sttp_output_node_id
+  }
+
+  JOB_ATTEMPT {
+    string id PK
+    string job_id FK
+    int attempt_number
+    datetime started_at
+    datetime ended_at
+    string outcome
+    object error_payload
+    int duration_ms
+  }
+
+  RECURRING_DEFINITION {
+    string id PK
+    string queue
+    string job_type
+    string cron_expr
+    string timezone
+    int jitter_seconds
+    bool enabled
+    datetime next_run_at
+    datetime last_run_at
+    string lease_owner
+    datetime lease_expires_at
+  }
+
+  OUTBOX_EVENT {
+    string id PK
+    string event_type
+    string aggregate_type
+    string aggregate_id
+    string status
+    datetime created_at
+    datetime published_at
+  }
+
+  STTP_REFERENCE {
+    string node_id PK
+    string role
+  }
+</pre>
+
+<h2 id="surrealdb-tables"><a class="header" href="#surrealdb-tables">SurrealDB Tables</a></h2>
+<pre><code class="language-sql">DEFINE TABLE job SCHEMAFULL;
+DEFINE FIELD queue ON TABLE job TYPE string;
+DEFINE FIELD job_type ON TABLE job TYPE string;
+DEFINE FIELD payload_ref ON TABLE job TYPE string;
+DEFINE FIELD state ON TABLE job TYPE string ASSERT $value INSIDE [
+  'enqueued',
+  'leased',
+  'running',
+  'succeeded',
+  'failed',
+  'dead_letter',
+  'canceled'
+];
+DEFINE FIELD priority ON TABLE job TYPE int DEFAULT 100;
+DEFINE FIELD attempts ON TABLE job TYPE int DEFAULT 0;
+DEFINE FIELD max_attempts ON TABLE job TYPE int DEFAULT 10;
+DEFINE FIELD backoff_policy ON TABLE job TYPE object;
+DEFINE FIELD idempotency_key ON TABLE job TYPE string;
+DEFINE FIELD correlation_id ON TABLE job TYPE string;
+DEFINE FIELD causation_id ON TABLE job TYPE string;
+DEFINE FIELD trace_id ON TABLE job TYPE string;
+DEFINE FIELD sttp_input_node_id ON TABLE job TYPE string;
+DEFINE FIELD sttp_output_node_id ON TABLE job TYPE option&lt;string&gt;;
+DEFINE FIELD lease_owner ON TABLE job TYPE option&lt;string&gt;;
+DEFINE FIELD lease_expires_at ON TABLE job TYPE option&lt;datetime&gt;;
+DEFINE FIELD heartbeat_at ON TABLE job TYPE option&lt;datetime&gt;;
+DEFINE FIELD scheduled_at ON TABLE job TYPE datetime;
+DEFINE FIELD started_at ON TABLE job TYPE option&lt;datetime&gt;;
+DEFINE FIELD finished_at ON TABLE job TYPE option&lt;datetime&gt;;
+DEFINE FIELD last_error ON TABLE job TYPE option&lt;object&gt;;
+DEFINE FIELD created_at ON TABLE job TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at ON TABLE job TYPE datetime VALUE time::now();
+
+DEFINE INDEX idx_job_state_queue_sched ON TABLE job COLUMNS state, queue, scheduled_at;
+DEFINE INDEX idx_job_lease_expiry ON TABLE job COLUMNS lease_expires_at;
+DEFINE INDEX uq_job_idempotency ON TABLE job COLUMNS idempotency_key UNIQUE;
+DEFINE INDEX idx_job_correlation ON TABLE job COLUMNS correlation_id;
+DEFINE INDEX idx_job_trace ON TABLE job COLUMNS trace_id;
+</code></pre>
+<pre><code class="language-sql">DEFINE TABLE job_attempt SCHEMAFULL;
+DEFINE FIELD job_id ON TABLE job_attempt TYPE record&lt;job&gt;;
+DEFINE FIELD attempt_number ON TABLE job_attempt TYPE int;
+DEFINE FIELD started_at ON TABLE job_attempt TYPE datetime;
+DEFINE FIELD ended_at ON TABLE job_attempt TYPE option&lt;datetime&gt;;
+DEFINE FIELD outcome ON TABLE job_attempt TYPE string ASSERT $value INSIDE [
+  'running',
+  'succeeded',
+  'failed',
+  'canceled'
+];
+DEFINE FIELD error_payload ON TABLE job_attempt TYPE option&lt;object&gt;;
+DEFINE FIELD duration_ms ON TABLE job_attempt TYPE option&lt;int&gt;;
+DEFINE FIELD worker_id ON TABLE job_attempt TYPE option&lt;string&gt;;
+
+DEFINE INDEX idx_attempt_job ON TABLE job_attempt COLUMNS job_id, attempt_number;
+</code></pre>
+<pre><code class="language-sql">DEFINE TABLE recurring_definition SCHEMAFULL;
+DEFINE FIELD queue ON TABLE recurring_definition TYPE string;
+DEFINE FIELD job_type ON TABLE recurring_definition TYPE string;
+DEFINE FIELD payload_template_ref ON TABLE recurring_definition TYPE string;
+DEFINE FIELD cron_expr ON TABLE recurring_definition TYPE string;
+DEFINE FIELD timezone ON TABLE recurring_definition TYPE string;
+DEFINE FIELD jitter_seconds ON TABLE recurring_definition TYPE int DEFAULT 0;
+DEFINE FIELD enabled ON TABLE recurring_definition TYPE bool DEFAULT true;
+DEFINE FIELD next_run_at ON TABLE recurring_definition TYPE datetime;
+DEFINE FIELD last_run_at ON TABLE recurring_definition TYPE option&lt;datetime&gt;;
+DEFINE FIELD lease_owner ON TABLE recurring_definition TYPE option&lt;string&gt;;
+DEFINE FIELD lease_expires_at ON TABLE recurring_definition TYPE option&lt;datetime&gt;;
+DEFINE FIELD created_at ON TABLE recurring_definition TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at ON TABLE recurring_definition TYPE datetime VALUE time::now();
+
+DEFINE INDEX idx_recurring_due ON TABLE recurring_definition COLUMNS enabled, next_run_at;
+DEFINE INDEX idx_recurring_lease_expiry ON TABLE recurring_definition COLUMNS lease_expires_at;
+</code></pre>
+<pre><code class="language-sql">DEFINE TABLE outbox_event SCHEMAFULL;
+DEFINE FIELD event_type ON TABLE outbox_event TYPE string;
+DEFINE FIELD aggregate_type ON TABLE outbox_event TYPE string;
+DEFINE FIELD aggregate_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD job_id ON TABLE outbox_event TYPE option&lt;record&lt;job&gt;&gt;;
+DEFINE FIELD payload ON TABLE outbox_event TYPE object;
+DEFINE FIELD status ON TABLE outbox_event TYPE string ASSERT $value INSIDE [
+  'pending',
+  'published',
+  'failed'
+];
+DEFINE FIELD created_at ON TABLE outbox_event TYPE datetime DEFAULT time::now();
+DEFINE FIELD published_at ON TABLE outbox_event TYPE option&lt;datetime&gt;;
+DEFINE FIELD publish_attempts ON TABLE outbox_event TYPE int DEFAULT 0;
+
+DEFINE INDEX idx_outbox_pending ON TABLE outbox_event COLUMNS status, created_at;
+DEFINE INDEX idx_outbox_aggregate ON TABLE outbox_event COLUMNS aggregate_type, aggregate_id;
+</code></pre>
+<h2 id="leasing-and-concurrency-notes"><a class="header" href="#leasing-and-concurrency-notes">Leasing and Concurrency Notes</a></h2>
+<ol>
+<li>Lease updates should include compare-and-set predicates on state and current lease values.</li>
+<li>Worker heartbeat should only update rows leased by the same worker identity.</li>
+<li>Replay actions should emit explicit outbox events with causation lineage.</li>
+</ol>
+<h2 id="retention-and-archival-strategy"><a class="header" href="#retention-and-archival-strategy">Retention and Archival Strategy</a></h2>
+<ol>
+<li>Keep active jobs in hot tables.</li>
+<li>Move terminal jobs older than retention threshold to archive tables.</li>
+<li>Preserve outbox and attempt records according to compliance retention windows.</li>
+</ol>
+<h2 id="open-migration-topics"><a class="header" href="#open-migration-topics">Open Migration Topics</a></h2>
+<ol>
+<li>Multi-tenant key strategy: single table with tenant_id vs per-tenant namespace.</li>
+<li>Partitioning strategy for very high queue cardinality.</li>
+<li>Event payload versioning and schema evolution process.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="architecture-decision-records"><a class="header" href="#architecture-decision-records">Architecture Decision Records</a></h1>
+<h2 id="purpose-2"><a class="header" href="#purpose-2">Purpose</a></h2>
+<p>Track major architectural decisions with rationale, alternatives, and consequences.</p>
+<h2 id="adr-index"><a class="header" href="#adr-index">ADR Index</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>ADR</th><th>Title</th><th>Status</th><th>Date</th></tr>
+</thead>
+<tbody>
+<tr><td>ADR-0001</td><td>Durable Job Runtime on SurrealDB</td><td>Accepted</td><td>2026-05-07</td></tr>
+<tr><td>ADR-0002</td><td>Event-Driven Orchestration with Local CoR</td><td>Accepted</td><td>2026-05-07</td></tr>
+<tr><td>ADR-0003</td><td>STTP Reference-Only Job Context Contract</td><td>Accepted</td><td>2026-05-07</td></tr>
+<tr><td>ADR-0004</td><td>Recurring Jobs via Materialized Schedule Definitions</td><td>Accepted</td><td>2026-05-07</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="decision-dependency-diagram"><a class="header" href="#decision-dependency-diagram">Decision Dependency Diagram</a></h2>
+<pre class="mermaid">flowchart TD
+  A1[ADR-0001 Durable Job Runtime] --&gt; A2[ADR-0002 Event-Driven Orchestration]
+  A1 --&gt; A3[ADR-0003 STTP Reference Contract]
+  A1 --&gt; A4[ADR-0004 Recurring Definitions]
+  A3 --&gt; A2
+  A4 --&gt; A2
+</pre>
+
+<h2 id="adr-0001-durable-job-runtime-on-surrealdb"><a class="header" href="#adr-0001-durable-job-runtime-on-surrealdb">ADR-0001 Durable Job Runtime on SurrealDB</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Need durable orchestration semantics with lease and retry support.</li>
+<li>Decision: Use SurrealDB as primary runtime backing store.</li>
+<li>Consequences:
+<ul>
+<li>Positive: durable, queryable runtime state.</li>
+<li>Tradeoff: careful index and lease query tuning required.</li>
+</ul>
+</li>
+</ul>
+<h2 id="adr-0002-event-driven-orchestration-with-local-cor"><a class="header" href="#adr-0002-event-driven-orchestration-with-local-cor">ADR-0002 Event-Driven Orchestration with Local CoR</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Need composable cross-capability execution while preserving deterministic local processing.</li>
+<li>Decision: Use events/jobs across capabilities and CoR within a single execution path.</li>
+<li>Consequences:
+<ul>
+<li>Positive: clean boundaries and flexible orchestration.</li>
+<li>Tradeoff: eventual consistency and idempotency discipline required.</li>
+</ul>
+</li>
+</ul>
+<h2 id="adr-0003-sttp-reference-only-job-context-contract"><a class="header" href="#adr-0003-sttp-reference-only-job-context-contract">ADR-0003 STTP Reference-Only Job Context Contract</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Large payloads in job rows reduce performance and complicate lifecycle management.</li>
+<li>Decision: Store only STTP references and artifact handles in job metadata.</li>
+<li>Consequences:
+<ul>
+<li>Positive: small hot rows and better queue scan performance.</li>
+<li>Tradeoff: additional fetch step during execution.</li>
+</ul>
+</li>
+</ul>
+<h2 id="adr-0004-recurring-jobs-via-materialized-schedule-definitions"><a class="header" href="#adr-0004-recurring-jobs-via-materialized-schedule-definitions">ADR-0004 Recurring Jobs via Materialized Schedule Definitions</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Need periodic automation (for example web scraping) with distributed safety.</li>
+<li>Decision: Scheduler materializes recurring definitions into standard jobs under lease.</li>
+<li>Consequences:
+<ul>
+<li>Positive: unified runtime semantics for one-off and recurring jobs.</li>
+<li>Tradeoff: scheduler lock and drift monitoring required.</li>
+</ul>
+</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-c2a407aa.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid-eefea253.min.js"></script>
+        <script src="mermaid-init-ccf746f1.js"></script>
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>

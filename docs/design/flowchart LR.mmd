@@ -1,0 +1,31 @@
+flowchart LR
+  subgraph Clients
+    API[API Client]
+    CRON[Scheduler API]
+    OPS[Ops Replay Tool]
+  end
+
+  subgraph StasisSDK[Stasis Runtime]
+    CMD[Command Layer]
+    CORESVC[Application Use Cases]
+    BUS[Event Bus Port]
+    WORKER[Worker Runtime]
+    SCH[Recurring Scheduler]
+  end
+
+  subgraph DataPlane[Durable Data Plane]
+    SDB[(SurrealDB)]
+    LOCUS[Locus SDK]
+  end
+
+  API --> CMD
+  CRON --> CMD
+  OPS --> CMD
+  CMD --> CORESVC
+  CORESVC --> BUS
+  BUS --> WORKER
+  SCH --> BUS
+  WORKER --> SDB
+  SCH --> SDB
+  WORKER --> LOCUS
+  LOCUS --> SDB

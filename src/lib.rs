@@ -1,0 +1,61 @@
+pub mod application;
+pub mod domain;
+pub mod infrastructure;
+pub mod ports;
+pub mod sdk;
+
+pub mod prelude {
+    pub use crate::application::runtime::in_memory_runtime::{
+        InMemoryRuntime, JobExecutionOutcome, JobHandler,
+    };
+    pub use crate::application::runtime::runtime_factory::{
+        RuntimeBackend, RuntimeComposition, RuntimeFactory,
+    };
+    pub use crate::application::runtime::surreal_runtime::SurrealRuntime;
+    pub use crate::application::dto::{InvokeAgentRequest, RegisterAgentRequest};
+    pub use crate::domain::entities::agent::Agent;
+    pub use crate::domain::errors::{Result, StasisError};
+    pub use crate::domain::runtime::job::{BackoffPolicy, JobState, NewJob};
+    pub use crate::domain::runtime::outbox::{
+        OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType,
+    };
+    pub use crate::domain::runtime::recurring::RecurringDefinition;
+    pub use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
+    pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
+    pub use crate::sdk::stasis_sdk::StasisSdk;
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::application::dto::{InvokeAgentRequest, RegisterAgentRequest};
+    use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
+    use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
+    use crate::sdk::stasis_sdk::StasisSdk;
+
+    #[tokio::test]
+    async fn end_to_end_agent_registration_and_invocation_works() {
+        let repository = InMemoryAgentRepository::default();
+        let llm = MockLlmGateway::new("mock completion");
+        let sdk = StasisSdk::new(repository, llm);
+
+        let registration = RegisterAgentRequest {
+            id: "planner".to_string(),
+            name: "Task Planner".to_string(),
+            system_prompt: "Break work down into ordered steps".to_string(),
+        };
+
+        sdk.register_agent(registration)
+            .await
+            .expect("agent should register");
+
+        let response = sdk
+            .invoke_agent(InvokeAgentRequest {
+                agent_id: "planner".to_string(),
+                user_prompt: "Plan a release checklist".to_string(),
+            })
+            .await
+            .expect("agent should invoke");
+
+        assert_eq!(response.completion, "mock completion");
+    }
+}

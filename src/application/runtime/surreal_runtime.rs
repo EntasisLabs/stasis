@@ -1,0 +1,271 @@
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
+
+use chrono::{DateTime, Duration, Utc};
+use surrealdb::Surreal;
+use surrealdb::engine::local::Db;
+
+use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::domain::errors::{Result, StasisError};
+use crate::domain::runtime::job::{Job, JobState, NewJob};
+use crate::domain::runtime::outbox::{OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType};
+use crate::domain::runtime::recurring::RecurringDefinition;
+use crate::infrastructure::runtime::surreal_job_store::SurrealJobStore;
+use crate::infrastructure::runtime::surreal_outbox_store::SurrealOutboxStore;
+use crate::infrastructure::runtime::surreal_recurring_store::SurrealRecurringStore;
+use crate::ports::outbound::runtime::event_publisher::EventPublisher;
+use crate::ports::outbound::runtime::job_store::JobStore;
+use crate::ports::outbound::runtime::outbox_store::OutboxStore;
+use crate::ports::outbound::runtime::recurring_store::RecurringStore;
+
+#[derive(Clone)]
+pub struct SurrealRuntime {
+    pub job_store: SurrealJobStore,
+    pub recurring_store: SurrealRecurringStore,
+    pub outbox_store: SurrealOutboxStore,
+    handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
+    publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
+    id_counter: Arc<AtomicU64>,
+}
+
+impl SurrealRuntime {
+    pub fn new(db: Surreal<Db>) -> Self {
+        Self {
+            job_store: SurrealJobStore::new(db.clone()),
+            recurring_store: SurrealRecurringStore::new(db.clone()),
+            outbox_store: SurrealOutboxStore::new(db),
+            handlers: Arc::new(RwLock::new(HashMap::new())),
+            publisher: Arc::new(RwLock::new(None)),
+            id_counter: Arc::new(AtomicU64::new(1)),
+        }
+    }
+
+    pub fn register_handler<H: JobHandler + 'static>(&self, handler: H) -> Result<()> {
+        let mut handlers = self
+            .handlers
+            .write()
+            .map_err(|_| StasisError::PortFailure("handlers lock poisoned".to_string()))?;
+
+        handlers.insert(handler.job_type().to_string(), Arc::new(handler));
+        Ok(())
+    }
+
+    pub fn register_event_publisher<P: EventPublisher + 'static>(&self, publisher: P) -> Result<()> {
+        let mut state = self
+            .publisher
+            .write()
+            .map_err(|_| StasisError::PortFailure("publisher lock poisoned".to_string()))?;
+
+        *state = Some(Arc::new(publisher));
+        Ok(())
+    }
+
+    pub async fn enqueue(&self, job: NewJob) -> Result<()> {
+        self.job_store.insert(job.into_job()).await
+    }
+
+    pub async fn register_recurring(&self, definition: RecurringDefinition) -> Result<()> {
+        self.recurring_store.insert(definition).await
+    }
+
+    pub async fn materialize_recurring(
+        &self,
+        now: DateTime<Utc>,
+        scheduler_id: &str,
+    ) -> Result<usize> {
+        let due = self
+            .recurring_store
+            .lease_due(now, scheduler_id, 30)
+            .await?;
+
+        let mut produced = 0usize;
+
+        for mut definition in due {
+            if !definition.enabled {
+                continue;
+            }
+
+            let id = format!(
+                "{}-{}",
+                definition.id,
+                self.id_counter.fetch_add(1, Ordering::SeqCst)
+            );
+
+            let scheduled_at = now + Duration::seconds(definition.jitter_seconds.max(0));
+
+            let job = NewJob {
+                id,
+                queue: definition.queue.clone(),
+                job_type: definition.job_type.clone(),
+                payload_ref: definition.payload_template_ref.clone(),
+                priority: 100,
+                max_attempts: definition.max_attempts,
+                idempotency_key: format!("recurring:{}:{}", definition.id, now.timestamp()),
+                correlation_id: definition.id.clone(),
+                causation_id: definition.id.clone(),
+                trace_id: definition.id.clone(),
+                sttp_input_node_id: definition.payload_template_ref.clone(),
+                scheduled_at,
+                backoff_policy: Default::default(),
+            };
+
+            self.enqueue(job).await?;
+
+            definition.last_run_at = Some(now);
+            definition.next_run_at = now + Duration::seconds(definition.interval_seconds);
+            definition.lease_owner = None;
+            definition.lease_expires_at = None;
+            self.recurring_store.save(definition).await?;
+            produced += 1;
+        }
+
+        Ok(produced)
+    }
+
+    pub async fn process_once(
+        &self,
+        queue: &str,
+        worker_id: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<String>> {
+        let Some(mut job) = self.job_store.lease_due(queue, worker_id, now, 30).await? else {
+            return Ok(None);
+        };
+
+        job.state = JobState::Running;
+        job.started_at = job.started_at.or(Some(now));
+        job.heartbeat_at = Some(now);
+        self.job_store.save(job.clone()).await?;
+
+        let handler = {
+            let handlers = self
+                .handlers
+                .read()
+                .map_err(|_| StasisError::PortFailure("handlers lock poisoned".to_string()))?;
+            handlers.get(&job.job_type).cloned()
+        };
+
+        let outcome = if let Some(handler) = handler {
+            handler.execute(&job).await?
+        } else {
+            JobExecutionOutcome::FatalFailure {
+                message: format!("no handler registered for job_type={}", job.job_type),
+            }
+        };
+
+        match outcome {
+            JobExecutionOutcome::Success {
+                sttp_output_node_id,
+            } => {
+                job.state = JobState::Succeeded;
+                job.sttp_output_node_id = Some(sttp_output_node_id.clone());
+                job.finished_at = Some(now);
+                job.lease_owner = None;
+                job.lease_expires_at = None;
+                job.heartbeat_at = None;
+                self.job_store.save(job.clone()).await?;
+
+                self.append_outbox(RuntimeEventType::JobSucceeded, &job, Some(sttp_output_node_id), None, now)
+                    .await?;
+            }
+            JobExecutionOutcome::RetryableFailure { message } => {
+                job.attempts += 1;
+                job.last_error = Some(message.clone());
+                job.lease_owner = None;
+                job.lease_expires_at = None;
+                job.heartbeat_at = None;
+
+                if job.attempts >= job.max_attempts {
+                    job.state = JobState::DeadLetter;
+                    job.finished_at = Some(now);
+                    self.append_outbox(RuntimeEventType::JobDeadLettered, &job, None, Some(message), now)
+                        .await?;
+                } else {
+                    job.state = JobState::Enqueued;
+                    let exponent = (job.attempts - 1) as u32;
+                    let mut delay = job
+                        .backoff_policy
+                        .base_delay_seconds
+                        .saturating_mul(2_i64.saturating_pow(exponent));
+                    delay = delay.min(job.backoff_policy.max_delay_seconds);
+                    job.scheduled_at = now + Duration::seconds(delay.max(0));
+
+                    self.append_outbox(RuntimeEventType::JobRetryScheduled, &job, None, Some(message), now)
+                        .await?;
+                }
+
+                self.job_store.save(job.clone()).await?;
+            }
+            JobExecutionOutcome::FatalFailure { message } => {
+                job.attempts += 1;
+                job.state = JobState::DeadLetter;
+                job.last_error = Some(message.clone());
+                job.finished_at = Some(now);
+                job.lease_owner = None;
+                job.lease_expires_at = None;
+                job.heartbeat_at = None;
+                self.job_store.save(job.clone()).await?;
+
+                self.append_outbox(RuntimeEventType::JobDeadLettered, &job, None, Some(message), now)
+                    .await?;
+            }
+        }
+
+        Ok(Some(job.id))
+    }
+
+    pub async fn publish_pending_events(&self, limit: usize, now: DateTime<Utc>) -> Result<usize> {
+        let publisher = {
+            let state = self
+                .publisher
+                .read()
+                .map_err(|_| StasisError::PortFailure("publisher lock poisoned".to_string()))?;
+            state.clone()
+        };
+
+        let Some(publisher) = publisher else {
+            return Ok(0);
+        };
+
+        let pending = self.outbox_store.list_pending(limit).await?;
+        let mut published = 0usize;
+
+        for event in pending {
+            publisher.publish(&event).await?;
+            self.outbox_store.mark_published(&event.event_id, now).await?;
+            published += 1;
+        }
+
+        Ok(published)
+    }
+
+    async fn append_outbox(
+        &self,
+        event_type: RuntimeEventType,
+        job: &Job,
+        sttp_output_node_id: Option<String>,
+        message: Option<String>,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
+        let event = OutboxEvent {
+            event_id: format!("evt-{}-{}", job.id, self.id_counter.fetch_add(1, Ordering::SeqCst)),
+            status: OutboxStatus::Pending,
+            publish_attempts: 0,
+            published_at: None,
+            event: RuntimeEvent {
+                event_type,
+                job_id: job.id.clone(),
+                correlation_id: job.correlation_id.clone(),
+                causation_id: job.causation_id.clone(),
+                trace_id: job.trace_id.clone(),
+                sttp_input_node_id: job.sttp_input_node_id.clone(),
+                sttp_output_node_id,
+                occurred_at: now,
+                message,
+            },
+        };
+
+        self.outbox_store.insert(event).await
+    }
+}

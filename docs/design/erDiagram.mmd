@@ -1,0 +1,67 @@
+erDiagram
+  JOB ||--o{ JOB_ATTEMPT : has
+  JOB ||--o{ OUTBOX_EVENT : emits
+  RECURRING_DEFINITION ||--o{ JOB : materializes
+  JOB ||--o| STTP_REFERENCE : consumes
+  JOB ||--o| STTP_REFERENCE : produces
+
+  JOB {
+    string id PK
+    string queue
+    string job_type
+    string state
+    int priority
+    int attempts
+    int max_attempts
+    string idempotency_key
+    datetime scheduled_at
+    datetime lease_expires_at
+    datetime heartbeat_at
+    datetime started_at
+    datetime finished_at
+    string correlation_id
+    string causation_id
+    string trace_id
+    string sttp_input_node_id
+    string sttp_output_node_id
+  }
+
+  JOB_ATTEMPT {
+    string id PK
+    string job_id FK
+    int attempt_number
+    datetime started_at
+    datetime ended_at
+    string outcome
+    object error_payload
+    int duration_ms
+  }
+
+  RECURRING_DEFINITION {
+    string id PK
+    string queue
+    string job_type
+    string cron_expr
+    string timezone
+    int jitter_seconds
+    bool enabled
+    datetime next_run_at
+    datetime last_run_at
+    string lease_owner
+    datetime lease_expires_at
+  }
+
+  OUTBOX_EVENT {
+    string id PK
+    string event_type
+    string aggregate_type
+    string aggregate_id
+    string status
+    datetime created_at
+    datetime published_at
+  }
+
+  STTP_REFERENCE {
+    string node_id PK
+    string role
+  }
