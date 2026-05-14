@@ -297,4 +297,38 @@ impl JobStore for SurrealJobStore {
 
         Ok(jobs)
     }
+
+    async fn prune_terminal_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::table($table)")
+            .bind(("table", self.table.clone()))
+            .await
+            .map_err(|e| Self::port_err("list jobs for prune", e))?;
+
+        let rows: Vec<JobRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode jobs for prune", e))?;
+
+        let mut removed = 0usize;
+        for row in rows {
+            let job = Job::try_from(row.clone())?;
+            let terminal = matches!(
+                job.state,
+                JobState::Succeeded | JobState::Failed | JobState::DeadLetter | JobState::Canceled
+            );
+            let old_enough = job.finished_at.map(|t| t <= cutoff).unwrap_or(false);
+            if terminal && old_enough {
+                self.db
+                    .query("DELETE type::record($table, $id)")
+                    .bind(("table", self.table.clone()))
+                    .bind(("id", row.job_id))
+                    .await
+                    .map_err(|e| Self::port_err("delete pruned job", e))?;
+                removed += 1;
+            }
+        }
+
+        Ok(removed)
+    }
 }

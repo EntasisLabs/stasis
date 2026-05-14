@@ -39,6 +39,9 @@ struct JobAttemptRecord {
     error_message: Option<String>,
     sttp_output_node_id: Option<String>,
     execution_id: Option<String>,
+    guardrail_code: Option<String>,
+    policy_reason: Option<String>,
+    duration_ms: Option<u64>,
     diagnostics: Option<String>,
 }
 
@@ -59,6 +62,9 @@ impl From<JobAttempt> for JobAttemptRecord {
             error_message: value.error_message,
             sttp_output_node_id: value.sttp_output_node_id,
             execution_id: value.execution_id,
+            guardrail_code: value.guardrail_code,
+            policy_reason: value.policy_reason,
+            duration_ms: value.duration_ms,
             diagnostics: value.diagnostics,
         }
     }
@@ -90,6 +96,9 @@ impl TryFrom<JobAttemptRecord> for JobAttempt {
             error_message: value.error_message,
             sttp_output_node_id: value.sttp_output_node_id,
             execution_id: value.execution_id,
+            guardrail_code: value.guardrail_code,
+            policy_reason: value.policy_reason,
+            duration_ms: value.duration_ms,
             diagnostics: value.diagnostics,
         })
     }
@@ -130,5 +139,77 @@ impl JobAttemptStore for SurrealJobAttemptStore {
 
         attempts.sort_by_key(|attempt| attempt.attempt_number);
         Ok(attempts)
+    }
+
+    async fn list_by_guardrail_code(&self, guardrail_code: &str) -> Result<Vec<JobAttempt>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::table($table) WHERE guardrail_code = $guardrail_code")
+            .bind(("table", self.table.clone()))
+            .bind(("guardrail_code", guardrail_code.to_string()))
+            .await
+            .map_err(|e| Self::port_err("list job attempts by guardrail code", e))?;
+
+        let rows: Vec<JobAttemptRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode job attempts by guardrail code", e))?;
+
+        let mut attempts: Vec<JobAttempt> = rows
+            .into_iter()
+            .filter_map(|row| JobAttempt::try_from(row).ok())
+            .collect();
+
+        attempts.sort_by_key(|attempt| attempt.attempt_number);
+        Ok(attempts)
+    }
+
+    async fn list_by_execution_id(&self, execution_id: &str) -> Result<Vec<JobAttempt>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::table($table) WHERE execution_id = $execution_id")
+            .bind(("table", self.table.clone()))
+            .bind(("execution_id", execution_id.to_string()))
+            .await
+            .map_err(|e| Self::port_err("list job attempts by execution id", e))?;
+
+        let rows: Vec<JobAttemptRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode job attempts by execution id", e))?;
+
+        let mut attempts: Vec<JobAttempt> = rows
+            .into_iter()
+            .filter_map(|row| JobAttempt::try_from(row).ok())
+            .collect();
+
+        attempts.sort_by_key(|attempt| attempt.attempt_number);
+        Ok(attempts)
+    }
+
+    async fn prune_finished_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::table($table)")
+            .bind(("table", self.table.clone()))
+            .await
+            .map_err(|e| Self::port_err("list job attempts for prune", e))?;
+
+        let rows: Vec<JobAttemptRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode job attempts for prune", e))?;
+
+        let mut removed = 0usize;
+        for row in rows {
+            if row.finished_at <= cutoff {
+                self.db
+                    .query("DELETE type::record($table, $id)")
+                    .bind(("table", self.table.clone()))
+                    .bind(("id", row.attempt_id))
+                    .await
+                    .map_err(|e| Self::port_err("delete pruned job attempt", e))?;
+                removed += 1;
+            }
+        }
+
+        Ok(removed)
     }
 }

@@ -185,4 +185,77 @@ impl OutboxStore for SurrealOutboxStore {
         Ok(events)
     }
 
+    async fn list_by_job_id(&self, job_id: &str) -> Result<Vec<OutboxEvent>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::table($table) WHERE job_id = $job_id")
+            .bind(("table", self.table.clone()))
+            .bind(("job_id", job_id.to_string()))
+            .await
+            .map_err(|e| Self::port_err("list outbox events by job", e))?;
+
+        let rows: Vec<OutboxRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode outbox events by job", e))?;
+
+        let mut events: Vec<OutboxEvent> = rows
+            .into_iter()
+            .filter_map(|row| OutboxEvent::try_from(row).ok())
+            .collect();
+
+        events.sort_by_key(|evt| evt.event.occurred_at);
+        Ok(events)
+    }
+
+    async fn list_by_execution_id(&self, execution_id: &str) -> Result<Vec<OutboxEvent>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::table($table) WHERE execution_id = $execution_id")
+            .bind(("table", self.table.clone()))
+            .bind(("execution_id", execution_id.to_string()))
+            .await
+            .map_err(|e| Self::port_err("list outbox events by execution id", e))?;
+
+        let rows: Vec<OutboxRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode outbox events by execution id", e))?;
+
+        let mut events: Vec<OutboxEvent> = rows
+            .into_iter()
+            .filter_map(|row| OutboxEvent::try_from(row).ok())
+            .collect();
+
+        events.sort_by_key(|evt| evt.event.occurred_at);
+        Ok(events)
+    }
+
+    async fn prune_non_pending_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::table($table)")
+            .bind(("table", self.table.clone()))
+            .await
+            .map_err(|e| Self::port_err("list outbox events for prune", e))?;
+
+        let rows: Vec<OutboxRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode outbox events for prune", e))?;
+
+        let mut removed = 0usize;
+        for row in rows {
+            let is_pending = row.status == "pending";
+            if !is_pending && row.occurred_at <= cutoff {
+                self.db
+                    .query("DELETE type::record($table, $id)")
+                    .bind(("table", self.table.clone()))
+                    .bind(("id", row.event_id))
+                    .await
+                    .map_err(|e| Self::port_err("delete pruned outbox event", e))?;
+                removed += 1;
+            }
+        }
+
+        Ok(removed)
+    }
+
 }

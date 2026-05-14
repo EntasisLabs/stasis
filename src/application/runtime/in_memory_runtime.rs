@@ -1,9 +1,10 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
+use serde_json::Value as JsonValue;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job::{Job, JobState, NewJob};
@@ -12,11 +13,32 @@ use crate::domain::runtime::outbox::{
     OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
 };
 use crate::domain::runtime::recurring::RecurringDefinition;
+use crate::application::runtime::replay_report::ReplayReport;
+use crate::application::runtime::retention::{RetentionPolicy, RetentionPruneReport};
+use crate::application::use_cases::investigate_runtime_lineage::{
+    InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
+};
 use crate::ports::outbound::runtime::event_publisher::EventPublisher;
+use crate::ports::outbound::runtime::clock::Clock;
+use crate::ports::outbound::runtime::id_generator::IdGenerator;
 use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
+use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
+use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
+use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
+use crate::infrastructure::runtime::system_clock::SystemClock;
+
+const METRIC_JOB_SUCCEEDED_TOTAL: &str = "runtime.job.succeeded.total";
+const METRIC_JOB_RETRYABLE_FAILURE_TOTAL: &str = "runtime.job.retryable_failure.total";
+const METRIC_JOB_FATAL_FAILURE_TOTAL: &str = "runtime.job.fatal_failure.total";
+const METRIC_JOB_DEAD_LETTER_TOTAL: &str = "runtime.job.dead_letter.total";
+const METRIC_JOB_RETRY_SCHEDULED_TOTAL: &str = "runtime.job.retry_scheduled.total";
+const METRIC_JOB_PROCESS_DURATION_MS: &str = "runtime.job.process.duration_ms";
+const METRIC_OUTBOX_PUBLISH_SUCCESS_TOTAL: &str = "runtime.outbox.publish.success.total";
+const METRIC_OUTBOX_PUBLISH_FAILURE_TOTAL: &str = "runtime.outbox.publish.failure.total";
+const METRIC_GRAPHEME_GUARDRAIL_FAILURE_TOTAL: &str = "runtime.grapheme.guardrail_failure.total";
 
 #[derive(Clone, Debug)]
 pub enum JobExecutionOutcome {
@@ -52,7 +74,10 @@ pub struct InMemoryRuntime {
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
     publish_policy: Arc<RwLock<OutboxPublishPolicy>>,
-    id_counter: Arc<AtomicU64>,
+    clock: Arc<dyn Clock>,
+    id_generator: Arc<dyn IdGenerator>,
+    metrics: Arc<dyn RuntimeMetrics>,
+    retention_policy: Arc<RwLock<RetentionPolicy>>,
 }
 
 impl Default for InMemoryRuntime {
@@ -63,6 +88,22 @@ impl Default for InMemoryRuntime {
 
 impl InMemoryRuntime {
     pub fn new() -> Self {
+        Self::with_dependencies_and_metrics(
+            Arc::new(SystemClock),
+            Arc::new(AtomicIdGenerator::new(1)),
+            Arc::new(NoopRuntimeMetrics),
+        )
+    }
+
+    pub fn with_dependencies(clock: Arc<dyn Clock>, id_generator: Arc<dyn IdGenerator>) -> Self {
+        Self::with_dependencies_and_metrics(clock, id_generator, Arc::new(NoopRuntimeMetrics))
+    }
+
+    pub fn with_dependencies_and_metrics(
+        clock: Arc<dyn Clock>,
+        id_generator: Arc<dyn IdGenerator>,
+        metrics: Arc<dyn RuntimeMetrics>,
+    ) -> Self {
         Self {
             job_store: InMemoryJobStore::default(),
             recurring_store: InMemoryRecurringStore::default(),
@@ -71,8 +112,20 @@ impl InMemoryRuntime {
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
             publish_policy: Arc::new(RwLock::new(OutboxPublishPolicy::default())),
-            id_counter: Arc::new(AtomicU64::new(1)),
+            clock,
+            id_generator,
+            metrics,
+            retention_policy: Arc::new(RwLock::new(RetentionPolicy::default())),
         }
+    }
+
+    pub fn configure_retention_policy(&self, policy: RetentionPolicy) -> Result<()> {
+        let mut state = self
+            .retention_policy
+            .write()
+            .map_err(|_| StasisError::PortFailure("retention policy lock poisoned".to_string()))?;
+        *state = policy;
+        Ok(())
     }
 
     pub fn register_handler<H: JobHandler + 'static>(&self, handler: H) -> Result<()> {
@@ -113,6 +166,81 @@ impl InMemoryRuntime {
         self.recurring_store.insert(definition).await
     }
 
+    pub async fn list_job_attempts(&self, job_id: &str) -> Result<Vec<JobAttempt>> {
+        self.job_attempt_store.list_by_job_id(job_id).await
+    }
+
+    pub async fn list_attempts_by_guardrail_code(&self, guardrail_code: &str) -> Result<Vec<JobAttempt>> {
+        self.job_attempt_store.list_by_guardrail_code(guardrail_code).await
+    }
+
+    pub async fn list_attempts_by_execution_id(&self, execution_id: &str) -> Result<Vec<JobAttempt>> {
+        self.job_attempt_store.list_by_execution_id(execution_id).await
+    }
+
+    pub async fn list_lineage_events(&self, job_id: &str) -> Result<Vec<OutboxEvent>> {
+        self.outbox_store.list_by_job_id(job_id).await
+    }
+
+    pub async fn list_lineage_events_by_execution_id(
+        &self,
+        execution_id: &str,
+    ) -> Result<Vec<OutboxEvent>> {
+        self.outbox_store.list_by_execution_id(execution_id).await
+    }
+
+    pub async fn investigate_lineage(&self, query: RuntimeLineageQuery) -> Result<RuntimeLineageReport> {
+        InvestigateRuntimeLineage::new(self.job_attempt_store.clone(), self.outbox_store.clone())
+            .execute(query)
+            .await
+    }
+
+    pub async fn get_replay_report(&self, job_id: &str) -> Result<ReplayReport> {
+        Ok(ReplayReport {
+            job_id: job_id.to_string(),
+            attempts: self.list_job_attempts(job_id).await?,
+            lineage_events: self.list_lineage_events(job_id).await?,
+        })
+    }
+
+    pub async fn process_once_now(&self, queue: &str, worker_id: &str) -> Result<Option<String>> {
+        self.process_once(queue, worker_id, self.clock.now()).await
+    }
+
+    pub async fn replay_dead_letter_now(&self, job_id: &str) -> Result<bool> {
+        self.replay_dead_letter(job_id, self.clock.now()).await
+    }
+
+    pub async fn publish_pending_events_now(&self, limit: usize) -> Result<usize> {
+        self.publish_pending_events(limit, self.clock.now()).await
+    }
+
+    pub async fn materialize_recurring_now(&self, scheduler_id: &str) -> Result<usize> {
+        self.materialize_recurring(self.clock.now(), scheduler_id).await
+    }
+
+    pub async fn prune_terminal_records(&self, cutoff: DateTime<Utc>) -> Result<RetentionPruneReport> {
+        Ok(RetentionPruneReport {
+            jobs_pruned: self.job_store.prune_terminal_before(cutoff).await?,
+            attempts_pruned: self.job_attempt_store.prune_finished_before(cutoff).await?,
+            outbox_events_pruned: self.outbox_store.prune_non_pending_before(cutoff).await?,
+        })
+    }
+
+    pub async fn enforce_retention(&self, now: DateTime<Utc>) -> Result<RetentionPruneReport> {
+        let policy = self
+            .retention_policy
+            .read()
+            .map_err(|_| StasisError::PortFailure("retention policy lock poisoned".to_string()))?
+            .clone();
+        let cutoff = now - Duration::days(policy.terminal_ttl_days.max(0));
+        self.prune_terminal_records(cutoff).await
+    }
+
+    pub async fn enforce_retention_now(&self) -> Result<RetentionPruneReport> {
+        self.enforce_retention(self.clock.now()).await
+    }
+
     pub async fn materialize_recurring(
         &self,
         now: DateTime<Utc>,
@@ -131,9 +259,8 @@ impl InMemoryRuntime {
             }
 
             let id = format!(
-                "{}-{}",
-                definition.id,
-                self.id_counter.fetch_add(1, Ordering::SeqCst)
+                "{}",
+                self.id_generator.next_id(&definition.id)
             );
 
             let scheduled_at = now + Duration::seconds(definition.jitter_seconds.max(0));
@@ -181,6 +308,7 @@ impl InMemoryRuntime {
         job.started_at = job.started_at.or(Some(now));
         job.heartbeat_at = Some(now);
         self.job_store.save(job.clone()).await?;
+        let processing_started = Instant::now();
 
         let handler = {
             let handlers = self
@@ -240,12 +368,22 @@ impl InMemoryRuntime {
                     diagnostics,
                 )
                 .await?;
+
+                self.metrics.incr_counter(METRIC_JOB_SUCCEEDED_TOTAL, 1);
+                self.metrics.observe_duration_ms(
+                    METRIC_JOB_PROCESS_DURATION_MS,
+                    processing_started.elapsed().as_millis() as u64,
+                );
             }
             JobExecutionOutcome::RetryableFailure {
                 message,
                 execution_id,
                 diagnostics,
             } => {
+                let guardrail_failure = diagnostics
+                    .as_deref()
+                    .map(|v| v.contains("\"guardrail_code\""))
+                    .unwrap_or(false);
                 job.attempts += 1;
                 job.last_error = Some(message.clone());
                 job.lease_owner = None;
@@ -264,6 +402,8 @@ impl InMemoryRuntime {
                         execution_id.clone(),
                     )
                         .await?;
+
+                    self.metrics.incr_counter(METRIC_JOB_DEAD_LETTER_TOTAL, 1);
                 } else {
                     job.state = JobState::Enqueued;
                     let exponent = (job.attempts - 1) as u32;
@@ -283,6 +423,8 @@ impl InMemoryRuntime {
                         execution_id.clone(),
                     )
                         .await?;
+
+                    self.metrics.incr_counter(METRIC_JOB_RETRY_SCHEDULED_TOTAL, 1);
                 }
 
                 self.job_store.save(job.clone()).await?;
@@ -300,12 +442,27 @@ impl InMemoryRuntime {
                     diagnostics,
                 )
                 .await?;
+
+                self.metrics
+                    .incr_counter(METRIC_JOB_RETRYABLE_FAILURE_TOTAL, 1);
+                self.metrics.observe_duration_ms(
+                    METRIC_JOB_PROCESS_DURATION_MS,
+                    processing_started.elapsed().as_millis() as u64,
+                );
+                if guardrail_failure {
+                    self.metrics
+                        .incr_counter(METRIC_GRAPHEME_GUARDRAIL_FAILURE_TOTAL, 1);
+                }
             }
             JobExecutionOutcome::FatalFailure {
                 message,
                 execution_id,
                 diagnostics,
             } => {
+                let guardrail_failure = diagnostics
+                    .as_deref()
+                    .map(|v| v.contains("\"guardrail_code\""))
+                    .unwrap_or(false);
                 job.attempts += 1;
                 job.state = JobState::DeadLetter;
                 job.last_error = Some(message.clone());
@@ -338,6 +495,17 @@ impl InMemoryRuntime {
                     diagnostics,
                 )
                 .await?;
+
+                self.metrics.incr_counter(METRIC_JOB_FATAL_FAILURE_TOTAL, 1);
+                self.metrics.incr_counter(METRIC_JOB_DEAD_LETTER_TOTAL, 1);
+                self.metrics.observe_duration_ms(
+                    METRIC_JOB_PROCESS_DURATION_MS,
+                    processing_started.elapsed().as_millis() as u64,
+                );
+                if guardrail_failure {
+                    self.metrics
+                        .incr_counter(METRIC_GRAPHEME_GUARDRAIL_FAILURE_TOTAL, 1);
+                }
             }
         }
 
@@ -402,6 +570,8 @@ impl InMemoryRuntime {
                     event.last_publish_error = None;
                     self.outbox_store.save(event).await?;
                     published += 1;
+                    self.metrics
+                        .incr_counter(METRIC_OUTBOX_PUBLISH_SUCCESS_TOTAL, 1);
                 }
                 Err(err) => {
                     event.publish_attempts = event.publish_attempts.saturating_add(1);
@@ -422,6 +592,8 @@ impl InMemoryRuntime {
                     }
 
                     self.outbox_store.save(event).await?;
+                    self.metrics
+                        .incr_counter(METRIC_OUTBOX_PUBLISH_FAILURE_TOTAL, 1);
                 }
             }
         }
@@ -439,7 +611,7 @@ impl InMemoryRuntime {
         execution_id: Option<String>,
     ) -> Result<()> {
         let event = OutboxEvent {
-            event_id: format!("evt-{}-{}", job.id, self.id_counter.fetch_add(1, Ordering::SeqCst)),
+            event_id: self.id_generator.next_id(&format!("evt-{}", job.id)),
             status: OutboxStatus::Pending,
             publish_attempts: 0,
             published_at: None,
@@ -475,12 +647,11 @@ impl InMemoryRuntime {
         execution_id: Option<String>,
         diagnostics: Option<String>,
     ) -> Result<()> {
+        let (guardrail_code, policy_reason, duration_ms) =
+            Self::extract_diagnostics_fields(diagnostics.as_deref());
+
         let attempt = JobAttempt {
-            attempt_id: format!(
-                "attempt-{}-{}",
-                job.id,
-                self.id_counter.fetch_add(1, Ordering::SeqCst)
-            ),
+            attempt_id: self.id_generator.next_id(&format!("attempt-{}", job.id)),
             job_id: job.id.clone(),
             attempt_number,
             worker_id: worker_id.to_string(),
@@ -490,10 +661,37 @@ impl InMemoryRuntime {
             error_message,
             sttp_output_node_id,
             execution_id,
+            guardrail_code,
+            policy_reason,
+            duration_ms,
             diagnostics,
         };
 
         self.job_attempt_store.insert(attempt).await
+    }
+
+    fn extract_diagnostics_fields(
+        diagnostics: Option<&str>,
+    ) -> (Option<String>, Option<String>, Option<u64>) {
+        let Some(raw) = diagnostics else {
+            return (None, None, None);
+        };
+
+        let Ok(json) = serde_json::from_str::<JsonValue>(raw) else {
+            return (None, None, None);
+        };
+
+        let guardrail_code = json
+            .get("guardrail_code")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string());
+        let policy_reason = json
+            .get("policy_reason")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string());
+        let duration_ms = json.get("duration_ms").and_then(|v| v.as_u64());
+
+        (guardrail_code, policy_reason, duration_ms)
     }
 }
 
@@ -606,6 +804,25 @@ impl JobStore for InMemoryJobStore {
             .cloned()
             .collect())
     }
+
+    async fn prune_terminal_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
+        let mut state = self
+            .jobs
+            .write()
+            .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
+
+        let before = state.len();
+        state.retain(|_, job| {
+            let terminal = matches!(
+                job.state,
+                JobState::Succeeded | JobState::Failed | JobState::DeadLetter | JobState::Canceled
+            );
+            let old_enough = job.finished_at.map(|t| t <= cutoff).unwrap_or(false);
+            !(terminal && old_enough)
+        });
+
+        Ok(before.saturating_sub(state.len()))
+    }
 }
 
 #[derive(Clone, Default)]
@@ -647,6 +864,57 @@ impl JobAttemptStore for InMemoryJobAttemptStore {
         let mut attempts = state.get(job_id).cloned().unwrap_or_default();
         attempts.sort_by_key(|attempt| attempt.attempt_number);
         Ok(attempts)
+    }
+
+    async fn list_by_guardrail_code(&self, guardrail_code: &str) -> Result<Vec<JobAttempt>> {
+        let state = self
+            .attempts
+            .read()
+            .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
+
+        let mut attempts: Vec<JobAttempt> = state
+            .values()
+            .flat_map(|attempts| attempts.iter())
+            .filter(|attempt| attempt.guardrail_code.as_deref() == Some(guardrail_code))
+            .cloned()
+            .collect();
+
+        attempts.sort_by_key(|attempt| attempt.attempt_number);
+        Ok(attempts)
+    }
+
+    async fn list_by_execution_id(&self, execution_id: &str) -> Result<Vec<JobAttempt>> {
+        let state = self
+            .attempts
+            .read()
+            .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
+
+        let mut attempts: Vec<JobAttempt> = state
+            .values()
+            .flat_map(|attempts| attempts.iter())
+            .filter(|attempt| attempt.execution_id.as_deref() == Some(execution_id))
+            .cloned()
+            .collect();
+
+        attempts.sort_by_key(|attempt| attempt.attempt_number);
+        Ok(attempts)
+    }
+
+    async fn prune_finished_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
+        let mut state = self
+            .attempts
+            .write()
+            .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
+
+        let mut removed = 0usize;
+        for attempts in state.values_mut() {
+            let before = attempts.len();
+            attempts.retain(|attempt| attempt.finished_at > cutoff);
+            removed += before.saturating_sub(attempts.len());
+        }
+        state.retain(|_, attempts| !attempts.is_empty());
+
+        Ok(removed)
     }
 }
 
@@ -696,6 +964,54 @@ impl OutboxStore for InMemoryOutboxStore {
         pending.sort_by_key(|evt| evt.event.occurred_at);
         pending.truncate(limit);
         Ok(pending)
+    }
+
+    async fn list_by_job_id(&self, job_id: &str) -> Result<Vec<OutboxEvent>> {
+        let state = self
+            .events
+            .read()
+            .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+
+        let mut events: Vec<OutboxEvent> = state
+            .values()
+            .filter(|evt| evt.event.job_id == job_id)
+            .cloned()
+            .collect();
+
+        events.sort_by_key(|evt| evt.event.occurred_at);
+        Ok(events)
+    }
+
+    async fn list_by_execution_id(&self, execution_id: &str) -> Result<Vec<OutboxEvent>> {
+        let state = self
+            .events
+            .read()
+            .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+
+        let mut events: Vec<OutboxEvent> = state
+            .values()
+            .filter(|evt| evt.event.execution_id.as_deref() == Some(execution_id))
+            .cloned()
+            .collect();
+
+        events.sort_by_key(|evt| evt.event.occurred_at);
+        Ok(events)
+    }
+
+    async fn prune_non_pending_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
+        let mut state = self
+            .events
+            .write()
+            .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+
+        let before = state.len();
+        state.retain(|_, evt| {
+            let terminal = evt.status != OutboxStatus::Pending;
+            let old_enough = evt.event.occurred_at <= cutoff;
+            !(terminal && old_enough)
+        });
+
+        Ok(before.saturating_sub(state.len()))
     }
 
 }

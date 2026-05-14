@@ -5,9 +5,17 @@ pub mod ports;
 pub mod sdk;
 
 pub mod prelude {
+    pub use crate::application::runtime::grapheme_echo_job_handler::GraphemeEchoJobHandler;
+    pub use crate::application::runtime::grapheme_healthcheck_job_handler::GraphemeHealthcheckJobHandler;
     pub use crate::application::runtime::grapheme_job_handler::GraphemeJobHandler;
+    pub use crate::application::runtime::grapheme_textops_job_handler::GraphemeTextOpsJobHandler;
     pub use crate::application::runtime::in_memory_runtime::{
         InMemoryRuntime, JobExecutionOutcome, JobHandler,
+    };
+    pub use crate::application::runtime::replay_report::ReplayReport;
+    pub use crate::application::runtime::retention::{RetentionPolicy, RetentionPruneReport};
+    pub use crate::application::use_cases::investigate_runtime_lineage::{
+        InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
     };
     pub use crate::application::runtime::runtime_factory::{
         RuntimeBackend, RuntimeComposition, RuntimeFactory,
@@ -22,7 +30,13 @@ pub mod prelude {
         OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
     };
     pub use crate::infrastructure::runtime::tokio_channel_event_publisher::TokioChannelEventPublisher;
+    pub use crate::infrastructure::runtime::system_clock::SystemClock;
+    pub use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
+    pub use crate::infrastructure::runtime::in_memory_runtime_metrics::InMemoryRuntimeMetrics;
     pub use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
+    pub use crate::ports::outbound::runtime::clock::Clock;
+    pub use crate::ports::outbound::runtime::id_generator::IdGenerator;
+    pub use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
     pub use crate::ports::outbound::runtime::workflow_engine::{
         WorkflowEngine, WorkflowExecutionOutput,
     };

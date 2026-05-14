@@ -11,3 +11,5 @@
 - V1 runtime draft: [v1-runtime-draft.md](v1-runtime-draft.md)
 - Job runtime design: [design/job-runtime-design.md](design/job-runtime-design.md)
 - Runtime phase plan and Grapheme track: [design/runtime-phase-plan.md](design/runtime-phase-plan.md)
+- Runtime demo program plan: [design/runtime-demo-plan.md](design/runtime-demo-plan.md)
+- Medousa product roadmap: [design/medousa-roadmap.md](design/medousa-roadmap.md)

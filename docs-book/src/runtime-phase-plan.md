@@ -14,8 +14,9 @@ Completed:
 - P1 continuation validated end-to-end.
 
 Open:
-- P2 forensics and replay diagnostics.
-- P3 operational readiness and metrics.
+- G2 diagnostics and execution-level lineage.
+
+In progress:
 - G2 diagnostics and execution-level lineage.
 
 ## Core Phases (Preserved)
@@ -33,21 +34,35 @@ Status:
 ### P2: Forensics And Replay Operability
 
 Status:
-- Not started.
+- Complete for replay and diagnostics baseline.
 
 Scope:
 - Persist job_attempt records.
 - Keep replay lineage auditable.
 
+Implemented baseline:
+- Job attempt persistence/query APIs for in-memory and Surreal.
+- Replay report APIs return attempt history and lineage events.
+- Parity test coverage validates replay lineage continuity.
+
 ### P3: Operational Readiness
 
 Status:
-- Not started.
+- Complete for operational-readiness baseline.
 
 Scope:
 - Clock and IdGenerator ports.
 - Runtime metrics.
 - Retention behavior.
+
+Implemented baseline:
+- Clock and IdGenerator runtime ports with default adapters.
+- In-memory and Surreal runtimes support dependency-injected clock/id.
+- Runtime now() convenience APIs added for deterministic orchestration.
+- Runtime metrics port with no-op and in-memory collector adapters.
+- Runtime emits outcome/outbox counters and processing duration histograms.
+- Retention policy/prune APIs implemented for terminal jobs, attempts, and outbox records.
+- Parity tests validate retention pruning in in-memory and Surreal runtimes.
 
 ## Grapheme First-Class Track
 
@@ -68,9 +83,20 @@ Design principle:
 - Attempt-level Grapheme diagnostics.
 - Traceable execution identifiers in outbox lineage.
 - Baseline implemented: job_attempt persistence + execution_id propagation in runtime events.
+- Structured diagnostics payload includes guardrail_code, policy_reason, and duration_ms.
+- Indexed diagnostics fields persisted on attempts for queryability.
+- Query APIs support attempts by guardrail_code and attempts/lineage by execution_id.
+- Lineage investigator use case provides a single composed query/report surface.
 
 ### G3: Expansion
 - Broaden workflow coverage only after reliability metrics are stable.
+- Kickoff implemented with first expanded workflow class: `workflow.grapheme.healthcheck`.
+- Healthcheck path delegates to the existing guarded Grapheme handler for policy parity.
+- Parity tests now include healthcheck execution for in-memory and Surreal runtimes.
+- Second workflow class added: `workflow.grapheme.echo` with typed JSON payload validation.
+- Invalid echo payloads are rejected as policy violations before Grapheme execution.
+- Third workflow class added: `workflow.grapheme.textops` with enum-mode payloads (`summarize`, `extract_keywords`).
+- Invalid textops payloads are rejected as policy violations before Grapheme execution.
 
 ## Sequencing
 

@@ -1,10 +1,13 @@
 use std::fs;
 use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
+use serde_json::json;
 
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::domain::errors::Result;
+use crate::domain::errors::StasisError;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 
@@ -36,6 +39,60 @@ impl GraphemeJobHandler {
 
         Ok(payload_ref.to_string())
     }
+
+    fn classify_guardrail_code(message: &str) -> &'static str {
+        if message.contains("not allowlisted") {
+            return "IMPORT_NOT_ALLOWLISTED";
+        }
+
+        if message.contains("source size") {
+            return "SOURCE_TOO_LARGE";
+        }
+
+        if message.contains("timed out") {
+            return "EXECUTION_TIMEOUT";
+        }
+
+        if message.contains("timeout must be greater than 0ms") {
+            return "INVALID_TIMEOUT_CONFIG";
+        }
+
+        if message.contains("policy violation") {
+            return "POLICY_VIOLATION";
+        }
+
+        "EXECUTION_ERROR"
+    }
+
+    fn build_success_diagnostics(duration_ms: u128, execution_id: &str) -> String {
+        json!({
+            "provider": "grapheme-sdk",
+            "status": "success",
+            "duration_ms": duration_ms,
+            "execution_id": execution_id
+        })
+        .to_string()
+    }
+
+    fn build_failure_diagnostics(duration_ms: u128, err: &StasisError) -> String {
+        let message = err.to_string();
+        let guardrail_code = Self::classify_guardrail_code(&message);
+        let policy_reason = if message.contains("policy violation") {
+            Some(message.clone())
+        } else {
+            None
+        };
+
+        json!({
+            "provider": "grapheme-sdk",
+            "status": "failure",
+            "duration_ms": duration_ms,
+            "guardrail_code": guardrail_code,
+            "policy_reason": policy_reason,
+            "error": message,
+        })
+        .to_string()
+    }
 }
 
 #[async_trait]
@@ -45,13 +102,36 @@ impl JobHandler for GraphemeJobHandler {
     }
 
     async fn execute(&self, job: &Job) -> Result<JobExecutionOutcome> {
-        let source = Self::resolve_source(&job.payload_ref)?;
-        let output = self.engine.execute_grapheme_source(&source).await?;
+        let started = Instant::now();
+        let source = match Self::resolve_source(&job.payload_ref) {
+            Ok(source) => source,
+            Err(err) => {
+                let duration_ms = started.elapsed().as_millis();
+                return Ok(JobExecutionOutcome::FatalFailure {
+                    message: err.to_string(),
+                    execution_id: None,
+                    diagnostics: Some(Self::build_failure_diagnostics(duration_ms, &err)),
+                });
+            }
+        };
 
-        Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: format!("sttp:{}:{}", output.run_id, job.id),
-            execution_id: Some(output.run_id),
-            diagnostics: None,
-        })
+        match self.engine.execute_grapheme_source(&source).await {
+            Ok(output) => {
+                let duration_ms = started.elapsed().as_millis();
+                Ok(JobExecutionOutcome::Success {
+                    sttp_output_node_id: format!("sttp:{}:{}", output.run_id, job.id),
+                    execution_id: Some(output.run_id.clone()),
+                    diagnostics: Some(Self::build_success_diagnostics(duration_ms, &output.run_id)),
+                })
+            }
+            Err(err) => {
+                let duration_ms = started.elapsed().as_millis();
+                Ok(JobExecutionOutcome::FatalFailure {
+                    message: err.to_string(),
+                    execution_id: None,
+                    diagnostics: Some(Self::build_failure_diagnostics(duration_ms, &err)),
+                })
+            }
+        }
     }
 }

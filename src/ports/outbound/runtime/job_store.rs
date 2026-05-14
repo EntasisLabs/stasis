@@ -18,4 +18,5 @@ pub trait JobStore: Send + Sync {
     ) -> Result<Option<Job>>;
     async fn heartbeat(&self, job_id: &str, worker_id: &str, now: DateTime<Utc>) -> Result<()>;
     async fn list_by_state(&self, state: JobState) -> Result<Vec<Job>>;
+    async fn prune_terminal_before(&self, cutoff: DateTime<Utc>) -> Result<usize>;
 }

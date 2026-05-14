@@ -61,6 +61,22 @@ async fn main() {
 }
 ```
 
+    ## Medousa (Workspace Crate)
+
+    Medousa is a product-oriented web researcher agent crate in this workspace.
+
+    Run a local ask flow:
+
+    ```bash
+    cargo run -p medousa --bin medousa_cli -- ask "can you give me a report on the latest rust trends?"
+    ```
+
+    Start daemon loop:
+
+    ```bash
+    cargo run -p medousa --bin medousa_daemon -- --backend in-memory
+    ```
+
 ## Next Build Targets
 
 1. Add workflow/domain aggregates for multi-agent plans.

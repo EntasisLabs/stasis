@@ -17,11 +17,10 @@ Completed:
 - P1 continuation demonstrated end-to-end in integration tests.
 
 Open:
-- P2 forensics and replay diagnostics.
-- P3 operational readiness (clock/id generation and runtime metrics).
+- G2 diagnostics and execution-level lineage hardening.
 
 In progress:
-- G2 observability and diagnostics.
+- G2 diagnostics and execution-level lineage hardening.
 
 ## Core Phase Roadmap (Preserved)
 
@@ -59,12 +58,17 @@ Scope:
 - Persist job_attempt records with timing/outcome diagnostics.
 - Preserve replay lineage metadata for auditability.
 
+Implemented baseline:
+- Job attempt persistence and query APIs in both in-memory and Surreal backends.
+- Replay report APIs expose per-job attempt history plus lineage events.
+- Parity tests validate replay after dead-letter recovery and preserve correlation/trace lineage.
+
 Acceptance:
 - Attempt history is queryable per job.
 - Replay retains causation and diagnostics across attempts.
 
 Status:
-- Not started.
+- Complete for replay and diagnostics baseline.
 
 ### P3: Operational Readiness
 
@@ -73,13 +77,23 @@ Scope:
 - Runtime metrics (queue depth, retries, dead letters, lease recoveries, latency).
 - Retention strategy for terminal records.
 
+Implemented baseline:
+- Clock and IdGenerator runtime ports with default system adapters.
+- In-memory and Surreal runtimes now support dependency-injected clock/id providers.
+- Runtime now() convenience APIs added for process, replay, publish, and recurring materialization.
+- Parity test validates injected clock/id behavior for deterministic runtime operation.
+- Runtime metrics port added with default no-op and in-memory collector adapters.
+- In-memory and Surreal runtimes emit counters/histograms for processing outcomes and outbox publish results.
+- Retention policy and prune APIs implemented for terminal jobs, attempts, and non-pending outbox events.
+- In-memory and Surreal parity tests validate retention pruning behavior.
+
 Acceptance:
 - Runtime surfaces deterministic time/id abstractions.
 - Metrics emitted for key reliability dimensions.
 - Retention behavior documented and test-covered.
 
 Status:
-- Not started.
+- Complete for operational-readiness baseline.
 
 ## Grapheme First-Class Integration Track (New)
 
@@ -121,6 +135,10 @@ Implemented baseline:
 - Runtime job_attempt persistence port and adapters (in-memory and Surreal).
 - Attempt records emitted on success/retry/fatal paths with worker/attempt metadata.
 - Grapheme execution_id propagated into runtime outbox lineage.
+- Grapheme handler emits structured diagnostics payloads including guardrail_code, policy_reason, and duration_ms.
+- Job attempts now persist indexed diagnostics fields (guardrail_code, policy_reason, duration_ms).
+- Runtime/store query ergonomics added for attempts by guardrail_code and attempts/lineage by execution_id.
+- Lineage investigator use case composes attempts + lineage queries into a single report surface.
 
 Acceptance:
 - Failures are diagnosable without payload sprawl.
@@ -130,6 +148,15 @@ Acceptance:
 
 Scope:
 - Introduce more orchestrator capabilities via Grapheme workflows after guardrails stabilize.
+
+Kickoff implemented:
+- Added first expanded workflow class: `workflow.grapheme.healthcheck`.
+- Healthcheck class reuses the existing guarded Grapheme execution path via handler delegation.
+- Backend parity tests cover healthcheck execution in both in-memory and Surreal runtimes.
+- Added second expanded workflow class: `workflow.grapheme.echo` with typed JSON payload validation.
+- Invalid echo payloads fail with policy diagnostics (`POLICY_VIOLATION`) before execution.
+- Added third expanded workflow class: `workflow.grapheme.textops` with enum mode payloads (`summarize`, `extract_keywords`).
+- Invalid textops payloads fail with policy diagnostics (`POLICY_VIOLATION`) before execution.
 
 Acceptance:
 - Reliability SLOs hold under production-like workloads.

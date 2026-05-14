@@ -3,27 +3,65 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
+use serde_json::Value as JsonValue;
 use surrealdb::Surreal;
 use surrealdb::engine::local::Mem;
 use tokio::sync::Mutex;
 
 use stasis::application::runtime::in_memory_runtime::{InMemoryRuntime, JobExecutionOutcome, JobHandler};
+use stasis::application::runtime::grapheme_echo_job_handler::GraphemeEchoJobHandler;
+use stasis::application::runtime::grapheme_healthcheck_job_handler::GraphemeHealthcheckJobHandler;
 use stasis::application::runtime::grapheme_job_handler::GraphemeJobHandler;
+use stasis::application::runtime::grapheme_textops_job_handler::GraphemeTextOpsJobHandler;
 use stasis::application::runtime::surreal_runtime::SurrealRuntime;
+use stasis::application::runtime::retention::RetentionPolicy;
+use stasis::application::use_cases::investigate_runtime_lineage::RuntimeLineageQuery;
 use stasis::domain::errors::Result;
 use stasis::domain::runtime::job::{BackoffPolicy, Job, JobState, NewJob};
+use stasis::domain::runtime::job_attempt::JobAttemptOutcome;
 use stasis::domain::runtime::outbox::{OutboxPublishPolicy, OutboxStatus, RuntimeEventType};
 use stasis::domain::runtime::recurring::RecurringDefinition;
 use stasis::infrastructure::runtime::grapheme_sdk_workflow_engine::{
     GraphemeSdkWorkflowEngine, GraphemeWorkflowGuardrails,
 };
+use stasis::infrastructure::runtime::in_memory_runtime_metrics::InMemoryRuntimeMetrics;
 use stasis::infrastructure::runtime::tokio_channel_event_publisher::TokioChannelEventPublisher;
 use stasis::ports::outbound::runtime::event_publisher::EventPublisher;
+use stasis::ports::outbound::runtime::clock::Clock;
+use stasis::ports::outbound::runtime::id_generator::IdGenerator;
 use stasis::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use stasis::ports::outbound::runtime::job_store::JobStore;
 use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
 use stasis::ports::outbound::runtime::workflow_engine::WorkflowEngine;
+
+struct FixedClock {
+    now: DateTime<Utc>,
+}
+
+impl Clock for FixedClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.now
+    }
+}
+
+struct PrefixIdGenerator {
+    seq: AtomicUsize,
+}
+
+impl PrefixIdGenerator {
+    fn new() -> Self {
+        Self {
+            seq: AtomicUsize::new(1),
+        }
+    }
+}
+
+impl IdGenerator for PrefixIdGenerator {
+    fn next_id(&self, _prefix: &str) -> String {
+        format!("custom-id-{}", self.seq.fetch_add(1, Ordering::SeqCst))
+    }
+}
 
 struct AlwaysSuccessHandler;
 
@@ -217,6 +255,103 @@ async fn in_memory_runtime_emits_and_publishes_outbox_events() {
 }
 
 #[tokio::test]
+async fn in_memory_runtime_uses_injected_clock_and_id_generator() {
+    let fixed_now = Utc::now();
+    let runtime = InMemoryRuntime::with_dependencies(
+        Arc::new(FixedClock { now: fixed_now }),
+        Arc::new(PrefixIdGenerator::new()),
+    );
+    runtime
+        .register_handler(AlwaysSuccessHandler)
+        .expect("handler should register");
+
+    runtime
+        .enqueue(build_new_job("test.success", fixed_now))
+        .await
+        .expect("job should enqueue");
+
+    runtime
+        .process_once_now("default", "worker-clock-id")
+        .await
+        .expect("processing should succeed");
+
+    let report = runtime
+        .get_replay_report("job-test.success")
+        .await
+        .expect("replay report should load");
+    assert_eq!(report.attempts.len(), 1);
+    assert_eq!(report.attempts[0].started_at, fixed_now);
+    assert!(report.attempts[0].attempt_id.starts_with("custom-id-"));
+
+    let lineage = runtime
+        .list_lineage_events("job-test.success")
+        .await
+        .expect("lineage should load");
+    assert_eq!(lineage.len(), 1);
+    assert_eq!(lineage[0].event.occurred_at, fixed_now);
+    assert!(lineage[0].event_id.starts_with("custom-id-"));
+}
+
+#[tokio::test]
+async fn in_memory_runtime_emits_runtime_metrics_for_job_and_outbox_flow() {
+    let now = Utc::now();
+    let metrics = Arc::new(InMemoryRuntimeMetrics::default());
+    let runtime = InMemoryRuntime::with_dependencies_and_metrics(
+        Arc::new(FixedClock { now }),
+        Arc::new(PrefixIdGenerator::new()),
+        metrics.clone(),
+    );
+    runtime
+        .register_handler(AlwaysSuccessHandler)
+        .expect("handler should register");
+    runtime
+        .register_event_publisher(CountingPublisher {
+            count: Arc::new(AtomicUsize::new(0)),
+        })
+        .expect("publisher should register");
+
+    runtime
+        .enqueue(build_new_job("test.success", now))
+        .await
+        .expect("job should enqueue");
+
+    runtime
+        .process_once_now("default", "worker-metrics")
+        .await
+        .expect("processing should succeed");
+
+    runtime
+        .publish_pending_events_now(10)
+        .await
+        .expect("publish should succeed");
+
+    let snapshot = metrics.snapshot();
+    assert_eq!(
+        snapshot
+            .counters
+            .get("runtime.job.succeeded.total")
+            .copied()
+            .unwrap_or_default(),
+        1
+    );
+    assert_eq!(
+        snapshot
+            .counters
+            .get("runtime.outbox.publish.success.total")
+            .copied()
+            .unwrap_or_default(),
+        1
+    );
+    assert!(
+        snapshot
+            .durations_ms
+            .get("runtime.job.process.duration_ms")
+            .map(|values| !values.is_empty())
+            .unwrap_or(false)
+    );
+}
+
+#[tokio::test]
 async fn surreal_runtime_matches_core_flow_and_recurring_materialization() {
     let db = Surreal::new::<Mem>(())
         .await
@@ -362,6 +497,27 @@ async fn surreal_runtime_replays_dead_letter_and_retries_outbox_publish() {
         .process_once("default", "worker-2", now + Duration::seconds(1))
         .await
         .expect("second processing should complete");
+
+    let replay_report = runtime
+        .get_replay_report("job-test.fatal_then_success")
+        .await
+        .expect("replay report should load");
+    assert_eq!(replay_report.job_id, "job-test.fatal_then_success");
+    assert_eq!(replay_report.attempts.len(), 2);
+    assert_eq!(replay_report.attempts[0].outcome, JobAttemptOutcome::FatalFailure);
+    assert_eq!(replay_report.attempts[1].outcome, JobAttemptOutcome::Succeeded);
+    assert!(replay_report.attempts[0].error_message.is_some());
+    assert!(replay_report.attempts[1].sttp_output_node_id.is_some());
+
+    let lineage = runtime
+        .list_lineage_events("job-test.fatal_then_success")
+        .await
+        .expect("lineage events should load");
+    assert_eq!(lineage.len(), 2);
+    assert!(lineage
+        .iter()
+        .all(|evt| evt.event.correlation_id == "corr-1"));
+    assert!(lineage.iter().all(|evt| evt.event.trace_id == "trace-1"));
 
     let succeeded = runtime
         .job_store
@@ -676,6 +832,19 @@ query Hello {
             .unwrap_or_default()
             .starts_with("grapheme:")
     );
+    assert!(attempts[0].guardrail_code.is_none());
+    assert!(attempts[0].policy_reason.is_none());
+    assert!(attempts[0].duration_ms.is_some());
+
+    let execution_id = attempts[0]
+        .execution_id
+        .clone()
+        .expect("execution id should be present");
+    let attempts_by_execution = runtime
+        .list_attempts_by_execution_id(&execution_id)
+        .await
+        .expect("attempts by execution should succeed");
+    assert_eq!(attempts_by_execution.len(), 1);
 
     let pending = runtime
         .outbox_store
@@ -694,6 +863,451 @@ query Hello {
             .unwrap_or_default()
             .starts_with("grapheme:")
     );
+
+    let lineage_by_execution = runtime
+        .list_lineage_events_by_execution_id(&execution_id)
+        .await
+        .expect("lineage by execution should succeed");
+    assert_eq!(lineage_by_execution.len(), 1);
+    assert_eq!(lineage_by_execution[0].event.job_id, job_id);
+}
+
+#[tokio::test]
+async fn in_memory_grapheme_healthcheck_workflow_executes_successfully() {
+    let runtime = InMemoryRuntime::new();
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+    runtime
+        .register_handler(GraphemeHealthcheckJobHandler::new(workflow_engine))
+        .expect("grapheme healthcheck handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-healthcheck-1".to_string();
+
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.healthcheck".to_string(),
+            payload_ref: "runtime-ready".to_string(),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-healthcheck-1".to_string(),
+            correlation_id: "corr-grapheme-healthcheck-1".to_string(),
+            causation_id: "cause-grapheme-healthcheck-1".to_string(),
+            trace_id: "trace-grapheme-healthcheck-1".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:healthcheck:1".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("healthcheck job should enqueue");
+
+    runtime
+        .process_once("default", "worker-grapheme-healthcheck", now)
+        .await
+        .expect("healthcheck processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+
+    assert_eq!(job.state, JobState::Succeeded);
+    assert!(
+        job.sttp_output_node_id
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("sttp:grapheme:")
+    );
+}
+
+#[tokio::test]
+async fn surreal_grapheme_healthcheck_workflow_executes_successfully() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_grapheme_healthcheck")
+        .await
+        .expect("namespace and db should be selected");
+
+    let runtime = SurrealRuntime::new(db);
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+    runtime
+        .register_handler(GraphemeHealthcheckJobHandler::new(workflow_engine))
+        .expect("grapheme healthcheck handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-healthcheck-surreal-1".to_string();
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.healthcheck".to_string(),
+            payload_ref: "surreal-runtime-ready".to_string(),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-healthcheck-surreal-1".to_string(),
+            correlation_id: "corr-grapheme-healthcheck-surreal-1".to_string(),
+            causation_id: "cause-grapheme-healthcheck-surreal-1".to_string(),
+            trace_id: "trace-grapheme-healthcheck-surreal-1".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:healthcheck:surreal:1".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("healthcheck job should enqueue");
+
+    runtime
+        .process_once("default", "worker-grapheme-healthcheck", now)
+        .await
+        .expect("healthcheck processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+
+    assert_eq!(job.state, JobState::Succeeded);
+    assert!(
+        job.sttp_output_node_id
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("sttp:grapheme:")
+    );
+}
+
+#[tokio::test]
+async fn in_memory_grapheme_echo_workflow_executes_successfully() {
+    let runtime = InMemoryRuntime::new();
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+    runtime
+        .register_handler(GraphemeEchoJobHandler::new(workflow_engine))
+        .expect("grapheme echo handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-echo-1".to_string();
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.echo".to_string(),
+            payload_ref: r#"{"message":"echo-ready"}"#.to_string(),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-echo-1".to_string(),
+            correlation_id: "corr-grapheme-echo-1".to_string(),
+            causation_id: "cause-grapheme-echo-1".to_string(),
+            trace_id: "trace-grapheme-echo-1".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:echo:1".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("echo job should enqueue");
+
+    runtime
+        .process_once("default", "worker-grapheme-echo", now)
+        .await
+        .expect("echo processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+
+    assert_eq!(job.state, JobState::Succeeded);
+}
+
+#[tokio::test]
+async fn surreal_grapheme_echo_workflow_executes_successfully() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_grapheme_echo")
+        .await
+        .expect("namespace and db should be selected");
+
+    let runtime = SurrealRuntime::new(db);
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+    runtime
+        .register_handler(GraphemeEchoJobHandler::new(workflow_engine))
+        .expect("grapheme echo handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-echo-surreal-1".to_string();
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.echo".to_string(),
+            payload_ref: r#"{"message":"surreal-echo-ready"}"#.to_string(),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-echo-surreal-1".to_string(),
+            correlation_id: "corr-grapheme-echo-surreal-1".to_string(),
+            causation_id: "cause-grapheme-echo-surreal-1".to_string(),
+            trace_id: "trace-grapheme-echo-surreal-1".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:echo:surreal:1".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("echo job should enqueue");
+
+    runtime
+        .process_once("default", "worker-grapheme-echo", now)
+        .await
+        .expect("echo processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+
+    assert_eq!(job.state, JobState::Succeeded);
+}
+
+#[tokio::test]
+async fn in_memory_grapheme_echo_rejects_invalid_payload_schema() {
+    let runtime = InMemoryRuntime::new();
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+    runtime
+        .register_handler(GraphemeEchoJobHandler::new(workflow_engine))
+        .expect("grapheme echo handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-echo-invalid-1".to_string();
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.echo".to_string(),
+            payload_ref: r#"{"wrong":"shape"}"#.to_string(),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-echo-invalid-1".to_string(),
+            correlation_id: "corr-grapheme-echo-invalid-1".to_string(),
+            causation_id: "cause-grapheme-echo-invalid-1".to_string(),
+            trace_id: "trace-grapheme-echo-invalid-1".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:echo:invalid:1".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("echo job should enqueue");
+
+    runtime
+        .process_once("default", "worker-grapheme-echo", now)
+        .await
+        .expect("echo processing should complete");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .list_job_attempts(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert!(attempts[0]
+        .policy_reason
+        .as_deref()
+        .unwrap_or_default()
+        .contains("invalid echo payload json"));
+}
+
+#[tokio::test]
+async fn in_memory_grapheme_textops_workflow_executes_successfully() {
+    let runtime = InMemoryRuntime::new();
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+    runtime
+        .register_handler(GraphemeTextOpsJobHandler::new(workflow_engine))
+        .expect("grapheme textops handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-textops-1".to_string();
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.textops".to_string(),
+            payload_ref: r#"{"mode":"summarize","text":"Stasis runtime now supports replay. Grapheme workflows are guarded. Metrics are emitted for operations.","max_items":2}"#.to_string(),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-textops-1".to_string(),
+            correlation_id: "corr-grapheme-textops-1".to_string(),
+            causation_id: "cause-grapheme-textops-1".to_string(),
+            trace_id: "trace-grapheme-textops-1".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:textops:1".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("textops job should enqueue");
+
+    runtime
+        .process_once("default", "worker-grapheme-textops", now)
+        .await
+        .expect("textops processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+}
+
+#[tokio::test]
+async fn surreal_grapheme_textops_workflow_executes_successfully() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_grapheme_textops")
+        .await
+        .expect("namespace and db should be selected");
+
+    let runtime = SurrealRuntime::new(db);
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+    runtime
+        .register_handler(GraphemeTextOpsJobHandler::new(workflow_engine))
+        .expect("grapheme textops handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-textops-surreal-1".to_string();
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.textops".to_string(),
+            payload_ref: r#"{"mode":"extract_keywords","text":"Runtime orchestration metrics retention lineage diagnostics runtime runtime"}"#.to_string(),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-textops-surreal-1".to_string(),
+            correlation_id: "corr-grapheme-textops-surreal-1".to_string(),
+            causation_id: "cause-grapheme-textops-surreal-1".to_string(),
+            trace_id: "trace-grapheme-textops-surreal-1".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:textops:surreal:1".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("textops job should enqueue");
+
+    runtime
+        .process_once("default", "worker-grapheme-textops", now)
+        .await
+        .expect("textops processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+}
+
+#[tokio::test]
+async fn in_memory_grapheme_textops_rejects_invalid_payload_schema() {
+    let runtime = InMemoryRuntime::new();
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+    runtime
+        .register_handler(GraphemeTextOpsJobHandler::new(workflow_engine))
+        .expect("grapheme textops handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-textops-invalid-1".to_string();
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.textops".to_string(),
+            payload_ref: r#"{"mode":"summarize","text":"   "}"#.to_string(),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-textops-invalid-1".to_string(),
+            correlation_id: "corr-grapheme-textops-invalid-1".to_string(),
+            causation_id: "cause-grapheme-textops-invalid-1".to_string(),
+            trace_id: "trace-grapheme-textops-invalid-1".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:textops:invalid:1".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("textops job should enqueue");
+
+    runtime
+        .process_once("default", "worker-grapheme-textops", now)
+        .await
+        .expect("textops processing should complete");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .list_job_attempts(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert!(attempts[0]
+        .policy_reason
+        .as_deref()
+        .unwrap_or_default()
+        .contains("must be non-empty"));
 }
 
 #[tokio::test]
@@ -744,4 +1358,384 @@ query Hello {
         err.to_string().contains("timeout must be greater than 0ms"),
         "expected timeout policy violation, got: {err}"
     );
+}
+
+#[tokio::test]
+async fn in_memory_grapheme_policy_failure_records_guardrail_diagnostics() {
+    let runtime = InMemoryRuntime::new();
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+    runtime
+        .register_handler(GraphemeJobHandler::new(workflow_engine))
+        .expect("grapheme handler should register");
+
+    let source = r#"import sql from "grapheme/sql"
+
+query Run {
+  sql.query(connection: "local", sql: "select 1") {
+    rows
+  }
+}
+"#;
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-policy-failure".to_string();
+
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.run".to_string(),
+            payload_ref: format!("grapheme:inline:{}", source),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-policy-failure".to_string(),
+            correlation_id: "corr-grapheme-policy-failure".to_string(),
+            causation_id: "cause-grapheme-policy-failure".to_string(),
+            trace_id: "trace-grapheme-policy-failure".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:policy:1".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("grapheme job should enqueue");
+
+    runtime
+        .process_once("default", "worker-grapheme", now)
+        .await
+        .expect("grapheme processing should complete with fatal outcome");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .list_job_attempts(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].attempt_number, 1);
+    assert!(attempts[0].execution_id.is_none());
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("IMPORT_NOT_ALLOWLISTED")
+    );
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("not allowlisted")
+    );
+    assert!(attempts[0].duration_ms.is_some());
+
+    let guardrail_attempts = runtime
+        .list_attempts_by_guardrail_code("IMPORT_NOT_ALLOWLISTED")
+        .await
+        .expect("guardrail attempts query should succeed");
+    assert!(guardrail_attempts.iter().any(|attempt| attempt.job_id == job_id));
+
+    let diagnostics = attempts[0]
+        .diagnostics
+        .clone()
+        .expect("diagnostics should be present");
+    let diagnostics_json: JsonValue =
+        serde_json::from_str(&diagnostics).expect("diagnostics should be valid json");
+
+    assert_eq!(diagnostics_json["status"], "failure");
+    assert_eq!(diagnostics_json["guardrail_code"], "IMPORT_NOT_ALLOWLISTED");
+    assert!(
+        diagnostics_json["policy_reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not allowlisted")
+    );
+    assert!(diagnostics_json["duration_ms"].as_u64().is_some());
+
+    let pending = runtime
+        .outbox_store
+        .list_pending(10)
+        .await
+        .expect("pending list should succeed");
+    let event = pending
+        .iter()
+        .find(|evt| evt.event.job_id == job_id)
+        .expect("outbox event should exist for failed grapheme job");
+
+    assert_eq!(event.event.event_type, RuntimeEventType::JobDeadLettered);
+    assert!(event.event.execution_id.is_none());
+    assert!(
+        event
+            .event
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("policy violation")
+    );
+}
+
+#[tokio::test]
+async fn in_memory_runtime_retention_prunes_terminal_records() {
+    let now = Utc::now();
+    let runtime = InMemoryRuntime::new();
+    runtime
+        .register_handler(AlwaysSuccessHandler)
+        .expect("handler should register");
+    runtime
+        .register_event_publisher(CountingPublisher {
+            count: Arc::new(AtomicUsize::new(0)),
+        })
+        .expect("publisher should register");
+
+    let old = now - Duration::days(10);
+    runtime
+        .enqueue(build_new_job("test.success", old))
+        .await
+        .expect("job should enqueue");
+    runtime
+        .process_once("default", "worker-retention", old)
+        .await
+        .expect("processing should succeed");
+    runtime
+        .publish_pending_events(10, old + Duration::seconds(1))
+        .await
+        .expect("publish should succeed");
+
+    runtime
+        .configure_retention_policy(RetentionPolicy { terminal_ttl_days: 1 })
+        .expect("retention policy should configure");
+
+    let report = runtime
+        .enforce_retention(now)
+        .await
+        .expect("retention should enforce");
+
+    assert_eq!(report.jobs_pruned, 1);
+    assert_eq!(report.attempts_pruned, 1);
+    assert_eq!(report.outbox_events_pruned, 1);
+
+    let job = runtime
+        .job_store
+        .get("job-test.success")
+        .await
+        .expect("job get should succeed");
+    assert!(job.is_none());
+}
+
+#[tokio::test]
+async fn surreal_runtime_retention_prunes_terminal_records() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_retention_prune")
+        .await
+        .expect("namespace and db should be selected");
+
+    let now = Utc::now();
+    let old = now - Duration::days(10);
+    let runtime = SurrealRuntime::new(db);
+    runtime
+        .register_handler(AlwaysSuccessHandler)
+        .expect("handler should register");
+    runtime
+        .register_event_publisher(CountingPublisher {
+            count: Arc::new(AtomicUsize::new(0)),
+        })
+        .expect("publisher should register");
+
+    runtime
+        .enqueue(build_new_job("test.success", old))
+        .await
+        .expect("job should enqueue");
+    runtime
+        .process_once("default", "worker-retention", old)
+        .await
+        .expect("processing should succeed");
+    runtime
+        .publish_pending_events(10, old + Duration::seconds(1))
+        .await
+        .expect("publish should succeed");
+
+    runtime
+        .configure_retention_policy(RetentionPolicy { terminal_ttl_days: 1 })
+        .expect("retention policy should configure");
+
+    let report = runtime
+        .enforce_retention(now)
+        .await
+        .expect("retention should enforce");
+
+    assert_eq!(report.jobs_pruned, 1);
+    assert_eq!(report.attempts_pruned, 1);
+    assert_eq!(report.outbox_events_pruned, 1);
+
+    let job = runtime
+        .job_store
+        .get("job-test.success")
+        .await
+        .expect("job get should succeed");
+    assert!(job.is_none());
+}
+
+#[tokio::test]
+async fn lineage_investigator_queries_success_path_by_execution_id() {
+    let runtime = InMemoryRuntime::new();
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+    runtime
+        .register_handler(GraphemeJobHandler::new(workflow_engine))
+        .expect("grapheme handler should register");
+
+    let source = r#"import core from "grapheme/core"
+
+query Hello {
+  core.echo(message: "lineage investigator") {
+    state { current }
+  }
+}
+"#;
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-lineage-success".to_string();
+
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.run".to_string(),
+            payload_ref: format!("grapheme:inline:{}", source),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-lineage-success".to_string(),
+            correlation_id: "corr-grapheme-lineage-success".to_string(),
+            causation_id: "cause-grapheme-lineage-success".to_string(),
+            trace_id: "trace-grapheme-lineage-success".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:lineage:success".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("job should enqueue");
+
+    runtime
+        .process_once("default", "worker-lineage", now)
+        .await
+        .expect("processing should succeed");
+
+    let attempts = runtime
+        .list_job_attempts(&job_id)
+        .await
+        .expect("attempts should load");
+    let execution_id = attempts[0]
+        .execution_id
+        .clone()
+        .expect("execution id should be present");
+
+    let report = runtime
+        .investigate_lineage(RuntimeLineageQuery {
+            execution_id: Some(execution_id.clone()),
+            ..RuntimeLineageQuery::default()
+        })
+        .await
+        .expect("lineage investigation should succeed");
+
+    assert_eq!(report.attempts.len(), 1);
+    assert_eq!(report.attempts[0].job_id, job_id);
+    assert_eq!(
+        report.attempts[0].execution_id.as_deref(),
+        Some(execution_id.as_str())
+    );
+    assert_eq!(report.lineage_events.len(), 1);
+    assert_eq!(report.lineage_events[0].event.job_id, job_id);
+}
+
+#[tokio::test]
+async fn lineage_investigator_queries_guardrail_failures() {
+    let runtime = InMemoryRuntime::new();
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+    runtime
+        .register_handler(GraphemeJobHandler::new(workflow_engine))
+        .expect("grapheme handler should register");
+
+    let source = r#"import sql from "grapheme/sql"
+
+query Run {
+  sql.query(connection: "local", sql: "select 1") {
+    rows
+  }
+}
+"#;
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-lineage-guardrail".to_string();
+
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.run".to_string(),
+            payload_ref: format!("grapheme:inline:{}", source),
+            priority: 100,
+            max_attempts: 1,
+            idempotency_key: "idem-grapheme-lineage-guardrail".to_string(),
+            correlation_id: "corr-grapheme-lineage-guardrail".to_string(),
+            causation_id: "cause-grapheme-lineage-guardrail".to_string(),
+            trace_id: "trace-grapheme-lineage-guardrail".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:lineage:guardrail".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("job should enqueue");
+
+    runtime
+        .process_once("default", "worker-lineage", now)
+        .await
+        .expect("processing should complete");
+
+    let report = runtime
+        .investigate_lineage(RuntimeLineageQuery {
+            guardrail_code: Some("IMPORT_NOT_ALLOWLISTED".to_string()),
+            ..RuntimeLineageQuery::default()
+        })
+        .await
+        .expect("lineage investigation should succeed");
+
+    assert!(report.attempts.iter().any(|attempt| attempt.job_id == job_id));
+    assert!(report
+        .attempts
+        .iter()
+        .any(|attempt| attempt.guardrail_code.as_deref() == Some("IMPORT_NOT_ALLOWLISTED")));
+    assert!(report
+        .lineage_events
+        .iter()
+        .any(|event| event.event.job_id == job_id));
+}
+
+#[tokio::test]
+async fn lineage_investigator_requires_selector() {
+    let runtime = InMemoryRuntime::new();
+    let err = runtime
+        .investigate_lineage(RuntimeLineageQuery::default())
+        .await
+        .expect_err("empty selector should fail");
+
+    assert!(err
+        .to_string()
+        .contains("requires at least one selector"));
 }

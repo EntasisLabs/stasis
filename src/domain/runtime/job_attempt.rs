@@ -19,5 +19,8 @@ pub struct JobAttempt {
     pub error_message: Option<String>,
     pub sttp_output_node_id: Option<String>,
     pub execution_id: Option<String>,
+    pub guardrail_code: Option<String>,
+    pub policy_reason: Option<String>,
+    pub duration_ms: Option<u64>,
     pub diagnostics: Option<String>,
 }
