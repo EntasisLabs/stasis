@@ -9,7 +9,9 @@ use surrealdb::engine::local::Db;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job::{Job, JobState, NewJob};
-use crate::domain::runtime::outbox::{OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType};
+use crate::domain::runtime::outbox::{
+    OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
+};
 use crate::domain::runtime::recurring::RecurringDefinition;
 use crate::infrastructure::runtime::surreal_job_store::SurrealJobStore;
 use crate::infrastructure::runtime::surreal_outbox_store::SurrealOutboxStore;
@@ -26,6 +28,7 @@ pub struct SurrealRuntime {
     pub outbox_store: SurrealOutboxStore,
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
+    publish_policy: Arc<RwLock<OutboxPublishPolicy>>,
     id_counter: Arc<AtomicU64>,
 }
 
@@ -37,6 +40,7 @@ impl SurrealRuntime {
             outbox_store: SurrealOutboxStore::new(db),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
+            publish_policy: Arc::new(RwLock::new(OutboxPublishPolicy::default())),
             id_counter: Arc::new(AtomicU64::new(1)),
         }
     }
@@ -58,6 +62,16 @@ impl SurrealRuntime {
             .map_err(|_| StasisError::PortFailure("publisher lock poisoned".to_string()))?;
 
         *state = Some(Arc::new(publisher));
+        Ok(())
+    }
+
+    pub fn configure_outbox_publish_policy(&self, policy: OutboxPublishPolicy) -> Result<()> {
+        let mut state = self
+            .publish_policy
+            .write()
+            .map_err(|_| StasisError::PortFailure("publish policy lock poisoned".to_string()))?;
+
+        *state = policy;
         Ok(())
     }
 
@@ -113,7 +127,7 @@ impl SurrealRuntime {
             self.enqueue(job).await?;
 
             definition.last_run_at = Some(now);
-            definition.next_run_at = now + Duration::seconds(definition.interval_seconds);
+            definition.next_run_at = definition.compute_next_run_at(now)?;
             definition.lease_owner = None;
             definition.lease_expires_at = None;
             self.recurring_store.save(definition).await?;
@@ -215,6 +229,28 @@ impl SurrealRuntime {
         Ok(Some(job.id))
     }
 
+    pub async fn replay_dead_letter(&self, job_id: &str, now: DateTime<Utc>) -> Result<bool> {
+        let Some(mut job) = self.job_store.get(job_id).await? else {
+            return Ok(false);
+        };
+
+        if job.state != JobState::DeadLetter {
+            return Ok(false);
+        }
+
+        job.state = JobState::Enqueued;
+        job.attempts = 0;
+        job.last_error = None;
+        job.scheduled_at = now;
+        job.lease_owner = None;
+        job.lease_expires_at = None;
+        job.heartbeat_at = None;
+        job.finished_at = None;
+
+        self.job_store.save(job).await?;
+        Ok(true)
+    }
+
     pub async fn publish_pending_events(&self, limit: usize, now: DateTime<Utc>) -> Result<usize> {
         let publisher = {
             let state = self
@@ -228,13 +264,51 @@ impl SurrealRuntime {
             return Ok(0);
         };
 
+        let policy = self
+            .publish_policy
+            .read()
+            .map_err(|_| StasisError::PortFailure("publish policy lock poisoned".to_string()))?
+            .clone();
+
         let pending = self.outbox_store.list_pending(limit).await?;
         let mut published = 0usize;
 
-        for event in pending {
-            publisher.publish(&event).await?;
-            self.outbox_store.mark_published(&event.event_id, now).await?;
-            published += 1;
+        for mut event in pending {
+            if event.next_attempt_at.map(|next| next > now).unwrap_or(false) {
+                continue;
+            }
+
+            match publisher.publish(&event).await {
+                Ok(()) => {
+                    event.status = OutboxStatus::Published;
+                    event.publish_attempts = event.publish_attempts.saturating_add(1);
+                    event.published_at = Some(now);
+                    event.next_attempt_at = None;
+                    event.last_publish_error = None;
+                    self.outbox_store.save(event).await?;
+                    published += 1;
+                }
+                Err(err) => {
+                    event.publish_attempts = event.publish_attempts.saturating_add(1);
+                    event.published_at = None;
+                    event.last_publish_error = Some(err.to_string());
+
+                    if event.publish_attempts >= policy.max_attempts {
+                        event.status = OutboxStatus::Failed;
+                        event.next_attempt_at = None;
+                    } else {
+                        let exponent = (event.publish_attempts - 1) as u32;
+                        let mut delay = policy
+                            .base_delay_seconds
+                            .saturating_mul(2_i64.saturating_pow(exponent));
+                        delay = delay.min(policy.max_delay_seconds);
+                        event.status = OutboxStatus::Pending;
+                        event.next_attempt_at = Some(now + Duration::seconds(delay.max(0)));
+                    }
+
+                    self.outbox_store.save(event).await?;
+                }
+            }
         }
 
         Ok(published)
@@ -253,6 +327,8 @@ impl SurrealRuntime {
             status: OutboxStatus::Pending,
             publish_attempts: 0,
             published_at: None,
+            next_attempt_at: None,
+            last_publish_error: None,
             event: RuntimeEvent {
                 event_type,
                 job_id: job.id.clone(),

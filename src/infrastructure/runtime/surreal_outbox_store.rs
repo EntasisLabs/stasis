@@ -33,6 +33,8 @@ struct OutboxRecord {
     status: String,
     publish_attempts: u32,
     published_at: Option<DateTime<Utc>>,
+    next_attempt_at: Option<DateTime<Utc>>,
+    last_publish_error: Option<String>,
     event_type: String,
     job_id: String,
     correlation_id: String,
@@ -55,6 +57,8 @@ impl From<OutboxEvent> for OutboxRecord {
             },
             publish_attempts: value.publish_attempts,
             published_at: value.published_at,
+            next_attempt_at: value.next_attempt_at,
+            last_publish_error: value.last_publish_error,
             event_type: match value.event.event_type {
                 RuntimeEventType::JobSucceeded => "job_succeeded".to_string(),
                 RuntimeEventType::JobRetryScheduled => "job_retry_scheduled".to_string(),
@@ -103,6 +107,8 @@ impl TryFrom<OutboxRecord> for OutboxEvent {
             status,
             publish_attempts: value.publish_attempts,
             published_at: value.published_at,
+            next_attempt_at: value.next_attempt_at,
+            last_publish_error: value.last_publish_error,
             event: RuntimeEvent {
                 event_type,
                 job_id: value.job_id,
@@ -121,6 +127,10 @@ impl TryFrom<OutboxRecord> for OutboxEvent {
 #[async_trait]
 impl OutboxStore for SurrealOutboxStore {
     async fn insert(&self, event: OutboxEvent) -> Result<()> {
+        self.save(event).await
+    }
+
+    async fn save(&self, event: OutboxEvent) -> Result<()> {
         let record: OutboxRecord = event.into();
         self.db
             .query("UPSERT type::record($table, $id) CONTENT $data")
@@ -128,9 +138,25 @@ impl OutboxStore for SurrealOutboxStore {
             .bind(("id", record.event_id.clone()))
             .bind(("data", record))
             .await
-            .map_err(|e| Self::port_err("insert outbox event", e))?;
+            .map_err(|e| Self::port_err("save outbox event", e))?;
 
         Ok(())
+    }
+
+    async fn get(&self, event_id: &str) -> Result<Option<OutboxEvent>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::record($table, $id)")
+            .bind(("table", self.table.clone()))
+            .bind(("id", event_id.to_string()))
+            .await
+            .map_err(|e| Self::port_err("load outbox event", e))?;
+
+        let row: Option<OutboxRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode outbox event", e))?;
+
+        row.map(OutboxEvent::try_from).transpose()
     }
 
     async fn list_pending(&self, limit: usize) -> Result<Vec<OutboxEvent>> {
@@ -156,35 +182,4 @@ impl OutboxStore for SurrealOutboxStore {
         Ok(events)
     }
 
-    async fn mark_published(&self, event_id: &str, published_at: DateTime<Utc>) -> Result<()> {
-        let mut response = self
-            .db
-            .query("SELECT * FROM type::record($table, $id)")
-            .bind(("table", self.table.clone()))
-            .bind(("id", event_id.to_string()))
-            .await
-            .map_err(|e| Self::port_err("load outbox event", e))?;
-
-        let row: Option<OutboxRecord> = response
-            .take(0)
-            .map_err(|e| Self::port_err("decode outbox event", e))?;
-
-        let Some(mut event) = row else {
-            return Ok(());
-        };
-
-        event.status = "published".to_string();
-        event.publish_attempts = event.publish_attempts.saturating_add(1);
-        event.published_at = Some(published_at);
-
-        self.db
-            .query("UPSERT type::record($table, $id) CONTENT $data")
-            .bind(("table", self.table.clone()))
-            .bind(("id", event.event_id.clone()))
-            .bind(("data", event))
-            .await
-            .map_err(|e| Self::port_err("mark outbox published", e))?;
-
-        Ok(())
-    }
 }

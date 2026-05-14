@@ -17,8 +17,9 @@ pub mod prelude {
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, JobState, NewJob};
     pub use crate::domain::runtime::outbox::{
-        OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType,
+        OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
     };
+    pub use crate::infrastructure::runtime::tokio_channel_event_publisher::TokioChannelEventPublisher;
     pub use crate::domain::runtime::recurring::RecurringDefinition;
     pub use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
     pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;

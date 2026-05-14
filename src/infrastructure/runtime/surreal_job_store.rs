@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use surrealdb::{Surreal, engine::local::Db};
 use surrealdb_types::SurrealValue;
@@ -58,6 +58,13 @@ struct JobRecord {
     started_at: Option<DateTime<Utc>>,
     finished_at: Option<DateTime<Utc>>,
     last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
+struct LeaseCandidateRecord {
+    job_id: String,
+    scheduled_at: DateTime<Utc>,
+    priority: i32,
 }
 
 impl From<Job> for JobRecord {
@@ -194,40 +201,65 @@ impl JobStore for SurrealJobStore {
         now: DateTime<Utc>,
         lease_seconds: i64,
     ) -> Result<Option<Job>> {
-        let mut response = self
-            .db
-            .query("SELECT * FROM type::table($table)")
-            .bind(("table", self.table.clone()))
-            .await
-            .map_err(|e| Self::port_err("list jobs for leasing", e))?;
+        let lease_expires_at = now + chrono::Duration::seconds(lease_seconds);
 
-        let rows: Vec<JobRecord> = response
-            .take(0)
-            .map_err(|e| Self::port_err("decode jobs for leasing", e))?;
+        // Retry candidate selection a few times in case another worker wins the CAS update.
+        for _ in 0..3 {
+            let mut candidate_response = self
+                .db
+                .query(
+                                        "SELECT job_id, scheduled_at, priority FROM type::table($table) \
+                     WHERE queue = $queue \
+                                             AND (state = 'enqueued' OR state = 'leased') \
+                       AND scheduled_at <= $now \
+                       AND (lease_expires_at = NONE OR lease_expires_at <= $now) \
+                     ORDER BY scheduled_at ASC, priority ASC \
+                     LIMIT 1"
+                )
+                .bind(("table", self.table.clone()))
+                .bind(("queue", queue.to_string()))
+                .bind(("now", now))
+                .await
+                .map_err(|e| Self::port_err("select lease candidate", e))?;
 
-        let selected = rows
-            .into_iter()
-            .filter_map(|row| Job::try_from(row).ok())
-            .filter(|job| {
-                let lease_expired = job.lease_expires_at.map(|expiry| expiry <= now).unwrap_or(true);
-                job.queue == queue
-                    && job.state == JobState::Enqueued
-                    && job.scheduled_at <= now
-                    && lease_expired
-            })
-            .min_by_key(|job| (job.scheduled_at, job.priority));
+            let mut candidates: Vec<LeaseCandidateRecord> = candidate_response
+                .take(0)
+                .map_err(|e| Self::port_err("decode lease candidate", e))?;
 
-        let Some(mut job) = selected else {
-            return Ok(None);
-        };
+            let Some(candidate) = candidates.pop() else {
+                return Ok(None);
+            };
 
-        job.state = JobState::Leased;
-        job.lease_owner = Some(worker_id.to_string());
-        job.lease_expires_at = Some(now + Duration::seconds(lease_seconds));
-        job.heartbeat_at = Some(now);
+            let mut update_response = self
+                .db
+                .query(
+                    "UPDATE type::record($table, $id) \
+                     SET state = 'leased', lease_owner = $worker_id, lease_expires_at = $lease_expires_at, heartbeat_at = $now \
+                     WHERE queue = $queue \
+                                             AND (state = 'enqueued' OR state = 'leased') \
+                       AND scheduled_at <= $now \
+                       AND (lease_expires_at = NONE OR lease_expires_at <= $now) \
+                     RETURN AFTER"
+                )
+                .bind(("table", self.table.clone()))
+                .bind(("id", candidate.job_id))
+                .bind(("queue", queue.to_string()))
+                .bind(("worker_id", worker_id.to_string()))
+                .bind(("now", now))
+                .bind(("lease_expires_at", lease_expires_at))
+                .await
+                .map_err(|e| Self::port_err("lease due job", e))?;
 
-        self.save(job.clone()).await?;
-        Ok(Some(job))
+            let row: Option<JobRecord> = update_response
+                .take(0)
+                .map_err(|e| Self::port_err("decode leased job", e))?;
+
+            if let Some(record) = row {
+                return Ok(Some(Job::try_from(record)?));
+            }
+        }
+
+        Ok(None)
     }
 
     async fn heartbeat(&self, job_id: &str, worker_id: &str, now: DateTime<Utc>) -> Result<()> {

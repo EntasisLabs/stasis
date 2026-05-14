@@ -7,7 +7,9 @@ use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job::{Job, JobState, NewJob};
-use crate::domain::runtime::outbox::{OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType};
+use crate::domain::runtime::outbox::{
+    OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
+};
 use crate::domain::runtime::recurring::RecurringDefinition;
 use crate::ports::outbound::runtime::event_publisher::EventPublisher;
 use crate::ports::outbound::runtime::job_store::JobStore;
@@ -34,6 +36,7 @@ pub struct InMemoryRuntime {
     pub outbox_store: InMemoryOutboxStore,
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
+    publish_policy: Arc<RwLock<OutboxPublishPolicy>>,
     id_counter: Arc<AtomicU64>,
 }
 
@@ -51,6 +54,7 @@ impl InMemoryRuntime {
             outbox_store: InMemoryOutboxStore::default(),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
+            publish_policy: Arc::new(RwLock::new(OutboxPublishPolicy::default())),
             id_counter: Arc::new(AtomicU64::new(1)),
         }
     }
@@ -72,6 +76,16 @@ impl InMemoryRuntime {
             .map_err(|_| StasisError::PortFailure("publisher lock poisoned".to_string()))?;
 
         *state = Some(Arc::new(publisher));
+        Ok(())
+    }
+
+    pub fn configure_outbox_publish_policy(&self, policy: OutboxPublishPolicy) -> Result<()> {
+        let mut state = self
+            .publish_policy
+            .write()
+            .map_err(|_| StasisError::PortFailure("publish policy lock poisoned".to_string()))?;
+
+        *state = policy;
         Ok(())
     }
 
@@ -127,7 +141,7 @@ impl InMemoryRuntime {
             self.enqueue(job).await?;
 
             definition.last_run_at = Some(now);
-            definition.next_run_at = now + Duration::seconds(definition.interval_seconds);
+            definition.next_run_at = definition.compute_next_run_at(now)?;
             definition.lease_owner = None;
             definition.lease_expires_at = None;
             self.recurring_store.save(definition).await?;
@@ -229,6 +243,28 @@ impl InMemoryRuntime {
         Ok(Some(job.id))
     }
 
+    pub async fn replay_dead_letter(&self, job_id: &str, now: DateTime<Utc>) -> Result<bool> {
+        let Some(mut job) = self.job_store.get(job_id).await? else {
+            return Ok(false);
+        };
+
+        if job.state != JobState::DeadLetter {
+            return Ok(false);
+        }
+
+        job.state = JobState::Enqueued;
+        job.attempts = 0;
+        job.last_error = None;
+        job.scheduled_at = now;
+        job.lease_owner = None;
+        job.lease_expires_at = None;
+        job.heartbeat_at = None;
+        job.finished_at = None;
+
+        self.job_store.save(job).await?;
+        Ok(true)
+    }
+
     pub async fn publish_pending_events(&self, limit: usize, now: DateTime<Utc>) -> Result<usize> {
         let publisher = {
             let state = self
@@ -242,13 +278,51 @@ impl InMemoryRuntime {
             return Ok(0);
         };
 
+        let policy = self
+            .publish_policy
+            .read()
+            .map_err(|_| StasisError::PortFailure("publish policy lock poisoned".to_string()))?
+            .clone();
+
         let pending = self.outbox_store.list_pending(limit).await?;
         let mut published = 0usize;
 
-        for event in pending {
-            publisher.publish(&event).await?;
-            self.outbox_store.mark_published(&event.event_id, now).await?;
-            published += 1;
+        for mut event in pending {
+            if event.next_attempt_at.map(|next| next > now).unwrap_or(false) {
+                continue;
+            }
+
+            match publisher.publish(&event).await {
+                Ok(()) => {
+                    event.status = OutboxStatus::Published;
+                    event.publish_attempts = event.publish_attempts.saturating_add(1);
+                    event.published_at = Some(now);
+                    event.next_attempt_at = None;
+                    event.last_publish_error = None;
+                    self.outbox_store.save(event).await?;
+                    published += 1;
+                }
+                Err(err) => {
+                    event.publish_attempts = event.publish_attempts.saturating_add(1);
+                    event.published_at = None;
+                    event.last_publish_error = Some(err.to_string());
+
+                    if event.publish_attempts >= policy.max_attempts {
+                        event.status = OutboxStatus::Failed;
+                        event.next_attempt_at = None;
+                    } else {
+                        let exponent = (event.publish_attempts - 1) as u32;
+                        let mut delay = policy
+                            .base_delay_seconds
+                            .saturating_mul(2_i64.saturating_pow(exponent));
+                        delay = delay.min(policy.max_delay_seconds);
+                        event.status = OutboxStatus::Pending;
+                        event.next_attempt_at = Some(now + Duration::seconds(delay.max(0)));
+                    }
+
+                    self.outbox_store.save(event).await?;
+                }
+            }
         }
 
         Ok(published)
@@ -267,6 +341,8 @@ impl InMemoryRuntime {
             status: OutboxStatus::Pending,
             publish_attempts: 0,
             published_at: None,
+            next_attempt_at: None,
+            last_publish_error: None,
             event: RuntimeEvent {
                 event_type,
                 job_id: job.id.clone(),
@@ -417,6 +493,25 @@ impl OutboxStore for InMemoryOutboxStore {
         Ok(())
     }
 
+    async fn save(&self, event: OutboxEvent) -> Result<()> {
+        let mut state = self
+            .events
+            .write()
+            .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+
+        state.insert(event.event_id.clone(), event);
+        Ok(())
+    }
+
+    async fn get(&self, event_id: &str) -> Result<Option<OutboxEvent>> {
+        let state = self
+            .events
+            .read()
+            .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+
+        Ok(state.get(event_id).cloned())
+    }
+
     async fn list_pending(&self, limit: usize) -> Result<Vec<OutboxEvent>> {
         let state = self
             .events
@@ -434,20 +529,6 @@ impl OutboxStore for InMemoryOutboxStore {
         Ok(pending)
     }
 
-    async fn mark_published(&self, event_id: &str, published_at: DateTime<Utc>) -> Result<()> {
-        let mut state = self
-            .events
-            .write()
-            .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
-
-        if let Some(event) = state.get_mut(event_id) {
-            event.status = OutboxStatus::Published;
-            event.published_at = Some(published_at);
-            event.publish_attempts = event.publish_attempts.saturating_add(1);
-        }
-
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -513,6 +594,7 @@ impl RecurringStore for InMemoryRecurringStore {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use chrono::{Duration, Utc};
@@ -581,6 +663,24 @@ mod tests {
             Ok(JobExecutionOutcome::FatalFailure {
                 message: "non retryable".to_string(),
             })
+        }
+    }
+
+    #[derive(Clone)]
+    struct FlakyPublisher {
+        failures_before_success: usize,
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl EventPublisher for FlakyPublisher {
+        async fn publish(&self, _event: &OutboxEvent) -> Result<()> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if call <= self.failures_before_success {
+                return Err(StasisError::PortFailure("synthetic publish failure".to_string()));
+            }
+
+            Ok(())
         }
     }
 
@@ -712,6 +812,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dead_letter_jobs_can_be_replayed() {
+        let runtime = InMemoryRuntime::new();
+        runtime
+            .register_handler(AlwaysFatalHandler)
+            .expect("handler should register");
+
+        let now = Utc::now();
+        runtime
+            .enqueue(build_new_job("test.fatal", now))
+            .await
+            .expect("job should enqueue");
+
+        runtime
+            .process_once("default", "worker-1", now)
+            .await
+            .expect("processing should complete");
+
+        let replayed = runtime
+            .replay_dead_letter("job-test.fatal", now + Duration::seconds(5))
+            .await
+            .expect("replay should succeed");
+        assert!(replayed);
+
+        let replayed_job = runtime
+            .job_store
+            .get("job-test.fatal")
+            .await
+            .expect("job get should succeed")
+            .expect("job should exist");
+
+        assert_eq!(replayed_job.state, JobState::Enqueued);
+        assert_eq!(replayed_job.attempts, 0);
+        assert_eq!(replayed_job.last_error, None);
+    }
+
+    #[tokio::test]
+    async fn outbox_publish_failures_are_retried_with_backoff() {
+        let runtime = InMemoryRuntime::new();
+        runtime
+            .register_handler(AlwaysSuccessHandler)
+            .expect("handler should register");
+        runtime
+            .configure_outbox_publish_policy(OutboxPublishPolicy {
+                max_attempts: 3,
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            })
+            .expect("policy should configure");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        runtime
+            .register_event_publisher(FlakyPublisher {
+                failures_before_success: 1,
+                calls: calls.clone(),
+            })
+            .expect("publisher should register");
+
+        let now = Utc::now();
+        runtime
+            .enqueue(build_new_job("test.success", now))
+            .await
+            .expect("job should enqueue");
+
+        runtime
+            .process_once("default", "worker-1", now)
+            .await
+            .expect("processing should succeed");
+
+        let first_publish = runtime
+            .publish_pending_events(10, now)
+            .await
+            .expect("first publish attempt should complete");
+        assert_eq!(first_publish, 0);
+
+        let pending = runtime
+            .outbox_store
+            .list_pending(10)
+            .await
+            .expect("pending list should succeed");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].publish_attempts, 1);
+        assert_eq!(pending[0].status, OutboxStatus::Pending);
+        assert_eq!(
+            pending[0].last_publish_error,
+            Some("port failure: synthetic publish failure".to_string())
+        );
+        assert_eq!(pending[0].next_attempt_at, Some(now + Duration::seconds(1)));
+
+        let premature = runtime
+            .publish_pending_events(10, now)
+            .await
+            .expect("premature publish attempt should complete");
+        assert_eq!(premature, 0);
+
+        let second_publish = runtime
+            .publish_pending_events(10, now + Duration::seconds(1))
+            .await
+            .expect("second publish attempt should complete");
+        assert_eq!(second_publish, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+        let pending_after = runtime
+            .outbox_store
+            .list_pending(10)
+            .await
+            .expect("pending list should succeed");
+        assert!(pending_after.is_empty());
+    }
+
+    #[tokio::test]
     async fn recurring_materialization_creates_due_jobs() {
         let runtime = InMemoryRuntime::new();
 
@@ -722,7 +932,8 @@ mod tests {
                 queue: "default".to_string(),
                 job_type: "test.success".to_string(),
                 payload_template_ref: "sttp:in:recurring".to_string(),
-                interval_seconds: 60,
+                cron_expr: "0/1 * * * * * *".to_string(),
+                timezone: "UTC".to_string(),
                 jitter_seconds: 0,
                 enabled: true,
                 max_attempts: 4,
@@ -758,6 +969,6 @@ mod tests {
 
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].last_run_at, Some(now));
-        assert_eq!(defs[0].next_run_at, now + Duration::seconds(60));
+        assert!(defs[0].next_run_at > now);
     }
 }
