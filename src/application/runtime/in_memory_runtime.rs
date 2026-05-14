@@ -7,20 +7,34 @@ use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job::{Job, JobState, NewJob};
+use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
 use crate::domain::runtime::outbox::{
     OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
 };
 use crate::domain::runtime::recurring::RecurringDefinition;
 use crate::ports::outbound::runtime::event_publisher::EventPublisher;
+use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
 
 #[derive(Clone, Debug)]
 pub enum JobExecutionOutcome {
-    Success { sttp_output_node_id: String },
-    RetryableFailure { message: String },
-    FatalFailure { message: String },
+    Success {
+        sttp_output_node_id: String,
+        execution_id: Option<String>,
+        diagnostics: Option<String>,
+    },
+    RetryableFailure {
+        message: String,
+        execution_id: Option<String>,
+        diagnostics: Option<String>,
+    },
+    FatalFailure {
+        message: String,
+        execution_id: Option<String>,
+        diagnostics: Option<String>,
+    },
 }
 
 #[async_trait]
@@ -34,6 +48,7 @@ pub struct InMemoryRuntime {
     pub job_store: InMemoryJobStore,
     pub recurring_store: InMemoryRecurringStore,
     pub outbox_store: InMemoryOutboxStore,
+    pub job_attempt_store: InMemoryJobAttemptStore,
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
     publish_policy: Arc<RwLock<OutboxPublishPolicy>>,
@@ -52,6 +67,7 @@ impl InMemoryRuntime {
             job_store: InMemoryJobStore::default(),
             recurring_store: InMemoryRecurringStore::default(),
             outbox_store: InMemoryOutboxStore::default(),
+            job_attempt_store: InMemoryJobAttemptStore::default(),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
             publish_policy: Arc::new(RwLock::new(OutboxPublishPolicy::default())),
@@ -179,12 +195,19 @@ impl InMemoryRuntime {
         } else {
             JobExecutionOutcome::FatalFailure {
                 message: format!("no handler registered for job_type={}", job.job_type),
+                execution_id: None,
+                diagnostics: None,
             }
         };
+
+        let attempt_number = job.attempts + 1;
+        let attempt_started_at = now;
 
         match outcome {
             JobExecutionOutcome::Success {
                 sttp_output_node_id,
+                execution_id,
+                diagnostics,
             } => {
                 job.state = JobState::Succeeded;
                 job.sttp_output_node_id = Some(sttp_output_node_id.clone());
@@ -194,10 +217,35 @@ impl InMemoryRuntime {
                 job.heartbeat_at = None;
                 self.job_store.save(job.clone()).await?;
 
-                self.append_outbox(RuntimeEventType::JobSucceeded, &job, Some(sttp_output_node_id), None, now)
+                self.append_outbox(
+                    RuntimeEventType::JobSucceeded,
+                    &job,
+                    Some(sttp_output_node_id.clone()),
+                    None,
+                    now,
+                    execution_id.clone(),
+                )
                     .await?;
+
+                self.append_job_attempt(
+                    &job,
+                    worker_id,
+                    attempt_number,
+                    attempt_started_at,
+                    now,
+                    JobAttemptOutcome::Succeeded,
+                    None,
+                    Some(sttp_output_node_id),
+                    execution_id,
+                    diagnostics,
+                )
+                .await?;
             }
-            JobExecutionOutcome::RetryableFailure { message } => {
+            JobExecutionOutcome::RetryableFailure {
+                message,
+                execution_id,
+                diagnostics,
+            } => {
                 job.attempts += 1;
                 job.last_error = Some(message.clone());
                 job.lease_owner = None;
@@ -207,7 +255,14 @@ impl InMemoryRuntime {
                 if job.attempts >= job.max_attempts {
                     job.state = JobState::DeadLetter;
                     job.finished_at = Some(now);
-                    self.append_outbox(RuntimeEventType::JobDeadLettered, &job, None, Some(message), now)
+                    self.append_outbox(
+                        RuntimeEventType::JobDeadLettered,
+                        &job,
+                        None,
+                        Some(message.clone()),
+                        now,
+                        execution_id.clone(),
+                    )
                         .await?;
                 } else {
                     job.state = JobState::Enqueued;
@@ -219,13 +274,38 @@ impl InMemoryRuntime {
                     delay = delay.min(job.backoff_policy.max_delay_seconds);
                     job.scheduled_at = now + Duration::seconds(delay.max(0));
 
-                    self.append_outbox(RuntimeEventType::JobRetryScheduled, &job, None, Some(message), now)
+                    self.append_outbox(
+                        RuntimeEventType::JobRetryScheduled,
+                        &job,
+                        None,
+                        Some(message.clone()),
+                        now,
+                        execution_id.clone(),
+                    )
                         .await?;
                 }
 
                 self.job_store.save(job.clone()).await?;
+
+                self.append_job_attempt(
+                    &job,
+                    worker_id,
+                    attempt_number,
+                    attempt_started_at,
+                    now,
+                    JobAttemptOutcome::RetryableFailure,
+                    Some(message),
+                    None,
+                    execution_id,
+                    diagnostics,
+                )
+                .await?;
             }
-            JobExecutionOutcome::FatalFailure { message } => {
+            JobExecutionOutcome::FatalFailure {
+                message,
+                execution_id,
+                diagnostics,
+            } => {
                 job.attempts += 1;
                 job.state = JobState::DeadLetter;
                 job.last_error = Some(message.clone());
@@ -235,8 +315,29 @@ impl InMemoryRuntime {
                 job.heartbeat_at = None;
                 self.job_store.save(job.clone()).await?;
 
-                self.append_outbox(RuntimeEventType::JobDeadLettered, &job, None, Some(message), now)
+                self.append_outbox(
+                    RuntimeEventType::JobDeadLettered,
+                    &job,
+                    None,
+                    Some(message.clone()),
+                    now,
+                    execution_id.clone(),
+                )
                     .await?;
+
+                self.append_job_attempt(
+                    &job,
+                    worker_id,
+                    attempt_number,
+                    attempt_started_at,
+                    now,
+                    JobAttemptOutcome::FatalFailure,
+                    Some(message),
+                    None,
+                    execution_id,
+                    diagnostics,
+                )
+                .await?;
             }
         }
 
@@ -335,6 +436,7 @@ impl InMemoryRuntime {
         sttp_output_node_id: Option<String>,
         message: Option<String>,
         now: DateTime<Utc>,
+        execution_id: Option<String>,
     ) -> Result<()> {
         let event = OutboxEvent {
             event_id: format!("evt-{}-{}", job.id, self.id_counter.fetch_add(1, Ordering::SeqCst)),
@@ -351,12 +453,47 @@ impl InMemoryRuntime {
                 trace_id: job.trace_id.clone(),
                 sttp_input_node_id: job.sttp_input_node_id.clone(),
                 sttp_output_node_id,
+                execution_id,
                 occurred_at: now,
                 message,
             },
         };
 
         self.outbox_store.insert(event).await
+    }
+
+    async fn append_job_attempt(
+        &self,
+        job: &Job,
+        worker_id: &str,
+        attempt_number: u32,
+        started_at: DateTime<Utc>,
+        finished_at: DateTime<Utc>,
+        outcome: JobAttemptOutcome,
+        error_message: Option<String>,
+        sttp_output_node_id: Option<String>,
+        execution_id: Option<String>,
+        diagnostics: Option<String>,
+    ) -> Result<()> {
+        let attempt = JobAttempt {
+            attempt_id: format!(
+                "attempt-{}-{}",
+                job.id,
+                self.id_counter.fetch_add(1, Ordering::SeqCst)
+            ),
+            job_id: job.id.clone(),
+            attempt_number,
+            worker_id: worker_id.to_string(),
+            started_at,
+            finished_at,
+            outcome,
+            error_message,
+            sttp_output_node_id,
+            execution_id,
+            diagnostics,
+        };
+
+        self.job_attempt_store.insert(attempt).await
     }
 }
 
@@ -479,6 +616,38 @@ pub struct InMemoryRecurringStore {
 #[derive(Clone, Default)]
 pub struct InMemoryOutboxStore {
     events: Arc<RwLock<HashMap<String, OutboxEvent>>>,
+}
+
+#[derive(Clone, Default)]
+pub struct InMemoryJobAttemptStore {
+    attempts: Arc<RwLock<HashMap<String, Vec<JobAttempt>>>>,
+}
+
+#[async_trait]
+impl JobAttemptStore for InMemoryJobAttemptStore {
+    async fn insert(&self, attempt: JobAttempt) -> Result<()> {
+        let mut state = self
+            .attempts
+            .write()
+            .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
+
+        state
+            .entry(attempt.job_id.clone())
+            .or_insert_with(Vec::new)
+            .push(attempt);
+        Ok(())
+    }
+
+    async fn list_by_job_id(&self, job_id: &str) -> Result<Vec<JobAttempt>> {
+        let state = self
+            .attempts
+            .read()
+            .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
+
+        let mut attempts = state.get(job_id).cloned().unwrap_or_default();
+        attempts.sort_by_key(|attempt| attempt.attempt_number);
+        Ok(attempts)
+    }
 }
 
 #[async_trait]
@@ -612,6 +781,8 @@ mod tests {
         async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
             Ok(JobExecutionOutcome::Success {
                 sttp_output_node_id: "sttp:out:1".to_string(),
+                execution_id: None,
+                diagnostics: None,
             })
         }
     }
@@ -642,10 +813,14 @@ mod tests {
             if calls <= self.failures_before_success {
                 Ok(JobExecutionOutcome::RetryableFailure {
                     message: "transient failure".to_string(),
+                    execution_id: None,
+                    diagnostics: None,
                 })
             } else {
                 Ok(JobExecutionOutcome::Success {
                     sttp_output_node_id: "sttp:out:flaky".to_string(),
+                    execution_id: None,
+                    diagnostics: None,
                 })
             }
         }
@@ -662,6 +837,8 @@ mod tests {
         async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
             Ok(JobExecutionOutcome::FatalFailure {
                 message: "non retryable".to_string(),
+                execution_id: None,
+                diagnostics: None,
             })
         }
     }

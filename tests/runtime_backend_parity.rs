@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
@@ -8,15 +9,21 @@ use surrealdb::engine::local::Mem;
 use tokio::sync::Mutex;
 
 use stasis::application::runtime::in_memory_runtime::{InMemoryRuntime, JobExecutionOutcome, JobHandler};
+use stasis::application::runtime::grapheme_job_handler::GraphemeJobHandler;
 use stasis::application::runtime::surreal_runtime::SurrealRuntime;
 use stasis::domain::errors::Result;
 use stasis::domain::runtime::job::{BackoffPolicy, Job, JobState, NewJob};
 use stasis::domain::runtime::outbox::{OutboxPublishPolicy, OutboxStatus, RuntimeEventType};
 use stasis::domain::runtime::recurring::RecurringDefinition;
+use stasis::infrastructure::runtime::grapheme_sdk_workflow_engine::{
+    GraphemeSdkWorkflowEngine, GraphemeWorkflowGuardrails,
+};
 use stasis::infrastructure::runtime::tokio_channel_event_publisher::TokioChannelEventPublisher;
 use stasis::ports::outbound::runtime::event_publisher::EventPublisher;
+use stasis::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use stasis::ports::outbound::runtime::job_store::JobStore;
 use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
+use stasis::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 
 struct AlwaysSuccessHandler;
 
@@ -29,6 +36,8 @@ impl JobHandler for AlwaysSuccessHandler {
     async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
             sttp_output_node_id: "sttp:out:success".to_string(),
+            execution_id: None,
+            diagnostics: None,
         })
     }
 }
@@ -44,6 +53,8 @@ impl JobHandler for ParentSuccessHandler {
     async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
             sttp_output_node_id: "sttp:out:parent".to_string(),
+            execution_id: None,
+            diagnostics: None,
         })
     }
 }
@@ -59,6 +70,8 @@ impl JobHandler for ChildSuccessHandler {
     async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
             sttp_output_node_id: "sttp:out:child".to_string(),
+            execution_id: None,
+            diagnostics: None,
         })
     }
 }
@@ -111,11 +124,15 @@ impl JobHandler for FatalThenSuccessHandler {
         if call == 1 {
             return Ok(JobExecutionOutcome::FatalFailure {
                 message: "first run fails".to_string(),
+                execution_id: None,
+                diagnostics: None,
             });
         }
 
         Ok(JobExecutionOutcome::Success {
             sttp_output_node_id: "sttp:out:replayed".to_string(),
+            execution_id: None,
+            diagnostics: None,
         })
     }
 }
@@ -580,4 +597,151 @@ async fn in_memory_event_driven_continuation_job_executes_end_to_end() {
     assert_eq!(child.sttp_input_node_id, "sttp:out:parent");
     assert_eq!(child.correlation_id, "corr-parent-1");
     assert_eq!(child.trace_id, "trace-parent-1");
+}
+
+#[tokio::test]
+async fn in_memory_grapheme_sdk_workflow_job_executes_successfully() {
+    let runtime = InMemoryRuntime::new();
+    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+    runtime
+        .register_handler(GraphemeJobHandler::new(workflow_engine))
+        .expect("grapheme handler should register");
+
+    let source = r#"import core from "grapheme/core"
+
+query Hello {
+    core.echo(message: "hello from stasis grapheme handler") {
+        state { current }
+    }
+}
+"#;
+
+    let now = Utc::now();
+    let job_id = "job-grapheme-1".to_string();
+
+    runtime
+        .enqueue(NewJob {
+            id: job_id.clone(),
+            queue: "default".to_string(),
+            job_type: "workflow.grapheme.run".to_string(),
+            payload_ref: format!("grapheme:inline:{}", source),
+            priority: 100,
+            max_attempts: 3,
+            idempotency_key: "idem-grapheme-1".to_string(),
+            correlation_id: "corr-grapheme-1".to_string(),
+            causation_id: "cause-grapheme-1".to_string(),
+            trace_id: "trace-grapheme-1".to_string(),
+            sttp_input_node_id: "sttp:in:grapheme:1".to_string(),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy {
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            },
+        })
+        .await
+        .expect("grapheme job should enqueue");
+
+    runtime
+        .process_once("default", "worker-grapheme", now)
+        .await
+        .expect("grapheme processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+
+    assert_eq!(job.state, JobState::Succeeded);
+    assert!(
+        job.sttp_output_node_id
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("sttp:grapheme:")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].attempt_number, 1);
+    assert!(
+        attempts[0]
+            .execution_id
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("grapheme:")
+    );
+
+    let pending = runtime
+        .outbox_store
+        .list_pending(10)
+        .await
+        .expect("pending list should succeed");
+    let event = pending
+        .iter()
+        .find(|evt| evt.event.job_id == job_id)
+        .expect("outbox event should exist for grapheme job");
+    assert!(
+        event
+            .event
+            .execution_id
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("grapheme:")
+    );
+}
+
+#[tokio::test]
+async fn grapheme_sdk_rejects_non_allowlisted_import() {
+    let engine = GraphemeSdkWorkflowEngine::new();
+    let source = r#"import sql from "grapheme/sql"
+
+query Run {
+  sql.query(connection: "local", sql: "select 1") {
+    rows
+  }
+}
+"#;
+
+    let err = engine
+        .execute_grapheme_source(source)
+        .await
+        .expect_err("non-allowlisted import should be rejected");
+
+    assert!(
+        err.to_string().contains("not allowlisted"),
+        "expected allowlist policy violation, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn grapheme_sdk_rejects_zero_execution_timeout() {
+    let guardrails = GraphemeWorkflowGuardrails {
+        execution_timeout: StdDuration::from_millis(0),
+        ..GraphemeWorkflowGuardrails::default()
+    };
+    let engine = GraphemeSdkWorkflowEngine::with_guardrails(guardrails);
+    let source = r#"import core from "grapheme/core"
+
+query Hello {
+  core.echo(message: "hello") {
+    state { current }
+  }
+}
+"#;
+
+    let err = engine
+        .execute_grapheme_source(source)
+        .await
+        .expect_err("zero timeout should reject execution");
+
+    assert!(
+        err.to_string().contains("timeout must be greater than 0ms"),
+        "expected timeout policy violation, got: {err}"
+    );
 }

@@ -9,14 +9,17 @@ use surrealdb::engine::local::Db;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job::{Job, JobState, NewJob};
+use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
 use crate::domain::runtime::outbox::{
     OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
 };
 use crate::domain::runtime::recurring::RecurringDefinition;
+use crate::infrastructure::runtime::surreal_job_attempt_store::SurrealJobAttemptStore;
 use crate::infrastructure::runtime::surreal_job_store::SurrealJobStore;
 use crate::infrastructure::runtime::surreal_outbox_store::SurrealOutboxStore;
 use crate::infrastructure::runtime::surreal_recurring_store::SurrealRecurringStore;
 use crate::ports::outbound::runtime::event_publisher::EventPublisher;
+use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
@@ -26,6 +29,7 @@ pub struct SurrealRuntime {
     pub job_store: SurrealJobStore,
     pub recurring_store: SurrealRecurringStore,
     pub outbox_store: SurrealOutboxStore,
+    pub job_attempt_store: SurrealJobAttemptStore,
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
     publish_policy: Arc<RwLock<OutboxPublishPolicy>>,
@@ -37,7 +41,8 @@ impl SurrealRuntime {
         Self {
             job_store: SurrealJobStore::new(db.clone()),
             recurring_store: SurrealRecurringStore::new(db.clone()),
-            outbox_store: SurrealOutboxStore::new(db),
+            outbox_store: SurrealOutboxStore::new(db.clone()),
+            job_attempt_store: SurrealJobAttemptStore::new(db),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
             publish_policy: Arc::new(RwLock::new(OutboxPublishPolicy::default())),
@@ -165,12 +170,19 @@ impl SurrealRuntime {
         } else {
             JobExecutionOutcome::FatalFailure {
                 message: format!("no handler registered for job_type={}", job.job_type),
+                execution_id: None,
+                diagnostics: None,
             }
         };
+
+        let attempt_number = job.attempts + 1;
+        let attempt_started_at = now;
 
         match outcome {
             JobExecutionOutcome::Success {
                 sttp_output_node_id,
+                execution_id,
+                diagnostics,
             } => {
                 job.state = JobState::Succeeded;
                 job.sttp_output_node_id = Some(sttp_output_node_id.clone());
@@ -180,10 +192,35 @@ impl SurrealRuntime {
                 job.heartbeat_at = None;
                 self.job_store.save(job.clone()).await?;
 
-                self.append_outbox(RuntimeEventType::JobSucceeded, &job, Some(sttp_output_node_id), None, now)
+                self.append_outbox(
+                    RuntimeEventType::JobSucceeded,
+                    &job,
+                    Some(sttp_output_node_id.clone()),
+                    None,
+                    now,
+                    execution_id.clone(),
+                )
                     .await?;
+
+                self.append_job_attempt(
+                    &job,
+                    worker_id,
+                    attempt_number,
+                    attempt_started_at,
+                    now,
+                    JobAttemptOutcome::Succeeded,
+                    None,
+                    Some(sttp_output_node_id),
+                    execution_id,
+                    diagnostics,
+                )
+                .await?;
             }
-            JobExecutionOutcome::RetryableFailure { message } => {
+            JobExecutionOutcome::RetryableFailure {
+                message,
+                execution_id,
+                diagnostics,
+            } => {
                 job.attempts += 1;
                 job.last_error = Some(message.clone());
                 job.lease_owner = None;
@@ -193,7 +230,14 @@ impl SurrealRuntime {
                 if job.attempts >= job.max_attempts {
                     job.state = JobState::DeadLetter;
                     job.finished_at = Some(now);
-                    self.append_outbox(RuntimeEventType::JobDeadLettered, &job, None, Some(message), now)
+                    self.append_outbox(
+                        RuntimeEventType::JobDeadLettered,
+                        &job,
+                        None,
+                        Some(message.clone()),
+                        now,
+                        execution_id.clone(),
+                    )
                         .await?;
                 } else {
                     job.state = JobState::Enqueued;
@@ -205,13 +249,38 @@ impl SurrealRuntime {
                     delay = delay.min(job.backoff_policy.max_delay_seconds);
                     job.scheduled_at = now + Duration::seconds(delay.max(0));
 
-                    self.append_outbox(RuntimeEventType::JobRetryScheduled, &job, None, Some(message), now)
+                    self.append_outbox(
+                        RuntimeEventType::JobRetryScheduled,
+                        &job,
+                        None,
+                        Some(message.clone()),
+                        now,
+                        execution_id.clone(),
+                    )
                         .await?;
                 }
 
                 self.job_store.save(job.clone()).await?;
+
+                self.append_job_attempt(
+                    &job,
+                    worker_id,
+                    attempt_number,
+                    attempt_started_at,
+                    now,
+                    JobAttemptOutcome::RetryableFailure,
+                    Some(message),
+                    None,
+                    execution_id,
+                    diagnostics,
+                )
+                .await?;
             }
-            JobExecutionOutcome::FatalFailure { message } => {
+            JobExecutionOutcome::FatalFailure {
+                message,
+                execution_id,
+                diagnostics,
+            } => {
                 job.attempts += 1;
                 job.state = JobState::DeadLetter;
                 job.last_error = Some(message.clone());
@@ -221,8 +290,29 @@ impl SurrealRuntime {
                 job.heartbeat_at = None;
                 self.job_store.save(job.clone()).await?;
 
-                self.append_outbox(RuntimeEventType::JobDeadLettered, &job, None, Some(message), now)
+                self.append_outbox(
+                    RuntimeEventType::JobDeadLettered,
+                    &job,
+                    None,
+                    Some(message.clone()),
+                    now,
+                    execution_id.clone(),
+                )
                     .await?;
+
+                self.append_job_attempt(
+                    &job,
+                    worker_id,
+                    attempt_number,
+                    attempt_started_at,
+                    now,
+                    JobAttemptOutcome::FatalFailure,
+                    Some(message),
+                    None,
+                    execution_id,
+                    diagnostics,
+                )
+                .await?;
             }
         }
 
@@ -321,6 +411,7 @@ impl SurrealRuntime {
         sttp_output_node_id: Option<String>,
         message: Option<String>,
         now: DateTime<Utc>,
+        execution_id: Option<String>,
     ) -> Result<()> {
         let event = OutboxEvent {
             event_id: format!("evt-{}-{}", job.id, self.id_counter.fetch_add(1, Ordering::SeqCst)),
@@ -337,11 +428,46 @@ impl SurrealRuntime {
                 trace_id: job.trace_id.clone(),
                 sttp_input_node_id: job.sttp_input_node_id.clone(),
                 sttp_output_node_id,
+                execution_id,
                 occurred_at: now,
                 message,
             },
         };
 
         self.outbox_store.insert(event).await
+    }
+
+    async fn append_job_attempt(
+        &self,
+        job: &Job,
+        worker_id: &str,
+        attempt_number: u32,
+        started_at: DateTime<Utc>,
+        finished_at: DateTime<Utc>,
+        outcome: JobAttemptOutcome,
+        error_message: Option<String>,
+        sttp_output_node_id: Option<String>,
+        execution_id: Option<String>,
+        diagnostics: Option<String>,
+    ) -> Result<()> {
+        let attempt = JobAttempt {
+            attempt_id: format!(
+                "attempt-{}-{}",
+                job.id,
+                self.id_counter.fetch_add(1, Ordering::SeqCst)
+            ),
+            job_id: job.id.clone(),
+            attempt_number,
+            worker_id: worker_id.to_string(),
+            started_at,
+            finished_at,
+            outcome,
+            error_message,
+            sttp_output_node_id,
+            execution_id,
+            diagnostics,
+        };
+
+        self.job_attempt_store.insert(attempt).await
     }
 }

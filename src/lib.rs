@@ -5,6 +5,7 @@ pub mod ports;
 pub mod sdk;
 
 pub mod prelude {
+    pub use crate::application::runtime::grapheme_job_handler::GraphemeJobHandler;
     pub use crate::application::runtime::in_memory_runtime::{
         InMemoryRuntime, JobExecutionOutcome, JobHandler,
     };
@@ -16,10 +17,15 @@ pub mod prelude {
     pub use crate::domain::entities::agent::Agent;
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, JobState, NewJob};
+    pub use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
     pub use crate::domain::runtime::outbox::{
         OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
     };
     pub use crate::infrastructure::runtime::tokio_channel_event_publisher::TokioChannelEventPublisher;
+    pub use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
+    pub use crate::ports::outbound::runtime::workflow_engine::{
+        WorkflowEngine, WorkflowExecutionOutput,
+    };
     pub use crate::domain::runtime::recurring::RecurringDefinition;
     pub use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
     pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;

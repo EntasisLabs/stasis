@@ -42,6 +42,7 @@ struct OutboxRecord {
     trace_id: String,
     sttp_input_node_id: String,
     sttp_output_node_id: Option<String>,
+    execution_id: Option<String>,
     occurred_at: DateTime<Utc>,
     message: Option<String>,
 }
@@ -70,6 +71,7 @@ impl From<OutboxEvent> for OutboxRecord {
             trace_id: value.event.trace_id,
             sttp_input_node_id: value.event.sttp_input_node_id,
             sttp_output_node_id: value.event.sttp_output_node_id,
+            execution_id: value.event.execution_id,
             occurred_at: value.event.occurred_at,
             message: value.event.message,
         }
@@ -117,6 +119,7 @@ impl TryFrom<OutboxRecord> for OutboxEvent {
                 trace_id: value.trace_id,
                 sttp_input_node_id: value.sttp_input_node_id,
                 sttp_output_node_id: value.sttp_output_node_id,
+                execution_id: value.execution_id,
                 occurred_at: value.occurred_at,
                 message: value.message,
             },

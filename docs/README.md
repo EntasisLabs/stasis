@@ -10,3 +10,4 @@
 
 - V1 runtime draft: [v1-runtime-draft.md](v1-runtime-draft.md)
 - Job runtime design: [design/job-runtime-design.md](design/job-runtime-design.md)
+- Runtime phase plan and Grapheme track: [design/runtime-phase-plan.md](design/runtime-phase-plan.md)

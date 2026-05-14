@@ -147,3 +147,8 @@ Tracing fields:
 3. Recurring jobs materialize and execute on schedule.
 4. STTP input/output references are persisted per run.
 5. Event-driven continuation jobs are demonstrated end-to-end.
+
+## Implementation Checkpoint
+
+For current status against P0-P3 and the first-class Grapheme integration track, see:
+- [design/runtime-phase-plan.md](design/runtime-phase-plan.md)

@@ -33,6 +33,7 @@ pub struct RuntimeEvent {
     pub trace_id: String,
     pub sttp_input_node_id: String,
     pub sttp_output_node_id: Option<String>,
+    pub execution_id: Option<String>,
     pub occurred_at: DateTime<Utc>,
     pub message: Option<String>,
 }
