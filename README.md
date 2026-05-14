@@ -25,6 +25,8 @@ Stasis is an agentic framework SDK scaffold using DDD + Hexagonal architecture.
 - Infrastructure adapters:
   - `InMemoryAgentRepository`
   - `MockLlmGateway`
+  - `GenaiChatClient` (provider adapter)
+  - `GenaiLlmGateway`
 - Facade:
   - `StasisSdk`
 
@@ -61,6 +63,19 @@ async fn main() {
 }
 ```
 
+To use a real provider via `genai`, set a provider key (for example `OPENAI_API_KEY`) and optionally set:
+
+```bash
+export STASIS_LLM_MODEL=gpt-4o-mini
+```
+
+Then construct `GenaiLlmGateway` instead of `MockLlmGateway`.
+
+Architecture note:
+- `ChatClient` is the provider-agnostic chat abstraction layer.
+- `GenaiChatClient` is the concrete provider adapter using `genai`.
+- `GenaiLlmGateway` remains as a compatibility adapter for prompt-only use cases.
+
     ## Medousa (Workspace Crate)
 
     Medousa is a product-oriented web researcher agent crate in this workspace.
@@ -69,6 +84,13 @@ async fn main() {
 
     ```bash
     cargo run -p medousa --bin medousa_cli -- ask "can you give me a report on the latest rust trends?"
+    ```
+
+    Run a direct LLM completion via genai routing:
+
+    ```bash
+    export STASIS_LLM_MODEL=gpt-4o-mini
+    cargo run -p medousa --bin medousa_cli -- llm "Summarize the latest Rust trends in 5 bullets"
     ```
 
     Start daemon loop:

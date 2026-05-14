@@ -1,0 +1,217 @@
+use std::sync::Arc;
+
+use genai::chat::{ChatMessage, ChatRequest, ToolResponse};
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::application::orchestration::prompt_pipeline::{
+    PromptExecutionContext, PromptExecutionPipeline, PromptExecutionRequest,
+};
+use crate::application::orchestration::tool_registry::ToolRegistry;
+use crate::domain::errors::{Result, StasisError};
+
+const DEFAULT_MAX_TOOL_ROUNDS: usize = 4;
+
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub enum ToolCallMode {
+    #[default]
+    Auto,
+    Strict,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ToolInvocation {
+    pub tool_name: String,
+    pub tool_input: Value,
+    pub tool_output: Value,
+}
+
+#[derive(Clone, Debug)]
+pub struct ToolLoopExecutionRequest {
+    pub user_prompt: String,
+    pub system_prompt: Option<String>,
+    pub context: PromptExecutionContext,
+    pub tool_name: String,
+    pub tool_input: Value,
+    pub tool_call_mode: ToolCallMode,
+}
+
+#[derive(Clone, Debug)]
+pub struct ToolLoopExecutionResponse {
+    pub text: String,
+    pub metadata: PromptExecutionContext,
+    pub tool_name: String,
+    pub tool_output: Value,
+    pub tool_invocations: Vec<ToolInvocation>,
+    pub rounds_executed: usize,
+    pub termination_reason: String,
+}
+
+#[derive(Clone)]
+pub struct ToolLoopPipeline {
+    prompt_pipeline: PromptExecutionPipeline,
+    tool_registry: Arc<dyn ToolRegistry>,
+}
+
+impl ToolLoopPipeline {
+    pub fn new(prompt_pipeline: PromptExecutionPipeline, tool_registry: Arc<dyn ToolRegistry>) -> Self {
+        Self {
+            prompt_pipeline,
+            tool_registry,
+        }
+    }
+
+    pub async fn execute(&self, request: ToolLoopExecutionRequest) -> Result<ToolLoopExecutionResponse> {
+        let context = request.context.clone();
+        let selected_tool_name = request.tool_name.clone();
+
+        let mut messages = Vec::with_capacity(2);
+        if let Some(system_prompt) = request.system_prompt.clone() {
+            messages.push(ChatMessage::system(system_prompt));
+        }
+        messages.push(ChatMessage::user(request.user_prompt.clone()));
+
+        let mut tools = self.tool_registry.list_tools().await?;
+        if !selected_tool_name.trim().is_empty() {
+            tools.retain(|tool| tool.name == selected_tool_name);
+        }
+
+        let mut invocations = Vec::new();
+        let mut should_use_legacy_fallback = false;
+        let mut fallback_draft_text: Option<String> = None;
+        let mut rounds_executed = 0usize;
+        if !tools.is_empty() {
+            for _ in 0..DEFAULT_MAX_TOOL_ROUNDS {
+                rounds_executed += 1;
+                let chat_request = ChatRequest::new(messages.clone()).with_tools(tools.clone());
+                let completion = self
+                    .prompt_pipeline
+                    .complete_chat(chat_request, context.clone())
+                    .await?;
+                let response = completion.response;
+                let maybe_text = response
+                    .first_text()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty());
+                let tool_calls = response.clone().into_tool_calls();
+
+                if tool_calls.is_empty() {
+                    if invocations.is_empty() && !selected_tool_name.trim().is_empty() {
+                        if request.tool_call_mode == ToolCallMode::Strict {
+                            return Err(StasisError::PortFailure(
+                                "policy violation: strict tool-call mode expected model tool call but none was returned"
+                                    .to_string(),
+                            ));
+                        }
+
+                        should_use_legacy_fallback = true;
+                        fallback_draft_text = maybe_text;
+                        break;
+                    }
+
+                    if let Some(text) = maybe_text {
+                        let last = invocations.last().cloned().unwrap_or(ToolInvocation {
+                            tool_name: selected_tool_name.clone(),
+                            tool_input: request.tool_input.clone(),
+                            tool_output: Value::Null,
+                        });
+
+                        return Ok(ToolLoopExecutionResponse {
+                            text,
+                            metadata: context,
+                            tool_name: last.tool_name,
+                            tool_output: last.tool_output,
+                            tool_invocations: invocations,
+                            rounds_executed,
+                            termination_reason: "model_completed_no_tool_calls".to_string(),
+                        });
+                    }
+
+                    return Err(StasisError::PortFailure(
+                        "chat response was empty after tool loop".to_string(),
+                    ));
+                }
+
+                messages.push(ChatMessage::from(tool_calls.clone()));
+                for call in tool_calls {
+                    let tool_output = self
+                        .tool_registry
+                        .invoke_tool(&call.fn_name, call.fn_arguments.clone())
+                        .await?;
+
+                    let tool_output_text = tool_output.to_string();
+                    messages.push(ChatMessage::from(ToolResponse::new(
+                        call.call_id,
+                        tool_output_text,
+                    )));
+                    invocations.push(ToolInvocation {
+                        tool_name: call.fn_name,
+                        tool_input: call.fn_arguments,
+                        tool_output,
+                    });
+                }
+            }
+
+            if !should_use_legacy_fallback {
+                return Err(StasisError::PortFailure(
+                    format!(
+                        "tool loop exceeded max rounds ({DEFAULT_MAX_TOOL_ROUNDS}) without final response"
+                    ),
+                ));
+            }
+        }
+
+        if !should_use_legacy_fallback {
+            return Err(StasisError::PortFailure(
+                "no matching tools available for tool loop execution".to_string(),
+            ));
+        }
+
+        let draft_text = if let Some(text) = fallback_draft_text {
+            text
+        } else {
+            let mut first_request = PromptExecutionRequest::from_user_prompt(request.user_prompt.clone())
+                .with_context(context.clone());
+            if let Some(system_prompt) = request.system_prompt.clone() {
+                first_request = first_request.with_system_prompt(system_prompt);
+            }
+            self.prompt_pipeline.execute(first_request).await?.text
+        };
+        let tool_output = self
+            .tool_registry
+            .invoke_tool(&request.tool_name, request.tool_input.clone())
+            .await?;
+
+        let synthesis_prompt = format!(
+            "User request:\n{}\n\nDraft analysis:\n{}\n\nTool '{}' output JSON:\n{}\n\nProduce final answer grounded in the tool output.",
+            request.user_prompt,
+            draft_text,
+            request.tool_name,
+            tool_output
+        );
+
+        let mut final_request = PromptExecutionRequest::from_user_prompt(synthesis_prompt)
+            .with_context(context.clone());
+        if let Some(system_prompt) = request.system_prompt {
+            final_request = final_request.with_system_prompt(system_prompt);
+        }
+
+        let final_response = self.prompt_pipeline.execute(final_request).await?;
+
+        let fallback_invocation = ToolInvocation {
+            tool_name: request.tool_name.clone(),
+            tool_input: request.tool_input,
+            tool_output: tool_output.clone(),
+        };
+
+        Ok(ToolLoopExecutionResponse {
+            text: final_response.text,
+            metadata: final_response.metadata,
+            tool_name: request.tool_name,
+            tool_output,
+            tool_invocations: vec![fallback_invocation],
+            rounds_executed,
+            termination_reason: "legacy_fallback_no_model_tool_call".to_string(),
+        })
+    }
+}

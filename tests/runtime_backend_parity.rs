@@ -4,17 +4,37 @@ use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
-use serde_json::Value as JsonValue;
+use genai::ModelIden;
+use genai::adapter::AdapterKind;
+use genai::chat::{ChatOptions, ChatRequest, ChatResponse, MessageContent, ToolCall, Usage};
+use serde_json::{Value as JsonValue, json};
 use surrealdb::Surreal;
 use surrealdb::engine::local::Mem;
 use tokio::sync::Mutex;
 
+use stasis::application::orchestration::tool_registry::{InMemoryToolRegistry, StasisTool};
+use stasis::application::orchestration::agent_session_pipeline::{
+    AgentParticipant, AgentSessionCoordinator, AgentSessionPipeline, AgentSessionRunRequest,
+    AgentTurnExecutionPolicy, MaxTurnsTerminationStrategy, RoundRobinSelectionStrategy,
+};
+use stasis::application::orchestration::agent_session_payload::{
+    AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode,
+    AgentTurnJobPayload, ToolLoopJobPayload,
+};
+use stasis::application::orchestration::prompt_pipeline::{
+    PromptExecutionContext, PromptExecutionPipeline,
+};
+use stasis::application::orchestration::stasis_workflow_job_builder::StasisWorkflowJobBuilder;
+use stasis::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolLoopPipeline};
+use stasis::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
+use stasis::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
 use stasis::application::runtime::in_memory_runtime::{InMemoryRuntime, JobExecutionOutcome, JobHandler};
 use stasis::application::runtime::grapheme_echo_job_handler::GraphemeEchoJobHandler;
 use stasis::application::runtime::grapheme_healthcheck_job_handler::GraphemeHealthcheckJobHandler;
 use stasis::application::runtime::grapheme_job_handler::GraphemeJobHandler;
 use stasis::application::runtime::grapheme_textops_job_handler::GraphemeTextOpsJobHandler;
 use stasis::application::runtime::surreal_runtime::SurrealRuntime;
+use stasis::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
 use stasis::application::runtime::retention::RetentionPolicy;
 use stasis::application::use_cases::investigate_runtime_lineage::RuntimeLineageQuery;
 use stasis::domain::errors::Result;
@@ -34,6 +54,7 @@ use stasis::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use stasis::ports::outbound::runtime::job_store::JobStore;
 use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
 use stasis::ports::outbound::runtime::workflow_engine::WorkflowEngine;
+use stasis::ports::outbound::ai_chat_client::AiChatClient;
 
 struct FixedClock {
     now: DateTime<Utc>,
@@ -175,6 +196,147 @@ impl JobHandler for FatalThenSuccessHandler {
     }
 }
 
+#[derive(Clone)]
+struct ScriptedChatClient {
+    responses: Arc<Vec<String>>,
+    call_count: Arc<AtomicUsize>,
+}
+
+impl ScriptedChatClient {
+    fn new(responses: Vec<String>) -> Self {
+        Self {
+            responses: Arc::new(responses),
+            call_count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl AiChatClient for ScriptedChatClient {
+    async fn complete(&self, request: ChatRequest, _options: Option<&ChatOptions>) -> Result<ChatResponse> {
+        let index = self.call_count.fetch_add(1, Ordering::SeqCst);
+        if index == 1 {
+            let includes_tool_output = request
+                .messages
+                .iter()
+                .filter_map(|message| message.content.first_text())
+                .any(|text| text.contains("Tool 'stasis.web.search.mock' output JSON"));
+            assert!(
+                includes_tool_output,
+                "second prompt call should include tool output block"
+            );
+        }
+
+        let text = self
+            .responses
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| "fallback response".to_string());
+
+        Ok(ChatResponse {
+            content: MessageContent::from_text(text),
+            reasoning_content: None,
+            model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            usage: Usage::default(),
+            captured_raw_body: None,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct ModelToolCallScriptedClient {
+    call_count: Arc<AtomicUsize>,
+}
+
+impl ModelToolCallScriptedClient {
+    fn new() -> Self {
+        Self {
+            call_count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl AiChatClient for ModelToolCallScriptedClient {
+    async fn complete(&self, request: ChatRequest, _options: Option<&ChatOptions>) -> Result<ChatResponse> {
+        let index = self.call_count.fetch_add(1, Ordering::SeqCst);
+
+        if index == 0 {
+            return Ok(ChatResponse {
+                content: MessageContent::from_tool_calls(vec![ToolCall {
+                    call_id: "tool-call-1".to_string(),
+                    fn_name: "stasis.web.search.mock".to_string(),
+                    fn_arguments: json!({ "query": "latest rust trends" }),
+                    thought_signatures: None,
+                }]),
+                reasoning_content: None,
+                model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+                provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+                usage: Usage::default(),
+                captured_raw_body: None,
+            });
+        }
+
+        let includes_tool_response = request
+            .messages
+            .iter()
+            .any(|message| !message.content.tool_responses().is_empty());
+        assert!(
+            includes_tool_response,
+            "second round should include a tool response message"
+        );
+
+        Ok(ChatResponse {
+            content: MessageContent::from_text("final answer from model tool-call path"),
+            reasoning_content: None,
+            model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            usage: Usage::default(),
+            captured_raw_body: None,
+        })
+    }
+}
+
+struct MockWebSearchTool;
+
+#[async_trait]
+impl StasisTool for MockWebSearchTool {
+    fn name(&self) -> &'static str {
+        "stasis.web.search.mock"
+    }
+
+    fn input_schema(&self) -> Option<JsonValue> {
+        Some(json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string"
+                }
+            },
+            "required": ["query"],
+            "additionalProperties": false
+        }))
+    }
+
+    async fn invoke(&self, input: JsonValue) -> Result<JsonValue> {
+        let query = input
+            .get("query")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+
+        Ok(json!({
+            "query": query,
+            "results": [
+                {
+                    "title": "Rust in production",
+                    "source": "mock://rust-prod"
+                }
+            ]
+        }))
+    }
+}
+
 fn build_new_job(job_type: &str, now: chrono::DateTime<Utc>) -> NewJob {
     NewJob {
         id: format!("job-{job_type}"),
@@ -194,6 +356,79 @@ fn build_new_job(job_type: &str, now: chrono::DateTime<Utc>) -> NewJob {
             max_delay_seconds: 8,
         },
     }
+}
+
+fn test_backoff_policy() -> BackoffPolicy {
+    BackoffPolicy {
+        base_delay_seconds: 1,
+        max_delay_seconds: 8,
+    }
+}
+
+fn build_tool_loop_job(
+    job_id: &str,
+    payload: &ToolLoopJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_tool_loop(job_id.to_string(), payload)
+        .expect("tool-loop payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
+fn build_agent_turn_job(
+    job_id: &str,
+    payload: &AgentTurnJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_agent_turn(job_id.to_string(), payload)
+        .expect("agent-turn payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
+fn build_agent_session_job(
+    job_id: &str,
+    payload: &AgentSessionJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_agent_session(job_id.to_string(), payload)
+        .expect("agent-session payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
 }
 
 #[tokio::test]
@@ -252,6 +487,883 @@ async fn in_memory_runtime_emits_and_publishes_outbox_events() {
         .await
         .expect("pending list should succeed");
     assert!(still_pending.is_empty());
+}
+
+#[tokio::test]
+async fn in_memory_tool_loop_job_handler_executes_and_persists_diagnostics() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft analysis".to_string(),
+        "final answer grounded in tool evidence".to_string(),
+    ]));
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .expect("tool loop handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-tool-loop-1".to_string();
+    let payload = ToolLoopJobPayload {
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": "latest rust trends" })),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_tool_loop_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-tool-loop-1",
+            "corr-tool-loop-1",
+            "cause-tool-loop-1",
+            "trace-tool-loop-1",
+            "sttp:in:tool-loop:1",
+        ))
+        .await
+        .expect("tool-loop job should enqueue");
+
+    runtime
+        .process_once("default", "worker-tool-loop", now)
+        .await
+        .expect("tool-loop processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(job.sttp_output_node_id.as_deref(), Some("sttp:tool-loop:job-tool-loop-1"));
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-tool-loop")));
+    assert_eq!(diagnostics.get("status"), Some(&json!("success")));
+    assert_eq!(diagnostics.get("tool_name"), Some(&json!("stasis.web.search.mock")));
+    assert_eq!(diagnostics.get("tool_rounds"), Some(&json!(1)));
+    assert_eq!(
+        diagnostics.get("termination_reason"),
+        Some(&json!("legacy_fallback_no_model_tool_call"))
+    );
+    assert_eq!(
+        diagnostics.pointer("/invoked_tools/0"),
+        Some(&json!("stasis.web.search.mock"))
+    );
+    assert_eq!(
+        diagnostics.pointer("/tool_output/query"),
+        Some(&json!("latest rust trends"))
+    );
+    assert!(
+        diagnostics
+            .get("output_preview")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .contains("final answer")
+    );
+
+    let lineage = runtime
+        .list_lineage_events(&job_id)
+        .await
+        .expect("lineage should load");
+    assert_eq!(lineage.len(), 1);
+    assert_eq!(lineage[0].event.correlation_id, "corr-tool-loop-1");
+    assert_eq!(lineage[0].event.trace_id, "trace-tool-loop-1");
+}
+
+#[tokio::test]
+async fn in_memory_tool_loop_model_emitted_tool_call_roundtrip() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ModelToolCallScriptedClient::new());
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .expect("tool loop handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-tool-loop-model-tool-call-1".to_string();
+    let payload = ToolLoopJobPayload {
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": "fallback query" })),
+        tool_call_mode: Some(AgentToolCallMode::Strict),
+    };
+
+    runtime
+        .enqueue(build_tool_loop_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-tool-loop-model-tool-call-1",
+            "corr-tool-loop-model-tool-call-1",
+            "cause-tool-loop-model-tool-call-1",
+            "trace-tool-loop-model-tool-call-1",
+            "sttp:in:tool-loop:model-tool-call:1",
+        ))
+        .await
+        .expect("tool-loop job should enqueue");
+
+    runtime
+        .process_once("default", "worker-tool-loop", now)
+        .await
+        .expect("tool-loop processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("tool_rounds"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.get("termination_reason"),
+        Some(&json!("model_completed_no_tool_calls"))
+    );
+    assert_eq!(
+        diagnostics.pointer("/invoked_tools/0"),
+        Some(&json!("stasis.web.search.mock"))
+    );
+    assert_eq!(
+        diagnostics.pointer("/tool_invocations/0/tool_input/query"),
+        Some(&json!("latest rust trends"))
+    );
+    assert_eq!(
+        diagnostics.pointer("/tool_output/query"),
+        Some(&json!("latest rust trends"))
+    );
+}
+
+#[tokio::test]
+async fn in_memory_agent_turn_job_handler_executes_single_agent_turn() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft analysis".to_string(),
+        "agent final answer grounded in tool evidence".to_string(),
+    ]));
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(AgentTurnJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .expect("agent-turn handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-agent-turn-1".to_string();
+    let payload = AgentTurnJobPayload {
+        agent_id: "agent.researcher".to_string(),
+        thread_id: Some("thread-42".to_string()),
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": "latest rust trends" })),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_agent_turn_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-agent-turn-1",
+            "corr-agent-turn-1",
+            "cause-agent-turn-1",
+            "trace-agent-turn-1",
+            "sttp:in:agent-turn:1",
+        ))
+        .await
+        .expect("agent-turn job should enqueue");
+
+    runtime
+        .process_once("default", "worker-agent-turn", now)
+        .await
+        .expect("agent-turn processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(job.sttp_output_node_id.as_deref(), Some("sttp:agent-turn:job-agent-turn-1"));
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-agent-turn")));
+    assert_eq!(diagnostics.get("status"), Some(&json!("success")));
+    assert_eq!(diagnostics.get("agent_id"), Some(&json!("agent.researcher")));
+    assert_eq!(diagnostics.get("thread_id"), Some(&json!("thread-42")));
+    assert_eq!(
+        diagnostics.pointer("/invoked_tools/0"),
+        Some(&json!("stasis.web.search.mock"))
+    );
+    assert_eq!(
+        diagnostics.get("termination_reason"),
+        Some(&json!("legacy_fallback_no_model_tool_call"))
+    );
+
+    let lineage = runtime
+        .list_lineage_events(&job_id)
+        .await
+        .expect("lineage should load");
+    assert_eq!(lineage.len(), 1);
+    assert_eq!(lineage[0].event.correlation_id, "corr-agent-turn-1");
+    assert_eq!(lineage[0].event.trace_id, "trace-agent-turn-1");
+}
+
+#[tokio::test]
+async fn in_memory_agent_session_job_handler_executes_session() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft turn 1".to_string(),
+        "final turn 1".to_string(),
+        "draft turn 2".to_string(),
+        "final turn 2".to_string(),
+    ]));
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(AgentSessionJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .expect("agent-session handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-agent-session-1".to_string();
+    let payload = AgentSessionJobPayload {
+        thread_id: Some("thread-session-1".to_string()),
+        initial_user_prompt: "Coordinate a short research answer".to_string(),
+        participants: vec![
+            AgentSessionParticipantPayload {
+                agent_id: "agent.alpha".to_string(),
+                system_prompt: Some("You are agent alpha".to_string()),
+                tool_name: "stasis.web.search.mock".to_string(),
+                tool_input: Some(json!({"query": "rust trends"})),
+            },
+            AgentSessionParticipantPayload {
+                agent_id: "agent.beta".to_string(),
+                system_prompt: Some("You are agent beta".to_string()),
+                tool_name: "stasis.web.search.mock".to_string(),
+                tool_input: Some(json!({"query": "rust trends"})),
+            },
+        ],
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        max_turns: Some(2),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_agent_session_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-agent-session-1",
+            "corr-agent-session-1",
+            "cause-agent-session-1",
+            "trace-agent-session-1",
+            "sttp:in:agent-session:1",
+        ))
+        .await
+        .expect("agent-session job should enqueue");
+
+    runtime
+        .process_once("default", "worker-agent-session", now)
+        .await
+        .expect("agent-session processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:agent-session:job-agent-session-1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-agent-session")));
+    assert_eq!(diagnostics.get("status"), Some(&json!("success")));
+    assert_eq!(diagnostics.get("turn_count"), Some(&json!(2)));
+    assert_eq!(diagnostics.get("terminated"), Some(&json!(true)));
+    assert_eq!(
+        diagnostics.pointer("/participant_ids/0"),
+        Some(&json!("agent.alpha"))
+    );
+}
+
+#[tokio::test]
+async fn surreal_agent_session_job_handler_executes_session() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_agent_session_parity")
+        .await
+        .expect("namespace and db should be selected");
+
+    let runtime = SurrealRuntime::new(db);
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft turn 1".to_string(),
+        "final turn 1".to_string(),
+        "draft turn 2".to_string(),
+        "final turn 2".to_string(),
+    ]));
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(AgentSessionJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .expect("agent-session handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-surreal-agent-session-1".to_string();
+    let payload = AgentSessionJobPayload {
+        thread_id: Some("thread-surreal-session-1".to_string()),
+        initial_user_prompt: "Coordinate a short research answer".to_string(),
+        participants: vec![
+            AgentSessionParticipantPayload {
+                agent_id: "agent.alpha".to_string(),
+                system_prompt: Some("You are agent alpha".to_string()),
+                tool_name: "stasis.web.search.mock".to_string(),
+                tool_input: Some(json!({"query": "rust trends"})),
+            },
+            AgentSessionParticipantPayload {
+                agent_id: "agent.beta".to_string(),
+                system_prompt: Some("You are agent beta".to_string()),
+                tool_name: "stasis.web.search.mock".to_string(),
+                tool_input: Some(json!({"query": "rust trends"})),
+            },
+        ],
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        max_turns: Some(2),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_agent_session_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-surreal-agent-session-1",
+            "corr-surreal-agent-session-1",
+            "cause-surreal-agent-session-1",
+            "trace-surreal-agent-session-1",
+            "sttp:in:surreal-agent-session:1",
+        ))
+        .await
+        .expect("agent-session job should enqueue");
+
+    runtime
+        .process_once("default", "worker-agent-session", now)
+        .await
+        .expect("agent-session processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:agent-session:job-surreal-agent-session-1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-agent-session")));
+    assert_eq!(diagnostics.get("turn_count"), Some(&json!(2)));
+    assert_eq!(diagnostics.get("terminated"), Some(&json!(true)));
+}
+
+#[tokio::test]
+async fn agent_session_coordinator_runs_multi_turn_with_round_robin_and_max_turns() {
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft turn 1".to_string(),
+        "final turn 1".to_string(),
+        "draft turn 2".to_string(),
+        "final turn 2".to_string(),
+    ]));
+    let prompt_pipeline = PromptExecutionPipeline::new(chat_client);
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+    let tool_loop_pipeline = ToolLoopPipeline::new(prompt_pipeline, Arc::new(tool_registry));
+    let agent_pipeline = AgentSessionPipeline::new(tool_loop_pipeline);
+    let coordinator = AgentSessionCoordinator::new(
+        agent_pipeline,
+        Arc::new(RoundRobinSelectionStrategy::new()),
+        Arc::new(MaxTurnsTerminationStrategy::new(2)),
+    );
+
+    let response = coordinator
+        .run_session(AgentSessionRunRequest {
+            thread_id: Some("thread-coord-1".to_string()),
+            initial_user_prompt: "Coordinate a short research answer".to_string(),
+            participants: vec![
+                AgentParticipant {
+                    agent_id: "agent.alpha".to_string(),
+                    system_prompt: Some("You are agent alpha".to_string()),
+                    tool_name: "stasis.web.search.mock".to_string(),
+                    tool_input: json!({ "query": "rust trends" }),
+                },
+                AgentParticipant {
+                    agent_id: "agent.beta".to_string(),
+                    system_prompt: Some("You are agent beta".to_string()),
+                    tool_name: "stasis.web.search.mock".to_string(),
+                    tool_input: json!({ "query": "rust trends" }),
+                },
+            ],
+            context: PromptExecutionContext {
+                trace_id: Some("trace-coord-1".to_string()),
+                correlation_id: Some("corr-coord-1".to_string()),
+                policy_profile: Some("default".to_string()),
+                model_hint: None,
+            },
+            max_turns_cap: 4,
+            policy: AgentTurnExecutionPolicy {
+                tool_call_mode: ToolCallMode::Auto,
+            },
+        })
+        .await
+        .expect("coordinator should run successfully");
+
+    assert!(response.terminated);
+    assert_eq!(response.turns.len(), 2);
+    assert_eq!(response.turns[0].agent_id, "agent.alpha");
+    assert_eq!(response.turns[1].agent_id, "agent.beta");
+    assert_eq!(response.turns[0].response_text, "final turn 1");
+    assert_eq!(response.turns[1].response_text, "final turn 2");
+    assert_eq!(
+        response.turns[0].termination_reason,
+        "legacy_fallback_no_model_tool_call"
+    );
+    assert_eq!(response.thread_id.as_deref(), Some("thread-coord-1"));
+    assert_eq!(response.transcript.len(), 3);
+}
+
+#[tokio::test]
+async fn in_memory_tool_loop_strict_mode_requires_model_tool_call() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec!["plain model text".to_string()]));
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .expect("tool loop handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-tool-loop-strict-1".to_string();
+    let payload = ToolLoopJobPayload {
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": "latest rust trends" })),
+        tool_call_mode: Some(AgentToolCallMode::Strict),
+    };
+
+    runtime
+        .enqueue(build_tool_loop_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-tool-loop-strict-1",
+            "corr-tool-loop-strict-1",
+            "cause-tool-loop-strict-1",
+            "trace-tool-loop-strict-1",
+            "sttp:in:tool-loop:strict:1",
+        ))
+        .await
+        .expect("tool-loop job should enqueue");
+
+    runtime
+        .process_once("default", "worker-tool-loop", now)
+        .await
+        .expect("tool-loop processing should complete");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
+    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("strict tool-call mode expected model tool call")
+    );
+}
+
+#[tokio::test]
+async fn in_memory_tool_loop_job_handler_policy_violation_dead_letters_job() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![]));
+    let tool_registry = InMemoryToolRegistry::default();
+
+    runtime
+        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .expect("tool loop handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-tool-loop-invalid-1".to_string();
+    let payload = ToolLoopJobPayload {
+        user_prompt: "   ".to_string(),
+        system_prompt: None,
+        policy_profile: None,
+        model_hint: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: None,
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_tool_loop_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-tool-loop-invalid-1",
+            "corr-tool-loop-invalid-1",
+            "cause-tool-loop-invalid-1",
+            "trace-tool-loop-invalid-1",
+            "sttp:in:tool-loop:invalid:1",
+        ))
+        .await
+        .expect("tool-loop job should enqueue");
+
+    runtime
+        .process_once("default", "worker-tool-loop", now)
+        .await
+        .expect("tool-loop processing should complete");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
+    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("payload.user_prompt must be non-empty")
+    );
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-tool-loop")));
+    assert_eq!(diagnostics.get("status"), Some(&json!("failure")));
+    assert_eq!(diagnostics.get("guardrail_code"), Some(&json!("POLICY_VIOLATION")));
+    assert!(
+        diagnostics
+            .get("policy_reason")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .contains("payload.user_prompt must be non-empty")
+    );
+
+    let lineage = runtime
+        .list_lineage_events(&job_id)
+        .await
+        .expect("lineage should load");
+    assert_eq!(lineage.len(), 1);
+    assert_eq!(lineage[0].event.event_type, RuntimeEventType::JobDeadLettered);
+    assert_eq!(lineage[0].event.correlation_id, "corr-tool-loop-invalid-1");
+    assert_eq!(lineage[0].event.trace_id, "trace-tool-loop-invalid-1");
+}
+
+#[tokio::test]
+async fn in_memory_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![]));
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .expect("tool loop handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-tool-loop-schema-invalid-1".to_string();
+    let payload = ToolLoopJobPayload {
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": 123 })),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_tool_loop_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-tool-loop-schema-invalid-1",
+            "corr-tool-loop-schema-invalid-1",
+            "cause-tool-loop-schema-invalid-1",
+            "trace-tool-loop-schema-invalid-1",
+            "sttp:in:tool-loop:schema:1",
+        ))
+        .await
+        .expect("tool-loop job should enqueue");
+
+    runtime
+        .process_once("default", "worker-tool-loop", now)
+        .await
+        .expect("tool-loop processing should complete");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
+    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("expected type 'string'")
+    );
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("status"), Some(&json!("failure")));
+    assert_eq!(diagnostics.get("guardrail_code"), Some(&json!("POLICY_VIOLATION")));
+    assert!(
+        diagnostics
+            .get("policy_reason")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .contains("expected type 'string'")
+    );
+}
+
+#[tokio::test]
+async fn surreal_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_tool_loop_schema_violation")
+        .await
+        .expect("namespace and db should be selected");
+
+    let runtime = SurrealRuntime::new(db);
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![]));
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .expect("tool loop handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-surreal-tool-loop-schema-invalid-1".to_string();
+    let payload = ToolLoopJobPayload {
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": 321 })),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_tool_loop_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-surreal-tool-loop-schema-invalid-1",
+            "corr-surreal-tool-loop-schema-invalid-1",
+            "cause-surreal-tool-loop-schema-invalid-1",
+            "trace-surreal-tool-loop-schema-invalid-1",
+            "sttp:in:tool-loop:surreal:schema:1",
+        ))
+        .await
+        .expect("tool-loop job should enqueue");
+
+    runtime
+        .process_once("default", "worker-tool-loop", now)
+        .await
+        .expect("tool-loop processing should complete");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
+    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("expected type 'string'")
+    );
 }
 
 #[tokio::test]

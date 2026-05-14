@@ -3130,7 +3130,9 @@ name = "medousa"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
+ "serde_json",
  "stasis",
  "tokio",
 ]

@@ -1,31 +1,54 @@
-use std::sync::Arc;
-
+use async_trait::async_trait;
 use anyhow::Result;
 use chrono::Utc;
+use serde_json::{Value, json};
 use stasis::prelude::{
-    GraphemeEchoJobHandler, GraphemeHealthcheckJobHandler, GraphemeJobHandler,
-    GraphemeSdkWorkflowEngine, GraphemeTextOpsJobHandler, RuntimeBackend, RuntimeComposition,
-    RuntimeFactory,
+    RuntimeBackend, RuntimeComposition, StasisRuntimeBuilder, StasisTool,
 };
 
-pub async fn build_runtime(backend: RuntimeBackend) -> Result<RuntimeComposition> {
-    let runtime = RuntimeFactory::build(backend).await?;
-    let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+struct MockWebSearchTool;
 
-    match &runtime {
-        RuntimeComposition::InMemory(rt) => {
-            rt.register_handler(GraphemeJobHandler::new(workflow_engine.clone()))?;
-            rt.register_handler(GraphemeHealthcheckJobHandler::new(workflow_engine.clone()))?;
-            rt.register_handler(GraphemeEchoJobHandler::new(workflow_engine.clone()))?;
-            rt.register_handler(GraphemeTextOpsJobHandler::new(workflow_engine.clone()))?;
-        }
-        RuntimeComposition::Surreal(rt) => {
-            rt.register_handler(GraphemeJobHandler::new(workflow_engine.clone()))?;
-            rt.register_handler(GraphemeHealthcheckJobHandler::new(workflow_engine.clone()))?;
-            rt.register_handler(GraphemeEchoJobHandler::new(workflow_engine.clone()))?;
-            rt.register_handler(GraphemeTextOpsJobHandler::new(workflow_engine.clone()))?;
-        }
+#[async_trait]
+impl StasisTool for MockWebSearchTool {
+    fn name(&self) -> &'static str {
+        "stasis.web.search.mock"
     }
+
+    async fn invoke(&self, input: Value) -> stasis::prelude::Result<Value> {
+        let query = input
+            .get("query")
+            .and_then(|value| value.as_str())
+            .unwrap_or("general research")
+            .to_string();
+
+        Ok(json!({
+            "query": query,
+            "results": [
+                {
+                    "title": "Rust ecosystem trends",
+                    "snippet": "Growing adoption in platform tooling and backend services.",
+                    "source": "mock://rust-trends-1"
+                },
+                {
+                    "title": "Async Rust in production",
+                    "snippet": "Tokio-based workloads continue to increase in operational maturity.",
+                    "source": "mock://rust-trends-2"
+                },
+                {
+                    "title": "AI infrastructure in Rust",
+                    "snippet": "Teams are exploring Rust for inference gateways and orchestration services.",
+                    "source": "mock://rust-trends-3"
+                }
+            ]
+        }))
+    }
+}
+
+pub async fn build_runtime(backend: RuntimeBackend) -> Result<RuntimeComposition> {
+    let runtime = StasisRuntimeBuilder::new(backend)
+        .with_tool(MockWebSearchTool)?
+        .build()
+        .await?;
 
     Ok(runtime)
 }

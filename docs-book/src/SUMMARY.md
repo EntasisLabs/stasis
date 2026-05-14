@@ -8,5 +8,7 @@
 - [Runtime Phase Plan](./runtime-phase-plan.md)
 - [Runtime Demo Plan](./runtime-demo-plan.md)
 - [Medousa Roadmap](./medousa-roadmap.md)
+- [Stasis Framework RFC](./stasis-framework-rfc.md)
+- [Stasis Framework Implementation Plan](./stasis-framework-implementation-plan.md)
 - [SurrealDB Schema](./surrealdb-schema.md)
 - [Architecture Decision Records](./adr.md)
