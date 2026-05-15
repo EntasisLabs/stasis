@@ -804,9 +804,17 @@ async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_di
         .get("input_memory_query_id")
         .and_then(|value| value.as_str())
         .expect("input_memory_query_id should be present");
+    let input_query_fingerprint = diagnostics
+        .get("input_memory_query_fingerprint")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_fingerprint should be present");
     assert!(
         input_query_id.starts_with("mq:"),
         "input_memory_query_id should be generated"
+    );
+    assert!(
+        input_query_fingerprint.contains("alpha="),
+        "input_memory_query_fingerprint should include scoring tuple"
     );
 
     let lineage_events = runtime
@@ -818,6 +826,13 @@ async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_di
     assert_eq!(
         lineage_events[0].event.input_memory_query_id.as_deref(),
         Some(input_query_id)
+    );
+    assert_eq!(
+        lineage_events[0]
+            .event
+            .input_memory_query_fingerprint
+            .as_deref(),
+        Some(input_query_fingerprint)
     );
     assert_eq!(
         lineage_events[0].event.output_memory_node_id.as_deref(),
@@ -936,9 +951,17 @@ async fn surreal_prompt_job_handler_with_memory_persists_memory_node_id_and_diag
         .get("input_memory_query_id")
         .and_then(|value| value.as_str())
         .expect("input_memory_query_id should be present");
+    let input_query_fingerprint = diagnostics
+        .get("input_memory_query_fingerprint")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_fingerprint should be present");
     assert!(
         input_query_id.starts_with("mq:"),
         "input_memory_query_id should be generated"
+    );
+    assert!(
+        input_query_fingerprint.contains("alpha="),
+        "input_memory_query_fingerprint should include scoring tuple"
     );
 
     let lineage_events = runtime
@@ -950,6 +973,13 @@ async fn surreal_prompt_job_handler_with_memory_persists_memory_node_id_and_diag
     assert_eq!(
         lineage_events[0].event.input_memory_query_id.as_deref(),
         Some(input_query_id)
+    );
+    assert_eq!(
+        lineage_events[0]
+            .event
+            .input_memory_query_fingerprint
+            .as_deref(),
+        Some(input_query_fingerprint)
     );
     assert_eq!(
         lineage_events[0].event.output_memory_node_id.as_deref(),
@@ -1061,6 +1091,42 @@ async fn in_memory_tool_loop_job_handler_with_memory_persists_memory_node_id_and
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:tool-loop:1"))
+    );
+    let input_query_id = diagnostics
+        .get("input_memory_query_id")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_id should be present");
+    let input_query_fingerprint = diagnostics
+        .get("input_memory_query_fingerprint")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_fingerprint should be present");
+    assert!(input_query_id.starts_with("mq:"));
+    assert!(input_query_fingerprint.contains("alpha="));
+
+    let lineage_events = runtime
+        .outbox_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("lineage events should load");
+    assert_eq!(lineage_events.len(), 1);
+    assert_eq!(
+        lineage_events[0].event.input_memory_query_id.as_deref(),
+        Some(input_query_id)
+    );
+    assert_eq!(
+        lineage_events[0]
+            .event
+            .input_memory_query_fingerprint
+            .as_deref(),
+        Some(input_query_fingerprint)
+    );
+    assert_eq!(
+        lineage_events[0].event.output_memory_node_id.as_deref(),
+        Some("sttp:memory:tool-loop:1")
+    );
+    assert_eq!(
+        lineage_events[0].event.retrieval_path.as_deref(),
+        Some("Hybrid")
     );
 }
 
@@ -1175,6 +1241,42 @@ async fn surreal_tool_loop_job_handler_with_memory_persists_memory_node_id_and_d
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:tool-loop:surreal:1"))
     );
+    let input_query_id = diagnostics
+        .get("input_memory_query_id")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_id should be present");
+    let input_query_fingerprint = diagnostics
+        .get("input_memory_query_fingerprint")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_fingerprint should be present");
+    assert!(input_query_id.starts_with("mq:"));
+    assert!(input_query_fingerprint.contains("alpha="));
+
+    let lineage_events = runtime
+        .outbox_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("lineage events should load");
+    assert_eq!(lineage_events.len(), 1);
+    assert_eq!(
+        lineage_events[0].event.input_memory_query_id.as_deref(),
+        Some(input_query_id)
+    );
+    assert_eq!(
+        lineage_events[0]
+            .event
+            .input_memory_query_fingerprint
+            .as_deref(),
+        Some(input_query_fingerprint)
+    );
+    assert_eq!(
+        lineage_events[0].event.output_memory_node_id.as_deref(),
+        Some("sttp:memory:tool-loop:surreal:1")
+    );
+    assert_eq!(
+        lineage_events[0].event.retrieval_path.as_deref(),
+        Some("ResonanceOnly")
+    );
 }
 
 #[tokio::test]
@@ -1279,6 +1381,42 @@ async fn in_memory_agent_turn_job_handler_with_memory_persists_memory_node_id_an
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:agent-turn:1"))
+    );
+    let input_query_id = diagnostics
+        .get("input_memory_query_id")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_id should be present");
+    let input_query_fingerprint = diagnostics
+        .get("input_memory_query_fingerprint")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_fingerprint should be present");
+    assert!(input_query_id.starts_with("mq:"));
+    assert!(input_query_fingerprint.contains("alpha="));
+
+    let lineage_events = runtime
+        .outbox_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("lineage events should load");
+    assert_eq!(lineage_events.len(), 1);
+    assert_eq!(
+        lineage_events[0].event.input_memory_query_id.as_deref(),
+        Some(input_query_id)
+    );
+    assert_eq!(
+        lineage_events[0]
+            .event
+            .input_memory_query_fingerprint
+            .as_deref(),
+        Some(input_query_fingerprint)
+    );
+    assert_eq!(
+        lineage_events[0].event.output_memory_node_id.as_deref(),
+        Some("sttp:memory:agent-turn:1")
+    );
+    assert_eq!(
+        lineage_events[0].event.retrieval_path.as_deref(),
+        Some("Hybrid")
     );
 }
 
@@ -1395,6 +1533,42 @@ async fn surreal_agent_turn_job_handler_with_memory_persists_memory_node_id_and_
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:agent-turn:surreal:1"))
+    );
+    let input_query_id = diagnostics
+        .get("input_memory_query_id")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_id should be present");
+    let input_query_fingerprint = diagnostics
+        .get("input_memory_query_fingerprint")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_fingerprint should be present");
+    assert!(input_query_id.starts_with("mq:"));
+    assert!(input_query_fingerprint.contains("alpha="));
+
+    let lineage_events = runtime
+        .outbox_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("lineage events should load");
+    assert_eq!(lineage_events.len(), 1);
+    assert_eq!(
+        lineage_events[0].event.input_memory_query_id.as_deref(),
+        Some(input_query_id)
+    );
+    assert_eq!(
+        lineage_events[0]
+            .event
+            .input_memory_query_fingerprint
+            .as_deref(),
+        Some(input_query_fingerprint)
+    );
+    assert_eq!(
+        lineage_events[0].event.output_memory_node_id.as_deref(),
+        Some("sttp:memory:agent-turn:surreal:1")
+    );
+    assert_eq!(
+        lineage_events[0].event.retrieval_path.as_deref(),
+        Some("ResonanceOnly")
     );
 }
 
@@ -4420,6 +4594,105 @@ query Hello {
     );
     assert_eq!(report.lineage_events.len(), 1);
     assert_eq!(report.lineage_events[0].event.job_id, job_id);
+}
+
+#[tokio::test]
+async fn lineage_investigator_includes_memory_lineage_metadata() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "lineage investigator completion".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 2,
+            retrieval_path: Some("Hybrid".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-lineage-1".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:lineage-investigator:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+
+    runtime
+        .register_handler(PromptChatJobHandler::new_with_memory(
+            chat_client,
+            Some(memory_reader),
+            Some(memory_writer),
+        ))
+        .expect("prompt handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-lineage-memory-metadata-1".to_string();
+    let payload = PromptJobPayload {
+        user_prompt: "memory lineage check".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+    };
+
+    runtime
+        .enqueue(build_prompt_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-lineage-memory-metadata-1",
+            "corr-lineage-memory-metadata-1",
+            "cause-lineage-memory-metadata-1",
+            "trace-lineage-memory-metadata-1",
+            "sttp:in:lineage:memory:1",
+        ))
+        .await
+        .expect("prompt job should enqueue");
+
+    runtime
+        .process_once("default", "worker-lineage", now)
+        .await
+        .expect("processing should succeed");
+
+    let report = runtime
+        .investigate_lineage(RuntimeLineageQuery {
+            job_id: Some(job_id.clone()),
+            ..RuntimeLineageQuery::default()
+        })
+        .await
+        .expect("lineage investigation should succeed");
+
+    assert_eq!(report.attempts.len(), 1);
+    assert_eq!(report.lineage_events.len(), 1);
+    assert_eq!(report.lineage_events[0].event.job_id, job_id);
+    assert!(
+        report.lineage_events[0]
+            .event
+            .input_memory_query_id
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("mq:")
+    );
+    assert!(
+        report.lineage_events[0]
+            .event
+            .input_memory_query_fingerprint
+            .as_deref()
+            .unwrap_or_default()
+            .contains("alpha=")
+    );
+    assert_eq!(
+        report.lineage_events[0].event.output_memory_node_id.as_deref(),
+        Some("sttp:memory:lineage-investigator:1")
+    );
+    assert_eq!(
+        report.lineage_events[0].event.retrieval_path.as_deref(),
+        Some("Hybrid")
+    );
 }
 
 #[tokio::test]

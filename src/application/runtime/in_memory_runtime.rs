@@ -615,7 +615,12 @@ impl InMemoryRuntime {
         execution_id: Option<String>,
         diagnostics: Option<&str>,
     ) -> Result<()> {
-        let (input_memory_query_id, output_memory_node_id, retrieval_path) =
+        let (
+            input_memory_query_id,
+            input_memory_query_fingerprint,
+            output_memory_node_id,
+            retrieval_path,
+        ) =
             Self::extract_memory_lineage_fields(diagnostics);
         let event = OutboxEvent {
             event_id: self.id_generator.next_id(&format!("evt-{}", job.id)),
@@ -634,6 +639,7 @@ impl InMemoryRuntime {
                 sttp_output_node_id,
                 execution_id,
                 input_memory_query_id,
+                input_memory_query_fingerprint,
                 output_memory_node_id,
                 retrieval_path,
                 occurred_at: now,
@@ -706,19 +712,30 @@ impl InMemoryRuntime {
 
     fn extract_memory_lineage_fields(
         diagnostics: Option<&str>,
-    ) -> (Option<String>, Option<String>, Option<String>) {
+    ) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
         let Some(raw) = diagnostics else {
-            return (None, None, None);
+            return (None, None, None, None);
         };
 
         let Ok(json) = serde_json::from_str::<JsonValue>(raw) else {
-            return (None, None, None);
+            return (None, None, None, None);
         };
 
         let input_memory_query_id = json
             .get("input_memory_query_id")
             .and_then(|v| v.as_str())
             .map(|v| v.to_string());
+
+        let input_memory_query_fingerprint = json
+            .get("input_memory_query_fingerprint")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string())
+            .or_else(|| {
+                json.get("memory_recall")
+                    .and_then(|v| v.get("query_fingerprint"))
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string())
+            });
 
         let output_memory_node_id = json
             .get("output_memory_node_id")
@@ -735,7 +752,12 @@ impl InMemoryRuntime {
             .and_then(|v| v.as_str())
             .map(|v| v.to_string());
 
-        (input_memory_query_id, output_memory_node_id, retrieval_path)
+        (
+            input_memory_query_id,
+            input_memory_query_fingerprint,
+            output_memory_node_id,
+            retrieval_path,
+        )
     }
 }
 

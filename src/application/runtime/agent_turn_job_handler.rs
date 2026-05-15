@@ -183,6 +183,22 @@ impl AgentTurnJobHandler {
         basis.hash(&mut hasher);
         format!("mq:{:x}", hasher.finish())
     }
+
+    fn memory_query_fingerprint(request: &MemoryRecallRequest) -> String {
+        format!(
+            "sessions={:?}|tiers={:?}|from={:?}|to={:?}|limit={}|alpha={}|beta={}|fallback={:?}|strictness={:?}|include_explain={}",
+            request.scope.session_ids,
+            request.scope.tiers,
+            request.scope.from_utc,
+            request.scope.to_utc,
+            request.limit,
+            request.alpha,
+            request.beta,
+            request.fallback_policy,
+            request.strictness,
+            request.include_explain,
+        )
+    }
 }
 
 #[async_trait]
@@ -203,6 +219,7 @@ impl JobHandler for AgentTurnJobHandler {
         let mut memory_recall = None;
         let mut memory_recall_error = None;
         let mut input_memory_query_id = None;
+        let mut input_memory_query_fingerprint = None;
         if let Some(reader) = &self.memory_reader {
             let recall_request = Self::build_recall_request(
                 &job.correlation_id,
@@ -210,6 +227,7 @@ impl JobHandler for AgentTurnJobHandler {
                 memory_policy,
             );
             input_memory_query_id = Some(Self::memory_query_id(&job.correlation_id, &recall_request));
+            input_memory_query_fingerprint = Some(Self::memory_query_fingerprint(&recall_request));
 
             match reader.recall(&recall_request).await {
                 Ok(response) => memory_recall = Some(response),
@@ -327,10 +345,12 @@ impl JobHandler for AgentTurnJobHandler {
             "memory_store_valid": memory_store.as_ref().map(|value| value.valid).unwrap_or(false),
             "memory_store_node_id": memory_store.as_ref().map(|value| value.node_id.clone()),
             "input_memory_query_id": input_memory_query_id.clone(),
+            "input_memory_query_fingerprint": input_memory_query_fingerprint.clone(),
             "output_memory_node_id": memory_store.as_ref().map(|value| value.node_id.clone()),
             "memory_recall": {
                 "attempted": self.memory_reader.is_some(),
                 "query_id": input_memory_query_id,
+                "query_fingerprint": input_memory_query_fingerprint,
                 "retrieved": memory_recall.as_ref().map(|value| value.retrieved).unwrap_or_default(),
                 "retrieval_path": memory_recall.as_ref().and_then(|value| value.retrieval_path.clone()),
                 "fallback_triggered": memory_recall.as_ref().map(|value| value.fallback_triggered).unwrap_or(false),
