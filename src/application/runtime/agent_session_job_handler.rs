@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::{collections::hash_map::DefaultHasher, hash::{Hash, Hasher}};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -8,7 +9,8 @@ use crate::application::orchestration::agent_session_pipeline::{
     AgentTurnExecutionPolicy, MaxTurnsTerminationStrategy, RoundRobinSelectionStrategy,
 };
 use crate::application::orchestration::agent_session_payload::{
-    AgentSessionJobPayload, AgentToolCallMode,
+    AgentSessionJobPayload, AgentToolCallMode, MemoryFallbackPolicyPayload,
+    MemoryPolicyPayload, MemoryStoreModePayload, MemoryStrictnessModePayload,
 };
 use crate::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline,
@@ -19,19 +21,38 @@ use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHan
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::ai_chat_client::AiChatClient;
+use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
+use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
+use crate::ports::outbound::memory::memory_models::{
+    MemoryFallbackPolicy, MemoryRecallRequest, MemoryScope, MemoryStoreRequest,
+    MemoryStrictnessMode,
+};
 
 const DEFAULT_MAX_SESSION_TURNS: usize = 3;
 
 pub struct AgentSessionJobHandler {
     pipeline: AgentSessionPipeline,
+    memory_reader: Option<Arc<dyn MemoryContextReader>>,
+    memory_writer: Option<Arc<dyn MemoryContextWriter>>,
 }
 
 impl AgentSessionJobHandler {
     pub fn new(chat_client: Arc<dyn AiChatClient>, tool_registry: Arc<dyn ToolRegistry>) -> Self {
+        Self::new_with_memory(chat_client, tool_registry, None, None)
+    }
+
+    pub fn new_with_memory(
+        chat_client: Arc<dyn AiChatClient>,
+        tool_registry: Arc<dyn ToolRegistry>,
+        memory_reader: Option<Arc<dyn MemoryContextReader>>,
+        memory_writer: Option<Arc<dyn MemoryContextWriter>>,
+    ) -> Self {
         let prompt_pipeline = PromptExecutionPipeline::new(chat_client);
         let tool_loop_pipeline = ToolLoopPipeline::new(prompt_pipeline, tool_registry);
         Self {
             pipeline: AgentSessionPipeline::new(tool_loop_pipeline),
+            memory_reader,
+            memory_writer,
         }
     }
 
@@ -84,6 +105,103 @@ impl AgentSessionJobHandler {
             diagnostics: Some(diagnostics),
         }
     }
+
+    fn render_sttp_node(session_id: &str, summary_text: &str) -> String {
+        let escaped_summary = summary_text.replace('"', "\\\"");
+
+        format!(
+            "⊕⟨ ⏣0{{ trigger: manual, response_format: temporal_node, origin_session: \"{session_id}\", compression_depth: 1, parent_node: null, prime: {{ attractor_config: {{ stability: 0.80, friction: 0.20, logic: 0.85, autonomy: 0.75 }}, context_summary: \"{escaped_summary}\", relevant_tier: raw, retrieval_budget: 10 }} }} ⟩\n\
+⦿⟨ ⏣0{{ timestamp: \"{}\", tier: raw, session_id: \"{session_id}\", schema_version: \"sttp-1.0\", user_avec: {{ stability: 0.80, friction: 0.20, logic: 0.85, autonomy: 0.75, psi: 2.60 }}, model_avec: {{ stability: 0.82, friction: 0.18, logic: 0.84, autonomy: 0.74, psi: 2.58 }} }} ⟩\n\
+◈⟨ ⏣0{{ session_summary(.95): \"{escaped_summary}\" }} ⟩\n\
+⍉⟨ ⏣0{{ rho: 0.96, kappa: 0.94, psi: 2.60, compression_avec: {{ stability: 0.81, friction: 0.19, logic: 0.84, autonomy: 0.74, psi: 2.58 }} }} ⟩",
+            chrono::Utc::now().to_rfc3339(),
+        )
+    }
+
+    fn build_recall_request(
+        correlation_id: &str,
+        default_query_text: &str,
+        memory_policy: Option<&MemoryPolicyPayload>,
+    ) -> MemoryRecallRequest {
+        let mut request = MemoryRecallRequest::default();
+        request.scope = MemoryScope {
+            session_ids: memory_policy
+                .and_then(|policy| policy.session_ids.clone())
+                .or_else(|| Some(vec![correlation_id.to_string()])),
+            tiers: memory_policy.and_then(|policy| policy.tiers.clone()),
+            from_utc: memory_policy.and_then(|policy| policy.from_utc),
+            to_utc: memory_policy.and_then(|policy| policy.to_utc),
+        };
+        request.query_text = Some(
+            memory_policy
+                .and_then(|policy| policy.query_text.clone())
+                .unwrap_or_else(|| default_query_text.to_string()),
+        );
+        request.limit = memory_policy
+            .and_then(|policy| policy.limit)
+            .unwrap_or(request.limit);
+        request.alpha = memory_policy
+            .and_then(|policy| policy.alpha)
+            .unwrap_or(request.alpha);
+        request.beta = memory_policy
+            .and_then(|policy| policy.beta)
+            .unwrap_or(request.beta);
+        request.include_explain = memory_policy
+            .and_then(|policy| policy.include_explain)
+            .unwrap_or(true);
+        request.fallback_policy = match memory_policy.and_then(|policy| policy.fallback_policy.clone()) {
+            Some(MemoryFallbackPolicyPayload::Never) => MemoryFallbackPolicy::Never,
+            Some(MemoryFallbackPolicyPayload::Always) => MemoryFallbackPolicy::Always,
+            _ => MemoryFallbackPolicy::OnEmpty,
+        };
+        request.strictness = match memory_policy.and_then(|policy| policy.strictness.clone()) {
+            Some(MemoryStrictnessModePayload::Precision) => MemoryStrictnessMode::Precision,
+            Some(MemoryStrictnessModePayload::Recall) => MemoryStrictnessMode::Recall,
+            _ => MemoryStrictnessMode::Balanced,
+        };
+
+        request
+    }
+
+    fn should_store(memory_policy: Option<&MemoryPolicyPayload>) -> bool {
+        !matches!(
+            memory_policy.and_then(|policy| policy.store_mode.clone()),
+            Some(MemoryStoreModePayload::Disabled)
+        )
+    }
+
+    fn memory_scope_hash(correlation_id: &str, memory_policy: Option<&MemoryPolicyPayload>) -> String {
+        let basis = format!(
+            "corr={correlation_id}|sessions={:?}|tiers={:?}|from={:?}|to={:?}",
+            memory_policy.and_then(|policy| policy.session_ids.clone()),
+            memory_policy.and_then(|policy| policy.tiers.clone()),
+            memory_policy.and_then(|policy| policy.from_utc),
+            memory_policy.and_then(|policy| policy.to_utc),
+        );
+        let mut hasher = DefaultHasher::new();
+        basis.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    }
+
+    fn memory_query_id(correlation_id: &str, request: &MemoryRecallRequest) -> String {
+        let basis = format!(
+            "corr={correlation_id}|query={:?}|sessions={:?}|tiers={:?}|from={:?}|to={:?}|limit={}|alpha={}|beta={}|fallback={:?}|strictness={:?}|include_explain={}",
+            request.query_text,
+            request.scope.session_ids,
+            request.scope.tiers,
+            request.scope.from_utc,
+            request.scope.to_utc,
+            request.limit,
+            request.alpha,
+            request.beta,
+            request.fallback_policy,
+            request.strictness,
+            request.include_explain,
+        );
+        let mut hasher = DefaultHasher::new();
+        basis.hash(&mut hasher);
+        format!("mq:{:x}", hasher.finish())
+    }
 }
 
 #[async_trait]
@@ -97,6 +215,26 @@ impl JobHandler for AgentSessionJobHandler {
             Ok(payload) => payload,
             Err(message) => return Ok(Self::build_failure(message)),
         };
+
+        let initial_user_prompt = payload.initial_user_prompt.clone();
+        let memory_policy = payload.memory_policy.as_ref();
+
+        let mut memory_recall = None;
+        let mut memory_recall_error = None;
+        let mut input_memory_query_id = None;
+        if let Some(reader) = &self.memory_reader {
+            let recall_request = Self::build_recall_request(
+                &job.correlation_id,
+                &initial_user_prompt,
+                memory_policy,
+            );
+            input_memory_query_id = Some(Self::memory_query_id(&job.correlation_id, &recall_request));
+
+            match reader.recall(&recall_request).await {
+                Ok(response) => memory_recall = Some(response),
+                Err(err) => memory_recall_error = Some(err.to_string()),
+            }
+        }
 
         let context = PromptExecutionContext {
             trace_id: Some(job.trace_id.clone()),
@@ -126,7 +264,7 @@ impl JobHandler for AgentSessionJobHandler {
 
         let run_request = AgentSessionRunRequest {
             thread_id: payload.thread_id,
-            initial_user_prompt: payload.initial_user_prompt,
+            initial_user_prompt,
             participants,
             context,
             max_turns_cap: payload.max_turns.unwrap_or(DEFAULT_MAX_SESSION_TURNS),
@@ -156,6 +294,10 @@ impl JobHandler for AgentSessionJobHandler {
                         "provider": "stasis-agent-session",
                         "status": "failure",
                         "error": error_text,
+                        "memory_recall": {
+                            "attempted": self.memory_reader.is_some(),
+                            "error": memory_recall_error,
+                        },
                     })
                     .to_string()
                 };
@@ -174,6 +316,36 @@ impl JobHandler for AgentSessionJobHandler {
             .map(|turn| turn.agent_id.clone())
             .collect();
 
+        let summary_text = response
+            .turns
+            .last()
+            .map(|turn| turn.response_text.clone())
+            .or_else(|| response.transcript.last().cloned())
+            .unwrap_or_default();
+
+        let mut memory_store = None;
+        let mut memory_store_error = None;
+        if Self::should_store(memory_policy) {
+            if let Some(writer) = &self.memory_writer {
+            let store_request = MemoryStoreRequest {
+                session_id: job.correlation_id.clone(),
+                raw_node: Self::render_sttp_node(&job.correlation_id, &summary_text),
+            };
+
+            match writer.store_context(&store_request).await {
+                Ok(stored) => memory_store = Some(stored),
+                Err(err) => memory_store_error = Some(err.to_string()),
+            }
+            }
+        }
+
+        let sttp_output_node_id = memory_store
+            .as_ref()
+            .map(|stored| stored.node_id.clone())
+            .filter(|node_id| !node_id.trim().is_empty())
+            .unwrap_or_else(|| format!("sttp:agent-session:{}", job.id));
+        let memory_scope_hash = Self::memory_scope_hash(&job.correlation_id, memory_policy);
+
         let diagnostics = json!({
             "provider": "stasis-agent-session",
             "status": "success",
@@ -183,11 +355,35 @@ impl JobHandler for AgentSessionJobHandler {
             "participant_ids": participant_ids,
             "turns": response.turns,
             "transcript_preview": response.transcript.last().cloned(),
+            "memory_retrieved_count": memory_recall.as_ref().map(|value| value.retrieved).unwrap_or_default(),
+            "memory_retrieval_path": memory_recall.as_ref().and_then(|value| value.retrieval_path.clone()),
+            "memory_fallback_triggered": memory_recall.as_ref().map(|value| value.fallback_triggered).unwrap_or(false),
+            "memory_fallback_reason": memory_recall.as_ref().and_then(|value| value.fallback_reason.clone()),
+            "memory_scope_hash": memory_scope_hash,
+            "memory_store_valid": memory_store.as_ref().map(|value| value.valid).unwrap_or(false),
+            "memory_store_node_id": memory_store.as_ref().map(|value| value.node_id.clone()),
+            "input_memory_query_id": input_memory_query_id.clone(),
+            "output_memory_node_id": memory_store.as_ref().map(|value| value.node_id.clone()),
+            "memory_recall": {
+                "attempted": self.memory_reader.is_some(),
+                "query_id": input_memory_query_id,
+                "retrieved": memory_recall.as_ref().map(|value| value.retrieved).unwrap_or_default(),
+                "retrieval_path": memory_recall.as_ref().and_then(|value| value.retrieval_path.clone()),
+                "fallback_triggered": memory_recall.as_ref().map(|value| value.fallback_triggered).unwrap_or(false),
+                "fallback_reason": memory_recall.as_ref().and_then(|value| value.fallback_reason.clone()),
+                "error": memory_recall_error,
+            },
+            "memory_store": {
+                "attempted": self.memory_writer.is_some(),
+                "node_id": memory_store.as_ref().map(|value| value.node_id.clone()),
+                "valid": memory_store.as_ref().map(|value| value.valid).unwrap_or(false),
+                "error": memory_store_error,
+            },
         })
         .to_string();
 
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: format!("sttp:agent-session:{}", job.id),
+            sttp_output_node_id,
             execution_id: None,
             diagnostics: Some(diagnostics),
         })

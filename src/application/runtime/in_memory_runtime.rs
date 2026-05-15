@@ -352,6 +352,7 @@ impl InMemoryRuntime {
                     None,
                     now,
                     execution_id.clone(),
+                    diagnostics.as_deref(),
                 )
                     .await?;
 
@@ -400,6 +401,7 @@ impl InMemoryRuntime {
                         Some(message.clone()),
                         now,
                         execution_id.clone(),
+                        diagnostics.as_deref(),
                     )
                         .await?;
 
@@ -421,6 +423,7 @@ impl InMemoryRuntime {
                         Some(message.clone()),
                         now,
                         execution_id.clone(),
+                        diagnostics.as_deref(),
                     )
                         .await?;
 
@@ -479,6 +482,7 @@ impl InMemoryRuntime {
                     Some(message.clone()),
                     now,
                     execution_id.clone(),
+                    diagnostics.as_deref(),
                 )
                     .await?;
 
@@ -609,7 +613,10 @@ impl InMemoryRuntime {
         message: Option<String>,
         now: DateTime<Utc>,
         execution_id: Option<String>,
+        diagnostics: Option<&str>,
     ) -> Result<()> {
+        let (input_memory_query_id, output_memory_node_id, retrieval_path) =
+            Self::extract_memory_lineage_fields(diagnostics);
         let event = OutboxEvent {
             event_id: self.id_generator.next_id(&format!("evt-{}", job.id)),
             status: OutboxStatus::Pending,
@@ -626,6 +633,9 @@ impl InMemoryRuntime {
                 sttp_input_node_id: job.sttp_input_node_id.clone(),
                 sttp_output_node_id,
                 execution_id,
+                input_memory_query_id,
+                output_memory_node_id,
+                retrieval_path,
                 occurred_at: now,
                 message,
             },
@@ -692,6 +702,40 @@ impl InMemoryRuntime {
         let duration_ms = json.get("duration_ms").and_then(|v| v.as_u64());
 
         (guardrail_code, policy_reason, duration_ms)
+    }
+
+    fn extract_memory_lineage_fields(
+        diagnostics: Option<&str>,
+    ) -> (Option<String>, Option<String>, Option<String>) {
+        let Some(raw) = diagnostics else {
+            return (None, None, None);
+        };
+
+        let Ok(json) = serde_json::from_str::<JsonValue>(raw) else {
+            return (None, None, None);
+        };
+
+        let input_memory_query_id = json
+            .get("input_memory_query_id")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string());
+
+        let output_memory_node_id = json
+            .get("output_memory_node_id")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string())
+            .or_else(|| {
+                json.get("memory_store_node_id")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string())
+            });
+
+        let retrieval_path = json
+            .get("memory_retrieval_path")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string());
+
+        (input_memory_query_id, output_memory_node_id, retrieval_path)
     }
 }
 

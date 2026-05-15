@@ -54,6 +54,10 @@ pub mod prelude {
         OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
     };
     pub use crate::infrastructure::llm::genai_chat_client::GenaiChatClient;
+    pub use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
+    pub use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
+    pub use crate::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
+    pub use crate::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
     pub use crate::infrastructure::runtime::tokio_channel_event_publisher::TokioChannelEventPublisher;
     pub use crate::infrastructure::runtime::system_clock::SystemClock;
     pub use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
@@ -67,6 +71,16 @@ pub mod prelude {
         WorkflowEngine, WorkflowExecutionOutput,
     };
     pub use crate::ports::outbound::ai_chat_client::AiChatClient;
+    pub use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
+    pub use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
+    pub use crate::ports::outbound::memory::memory_models::{
+        MemoryAggregateRequest, MemoryAggregateResponse, MemoryAvecState,
+        MemoryFallbackPolicy, MemoryRecallRequest, MemoryRecallResponse, MemoryRollupRequest,
+        MemoryRollupResponse, MemorySchemaResponse, MemoryScope, MemoryStoreRequest,
+        MemoryStoreResponse, MemoryStrictnessMode, MemoryTransformOperation,
+        MemoryTransformRequest, MemoryTransformResponse,
+    };
+    pub use crate::ports::outbound::memory::memory_operations::MemoryOperations;
     pub use genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatResponse};
     pub use crate::domain::runtime::recurring::RecurringDefinition;
     pub use crate::infrastructure::llm::genai_gateway::GenaiLlmGateway;

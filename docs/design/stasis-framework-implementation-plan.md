@@ -32,6 +32,10 @@ Execution note (2026-05-14):
 - P-E migration delivered: Medousa `llm` path now submits `workflow.stasis.prompt` jobs through `StasisWorkflowJobBuilder::for_prompt` and runtime processing, removing direct adapter/pipeline construction from CLI execution flow.
 - P-A guardrail artifact delivered: repository PR template added with mandatory RFC/implementation-plan reference and boundary checklist.
 - P-F baseline hardening delivered: architecture conformance tests added to enforce Medousa runtime-path usage and prevent direct adapter construction drift in CLI code.
+- P-E/P-F DX hardening delivered: explicit provider + model + base-url runtime registration added for Medousa (`--provider`, `--model`, `--base-url` plus env fallback chain), with Stasis `GenaiChatClient` endpoint override support for custom/Ollama hosts and updated multi-provider auth docs.
+- P-F DX hardening delivered: Stasis `GenaiChatClient` now configures genai `AuthResolver` for provider-scoped key resolution (`STASIS_<PROVIDER>_API_KEY`, `STASIS_LLM_API_KEY`) while preserving genai default provider-key fallback, enabling cleaner multi-provider auth orchestration.
+- Locus integration checkoff delivered: Stasis memory ports/adapters, memory-enabled prompt/tool/turn/session handlers, memory operation workflows, adapter validation tests, and backend parity coverage are in place and green.
+- Locus lineage hardening delivered: runtime outbox events now project memory lineage metadata (`input_memory_query_id`, `output_memory_node_id`, `retrieval_path`) from handler diagnostics when available.
 
 ## 1. Goal
 

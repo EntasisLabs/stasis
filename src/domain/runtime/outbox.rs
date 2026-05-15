@@ -34,6 +34,9 @@ pub struct RuntimeEvent {
     pub sttp_input_node_id: String,
     pub sttp_output_node_id: Option<String>,
     pub execution_id: Option<String>,
+    pub input_memory_query_id: Option<String>,
+    pub output_memory_node_id: Option<String>,
+    pub retrieval_path: Option<String>,
     pub occurred_at: DateTime<Utc>,
     pub message: Option<String>,
 }

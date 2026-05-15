@@ -15,3 +15,4 @@
 - Medousa product roadmap: [design/medousa-roadmap.md](design/medousa-roadmap.md)
 - Stasis framework RFC: [design/stasis-framework-rfc.md](design/stasis-framework-rfc.md)
 - Stasis framework implementation plan: [design/stasis-framework-implementation-plan.md](design/stasis-framework-implementation-plan.md)
+- Locus integration RFC and delivery plan: [design/locus-integration-rfc-plan.md](design/locus-integration-rfc-plan.md)

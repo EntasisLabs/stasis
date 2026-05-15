@@ -1,7 +1,9 @@
 use chrono::{DateTime, Utc};
 
 use crate::application::orchestration::agent_session_payload::{
-    AgentSessionJobPayload, AgentTurnJobPayload, PromptJobPayload, ToolLoopJobPayload,
+    AgentSessionJobPayload, AgentTurnJobPayload, MemoryAggregateJobPayload,
+    MemoryRecallJobPayload, MemoryRollupJobPayload, MemorySchemaJobPayload,
+    MemoryTransformJobPayload, PromptJobPayload, ToolLoopJobPayload,
 };
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::{BackoffPolicy, NewJob};
@@ -10,6 +12,11 @@ const JOB_TYPE_AGENT_SESSION: &str = "workflow.stasis.agent_session";
 const JOB_TYPE_AGENT_TURN: &str = "workflow.stasis.agent_turn";
 const JOB_TYPE_TOOL_LOOP: &str = "workflow.stasis.tool_loop";
 const JOB_TYPE_PROMPT: &str = "workflow.stasis.prompt";
+const JOB_TYPE_MEMORY_RECALL: &str = "workflow.stasis.memory.recall";
+const JOB_TYPE_MEMORY_AGGREGATE: &str = "workflow.stasis.memory.aggregate";
+const JOB_TYPE_MEMORY_TRANSFORM: &str = "workflow.stasis.memory.transform";
+const JOB_TYPE_MEMORY_ROLLUP: &str = "workflow.stasis.memory.rollup";
+const JOB_TYPE_MEMORY_SCHEMA: &str = "workflow.stasis.memory.schema";
 
 #[derive(Clone, Debug)]
 pub struct StasisWorkflowJobBuilder {
@@ -43,6 +50,32 @@ impl StasisWorkflowJobBuilder {
 
     pub fn for_prompt(id: impl Into<String>, payload: &PromptJobPayload) -> Result<Self> {
         Self::new(id.into(), JOB_TYPE_PROMPT, payload.to_payload_ref()?)
+    }
+
+    pub fn for_memory_recall(id: impl Into<String>, payload: &MemoryRecallJobPayload) -> Result<Self> {
+        Self::new(id.into(), JOB_TYPE_MEMORY_RECALL, payload.to_payload_ref()?)
+    }
+
+    pub fn for_memory_aggregate(
+        id: impl Into<String>,
+        payload: &MemoryAggregateJobPayload,
+    ) -> Result<Self> {
+        Self::new(id.into(), JOB_TYPE_MEMORY_AGGREGATE, payload.to_payload_ref()?)
+    }
+
+    pub fn for_memory_transform(
+        id: impl Into<String>,
+        payload: &MemoryTransformJobPayload,
+    ) -> Result<Self> {
+        Self::new(id.into(), JOB_TYPE_MEMORY_TRANSFORM, payload.to_payload_ref()?)
+    }
+
+    pub fn for_memory_rollup(id: impl Into<String>, payload: &MemoryRollupJobPayload) -> Result<Self> {
+        Self::new(id.into(), JOB_TYPE_MEMORY_ROLLUP, payload.to_payload_ref()?)
+    }
+
+    pub fn for_memory_schema(id: impl Into<String>, payload: &MemorySchemaJobPayload) -> Result<Self> {
+        Self::new(id.into(), JOB_TYPE_MEMORY_SCHEMA, payload.to_payload_ref()?)
     }
 
     fn new(id: String, job_type: &'static str, payload_ref: String) -> Result<Self> {

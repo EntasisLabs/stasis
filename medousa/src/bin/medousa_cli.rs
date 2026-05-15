@@ -1,6 +1,9 @@
 use anyhow::{Result, anyhow};
 use chrono::Utc;
-use medousa::{build_runtime, parse_backend, process_once, publish_pending};
+use medousa::{
+    build_runtime, parse_backend, process_once, publish_pending, resolve_llm_provider,
+    resolve_llm_base_url, resolve_llm_target,
+};
 use serde_json::json;
 use stasis::prelude::{
     AgentSessionJobPayload, AgentSessionParticipantPayload, JobAttemptStore, PromptJobPayload,
@@ -20,7 +23,10 @@ async fn main() -> Result<()> {
     match args[0].as_str() {
         "ask" => {
             let backend = parse_backend(find_arg_value(&args, "--backend"));
-            let runtime = build_runtime(backend).await?;
+            let provider = find_arg_value(&args, "--provider");
+            let model = find_arg_value(&args, "--model");
+            let base_url = find_arg_value(&args, "--base-url");
+            let runtime = build_runtime(backend, provider, model, base_url).await?;
             let prompt = args
                 .get(1)
                 .ok_or_else(|| anyhow!("missing prompt: medousa ask <prompt>"))?;
@@ -28,12 +34,14 @@ async fn main() -> Result<()> {
         }
         "llm" => {
             let backend = parse_backend(find_arg_value(&args, "--backend"));
-            let runtime = build_runtime(backend).await?;
+            let provider = find_arg_value(&args, "--provider");
+            let base_url = find_arg_value(&args, "--base-url");
             let prompt = args
                 .get(1)
                 .ok_or_else(|| anyhow!("missing prompt: medousa llm <prompt>"))?;
             let model = find_arg_value(&args, "--model");
-            run_llm(&runtime, prompt, model).await
+            let runtime = build_runtime(backend, provider, model, base_url).await?;
+            run_llm(&runtime, prompt, provider, model, base_url).await
         }
         _ => {
             print_usage();
@@ -42,7 +50,13 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn run_llm(runtime: &RuntimeComposition, prompt: &str, model: Option<&str>) -> Result<()> {
+async fn run_llm(
+    runtime: &RuntimeComposition,
+    prompt: &str,
+    provider: Option<&str>,
+    model: Option<&str>,
+    base_url: Option<&str>,
+) -> Result<()> {
     let now = Utc::now();
     let job_id = format!("medousa-llm-{}", now.timestamp_millis());
     let payload = PromptJobPayload {
@@ -53,6 +67,7 @@ async fn run_llm(runtime: &RuntimeComposition, prompt: &str, model: Option<&str>
         ),
         policy_profile: Some("default".to_string()),
         model_hint: model.map(|v| v.to_string()),
+        memory_policy: None,
     };
 
     let new_job = StasisWorkflowJobBuilder::for_prompt(job_id.clone(), &payload)?
@@ -82,10 +97,14 @@ async fn run_llm(runtime: &RuntimeComposition, prompt: &str, model: Option<&str>
         .and_then(|value| value.as_str())
         .ok_or_else(|| anyhow!("missing output_text in prompt diagnostics"))?;
 
-    println!(
-        "model_hint={}",
-        model.unwrap_or("(provider default from runtime environment)")
-    );
+    let resolved_provider = resolve_llm_provider(provider);
+    let target = resolve_llm_target(provider, model);
+    let resolved_base_url = resolve_llm_base_url(provider, base_url);
+    println!("registered_provider={}", resolved_provider);
+    println!("registered_model={}", target);
+    if let Some(base_url) = resolved_base_url {
+        println!("registered_base_url={}", base_url);
+    }
     println!("completion:\n{}", completion);
     Ok(())
 }
@@ -106,6 +125,7 @@ async fn run_ask(runtime: &RuntimeComposition, prompt: &str) -> Result<()> {
         }],
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        memory_policy: None,
         max_turns: Some(1),
         tool_call_mode: Some(AgentToolCallMode::Auto),
     };
@@ -140,7 +160,7 @@ fn find_arg_value<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
 
 fn print_usage() {
     println!("medousa-cli usage:");
-    println!("  medousa-cli ask <prompt> [--backend in-memory|surreal-mem]");
-    println!("  medousa-cli llm <prompt> [--model <model_name>] [--backend in-memory|surreal-mem]");
+    println!("  medousa-cli ask <prompt> [--backend in-memory|surreal-mem] [--provider <provider>] [--model <model_name>] [--base-url <url>]");
+    println!("  medousa-cli llm <prompt> [--provider <provider>] [--model <model_name>] [--base-url <url>] [--backend in-memory|surreal-mem]");
     println!("  note: ask uses workflow.stasis.agent_session through Stasis runtime orchestration");
 }

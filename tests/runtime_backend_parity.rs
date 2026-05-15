@@ -19,7 +19,9 @@ use stasis::application::orchestration::agent_session_pipeline::{
 };
 use stasis::application::orchestration::agent_session_payload::{
     AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode,
-    AgentTurnJobPayload, ToolLoopJobPayload,
+    AgentTurnJobPayload, MemoryAggregateJobPayload, MemoryRecallJobPayload,
+    MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
+    PromptJobPayload, ToolLoopJobPayload,
 };
 use stasis::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline,
@@ -29,6 +31,14 @@ use stasis::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolL
 use stasis::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
 use stasis::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
 use stasis::application::runtime::in_memory_runtime::{InMemoryRuntime, JobExecutionOutcome, JobHandler};
+use stasis::application::runtime::memory_aggregate_job_handler::MemoryAggregateJobHandler;
+use stasis::application::runtime::memory_recall_job_handler::MemoryRecallJobHandler;
+use stasis::application::runtime::memory_rollup_job_handler::MemoryRollupJobHandler;
+use stasis::application::runtime::memory_schema_job_handler::MemorySchemaJobHandler;
+use stasis::application::runtime::memory_transform_job_handler::MemoryTransformJobHandler;
+use stasis::application::runtime::prompt_chat_job_handler::PromptChatJobHandler;
+use stasis::application::runtime::runtime_factory::{RuntimeBackend, RuntimeComposition};
+use stasis::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
 use stasis::application::runtime::grapheme_echo_job_handler::GraphemeEchoJobHandler;
 use stasis::application::runtime::grapheme_healthcheck_job_handler::GraphemeHealthcheckJobHandler;
 use stasis::application::runtime::grapheme_job_handler::GraphemeJobHandler;
@@ -55,6 +65,14 @@ use stasis::ports::outbound::runtime::job_store::JobStore;
 use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
 use stasis::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 use stasis::ports::outbound::ai_chat_client::AiChatClient;
+use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
+use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
+use stasis::ports::outbound::memory::memory_models::{
+    MemoryAggregateRequest, MemoryAggregateResponse, MemoryRecallRequest, MemoryRecallResponse,
+    MemoryRollupRequest, MemoryRollupResponse, MemorySchemaResponse, MemoryStoreRequest,
+    MemoryStoreResponse, MemoryTransformRequest, MemoryTransformResponse,
+};
+use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
 
 struct FixedClock {
     now: DateTime<Utc>,
@@ -298,6 +316,74 @@ impl AiChatClient for ModelToolCallScriptedClient {
     }
 }
 
+#[derive(Clone)]
+struct MockMemoryContextReader {
+    response: MemoryRecallResponse,
+}
+
+#[async_trait]
+impl MemoryContextReader for MockMemoryContextReader {
+    async fn recall(&self, _request: &MemoryRecallRequest) -> Result<MemoryRecallResponse> {
+        Ok(self.response.clone())
+    }
+}
+
+#[derive(Clone)]
+struct MockMemoryContextWriter {
+    response: MemoryStoreResponse,
+}
+
+#[async_trait]
+impl MemoryContextWriter for MockMemoryContextWriter {
+    async fn store_context(&self, _request: &MemoryStoreRequest) -> Result<MemoryStoreResponse> {
+        Ok(self.response.clone())
+    }
+}
+
+#[derive(Clone, Default)]
+struct MockMemoryOperations;
+
+#[async_trait]
+impl MemoryOperations for MockMemoryOperations {
+    async fn aggregate(&self, _request: &MemoryAggregateRequest) -> Result<MemoryAggregateResponse> {
+        Ok(MemoryAggregateResponse {
+            total_groups: 3,
+            scanned_nodes: 42,
+        })
+    }
+
+    async fn transform(&self, _request: &MemoryTransformRequest) -> Result<MemoryTransformResponse> {
+        Ok(MemoryTransformResponse {
+            scanned: 50,
+            selected: 20,
+            updated: 18,
+            skipped: 2,
+            failed: 0,
+            duplicate: 0,
+            failures: Vec::new(),
+        })
+    }
+
+    async fn rollup(&self, _request: &MemoryRollupRequest) -> Result<MemoryRollupResponse> {
+        Ok(MemoryRollupResponse {
+            total_groups: 4,
+            scanned_nodes: 40,
+        })
+    }
+
+    async fn schema(&self) -> Result<MemorySchemaResponse> {
+        Ok(MemorySchemaResponse {
+            schema_version: "sttp-v1".to_string(),
+            sort_fields: vec!["created_at".to_string()],
+            filter_fields: vec!["session_id".to_string()],
+            group_by_fields: vec!["session_id".to_string()],
+            fallback_policies: vec!["on_empty".to_string()],
+            strictness_modes: vec!["balanced".to_string()],
+            transform_operations: vec!["embed_backfill".to_string()],
+        })
+    }
+}
+
 struct MockWebSearchTool;
 
 #[async_trait]
@@ -431,6 +517,138 @@ fn build_agent_session_job(
         .build()
 }
 
+fn build_prompt_job(
+    job_id: &str,
+    payload: &PromptJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_prompt(job_id.to_string(), payload)
+        .expect("prompt payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
+fn build_memory_recall_job(
+    job_id: &str,
+    payload: &MemoryRecallJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_memory_recall(job_id.to_string(), payload)
+        .expect("memory-recall payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
+fn build_memory_aggregate_job(
+    job_id: &str,
+    payload: &MemoryAggregateJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_memory_aggregate(job_id.to_string(), payload)
+        .expect("memory-aggregate payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
+fn build_memory_transform_job(
+    job_id: &str,
+    payload: &MemoryTransformJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_memory_transform(job_id.to_string(), payload)
+        .expect("memory-transform payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
+fn build_memory_rollup_job(
+    job_id: &str,
+    payload: &MemoryRollupJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_memory_rollup(job_id.to_string(), payload)
+        .expect("memory-rollup payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
+fn build_memory_schema_job(
+    job_id: &str,
+    payload: &MemorySchemaJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_memory_schema(job_id.to_string(), payload)
+        .expect("memory-schema payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
 #[tokio::test]
 async fn in_memory_runtime_emits_and_publishes_outbox_events() {
     let runtime = InMemoryRuntime::new();
@@ -490,6 +708,697 @@ async fn in_memory_runtime_emits_and_publishes_outbox_events() {
 }
 
 #[tokio::test]
+async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "prompt completion text".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 2,
+            retrieval_path: Some("Hybrid".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-a".to_string(), "sync-b".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:prompt:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+
+    runtime
+        .register_handler(PromptChatJobHandler::new_with_memory(
+            chat_client,
+            Some(memory_reader),
+            Some(memory_writer),
+        ))
+        .expect("prompt handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-prompt-memory-1".to_string();
+    let payload = PromptJobPayload {
+        user_prompt: "summarize rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+    };
+
+    runtime
+        .enqueue(build_prompt_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-prompt-memory-1",
+            "corr-prompt-memory-1",
+            "cause-prompt-memory-1",
+            "trace-prompt-memory-1",
+            "sttp:in:prompt:memory:1",
+        ))
+        .await
+        .expect("prompt job should enqueue");
+
+    runtime
+        .process_once("default", "worker-prompt", now)
+        .await
+        .expect("prompt processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(job.sttp_output_node_id.as_deref(), Some("sttp:memory:prompt:1"));
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-pipeline")));
+    assert_eq!(diagnostics.get("status"), Some(&json!("success")));
+    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.pointer("/memory_store/node_id"),
+        Some(&json!("sttp:memory:prompt:1"))
+    );
+    let input_query_id = diagnostics
+        .get("input_memory_query_id")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_id should be present");
+    assert!(
+        input_query_id.starts_with("mq:"),
+        "input_memory_query_id should be generated"
+    );
+
+    let lineage_events = runtime
+        .outbox_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("lineage events should load");
+    assert_eq!(lineage_events.len(), 1);
+    assert_eq!(
+        lineage_events[0].event.input_memory_query_id.as_deref(),
+        Some(input_query_id)
+    );
+    assert_eq!(
+        lineage_events[0].event.output_memory_node_id.as_deref(),
+        Some("sttp:memory:prompt:1")
+    );
+    assert_eq!(
+        lineage_events[0].event.retrieval_path.as_deref(),
+        Some("Hybrid")
+    );
+}
+
+#[tokio::test]
+async fn surreal_prompt_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_prompt_memory_parity")
+        .await
+        .expect("namespace and db should be selected");
+
+    let runtime = SurrealRuntime::new(db);
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "prompt completion text".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 1,
+            retrieval_path: Some("ResonanceOnly".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-x".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:prompt:surreal:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+
+    runtime
+        .register_handler(PromptChatJobHandler::new_with_memory(
+            chat_client,
+            Some(memory_reader),
+            Some(memory_writer),
+        ))
+        .expect("prompt handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-surreal-prompt-memory-1".to_string();
+    let payload = PromptJobPayload {
+        user_prompt: "summarize rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+    };
+
+    runtime
+        .enqueue(build_prompt_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-surreal-prompt-memory-1",
+            "corr-surreal-prompt-memory-1",
+            "cause-surreal-prompt-memory-1",
+            "trace-surreal-prompt-memory-1",
+            "sttp:in:prompt:memory:surreal:1",
+        ))
+        .await
+        .expect("prompt job should enqueue");
+
+    runtime
+        .process_once("default", "worker-prompt", now)
+        .await
+        .expect("prompt processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:memory:prompt:surreal:1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-pipeline")));
+    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(1)));
+    assert_eq!(
+        diagnostics.pointer("/memory_store/node_id"),
+        Some(&json!("sttp:memory:prompt:surreal:1"))
+    );
+    let input_query_id = diagnostics
+        .get("input_memory_query_id")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_id should be present");
+    assert!(
+        input_query_id.starts_with("mq:"),
+        "input_memory_query_id should be generated"
+    );
+
+    let lineage_events = runtime
+        .outbox_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("lineage events should load");
+    assert_eq!(lineage_events.len(), 1);
+    assert_eq!(
+        lineage_events[0].event.input_memory_query_id.as_deref(),
+        Some(input_query_id)
+    );
+    assert_eq!(
+        lineage_events[0].event.output_memory_node_id.as_deref(),
+        Some("sttp:memory:prompt:surreal:1")
+    );
+    assert_eq!(
+        lineage_events[0].event.retrieval_path.as_deref(),
+        Some("ResonanceOnly")
+    );
+}
+
+#[tokio::test]
+async fn in_memory_tool_loop_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft analysis".to_string(),
+        "final answer grounded in tool evidence".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 3,
+            retrieval_path: Some("Hybrid".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-tool-1".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:tool-loop:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(ToolLoopJobHandler::new_with_memory(
+            chat_client,
+            Arc::new(tool_registry),
+            Some(memory_reader),
+            Some(memory_writer),
+        ))
+        .expect("tool loop handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-tool-loop-memory-1".to_string();
+    let payload = ToolLoopJobPayload {
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": "latest rust trends" })),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_tool_loop_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-tool-loop-memory-1",
+            "corr-tool-loop-memory-1",
+            "cause-tool-loop-memory-1",
+            "trace-tool-loop-memory-1",
+            "sttp:in:tool-loop:memory:1",
+        ))
+        .await
+        .expect("tool-loop job should enqueue");
+
+    runtime
+        .process_once("default", "worker-tool-loop", now)
+        .await
+        .expect("tool-loop processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(job.sttp_output_node_id.as_deref(), Some("sttp:memory:tool-loop:1"));
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(3)));
+    assert_eq!(
+        diagnostics.pointer("/memory_store/node_id"),
+        Some(&json!("sttp:memory:tool-loop:1"))
+    );
+}
+
+#[tokio::test]
+async fn surreal_tool_loop_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_tool_loop_memory_parity")
+        .await
+        .expect("namespace and db should be selected");
+
+    let runtime = SurrealRuntime::new(db);
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft analysis".to_string(),
+        "final answer grounded in tool evidence".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 2,
+            retrieval_path: Some("ResonanceOnly".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-tool-surreal-1".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:tool-loop:surreal:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(ToolLoopJobHandler::new_with_memory(
+            chat_client,
+            Arc::new(tool_registry),
+            Some(memory_reader),
+            Some(memory_writer),
+        ))
+        .expect("tool loop handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-surreal-tool-loop-memory-1".to_string();
+    let payload = ToolLoopJobPayload {
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": "latest rust trends" })),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_tool_loop_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-surreal-tool-loop-memory-1",
+            "corr-surreal-tool-loop-memory-1",
+            "cause-surreal-tool-loop-memory-1",
+            "trace-surreal-tool-loop-memory-1",
+            "sttp:in:tool-loop:memory:surreal:1",
+        ))
+        .await
+        .expect("tool-loop job should enqueue");
+
+    runtime
+        .process_once("default", "worker-tool-loop", now)
+        .await
+        .expect("tool-loop processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:memory:tool-loop:surreal:1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.pointer("/memory_store/node_id"),
+        Some(&json!("sttp:memory:tool-loop:surreal:1"))
+    );
+}
+
+#[tokio::test]
+async fn in_memory_agent_turn_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft analysis".to_string(),
+        "agent final answer grounded in tool evidence".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 4,
+            retrieval_path: Some("Hybrid".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-agent-turn-1".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:agent-turn:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(AgentTurnJobHandler::new_with_memory(
+            chat_client,
+            Arc::new(tool_registry),
+            Some(memory_reader),
+            Some(memory_writer),
+        ))
+        .expect("agent-turn handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-agent-turn-memory-1".to_string();
+    let payload = AgentTurnJobPayload {
+        agent_id: "agent.researcher".to_string(),
+        thread_id: Some("thread-42".to_string()),
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": "latest rust trends" })),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_agent_turn_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-agent-turn-memory-1",
+            "corr-agent-turn-memory-1",
+            "cause-agent-turn-memory-1",
+            "trace-agent-turn-memory-1",
+            "sttp:in:agent-turn:memory:1",
+        ))
+        .await
+        .expect("agent-turn job should enqueue");
+
+    runtime
+        .process_once("default", "worker-agent-turn", now)
+        .await
+        .expect("agent-turn processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(job.sttp_output_node_id.as_deref(), Some("sttp:memory:agent-turn:1"));
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(4)));
+    assert_eq!(
+        diagnostics.pointer("/memory_store/node_id"),
+        Some(&json!("sttp:memory:agent-turn:1"))
+    );
+}
+
+#[tokio::test]
+async fn surreal_agent_turn_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_agent_turn_memory_parity")
+        .await
+        .expect("namespace and db should be selected");
+
+    let runtime = SurrealRuntime::new(db);
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft analysis".to_string(),
+        "agent final answer grounded in tool evidence".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 2,
+            retrieval_path: Some("ResonanceOnly".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-agent-turn-surreal-1".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:agent-turn:surreal:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(AgentTurnJobHandler::new_with_memory(
+            chat_client,
+            Arc::new(tool_registry),
+            Some(memory_reader),
+            Some(memory_writer),
+        ))
+        .expect("agent-turn handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-surreal-agent-turn-memory-1".to_string();
+    let payload = AgentTurnJobPayload {
+        agent_id: "agent.researcher".to_string(),
+        thread_id: Some("thread-42".to_string()),
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": "latest rust trends" })),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_agent_turn_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-surreal-agent-turn-memory-1",
+            "corr-surreal-agent-turn-memory-1",
+            "cause-surreal-agent-turn-memory-1",
+            "trace-surreal-agent-turn-memory-1",
+            "sttp:in:agent-turn:memory:surreal:1",
+        ))
+        .await
+        .expect("agent-turn job should enqueue");
+
+    runtime
+        .process_once("default", "worker-agent-turn", now)
+        .await
+        .expect("agent-turn processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:memory:agent-turn:surreal:1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.pointer("/memory_store/node_id"),
+        Some(&json!("sttp:memory:agent-turn:surreal:1"))
+    );
+}
+
+#[tokio::test]
 async fn in_memory_tool_loop_job_handler_executes_and_persists_diagnostics() {
     let runtime = InMemoryRuntime::new();
     let chat_client = Arc::new(ScriptedChatClient::new(vec![
@@ -512,6 +1421,7 @@ async fn in_memory_tool_loop_job_handler_executes_and_persists_diagnostics() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
         tool_call_mode: None,
@@ -612,6 +1522,7 @@ async fn in_memory_tool_loop_model_emitted_tool_call_roundtrip() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "fallback query" })),
         tool_call_mode: Some(AgentToolCallMode::Strict),
@@ -703,6 +1614,7 @@ async fn in_memory_agent_turn_job_handler_executes_single_agent_turn() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
         tool_call_mode: None,
@@ -812,6 +1724,7 @@ async fn in_memory_agent_session_job_handler_executes_session() {
         ],
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        memory_policy: None,
         max_turns: Some(2),
         tool_call_mode: None,
     };
@@ -919,6 +1832,7 @@ async fn surreal_agent_session_job_handler_executes_session() {
         ],
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        memory_policy: None,
         max_turns: Some(2),
         tool_call_mode: None,
     };
@@ -972,6 +1886,738 @@ async fn surreal_agent_session_job_handler_executes_session() {
     assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-agent-session")));
     assert_eq!(diagnostics.get("turn_count"), Some(&json!(2)));
     assert_eq!(diagnostics.get("terminated"), Some(&json!(true)));
+}
+
+#[tokio::test]
+async fn in_memory_agent_session_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft turn 1".to_string(),
+        "final turn 1".to_string(),
+        "draft turn 2".to_string(),
+        "final turn 2".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 2,
+            retrieval_path: Some("Hybrid".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-agent-session-1".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:agent-session:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(AgentSessionJobHandler::new_with_memory(
+            chat_client,
+            Arc::new(tool_registry),
+            Some(memory_reader),
+            Some(memory_writer),
+        ))
+        .expect("agent-session handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-agent-session-memory-1".to_string();
+    let payload = AgentSessionJobPayload {
+        thread_id: Some("thread-session-memory-1".to_string()),
+        initial_user_prompt: "Coordinate a short research answer".to_string(),
+        participants: vec![
+            AgentSessionParticipantPayload {
+                agent_id: "agent.alpha".to_string(),
+                system_prompt: Some("You are agent alpha".to_string()),
+                tool_name: "stasis.web.search.mock".to_string(),
+                tool_input: Some(json!({"query": "rust trends"})),
+            },
+            AgentSessionParticipantPayload {
+                agent_id: "agent.beta".to_string(),
+                system_prompt: Some("You are agent beta".to_string()),
+                tool_name: "stasis.web.search.mock".to_string(),
+                tool_input: Some(json!({"query": "rust trends"})),
+            },
+        ],
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+        max_turns: Some(2),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_agent_session_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-agent-session-memory-1",
+            "corr-agent-session-memory-1",
+            "cause-agent-session-memory-1",
+            "trace-agent-session-memory-1",
+            "sttp:in:agent-session:memory:1",
+        ))
+        .await
+        .expect("agent-session job should enqueue");
+
+    runtime
+        .process_once("default", "worker-agent-session", now)
+        .await
+        .expect("agent-session processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:memory:agent-session:1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.pointer("/memory_store/node_id"),
+        Some(&json!("sttp:memory:agent-session:1"))
+    );
+}
+
+#[tokio::test]
+async fn surreal_agent_session_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_agent_session_memory_parity")
+        .await
+        .expect("namespace and db should be selected");
+
+    let runtime = SurrealRuntime::new(db);
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft turn 1".to_string(),
+        "final turn 1".to_string(),
+        "draft turn 2".to_string(),
+        "final turn 2".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 1,
+            retrieval_path: Some("ResonanceOnly".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-agent-session-surreal-1".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:agent-session:surreal:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(AgentSessionJobHandler::new_with_memory(
+            chat_client,
+            Arc::new(tool_registry),
+            Some(memory_reader),
+            Some(memory_writer),
+        ))
+        .expect("agent-session handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-surreal-agent-session-memory-1".to_string();
+    let payload = AgentSessionJobPayload {
+        thread_id: Some("thread-surreal-session-memory-1".to_string()),
+        initial_user_prompt: "Coordinate a short research answer".to_string(),
+        participants: vec![
+            AgentSessionParticipantPayload {
+                agent_id: "agent.alpha".to_string(),
+                system_prompt: Some("You are agent alpha".to_string()),
+                tool_name: "stasis.web.search.mock".to_string(),
+                tool_input: Some(json!({"query": "rust trends"})),
+            },
+            AgentSessionParticipantPayload {
+                agent_id: "agent.beta".to_string(),
+                system_prompt: Some("You are agent beta".to_string()),
+                tool_name: "stasis.web.search.mock".to_string(),
+                tool_input: Some(json!({"query": "rust trends"})),
+            },
+        ],
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+        max_turns: Some(2),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_agent_session_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-surreal-agent-session-memory-1",
+            "corr-surreal-agent-session-memory-1",
+            "cause-surreal-agent-session-memory-1",
+            "trace-surreal-agent-session-memory-1",
+            "sttp:in:agent-session:memory:surreal:1",
+        ))
+        .await
+        .expect("agent-session job should enqueue");
+
+    runtime
+        .process_once("default", "worker-agent-session", now)
+        .await
+        .expect("agent-session processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get(&job_id)
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:memory:agent-session:surreal:1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
+
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(1)));
+    assert_eq!(
+        diagnostics.pointer("/memory_store/node_id"),
+        Some(&json!("sttp:memory:agent-session:surreal:1"))
+    );
+}
+
+#[tokio::test]
+async fn in_memory_memory_workflow_handlers_execute_and_emit_diagnostics() {
+    let runtime = InMemoryRuntime::new();
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 5,
+            retrieval_path: Some("Hybrid".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-memory-op-1".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_operations = Arc::new(MockMemoryOperations);
+
+    runtime
+        .register_handler(MemoryRecallJobHandler::new(memory_reader))
+        .expect("memory recall handler should register");
+    runtime
+        .register_handler(MemoryAggregateJobHandler::new(memory_operations.clone()))
+        .expect("memory aggregate handler should register");
+    runtime
+        .register_handler(MemoryTransformJobHandler::new(memory_operations.clone()))
+        .expect("memory transform handler should register");
+    runtime
+        .register_handler(MemoryRollupJobHandler::new(memory_operations.clone()))
+        .expect("memory rollup handler should register");
+    runtime
+        .register_handler(MemorySchemaJobHandler::new(memory_operations))
+        .expect("memory schema handler should register");
+
+    let now = Utc::now();
+
+    let recall_payload = MemoryRecallJobPayload {
+        memory_policy: None,
+    };
+    runtime
+        .enqueue(build_memory_recall_job(
+            "job-memory-recall-1",
+            &recall_payload,
+            now,
+            "idem-memory-recall-1",
+            "corr-memory-recall-1",
+            "cause-memory-recall-1",
+            "trace-memory-recall-1",
+            "sttp:in:memory:recall:1",
+        ))
+        .await
+        .expect("memory recall job should enqueue");
+
+    let aggregate_payload = MemoryAggregateJobPayload {
+        session_ids: Some(vec!["session-a".to_string()]),
+        tiers: None,
+        from_utc: None,
+        to_utc: None,
+        max_groups: Some(10),
+        max_nodes: Some(100),
+    };
+    runtime
+        .enqueue(build_memory_aggregate_job(
+            "job-memory-aggregate-1",
+            &aggregate_payload,
+            now,
+            "idem-memory-aggregate-1",
+            "corr-memory-aggregate-1",
+            "cause-memory-aggregate-1",
+            "trace-memory-aggregate-1",
+            "sttp:in:memory:aggregate:1",
+        ))
+        .await
+        .expect("memory aggregate job should enqueue");
+
+    let transform_payload = MemoryTransformJobPayload {
+        session_ids: Some(vec!["session-a".to_string()]),
+        tiers: None,
+        from_utc: None,
+        to_utc: None,
+        operation: None,
+        dry_run: Some(true),
+        batch_size: Some(50),
+        max_nodes: Some(500),
+        provider_id: None,
+        model: None,
+    };
+    runtime
+        .enqueue(build_memory_transform_job(
+            "job-memory-transform-1",
+            &transform_payload,
+            now,
+            "idem-memory-transform-1",
+            "corr-memory-transform-1",
+            "cause-memory-transform-1",
+            "trace-memory-transform-1",
+            "sttp:in:memory:transform:1",
+        ))
+        .await
+        .expect("memory transform job should enqueue");
+
+    let rollup_payload = MemoryRollupJobPayload {
+        session_ids: Some(vec!["session-a".to_string()]),
+        tiers: None,
+        from_utc: None,
+        to_utc: None,
+        max_days: Some(7),
+        max_nodes: Some(700),
+    };
+    runtime
+        .enqueue(build_memory_rollup_job(
+            "job-memory-rollup-1",
+            &rollup_payload,
+            now,
+            "idem-memory-rollup-1",
+            "corr-memory-rollup-1",
+            "cause-memory-rollup-1",
+            "trace-memory-rollup-1",
+            "sttp:in:memory:rollup:1",
+        ))
+        .await
+        .expect("memory rollup job should enqueue");
+
+    let schema_payload = MemorySchemaJobPayload::default();
+    runtime
+        .enqueue(build_memory_schema_job(
+            "job-memory-schema-1",
+            &schema_payload,
+            now,
+            "idem-memory-schema-1",
+            "corr-memory-schema-1",
+            "cause-memory-schema-1",
+            "trace-memory-schema-1",
+            "sttp:in:memory:schema:1",
+        ))
+        .await
+        .expect("memory schema job should enqueue");
+
+    for _ in 0..5 {
+        runtime
+            .process_once("default", "worker-memory-ops", now)
+            .await
+            .expect("memory op processing should succeed");
+    }
+
+    let recall_attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-memory-recall-1")
+        .await
+        .expect("recall attempts should load");
+    let recall_diagnostics: JsonValue = serde_json::from_str(
+        recall_attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("recall diagnostics should exist"),
+    )
+    .expect("recall diagnostics should be json");
+    assert_eq!(recall_diagnostics.get("provider"), Some(&json!("stasis-memory-recall")));
+    assert_eq!(recall_diagnostics.get("retrieved"), Some(&json!(5)));
+
+    let aggregate_attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-memory-aggregate-1")
+        .await
+        .expect("aggregate attempts should load");
+    let aggregate_diagnostics: JsonValue = serde_json::from_str(
+        aggregate_attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("aggregate diagnostics should exist"),
+    )
+    .expect("aggregate diagnostics should be json");
+    assert_eq!(
+        aggregate_diagnostics.get("provider"),
+        Some(&json!("stasis-memory-aggregate"))
+    );
+    assert_eq!(aggregate_diagnostics.get("total_groups"), Some(&json!(3)));
+
+    let transform_attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-memory-transform-1")
+        .await
+        .expect("transform attempts should load");
+    let transform_diagnostics: JsonValue = serde_json::from_str(
+        transform_attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("transform diagnostics should exist"),
+    )
+    .expect("transform diagnostics should be json");
+    assert_eq!(
+        transform_diagnostics.get("provider"),
+        Some(&json!("stasis-memory-transform"))
+    );
+    assert_eq!(transform_diagnostics.get("updated"), Some(&json!(18)));
+
+    let rollup_attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-memory-rollup-1")
+        .await
+        .expect("rollup attempts should load");
+    let rollup_diagnostics: JsonValue = serde_json::from_str(
+        rollup_attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("rollup diagnostics should exist"),
+    )
+    .expect("rollup diagnostics should be json");
+    assert_eq!(rollup_diagnostics.get("provider"), Some(&json!("stasis-memory-rollup")));
+    assert_eq!(rollup_diagnostics.get("total_groups"), Some(&json!(4)));
+
+    let schema_attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-memory-schema-1")
+        .await
+        .expect("schema attempts should load");
+    let schema_diagnostics: JsonValue = serde_json::from_str(
+        schema_attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("schema diagnostics should exist"),
+    )
+    .expect("schema diagnostics should be json");
+    assert_eq!(schema_diagnostics.get("provider"), Some(&json!("stasis-memory-schema")));
+    assert_eq!(schema_diagnostics.get("schema_version"), Some(&json!("sttp-v1")));
+}
+
+#[tokio::test]
+async fn surreal_memory_recall_job_handler_executes_and_emits_diagnostics() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_memory_recall_parity")
+        .await
+        .expect("namespace and db should be selected");
+
+    let runtime = SurrealRuntime::new(db);
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 2,
+            retrieval_path: Some("ResonanceOnly".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-memory-surreal-1".to_string()],
+            ..Default::default()
+        },
+    });
+
+    runtime
+        .register_handler(MemoryRecallJobHandler::new(memory_reader))
+        .expect("memory recall handler should register");
+
+    let now = Utc::now();
+    let payload = MemoryRecallJobPayload {
+        memory_policy: None,
+    };
+
+    runtime
+        .enqueue(build_memory_recall_job(
+            "job-surreal-memory-recall-1",
+            &payload,
+            now,
+            "idem-surreal-memory-recall-1",
+            "corr-surreal-memory-recall-1",
+            "cause-surreal-memory-recall-1",
+            "trace-surreal-memory-recall-1",
+            "sttp:in:surreal:memory:recall:1",
+        ))
+        .await
+        .expect("memory recall job should enqueue");
+
+    runtime
+        .process_once("default", "worker-surreal-memory", now)
+        .await
+        .expect("memory recall processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get("job-surreal-memory-recall-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:memory-recall:job-surreal-memory-recall-1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-surreal-memory-recall-1")
+        .await
+        .expect("attempts should load");
+    assert_eq!(attempts.len(), 1);
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-memory-recall")));
+    assert_eq!(diagnostics.get("retrieved"), Some(&json!(2)));
+}
+
+#[tokio::test]
+async fn in_memory_runtime_builder_with_memory_operations_registers_memory_schema_handler() {
+    let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(ScriptedChatClient::new(vec![])))
+        .with_memory_context_reader(Arc::new(MockMemoryContextReader {
+            response: MemoryRecallResponse::default(),
+        }))
+        .with_memory_operations(Arc::new(MockMemoryOperations))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers();
+
+    let runtime = builder
+        .build()
+        .await
+        .expect("runtime should build successfully");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime composition");
+    };
+
+    let now = Utc::now();
+    let schema_payload = MemorySchemaJobPayload::default();
+    runtime
+        .enqueue(build_memory_schema_job(
+            "job-builder-memory-schema-1",
+            &schema_payload,
+            now,
+            "idem-builder-memory-schema-1",
+            "corr-builder-memory-schema-1",
+            "cause-builder-memory-schema-1",
+            "trace-builder-memory-schema-1",
+            "sttp:in:builder:memory:schema:1",
+        ))
+        .await
+        .expect("memory schema job should enqueue");
+
+    runtime
+        .process_once("default", "worker-builder-memory", now)
+        .await
+        .expect("memory schema processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get("job-builder-memory-schema-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+}
+
+#[tokio::test]
+async fn in_memory_runtime_builder_without_memory_operation_handlers_dead_letters_memory_job() {
+    let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(ScriptedChatClient::new(vec![])))
+        .with_memory_context_reader(Arc::new(MockMemoryContextReader {
+            response: MemoryRecallResponse::default(),
+        }))
+        .with_memory_operations(Arc::new(MockMemoryOperations))
+        .without_memory_operation_handlers()
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers();
+
+    let runtime = builder
+        .build()
+        .await
+        .expect("runtime should build successfully");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime composition");
+    };
+
+    let now = Utc::now();
+    let schema_payload = MemorySchemaJobPayload::default();
+    runtime
+        .enqueue(build_memory_schema_job(
+            "job-builder-memory-schema-disabled-1",
+            &schema_payload,
+            now,
+            "idem-builder-memory-schema-disabled-1",
+            "corr-builder-memory-schema-disabled-1",
+            "cause-builder-memory-schema-disabled-1",
+            "trace-builder-memory-schema-disabled-1",
+            "sttp:in:builder:memory:schema:disabled:1",
+        ))
+        .await
+        .expect("memory schema job should enqueue");
+
+    runtime
+        .process_once("default", "worker-builder-memory", now)
+        .await
+        .expect("memory schema processing should complete");
+
+    let job = runtime
+        .job_store
+        .get("job-builder-memory-schema-disabled-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-builder-memory-schema-disabled-1")
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
+    assert!(
+        attempts[0]
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no handler registered for job_type=workflow.stasis.memory.schema")
+    );
+}
+
+#[tokio::test]
+async fn in_memory_runtime_builder_with_locus_memory_registers_memory_schema_handler() {
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(ScriptedChatClient::new(vec![])))
+        .with_locus_memory()
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .build()
+        .await
+        .expect("runtime should build successfully");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime composition");
+    };
+
+    let now = Utc::now();
+    let schema_payload = MemorySchemaJobPayload::default();
+    runtime
+        .enqueue(build_memory_schema_job(
+            "job-builder-locus-memory-schema-1",
+            &schema_payload,
+            now,
+            "idem-builder-locus-memory-schema-1",
+            "corr-builder-locus-memory-schema-1",
+            "cause-builder-locus-memory-schema-1",
+            "trace-builder-locus-memory-schema-1",
+            "sttp:in:builder:locus:memory:schema:1",
+        ))
+        .await
+        .expect("memory schema job should enqueue");
+
+    runtime
+        .process_once("default", "worker-builder-locus-memory", now)
+        .await
+        .expect("memory schema processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get("job-builder-locus-memory-schema-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-builder-locus-memory-schema-1")
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-memory-schema")));
+    assert_eq!(diagnostics.get("status"), Some(&json!("success")));
 }
 
 #[tokio::test]
@@ -1061,6 +2707,7 @@ async fn in_memory_tool_loop_strict_mode_requires_model_tool_call() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
         tool_call_mode: Some(AgentToolCallMode::Strict),
@@ -1127,6 +2774,7 @@ async fn in_memory_tool_loop_job_handler_policy_violation_dead_letters_job() {
         system_prompt: None,
         policy_profile: None,
         model_hint: None,
+        memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: None,
         tool_call_mode: None,
@@ -1223,6 +2871,7 @@ async fn in_memory_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": 123 })),
         tool_call_mode: None,
@@ -1317,6 +2966,7 @@ async fn surreal_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": 321 })),
         tool_call_mode: None,

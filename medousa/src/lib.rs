@@ -1,10 +1,23 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use anyhow::Result;
 use chrono::Utc;
 use serde_json::{Value, json};
 use stasis::prelude::{
-    RuntimeBackend, RuntimeComposition, StasisRuntimeBuilder, StasisTool,
+    GenaiChatClient, RuntimeBackend, RuntimeComposition, StasisRuntimeBuilder, StasisTool,
 };
+
+const DEFAULT_LLM_MODEL: &str = "gpt-4o-mini";
+const DEFAULT_LLM_PROVIDER: &str = "openai";
+
+fn provider_base_url_env_keys(provider: &str) -> (String, String) {
+    let normalized = provider.trim().to_ascii_uppercase().replace('-', "_");
+    (
+        format!("MEDOUSA_{normalized}_BASE_URL"),
+        format!("STASIS_{normalized}_BASE_URL"),
+    )
+}
 
 struct MockWebSearchTool;
 
@@ -44,8 +57,66 @@ impl StasisTool for MockWebSearchTool {
     }
 }
 
-pub async fn build_runtime(backend: RuntimeBackend) -> Result<RuntimeComposition> {
+pub fn resolve_llm_model(explicit_model: Option<&str>) -> String {
+    explicit_model
+        .map(|value| value.to_string())
+        .or_else(|| std::env::var("MEDOUSA_LLM_MODEL").ok())
+        .or_else(|| std::env::var("STASIS_LLM_MODEL").ok())
+        .unwrap_or_else(|| DEFAULT_LLM_MODEL.to_string())
+}
+
+pub fn resolve_llm_provider(explicit_provider: Option<&str>) -> String {
+    explicit_provider
+        .map(|value| value.to_string())
+        .or_else(|| std::env::var("MEDOUSA_LLM_PROVIDER").ok())
+        .or_else(|| std::env::var("STASIS_LLM_PROVIDER").ok())
+        .unwrap_or_else(|| DEFAULT_LLM_PROVIDER.to_string())
+}
+
+pub fn resolve_llm_target(explicit_provider: Option<&str>, explicit_model: Option<&str>) -> String {
+    let provider = resolve_llm_provider(explicit_provider);
+    let model = resolve_llm_model(explicit_model);
+    GenaiChatClient::build_model_target(Some(&provider), &model)
+}
+
+pub fn resolve_llm_base_url(
+    explicit_provider: Option<&str>,
+    explicit_base_url: Option<&str>,
+) -> Option<String> {
+    if let Some(explicit) = explicit_base_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(explicit.to_string());
+    }
+
+    let provider = resolve_llm_provider(explicit_provider);
+    let (medousa_provider_key, stasis_provider_key) = provider_base_url_env_keys(&provider);
+
+    std::env::var(&medousa_provider_key)
+        .ok()
+        .or_else(|| std::env::var(&stasis_provider_key).ok())
+        .or_else(|| std::env::var("MEDOUSA_LLM_BASE_URL").ok())
+        .or_else(|| std::env::var("STASIS_LLM_BASE_URL").ok())
+}
+
+pub async fn build_runtime(
+    backend: RuntimeBackend,
+    explicit_provider: Option<&str>,
+    explicit_model: Option<&str>,
+    explicit_base_url: Option<&str>,
+) -> Result<RuntimeComposition> {
+    let provider = resolve_llm_provider(explicit_provider);
+    let model = resolve_llm_model(explicit_model);
+    let base_url = resolve_llm_base_url(Some(&provider), explicit_base_url);
+    let chat_client = Arc::new(GenaiChatClient::from_provider_model_with_base_url(
+        Some(&provider),
+        &model,
+        base_url.as_deref(),
+    ));
+
     let runtime = StasisRuntimeBuilder::new(backend)
+        .with_chat_client(chat_client)
         .with_tool(MockWebSearchTool)?
         .build()
         .await?;

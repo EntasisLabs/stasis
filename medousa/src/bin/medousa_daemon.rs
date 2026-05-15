@@ -7,12 +7,15 @@ use medousa::{build_runtime, parse_backend, process_once, publish_pending};
 async fn main() -> Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let backend = parse_backend(find_arg_value(&args, "--backend"));
+    let provider = find_arg_value(&args, "--provider");
+    let model = find_arg_value(&args, "--model");
+    let base_url = find_arg_value(&args, "--base-url");
     let interval_ms = find_arg_value(&args, "--interval-ms")
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(1000);
     let once = args.iter().any(|arg| arg == "--once");
 
-    let runtime = build_runtime(backend).await?;
+    let runtime = build_runtime(backend, provider, model, base_url).await?;
     println!("medousa-daemon started");
 
     if once {
