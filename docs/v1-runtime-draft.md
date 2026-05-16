@@ -1,5 +1,18 @@
 # Stasis V1 Runtime Draft
 
+## Document Metadata
+
+- Document Type: Architecture Standard
+- Audience: Engineer, Architect
+- Stability: Evolving
+- Last Verified: 2026-05-15
+- Verified Against:
+	- src/application/runtime/in_memory_runtime.rs
+	- src/application/runtime/surreal_runtime.rs
+	- src/ports/outbound/runtime/job_store.rs
+	- src/ports/outbound/runtime/outbox_store.rs
+	- tests/runtime_backend_parity.rs
+
 ## Purpose
 
 Define a V1 execution runtime for Stasis that combines DDD + Hexagonal boundaries with a durable, SurrealDB-backed job system inspired by Hangfire.

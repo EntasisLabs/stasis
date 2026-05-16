@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-045a4fad.js";
+            window.path_to_searchindex_js = "searchindex-bf0615f1.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-6f90a697.js"></script>
+        <script src="toc-155ab26a.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -175,8 +175,35 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="stasis-job-runtime-design"><a class="header" href="#stasis-job-runtime-design">Stasis Job Runtime Design</a></h1>
+<h2 id="document-metadata"><a class="header" href="#document-metadata">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, SRE, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/runtime/in_memory_runtime.rs</li>
+<li>src/application/runtime/surreal_runtime.rs</li>
+<li>src/application/use_cases/investigate_runtime_lineage.rs</li>
+<li>src/domain/runtime/job.rs</li>
+<li>src/domain/runtime/job_attempt.rs</li>
+<li>src/domain/runtime/outbox.rs</li>
+<li>src/domain/runtime/thread.rs</li>
+<li>tests/runtime_backend_parity.rs</li>
+</ul>
+</li>
+</ul>
 <h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
-<p>This document defines the implementation-facing design for a SurrealDB-backed distributed job runtime used by Stasis.</p>
+<p>This document defines the implementation-facing design for the distributed Stasis runtime across in-memory and Surreal backends.</p>
+<p>The runtime coordinates:</p>
+<ul>
+<li>core job lifecycle and scheduling</li>
+<li>orchestration pattern handlers</li>
+<li>Grapheme workflow handlers</li>
+<li>Locus memory-enabled handlers and memory operation workflows</li>
+<li>thread-aware lineage and diagnostics</li>
+</ul>
 <h2 id="domain-concepts"><a class="header" href="#domain-concepts">Domain Concepts</a></h2>
 <p>Job:</p>
 <ul>
@@ -189,6 +216,14 @@
 <p>Run Attempt:</p>
 <ul>
 <li>Single execution attempt of a job with timing and outcome metadata.</li>
+</ul>
+<p>Thread:</p>
+<ul>
+<li>First-class execution continuity record used by orchestration patterns.</li>
+</ul>
+<p>Thread Event:</p>
+<ul>
+<li>Time-ordered event stream bound to a thread, including branch/merge lifecycle semantics.</li>
 </ul>
 <p>Lease:</p>
 <ul>
@@ -221,6 +256,11 @@
 <li>finished_at: datetime | null</li>
 <li>last_error: object | null</li>
 </ul>
+<p>Notes:</p>
+<ul>
+<li><code>sttp_input_node_id</code> and <code>sttp_output_node_id</code> preserve cross-job context continuity.</li>
+<li><code>correlation_id</code>, <code>causation_id</code>, and <code>trace_id</code> are mandatory observability fields.</li>
+</ul>
 <h3 id="recurring-definition"><a class="header" href="#recurring-definition">Recurring Definition</a></h3>
 <p>Suggested fields:</p>
 <ul>
@@ -237,6 +277,42 @@
 <li>lease_owner: string | null</li>
 <li>lease_expires_at: datetime | null</li>
 </ul>
+<h3 id="run-attempt-record"><a class="header" href="#run-attempt-record">Run Attempt Record</a></h3>
+<p>Suggested fields:</p>
+<ul>
+<li>attempt_id: string</li>
+<li>job_id: string</li>
+<li>attempt_number: int</li>
+<li>worker_id: string</li>
+<li>started_at: datetime</li>
+<li>finished_at: datetime</li>
+<li>outcome: enum(succeeded|retryable_failure|fatal_failure)</li>
+<li>error_message: string | null</li>
+<li>sttp_output_node_id: string | null</li>
+<li>execution_id: string | null</li>
+<li>guardrail_code: string | null</li>
+<li>policy_reason: string | null</li>
+<li>duration_ms: int | null</li>
+<li>diagnostics: json string | null</li>
+</ul>
+<h3 id="thread-record"><a class="header" href="#thread-record">Thread Record</a></h3>
+<p>Suggested fields:</p>
+<ul>
+<li>thread_id: string</li>
+<li>parent_thread_id: string | null</li>
+<li>branch_label: string | null</li>
+<li>created_at: datetime</li>
+<li>updated_at: datetime</li>
+</ul>
+<h3 id="thread-event-record"><a class="header" href="#thread-event-record">Thread Event Record</a></h3>
+<p>Suggested fields:</p>
+<ul>
+<li>event_id: string</li>
+<li>thread_id: string</li>
+<li>event_kind: string</li>
+<li>payload_ref: string</li>
+<li>occurred_at: datetime</li>
+</ul>
 <h3 id="job-event-outbox"><a class="header" href="#job-event-outbox">Job Event (Outbox)</a></h3>
 <p>Suggested fields:</p>
 <ul>
@@ -250,12 +326,32 @@
 <li>created_at: datetime</li>
 <li>published_at: datetime | null</li>
 </ul>
+<p>Runtime event envelope fields:</p>
+<ul>
+<li>event_type</li>
+<li>job_id</li>
+<li>thread_id</li>
+<li>correlation_id</li>
+<li>causation_id</li>
+<li>trace_id</li>
+<li>sttp_input_node_id</li>
+<li>sttp_output_node_id</li>
+<li>execution_id</li>
+<li>input_memory_query_id</li>
+<li>input_memory_query_fingerprint</li>
+<li>output_memory_node_id</li>
+<li>retrieval_path</li>
+<li>occurred_at</li>
+<li>message</li>
+</ul>
 <h2 id="ports"><a class="header" href="#ports">Ports</a></h2>
 <p>Outbound ports:</p>
 <ul>
 <li>JobStore</li>
+<li>JobAttemptStore</li>
 <li>RecurringStore</li>
 <li>OutboxStore</li>
+<li>ThreadStore</li>
 <li>EventPublisher</li>
 <li>Clock</li>
 <li>IdGenerator</li>
@@ -264,6 +360,7 @@
 <ul>
 <li>JobCommands</li>
 <li>SchedulerCommands</li>
+<li>LineageInvestigation</li>
 </ul>
 <h2 id="core-algorithms"><a class="header" href="#core-algorithms">Core Algorithms</a></h2>
 <h3 id="lease-acquisition"><a class="header" href="#lease-acquisition">Lease Acquisition</a></h3>
@@ -283,6 +380,7 @@
 <li>persist result reference sttp_output_node_id</li>
 <li>mark succeeded</li>
 <li>write outbox events</li>
+<li>include standardized diagnostics for orchestration/policy outcomes when applicable</li>
 </ul>
 <ol start="5">
 <li>On failure:</li>
@@ -292,6 +390,45 @@
 <li>if attempts &lt; max_attempts, compute backoff and re-enqueue</li>
 <li>otherwise mark dead_letter and write failure event</li>
 </ul>
+<h3 id="orchestration-pattern-execution"><a class="header" href="#orchestration-pattern-execution">Orchestration Pattern Execution</a></h3>
+<p>Supported typed pattern handlers:</p>
+<ul>
+<li>sequential</li>
+<li>concurrent fan-out + merge</li>
+<li>handoff</li>
+<li>orchestrator-routed</li>
+</ul>
+<p>Pattern invariants:</p>
+<ol>
+<li>Emit deterministic diagnostics with provider, status, pattern, and termination fields.</li>
+<li>Emit <code>guardrail_code=POLICY_VIOLATION</code> and <code>policy_reason</code> for policy failures.</li>
+<li>Persist <code>thread_id</code> in success diagnostics and outbox runtime events.</li>
+</ol>
+<p>Concurrent-specific invariants:</p>
+<ol>
+<li>Branch thread IDs follow <code>root::branch::&lt;branch_id&gt;</code> naming.</li>
+<li>Branch completion events are persisted per branch thread.</li>
+<li>Merge metadata is emitted via <code>ThreadMergeMetadata</code>.</li>
+</ol>
+<h3 id="grapheme-execution"><a class="header" href="#grapheme-execution">Grapheme Execution</a></h3>
+<p>Grapheme handlers execute policy-governed workflow jobs and classify policy failures into guardrail outcomes.</p>
+<h3 id="locus-memory-execution"><a class="header" href="#locus-memory-execution">Locus Memory Execution</a></h3>
+<p>Memory-enabled handlers project memory lineage metadata into runtime outbox events.
+Dedicated memory operation handlers support aggregate, transform, rollup, and schema workflows.</p>
+<h3 id="lineage-investigation"><a class="header" href="#lineage-investigation">Lineage Investigation</a></h3>
+<p>Selectors supported:</p>
+<ul>
+<li>job_id</li>
+<li>execution_id</li>
+<li>guardrail_code</li>
+<li>thread_id (+ optional ancestry expansion)</li>
+</ul>
+<p>Thread selector behavior:</p>
+<ol>
+<li>Branch selectors can include parent ancestry.</li>
+<li>Root selectors can include descendant branch contexts through outbox thread-prefix expansion.</li>
+<li>Results are constrained to selected job IDs for deterministic reports.</li>
+</ol>
 <h3 id="recurring-materialization"><a class="header" href="#recurring-materialization">Recurring Materialization</a></h3>
 <ol>
 <li>Scheduler leases recurring definitions that are due.</li>
@@ -314,14 +451,25 @@
 <li>causation_id</li>
 <li>trace_id</li>
 <li>job_id</li>
+<li>thread_id</li>
 <li>sttp_input_node_id</li>
 <li>sttp_output_node_id</li>
+</ul>
+<p>Optional lineage extensions:</p>
+<ul>
+<li>execution_id</li>
+<li>input_memory_query_id</li>
+<li>input_memory_query_fingerprint</li>
+<li>output_memory_node_id</li>
+<li>retrieval_path</li>
+<li>message</li>
 </ul>
 <h2 id="failure-semantics"><a class="header" href="#failure-semantics">Failure Semantics</a></h2>
 <ul>
 <li>At-least-once processing is expected.</li>
 <li>Lease expiration enables recovery after worker crash.</li>
 <li>Dead-letter records must retain full diagnostics and replay metadata.</li>
+<li>Policy violations are terminal and classified explicitly for lineage querying.</li>
 </ul>
 <h2 id="surrealdb-notes"><a class="header" href="#surrealdb-notes">SurrealDB Notes</a></h2>
 <ul>
@@ -338,6 +486,10 @@
 <li>Recurring materialization correctness with timezone and jitter.</li>
 <li>Idempotent replay behavior.</li>
 <li>STTP input/output reference continuity across continuation jobs.</li>
+<li>Orchestration pattern success and policy-failure parity across backends.</li>
+<li>Thread store parity for create/append/fork/lineage behavior.</li>
+<li>Thread-only lineage investigation parity for root and branch selectors.</li>
+<li>Middleware chain parity (ordering, failure propagation, cache, telemetry, interception).</li>
 </ol>
 <h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
 <ol>
@@ -351,11 +503,11 @@
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="runtime-v1-draft.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="architecture-overview.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="surrealdb-schema.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="runtime-builder.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -365,11 +517,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="runtime-v1-draft.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="architecture-overview.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="surrealdb-schema.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="runtime-builder.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

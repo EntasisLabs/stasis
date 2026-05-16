@@ -5,18 +5,27 @@ use async_trait::async_trait;
 use crate::application::orchestration::tool_registry::{InMemoryToolRegistry, StasisTool};
 use crate::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
 use crate::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
+use crate::application::runtime::chat_client_middleware::ChatClientMiddleware;
+use crate::application::runtime::concurrent_pattern_job_handler::ConcurrentPatternJobHandler;
+use crate::application::runtime::default_chat_middlewares::{
+    CacheChatMiddleware, LoggingChatMiddleware, TelemetryChatMiddleware,
+    ToolCallInterceptionChatMiddleware,
+};
 use crate::application::runtime::grapheme_echo_job_handler::GraphemeEchoJobHandler;
 use crate::application::runtime::grapheme_healthcheck_job_handler::GraphemeHealthcheckJobHandler;
 use crate::application::runtime::grapheme_job_handler::GraphemeJobHandler;
 use crate::application::runtime::grapheme_textops_job_handler::GraphemeTextOpsJobHandler;
+use crate::application::runtime::handoff_pattern_job_handler::HandoffPatternJobHandler;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::memory_aggregate_job_handler::MemoryAggregateJobHandler;
 use crate::application::runtime::memory_recall_job_handler::MemoryRecallJobHandler;
 use crate::application::runtime::memory_rollup_job_handler::MemoryRollupJobHandler;
 use crate::application::runtime::memory_schema_job_handler::MemorySchemaJobHandler;
 use crate::application::runtime::memory_transform_job_handler::MemoryTransformJobHandler;
+use crate::application::runtime::orchestrator_pattern_job_handler::OrchestratorPatternJobHandler;
 use crate::application::runtime::prompt_chat_job_handler::PromptChatJobHandler;
 use crate::application::runtime::runtime_factory::{RuntimeBackend, RuntimeComposition, RuntimeFactory};
+use crate::application::runtime::sequential_pattern_job_handler::SequentialPatternJobHandler;
 use crate::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
 use crate::domain::errors::Result;
 use crate::infrastructure::llm::genai_chat_client::GenaiChatClient;
@@ -25,10 +34,16 @@ use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
 use crate::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
 use crate::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
 use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
+use crate::infrastructure::runtime::in_memory_thread_store::InMemoryThreadStore;
+use crate::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
 use crate::ports::outbound::ai_chat_client::AiChatClient;
+use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
+use crate::ports::outbound::ai_chat_tool_interceptor::AiChatToolInterceptor;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use crate::ports::outbound::memory::memory_operations::MemoryOperations;
+use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
+use crate::ports::outbound::runtime::thread_store::ThreadStore;
 
 #[derive(Clone)]
 struct DelegatingJobHandler {
@@ -50,9 +65,11 @@ impl JobHandler for DelegatingJobHandler {
 pub struct StasisRuntimeBuilder {
     backend: RuntimeBackend,
     chat_client: Option<Arc<dyn AiChatClient>>,
+    chat_middlewares: Vec<Arc<dyn ChatClientMiddleware>>,
     memory_context_reader: Option<Arc<dyn MemoryContextReader>>,
     memory_context_writer: Option<Arc<dyn MemoryContextWriter>>,
     memory_operations: Option<Arc<dyn MemoryOperations>>,
+    thread_store: Option<Arc<dyn ThreadStore>>,
     enable_locus_memory: bool,
     tool_registry: InMemoryToolRegistry,
     include_grapheme_handlers: bool,
@@ -60,6 +77,7 @@ pub struct StasisRuntimeBuilder {
     include_tool_loop_handler: bool,
     include_agent_handlers: bool,
     include_memory_operation_handlers: bool,
+    include_orchestration_pattern_handlers: bool,
     extra_handlers: Vec<Arc<dyn JobHandler>>,
 }
 
@@ -68,9 +86,11 @@ impl StasisRuntimeBuilder {
         Self {
             backend,
             chat_client: None,
+            chat_middlewares: Vec::new(),
             memory_context_reader: None,
             memory_context_writer: None,
             memory_operations: None,
+            thread_store: None,
             enable_locus_memory: false,
             tool_registry: InMemoryToolRegistry::default(),
             include_grapheme_handlers: true,
@@ -78,6 +98,7 @@ impl StasisRuntimeBuilder {
             include_tool_loop_handler: true,
             include_agent_handlers: true,
             include_memory_operation_handlers: true,
+            include_orchestration_pattern_handlers: true,
             extra_handlers: Vec::new(),
         }
     }
@@ -85,6 +106,35 @@ impl StasisRuntimeBuilder {
     pub fn with_chat_client(mut self, chat_client: Arc<dyn AiChatClient>) -> Self {
         self.chat_client = Some(chat_client);
         self
+    }
+
+    pub fn with_chat_middleware<M: ChatClientMiddleware + 'static>(mut self, middleware: M) -> Self {
+        self.chat_middlewares.push(Arc::new(middleware));
+        self
+    }
+
+    pub fn with_chat_middleware_arc(mut self, middleware: Arc<dyn ChatClientMiddleware>) -> Self {
+        self.chat_middlewares.push(middleware);
+        self
+    }
+
+    pub fn with_logging_chat_middleware(self) -> Self {
+        self.with_chat_middleware(LoggingChatMiddleware)
+    }
+
+    pub fn with_telemetry_chat_middleware(self, metrics: Arc<dyn RuntimeMetrics>) -> Self {
+        self.with_chat_middleware(TelemetryChatMiddleware::new(metrics))
+    }
+
+    pub fn with_cache_chat_middleware(self, cache: Arc<dyn AiChatResponseCache>) -> Self {
+        self.with_chat_middleware(CacheChatMiddleware::new(cache))
+    }
+
+    pub fn with_tool_call_interception_chat_middleware(
+        self,
+        interceptor: Arc<dyn AiChatToolInterceptor>,
+    ) -> Self {
+        self.with_chat_middleware(ToolCallInterceptionChatMiddleware::new(interceptor))
     }
 
     pub fn with_memory_context_reader(mut self, memory_context_reader: Arc<dyn MemoryContextReader>) -> Self {
@@ -104,6 +154,11 @@ impl StasisRuntimeBuilder {
 
     pub fn with_memory_operations(mut self, memory_operations: Arc<dyn MemoryOperations>) -> Self {
         self.memory_operations = Some(memory_operations);
+        self
+    }
+
+    pub fn with_thread_store(mut self, thread_store: Arc<dyn ThreadStore>) -> Self {
+        self.thread_store = Some(thread_store);
         self
     }
 
@@ -142,15 +197,22 @@ impl StasisRuntimeBuilder {
         self
     }
 
+    pub fn without_orchestration_pattern_handlers(mut self) -> Self {
+        self.include_orchestration_pattern_handlers = false;
+        self
+    }
+
     pub async fn build(self) -> Result<RuntimeComposition> {
         let runtime = RuntimeFactory::build(self.backend).await?;
         let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
         let chat_client = self
             .chat_client
             .unwrap_or_else(|| Arc::new(GenaiChatClient::from_env()));
+        let chat_client = Self::compose_chat_client(chat_client, &self.chat_middlewares);
         let mut memory_context_reader = self.memory_context_reader;
         let mut memory_context_writer = self.memory_context_writer;
         let mut memory_operations = self.memory_operations;
+        let default_thread_store = self.thread_store.clone();
 
         if self.enable_locus_memory
             && (memory_context_reader.is_none() || memory_context_writer.is_none() || memory_operations.is_none())
@@ -171,6 +233,9 @@ impl StasisRuntimeBuilder {
 
         match &runtime {
             RuntimeComposition::InMemory(rt) => {
+                let thread_store = default_thread_store
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(InMemoryThreadStore::default()));
                 if self.include_grapheme_handlers {
                     rt.register_handler(GraphemeJobHandler::new(workflow_engine.clone()))?;
                     rt.register_handler(GraphemeHealthcheckJobHandler::new(workflow_engine.clone()))?;
@@ -220,6 +285,25 @@ impl StasisRuntimeBuilder {
                         rt.register_handler(MemoryRollupJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemorySchemaJobHandler::new(operations))?;
                     }
+                }
+
+                if self.include_orchestration_pattern_handlers {
+                    rt.register_handler(ConcurrentPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store.clone()),
+                    ))?;
+                    rt.register_handler(HandoffPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store.clone()),
+                    ))?;
+                    rt.register_handler(OrchestratorPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store.clone()),
+                    ))?;
+                    rt.register_handler(SequentialPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store),
+                    ))?;
                 }
 
                 for handler in &self.extra_handlers {
@@ -229,6 +313,9 @@ impl StasisRuntimeBuilder {
                 }
             }
             RuntimeComposition::Surreal(rt) => {
+                let thread_store = default_thread_store.clone().unwrap_or_else(|| {
+                    Arc::new(SurrealThreadStore::new(rt.job_store.db()))
+                });
                 if self.include_grapheme_handlers {
                     rt.register_handler(GraphemeJobHandler::new(workflow_engine.clone()))?;
                     rt.register_handler(GraphemeHealthcheckJobHandler::new(workflow_engine.clone()))?;
@@ -278,6 +365,25 @@ impl StasisRuntimeBuilder {
                         rt.register_handler(MemoryRollupJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemorySchemaJobHandler::new(operations))?;
                     }
+                }
+
+                if self.include_orchestration_pattern_handlers {
+                    rt.register_handler(ConcurrentPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store.clone()),
+                    ))?;
+                    rt.register_handler(HandoffPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store.clone()),
+                    ))?;
+                    rt.register_handler(OrchestratorPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store.clone()),
+                    ))?;
+                    rt.register_handler(SequentialPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store),
+                    ))?;
                 }
 
                 for handler in &self.extra_handlers {
@@ -289,5 +395,16 @@ impl StasisRuntimeBuilder {
         }
 
         Ok(runtime)
+    }
+
+    fn compose_chat_client(
+        chat_client: Arc<dyn AiChatClient>,
+        middlewares: &[Arc<dyn ChatClientMiddleware>],
+    ) -> Arc<dyn AiChatClient> {
+        let mut wrapped = chat_client;
+        for middleware in middlewares.iter().rev() {
+            wrapped = middleware.wrap(wrapped);
+        }
+        wrapped
     }
 }

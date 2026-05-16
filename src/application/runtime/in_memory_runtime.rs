@@ -189,6 +189,10 @@ impl InMemoryRuntime {
         self.outbox_store.list_by_execution_id(execution_id).await
     }
 
+    pub async fn list_lineage_events_by_thread_id(&self, thread_id: &str) -> Result<Vec<OutboxEvent>> {
+        self.outbox_store.list_by_thread_id(thread_id).await
+    }
+
     pub async fn investigate_lineage(&self, query: RuntimeLineageQuery) -> Result<RuntimeLineageReport> {
         InvestigateRuntimeLineage::new(self.job_attempt_store.clone(), self.outbox_store.clone())
             .execute(query)
@@ -622,6 +626,7 @@ impl InMemoryRuntime {
             retrieval_path,
         ) =
             Self::extract_memory_lineage_fields(diagnostics);
+        let thread_id = Self::extract_thread_id(diagnostics);
         let event = OutboxEvent {
             event_id: self.id_generator.next_id(&format!("evt-{}", job.id)),
             status: OutboxStatus::Pending,
@@ -632,6 +637,7 @@ impl InMemoryRuntime {
             event: RuntimeEvent {
                 event_type,
                 job_id: job.id.clone(),
+                thread_id,
                 correlation_id: job.correlation_id.clone(),
                 causation_id: job.causation_id.clone(),
                 trace_id: job.trace_id.clone(),
@@ -758,6 +764,14 @@ impl InMemoryRuntime {
             output_memory_node_id,
             retrieval_path,
         )
+    }
+
+    fn extract_thread_id(diagnostics: Option<&str>) -> Option<String> {
+        let raw = diagnostics?;
+        let json = serde_json::from_str::<JsonValue>(raw).ok()?;
+        json.get("thread_id")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string())
     }
 }
 
@@ -1041,6 +1055,44 @@ impl OutboxStore for InMemoryOutboxStore {
         let mut events: Vec<OutboxEvent> = state
             .values()
             .filter(|evt| evt.event.job_id == job_id)
+            .cloned()
+            .collect();
+
+        events.sort_by_key(|evt| evt.event.occurred_at);
+        Ok(events)
+    }
+
+    async fn list_by_thread_id(&self, thread_id: &str) -> Result<Vec<OutboxEvent>> {
+        let state = self
+            .events
+            .read()
+            .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+
+        let mut events: Vec<OutboxEvent> = state
+            .values()
+            .filter(|evt| evt.event.thread_id.as_deref() == Some(thread_id))
+            .cloned()
+            .collect();
+
+        events.sort_by_key(|evt| evt.event.occurred_at);
+        Ok(events)
+    }
+
+    async fn list_by_thread_prefix(&self, thread_prefix: &str) -> Result<Vec<OutboxEvent>> {
+        let state = self
+            .events
+            .read()
+            .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+
+        let mut events: Vec<OutboxEvent> = state
+            .values()
+            .filter(|evt| {
+                evt.event
+                    .thread_id
+                    .as_deref()
+                    .map(|thread_id| thread_id.starts_with(thread_prefix))
+                    .unwrap_or(false)
+            })
             .cloned()
             .collect();
 

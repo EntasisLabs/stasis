@@ -12,6 +12,8 @@ pub trait OutboxStore: Send + Sync {
     async fn get(&self, event_id: &str) -> Result<Option<OutboxEvent>>;
     async fn list_pending(&self, limit: usize) -> Result<Vec<OutboxEvent>>;
     async fn list_by_job_id(&self, job_id: &str) -> Result<Vec<OutboxEvent>>;
+    async fn list_by_thread_id(&self, thread_id: &str) -> Result<Vec<OutboxEvent>>;
+    async fn list_by_thread_prefix(&self, thread_prefix: &str) -> Result<Vec<OutboxEvent>>;
     async fn list_by_execution_id(&self, execution_id: &str) -> Result<Vec<OutboxEvent>>;
     async fn prune_non_pending_before(&self, cutoff: DateTime<Utc>) -> Result<usize>;
 }

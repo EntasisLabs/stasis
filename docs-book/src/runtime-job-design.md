@@ -1,8 +1,31 @@
 # Stasis Job Runtime Design
 
+## Document Metadata
+
+- Document Type: Reference Standard
+- Audience: Engineer, SRE, Architect
+- Stability: Evolving
+- Last Verified: 2026-05-15
+- Verified Against:
+	- src/application/runtime/in_memory_runtime.rs
+	- src/application/runtime/surreal_runtime.rs
+	- src/application/use_cases/investigate_runtime_lineage.rs
+	- src/domain/runtime/job.rs
+	- src/domain/runtime/job_attempt.rs
+	- src/domain/runtime/outbox.rs
+	- src/domain/runtime/thread.rs
+	- tests/runtime_backend_parity.rs
+
 ## Scope
 
-This document defines the implementation-facing design for a SurrealDB-backed distributed job runtime used by Stasis.
+This document defines the implementation-facing design for the distributed Stasis runtime across in-memory and Surreal backends.
+
+The runtime coordinates:
+- core job lifecycle and scheduling
+- orchestration pattern handlers
+- Grapheme workflow handlers
+- Locus memory-enabled handlers and memory operation workflows
+- thread-aware lineage and diagnostics
 
 ## Domain Concepts
 
@@ -14,6 +37,12 @@ Recurring Definition:
 
 Run Attempt:
 - Single execution attempt of a job with timing and outcome metadata.
+
+Thread:
+- First-class execution continuity record used by orchestration patterns.
+
+Thread Event:
+- Time-ordered event stream bound to a thread, including branch/merge lifecycle semantics.
 
 Lease:
 - Time-bounded ownership token for safe distributed processing.
@@ -46,6 +75,10 @@ Suggested fields:
 - finished_at: datetime | null
 - last_error: object | null
 
+Notes:
+- `sttp_input_node_id` and `sttp_output_node_id` preserve cross-job context continuity.
+- `correlation_id`, `causation_id`, and `trace_id` are mandatory observability fields.
+
 ### Recurring Definition
 
 Suggested fields:
@@ -62,6 +95,42 @@ Suggested fields:
 - lease_owner: string | null
 - lease_expires_at: datetime | null
 
+### Run Attempt Record
+
+Suggested fields:
+- attempt_id: string
+- job_id: string
+- attempt_number: int
+- worker_id: string
+- started_at: datetime
+- finished_at: datetime
+- outcome: enum(succeeded|retryable_failure|fatal_failure)
+- error_message: string | null
+- sttp_output_node_id: string | null
+- execution_id: string | null
+- guardrail_code: string | null
+- policy_reason: string | null
+- duration_ms: int | null
+- diagnostics: json string | null
+
+### Thread Record
+
+Suggested fields:
+- thread_id: string
+- parent_thread_id: string | null
+- branch_label: string | null
+- created_at: datetime
+- updated_at: datetime
+
+### Thread Event Record
+
+Suggested fields:
+- event_id: string
+- thread_id: string
+- event_kind: string
+- payload_ref: string
+- occurred_at: datetime
+
 ### Job Event (Outbox)
 
 Suggested fields:
@@ -75,12 +144,31 @@ Suggested fields:
 - created_at: datetime
 - published_at: datetime | null
 
+Runtime event envelope fields:
+- event_type
+- job_id
+- thread_id
+- correlation_id
+- causation_id
+- trace_id
+- sttp_input_node_id
+- sttp_output_node_id
+- execution_id
+- input_memory_query_id
+- input_memory_query_fingerprint
+- output_memory_node_id
+- retrieval_path
+- occurred_at
+- message
+
 ## Ports
 
 Outbound ports:
 - JobStore
+- JobAttemptStore
 - RecurringStore
 - OutboxStore
+- ThreadStore
 - EventPublisher
 - Clock
 - IdGenerator
@@ -88,6 +176,7 @@ Outbound ports:
 Inbound ports:
 - JobCommands
 - SchedulerCommands
+- LineageInvestigation
 
 ## Core Algorithms
 
@@ -106,10 +195,51 @@ Inbound ports:
 - persist result reference sttp_output_node_id
 - mark succeeded
 - write outbox events
+ - include standardized diagnostics for orchestration/policy outcomes when applicable
 5. On failure:
 - increment attempts
 - if attempts < max_attempts, compute backoff and re-enqueue
 - otherwise mark dead_letter and write failure event
+
+### Orchestration Pattern Execution
+
+Supported typed pattern handlers:
+- sequential
+- concurrent fan-out + merge
+- handoff
+- orchestrator-routed
+
+Pattern invariants:
+1. Emit deterministic diagnostics with provider, status, pattern, and termination fields.
+2. Emit `guardrail_code=POLICY_VIOLATION` and `policy_reason` for policy failures.
+3. Persist `thread_id` in success diagnostics and outbox runtime events.
+
+Concurrent-specific invariants:
+1. Branch thread IDs follow `root::branch::<branch_id>` naming.
+2. Branch completion events are persisted per branch thread.
+3. Merge metadata is emitted via `ThreadMergeMetadata`.
+
+### Grapheme Execution
+
+Grapheme handlers execute policy-governed workflow jobs and classify policy failures into guardrail outcomes.
+
+### Locus Memory Execution
+
+Memory-enabled handlers project memory lineage metadata into runtime outbox events.
+Dedicated memory operation handlers support aggregate, transform, rollup, and schema workflows.
+
+### Lineage Investigation
+
+Selectors supported:
+- job_id
+- execution_id
+- guardrail_code
+- thread_id (+ optional ancestry expansion)
+
+Thread selector behavior:
+1. Branch selectors can include parent ancestry.
+2. Root selectors can include descendant branch contexts through outbox thread-prefix expansion.
+3. Results are constrained to selected job IDs for deterministic reports.
 
 ### Recurring Materialization
 
@@ -133,14 +263,24 @@ Minimum event envelope:
 - causation_id
 - trace_id
 - job_id
+- thread_id
 - sttp_input_node_id
 - sttp_output_node_id
+
+Optional lineage extensions:
+- execution_id
+- input_memory_query_id
+- input_memory_query_fingerprint
+- output_memory_node_id
+- retrieval_path
+- message
 
 ## Failure Semantics
 
 - At-least-once processing is expected.
 - Lease expiration enables recovery after worker crash.
 - Dead-letter records must retain full diagnostics and replay metadata.
+- Policy violations are terminal and classified explicitly for lineage querying.
 
 ## SurrealDB Notes
 
@@ -157,6 +297,10 @@ Minimum event envelope:
 5. Recurring materialization correctness with timezone and jitter.
 6. Idempotent replay behavior.
 7. STTP input/output reference continuity across continuation jobs.
+8. Orchestration pattern success and policy-failure parity across backends.
+9. Thread store parity for create/append/fork/lineage behavior.
+10. Thread-only lineage investigation parity for root and branch selectors.
+11. Middleware chain parity (ordering, failure propagation, cache, telemetry, interception).
 
 ## Open Questions
 

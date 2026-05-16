@@ -1,5 +1,19 @@
 # SurrealDB Schema Specification
 
+## Document Metadata
+
+- Document Type: Reference Standard
+- Audience: Engineer, SRE, Architect
+- Stability: Evolving
+- Last Verified: 2026-05-15
+- Verified Against:
+  - src/infrastructure/runtime/surreal_job_store.rs
+  - src/infrastructure/runtime/surreal_job_attempt_store.rs
+  - src/infrastructure/runtime/surreal_outbox_store.rs
+  - src/infrastructure/runtime/surreal_recurring_store.rs
+  - src/infrastructure/runtime/surreal_thread_store.rs
+  - tests/runtime_backend_parity.rs
+
 ## Purpose
 
 Define the V1 SurrealDB schema and indexing strategy for Stasis durable job orchestration.
@@ -10,6 +24,7 @@ Define the V1 SurrealDB schema and indexing strategy for Stasis durable job orch
 2. Append-observable state transitions via events/outbox.
 3. Small hot rows with reference-based payload model.
 4. Explicit keys for correlation, causation, and idempotency.
+5. First-class thread and lineage metadata for orchestration observability.
 
 ## Logical Entity Relationship
 
@@ -18,6 +33,8 @@ erDiagram
   JOB ||--o{ JOB_ATTEMPT : has
   JOB ||--o{ OUTBOX_EVENT : emits
   RECURRING_DEFINITION ||--o{ JOB : materializes
+  THREAD ||--o{ THREAD_EVENT : has
+  THREAD ||--o{ THREAD : parent_of
   JOB ||--o| STTP_REFERENCE : consumes
   JOB ||--o| STTP_REFERENCE : produces
 
@@ -47,10 +64,15 @@ erDiagram
     string job_id FK
     int attempt_number
     datetime started_at
-    datetime ended_at
+    datetime finished_at
     string outcome
-    object error_payload
+    string error_message
+    string sttp_output_node_id
+    string execution_id
+    string guardrail_code
+    string policy_reason
     int duration_ms
+    string diagnostics
   }
 
   RECURRING_DEFINITION {
@@ -70,11 +92,42 @@ erDiagram
   OUTBOX_EVENT {
     string id PK
     string event_type
-    string aggregate_type
-    string aggregate_id
+    string job_id
+    string thread_id
+    string correlation_id
+    string causation_id
+    string trace_id
+    string sttp_input_node_id
+    string sttp_output_node_id
+    string execution_id
+    string input_memory_query_id
+    string input_memory_query_fingerprint
+    string output_memory_node_id
+    string retrieval_path
+    datetime occurred_at
+    string message
     string status
+    datetime next_attempt_at
+    string last_publish_error
+    int publish_attempts
     datetime created_at
     datetime published_at
+  }
+
+  THREAD {
+    string thread_id PK
+    string parent_thread_id
+    string branch_label
+    datetime created_at
+    datetime updated_at
+  }
+
+  THREAD_EVENT {
+    string event_id PK
+    string thread_id FK
+    string event_kind
+    string payload_ref
+    datetime occurred_at
   }
 
   STTP_REFERENCE {
@@ -130,19 +183,25 @@ DEFINE INDEX idx_job_trace ON TABLE job COLUMNS trace_id;
 DEFINE TABLE job_attempt SCHEMAFULL;
 DEFINE FIELD job_id ON TABLE job_attempt TYPE record<job>;
 DEFINE FIELD attempt_number ON TABLE job_attempt TYPE int;
+DEFINE FIELD worker_id ON TABLE job_attempt TYPE string;
 DEFINE FIELD started_at ON TABLE job_attempt TYPE datetime;
-DEFINE FIELD ended_at ON TABLE job_attempt TYPE option<datetime>;
+DEFINE FIELD finished_at ON TABLE job_attempt TYPE datetime;
 DEFINE FIELD outcome ON TABLE job_attempt TYPE string ASSERT $value INSIDE [
-  'running',
   'succeeded',
-  'failed',
-  'canceled'
+  'retryable_failure',
+  'fatal_failure'
 ];
-DEFINE FIELD error_payload ON TABLE job_attempt TYPE option<object>;
+DEFINE FIELD error_message ON TABLE job_attempt TYPE option<string>;
+DEFINE FIELD sttp_output_node_id ON TABLE job_attempt TYPE option<string>;
+DEFINE FIELD execution_id ON TABLE job_attempt TYPE option<string>;
+DEFINE FIELD guardrail_code ON TABLE job_attempt TYPE option<string>;
+DEFINE FIELD policy_reason ON TABLE job_attempt TYPE option<string>;
 DEFINE FIELD duration_ms ON TABLE job_attempt TYPE option<int>;
-DEFINE FIELD worker_id ON TABLE job_attempt TYPE option<string>;
+DEFINE FIELD diagnostics ON TABLE job_attempt TYPE option<string>;
 
 DEFINE INDEX idx_attempt_job ON TABLE job_attempt COLUMNS job_id, attempt_number;
+DEFINE INDEX idx_attempt_execution ON TABLE job_attempt COLUMNS execution_id;
+DEFINE INDEX idx_attempt_guardrail ON TABLE job_attempt COLUMNS guardrail_code;
 ```
 
 ```sql
@@ -168,10 +227,20 @@ DEFINE INDEX idx_recurring_lease_expiry ON TABLE recurring_definition COLUMNS le
 ```sql
 DEFINE TABLE outbox_event SCHEMAFULL;
 DEFINE FIELD event_type ON TABLE outbox_event TYPE string;
-DEFINE FIELD aggregate_type ON TABLE outbox_event TYPE string;
-DEFINE FIELD aggregate_id ON TABLE outbox_event TYPE string;
-DEFINE FIELD job_id ON TABLE outbox_event TYPE option<record<job>>;
-DEFINE FIELD payload ON TABLE outbox_event TYPE object;
+DEFINE FIELD job_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD thread_id ON TABLE outbox_event TYPE option<string>;
+DEFINE FIELD correlation_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD causation_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD trace_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD sttp_input_node_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD sttp_output_node_id ON TABLE outbox_event TYPE option<string>;
+DEFINE FIELD execution_id ON TABLE outbox_event TYPE option<string>;
+DEFINE FIELD input_memory_query_id ON TABLE outbox_event TYPE option<string>;
+DEFINE FIELD input_memory_query_fingerprint ON TABLE outbox_event TYPE option<string>;
+DEFINE FIELD output_memory_node_id ON TABLE outbox_event TYPE option<string>;
+DEFINE FIELD retrieval_path ON TABLE outbox_event TYPE option<string>;
+DEFINE FIELD occurred_at ON TABLE outbox_event TYPE datetime;
+DEFINE FIELD message ON TABLE outbox_event TYPE option<string>;
 DEFINE FIELD status ON TABLE outbox_event TYPE string ASSERT $value INSIDE [
   'pending',
   'published',
@@ -180,9 +249,33 @@ DEFINE FIELD status ON TABLE outbox_event TYPE string ASSERT $value INSIDE [
 DEFINE FIELD created_at ON TABLE outbox_event TYPE datetime DEFAULT time::now();
 DEFINE FIELD published_at ON TABLE outbox_event TYPE option<datetime>;
 DEFINE FIELD publish_attempts ON TABLE outbox_event TYPE int DEFAULT 0;
+DEFINE FIELD next_attempt_at ON TABLE outbox_event TYPE option<datetime>;
+DEFINE FIELD last_publish_error ON TABLE outbox_event TYPE option<string>;
 
-DEFINE INDEX idx_outbox_pending ON TABLE outbox_event COLUMNS status, created_at;
-DEFINE INDEX idx_outbox_aggregate ON TABLE outbox_event COLUMNS aggregate_type, aggregate_id;
+DEFINE INDEX idx_outbox_pending ON TABLE outbox_event COLUMNS status, occurred_at;
+DEFINE INDEX idx_outbox_job ON TABLE outbox_event COLUMNS job_id;
+DEFINE INDEX idx_outbox_execution ON TABLE outbox_event COLUMNS execution_id;
+DEFINE INDEX idx_outbox_thread ON TABLE outbox_event COLUMNS thread_id;
+
+DEFINE TABLE thread SCHEMAFULL;
+DEFINE FIELD thread_id ON TABLE thread TYPE string;
+DEFINE FIELD parent_thread_id ON TABLE thread TYPE option<string>;
+DEFINE FIELD branch_label ON TABLE thread TYPE option<string>;
+DEFINE FIELD created_at ON TABLE thread TYPE datetime;
+DEFINE FIELD updated_at ON TABLE thread TYPE datetime;
+
+DEFINE INDEX uq_thread_id ON TABLE thread COLUMNS thread_id UNIQUE;
+DEFINE INDEX idx_thread_parent ON TABLE thread COLUMNS parent_thread_id;
+
+DEFINE TABLE thread_event SCHEMAFULL;
+DEFINE FIELD event_id ON TABLE thread_event TYPE string;
+DEFINE FIELD thread_id ON TABLE thread_event TYPE string;
+DEFINE FIELD event_kind ON TABLE thread_event TYPE string;
+DEFINE FIELD payload_ref ON TABLE thread_event TYPE string;
+DEFINE FIELD occurred_at ON TABLE thread_event TYPE datetime;
+
+DEFINE INDEX uq_thread_event_id ON TABLE thread_event COLUMNS event_id UNIQUE;
+DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_id, occurred_at;
 ```
 
 ## Leasing and Concurrency Notes
@@ -190,6 +283,7 @@ DEFINE INDEX idx_outbox_aggregate ON TABLE outbox_event COLUMNS aggregate_type, 
 1. Lease updates should include compare-and-set predicates on state and current lease values.
 2. Worker heartbeat should only update rows leased by the same worker identity.
 3. Replay actions should emit explicit outbox events with causation lineage.
+4. Thread ancestry reads should primarily use indexed thread and thread_event access paths.
 
 ## Retention and Archival Strategy
 

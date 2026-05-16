@@ -2,13 +2,37 @@
 
 - [Introduction](./introduction.md)
 
-- [Architecture](./architecture-overview.md)
-- [Runtime V1 Draft](./runtime-v1-draft.md)
+## Architecture
+
+- [Architecture Overview](./architecture-overview.md)
+
+## Runtime
+
 - [Job Runtime Design](./runtime-job-design.md)
-- [Runtime Phase Plan](./runtime-phase-plan.md)
-- [Runtime Demo Plan](./runtime-demo-plan.md)
-- [Medousa Roadmap](./medousa-roadmap.md)
-- [Stasis Framework RFC](./stasis-framework-rfc.md)
-- [Stasis Framework Implementation Plan](./stasis-framework-implementation-plan.md)
+- [Runtime Builder and Wiring Guide](./runtime-builder.md)
+- [Recurring Jobs](./recurring-jobs.md)
+- [Retention and Replay](./retention-replay.md)
+- [Lineage and Observability](./lineage-observability.md)
+
+## Orchestration
+
+- [Orchestration Patterns](./orchestration-patterns.md)
+- [Chat Middleware Pipeline](./chat-middleware.md)
+- [Grapheme Workflow Handlers](./grapheme-workflow-handlers.md)
+- [Agent Coordination](./agent-coordination.md)
+
+## Memory
+
+- [Memory Operations Reference](./memory-operations.md)
+
+## Integration
+
+- [Extension Points and Port Contracts](./extension-points.md)
+
+## Data Contracts
+
 - [SurrealDB Schema](./surrealdb-schema.md)
+
+## Decision Records
+
 - [Architecture Decision Records](./adr.md)

@@ -1,0 +1,599 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Grapheme Workflow Handlers - Stasis Architecture Book</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-2459343d.css">
+        <link rel="stylesheet" href="css/chrome-ae938929.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-bf0615f1.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-155ab26a.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Stasis Architecture Book</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="grapheme-workflow-handlers"><a class="header" href="#grapheme-workflow-handlers">Grapheme Workflow Handlers</a></h1>
+<h2 id="document-metadata"><a class="header" href="#document-metadata">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, Architect, SRE</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/runtime/grapheme_job_handler.rs</li>
+<li>src/application/runtime/grapheme_echo_job_handler.rs</li>
+<li>src/application/runtime/grapheme_healthcheck_job_handler.rs</li>
+<li>src/application/runtime/grapheme_textops_job_handler.rs</li>
+<li>src/infrastructure/runtime/grapheme_sdk_workflow_engine.rs</li>
+<li>src/ports/outbound/runtime/workflow_engine.rs</li>
+<li>src/application/runtime/stasis_runtime_builder.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose"><a class="header" href="#purpose">Purpose</a></h2>
+<p>Document the Grapheme Workflow plane in Stasis — a policy-governed scripted workflow execution layer backed by <code>grapheme-sdk</code>. Covers the four registered job handlers, source resolution semantics, guardrail policy, diagnostics contracts, and tracing behavior.</p>
+<h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
+<p>Grapheme jobs are one of the three capability planes in Stasis (alongside the orchestration core and Locus memory). They execute compiled Grapheme-language scripts inside a sandboxed engine with enforced policy limits. This document does not cover AI prompt handlers or Locus memory handlers.</p>
+<h2 id="invariants"><a class="header" href="#invariants">Invariants</a></h2>
+<ol>
+<li>Every Grapheme job inherits durable retry, dead-letter, and lineage semantics from the Stasis runtime.</li>
+<li>Policy validation runs before engine execution. Any guardrail violation produces a <code>FatalFailure</code> — no retry is attempted.</li>
+<li>All four handlers share a single <code>WorkflowEngine</code> port instance wired at builder time via <code>GraphemeSdkWorkflowEngine</code>.</li>
+<li><code>execution_id</code> in success diagnostics is the <code>grapheme:&lt;artifact_id&gt;</code> value returned by the engine.</li>
+<li>Every attempt record receives a <code>diagnostics</code> JSON blob regardless of outcome — success and failure paths both emit structured diagnostics.</li>
+<li>Grapheme handlers are enabled by default in <code>StasisRuntimeBuilder</code>. They can be suppressed with <code>.without_grapheme_handlers()</code> for tests or specialized runtimes that do not need workflow execution.</li>
+</ol>
+<hr>
+<h2 id="system-context"><a class="header" href="#system-context">System Context</a></h2>
+<p>Grapheme handlers sit between the Stasis worker runtime and the <code>grapheme-sdk</code> engine. The <code>WorkflowEngine</code> port decouples the handler layer from the SDK, allowing the engine implementation to be swapped in tests.</p>
+<pre><code>Worker Runtime
+    │
+    ▼
+[GraphemeJobHandler / specialised handler]
+    │
+    ▼
+WorkflowEngine port
+    │
+    ▼
+GraphemeSdkWorkflowEngine (infrastructure adapter)
+    │  ├── validate_source()  ← guardrail pre-check
+    │  ├── tokio::time::timeout()  ← execution timeout enforcement
+    │  └── GraphemeEngine::execute_source()  ← grapheme-sdk
+    ▼
+WorkflowExecutionOutput { run_id: "grapheme:&lt;artifact_id&gt;" }
+</code></pre>
+<hr>
+<h2 id="runtime-builder-wiring"><a class="header" href="#runtime-builder-wiring">Runtime Builder Wiring</a></h2>
+<p>Grapheme handlers are registered by <code>StasisRuntimeBuilder</code> when <code>include_grapheme_handlers</code> is <code>true</code> (the default).</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    // Grapheme handlers are on by default. Suppress with:
+    // .without_grapheme_handlers()
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<p>All four handlers share one <code>GraphemeSdkWorkflowEngine</code> instance created at build time:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+rt.register_handler(GraphemeJobHandler::new(workflow_engine.clone()))?;
+rt.register_handler(GraphemeHealthcheckJobHandler::new(workflow_engine.clone()))?;
+rt.register_handler(GraphemeEchoJobHandler::new(workflow_engine.clone()))?;
+rt.register_handler(GraphemeTextOpsJobHandler::new(workflow_engine.clone()))?;
+<span class="boring">}</span></code></pre>
+<p>To use custom guardrails:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::infrastructure::runtime::grapheme_sdk_workflow_engine::{
+    GraphemeSdkWorkflowEngine, GraphemeWorkflowGuardrails,
+};
+use std::time::Duration;
+
+let guardrails = GraphemeWorkflowGuardrails {
+    allowed_imports: vec!["grapheme/core".to_string(), "grapheme/text".to_string()],
+    max_source_bytes: 64 * 1024,
+    execution_timeout: Duration::from_secs(1),
+    max_steps: Some(5_000),
+    max_call_depth: Some(8),
+};
+
+let engine = Arc::new(GraphemeSdkWorkflowEngine::with_guardrails(guardrails));
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="guardrails-policy"><a class="header" href="#guardrails-policy">Guardrails Policy</a></h2>
+<p><code>GraphemeWorkflowGuardrails</code> is evaluated by <code>GraphemeSdkWorkflowEngine</code> before the script reaches the engine. All violations produce a <code>POLICY_VIOLATION</code>-class guardrail code in the attempt diagnostics.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Guardrail</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>allowed_imports</code></td><td><code>["grapheme/core"]</code></td><td>Import statements not in this list are rejected</td></tr>
+<tr><td><code>max_source_bytes</code></td><td><code>131,072</code> (128 KiB)</td><td>Source exceeding this limit is rejected before parsing</td></tr>
+<tr><td><code>execution_timeout</code></td><td><code>2 seconds</code></td><td>Execution aborted if the engine does not return within this duration</td></tr>
+<tr><td><code>max_steps</code></td><td><code>10,000</code></td><td>Maximum engine evaluation steps (passed to <code>GraphemeEngine::builder</code>)</td></tr>
+<tr><td><code>max_call_depth</code></td><td><code>16</code></td><td>Maximum call stack depth (passed to <code>GraphemeEngine::builder</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="import-validation"><a class="header" href="#import-validation">Import validation</a></h3>
+<p>The engine extracts all <code>import</code> statements and checks each module path against <code>allowed_imports</code>. Matching is exact string equality.</p>
+<pre><code class="language-grapheme">import core from "grapheme/core"   // ✓ allowed by default
+import text from "grapheme/text"   // ✗ rejected unless added to allowed_imports
+</code></pre>
+<h3 id="execution-model"><a class="header" href="#execution-model">Execution model</a></h3>
+<p>Scripts run inside <code>tokio::task::spawn_blocking</code> to prevent blocking the async runtime. The <code>tokio::time::timeout</code> wrapper enforces <code>execution_timeout</code> at the async boundary — the underlying synchronous engine call is cancelled if the deadline is exceeded.</p>
+<hr>
+<h2 id="source-resolution"><a class="header" href="#source-resolution">Source Resolution</a></h2>
+<p><code>GraphemeJobHandler</code> resolves the script source from <code>job.payload_ref</code> using a prefix convention:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Prefix</th><th>Resolution</th></tr>
+</thead>
+<tbody>
+<tr><td><code>grapheme:inline:&lt;source&gt;</code></td><td>Uses the text after the prefix as the script source</td></tr>
+<tr><td><code>grapheme:file:&lt;path&gt;</code></td><td>Reads the script from the filesystem path</td></tr>
+<tr><td><em>(no prefix)</em></td><td>Treated as a bare inline source string</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Examples:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Inline source
+job.payload_ref = "grapheme:inline:import core from \"grapheme/core\"\nquery Ping { core.echo(message: \"ping\") { state { current } } }".to_string();
+
+// File source
+job.payload_ref = "grapheme:file:/opt/workflows/summarize.gql".to_string();
+
+// Bare inline (no prefix)
+job.payload_ref = "import core from \"grapheme/core\"\nquery Ping { core.echo(message: \"ok\") { state { current } } }".to_string();
+<span class="boring">}</span></code></pre>
+<p>Specialised handlers (<code>GraphemeEchoJobHandler</code>, <code>GraphemeHealthcheckJobHandler</code>, <code>GraphemeTextOpsJobHandler</code>) synthesise a <code>grapheme:inline:</code> source internally — callers submit a structured JSON payload, not raw source.</p>
+<hr>
+<h2 id="handler-reference"><a class="header" href="#handler-reference">Handler Reference</a></h2>
+<h3 id="graphemejobhandler"><a class="header" href="#graphemejobhandler">GraphemeJobHandler</a></h3>
+<p><strong>Job type:</strong> <code>workflow.grapheme</code></p>
+<p>The base Grapheme handler. Accepts <code>payload_ref</code> directly (inline, file, or bare). Used when the caller constructs the Grapheme source or file path themselves.</p>
+<p><strong>Payload:</strong> raw <code>payload_ref</code> string (source or path, see Source Resolution above)</p>
+<p><strong>When to use:</strong> Integration points that produce Grapheme scripts at runtime or need to reference a script file on disk.</p>
+<hr>
+<h3 id="graphemeechojobhandler"><a class="header" href="#graphemeechojobhandler">GraphemeEchoJobHandler</a></h3>
+<p><strong>Job type:</strong> <code>workflow.grapheme.echo</code></p>
+<p>Accepts a JSON payload with a <code>message</code> field, synthesises an inline <code>core.echo</code> Grapheme script, and delegates to <code>GraphemeJobHandler</code>. Used for integration tests, health verification, and pipeline smoke checks.</p>
+<p><strong>Payload:</strong></p>
+<pre><code class="language-json">{
+  "message": "string"
+}
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Constraint</th></tr>
+</thead>
+<tbody>
+<tr><td><code>message</code></td><td>Required. Non-empty. Maximum 512 characters.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Guardrail behavior:</strong></p>
+<ul>
+<li>Empty or whitespace <code>message</code> → <code>POLICY_VIOLATION</code> / FatalFailure (no retry)</li>
+<li><code>message</code> over 512 characters → <code>POLICY_VIOLATION</code> / FatalFailure</li>
+</ul>
+<p><strong>Generated source:</strong></p>
+<pre><code class="language-grapheme">import core from "grapheme/core"
+
+query Echo {
+  core.echo(message: "&lt;sanitised message&gt;") {
+    state { current }
+  }
+}
+</code></pre>
+<p>Quote characters in the message are replaced with single quotes. Newlines and carriage returns are replaced with spaces before source generation.</p>
+<p><strong>Example job submission:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::orchestration::stasis_workflow_job_builder::StasisWorkflowJobBuilder;
+
+let job = StasisWorkflowJobBuilder::new("job-echo-1")
+    .with_job_type("workflow.grapheme.echo")
+    .with_payload_ref(serde_json::to_string(&amp;serde_json::json!({
+        "message": "hello from grapheme"
+    }))?)
+    .with_scheduled_at(Utc::now())
+    .build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<hr>
+<h3 id="graphemehealthcheckjobhandler"><a class="header" href="#graphemehealthcheckjobhandler">GraphemeHealthcheckJobHandler</a></h3>
+<p><strong>Job type:</strong> <code>workflow.grapheme.healthcheck</code></p>
+<p>Validates that the Grapheme engine is operational by executing an inline echo script. Accepts an optional message string in <code>payload_ref</code>. Falls back to <code>"stasis grapheme healthcheck"</code> when the payload is empty.</p>
+<p><strong>Payload:</strong> plain string in <code>payload_ref</code> (not JSON). Empty payload is valid.</p>
+<p><strong>When to use:</strong> Kubernetes/platform liveness probes, runtime startup verification, deployment validation.</p>
+<p><strong>Example job submission:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let job = StasisWorkflowJobBuilder::new("job-healthcheck-1")
+    .with_job_type("workflow.grapheme.healthcheck")
+    .with_payload_ref("deployment check".to_string())
+    .with_scheduled_at(Utc::now())
+    .build();
+<span class="boring">}</span></code></pre>
+<hr>
+<h3 id="graphemetextopsjobhandler"><a class="header" href="#graphemetextopsjobhandler">GraphemeTextOpsJobHandler</a></h3>
+<p><strong>Job type:</strong> <code>workflow.grapheme.textops</code></p>
+<p>Runs a text transformation pipeline (<code>summarize</code> or <code>extract_keywords</code>) over input text using a Grapheme-backed engine execution. Validates payload structure and limits before reaching the engine.</p>
+<p><strong>Payload:</strong></p>
+<pre><code class="language-json">{
+  "mode": "summarize" | "extract_keywords",
+  "text": "string",
+  "max_items": "number | null"
+}
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Constraint</th></tr>
+</thead>
+<tbody>
+<tr><td><code>mode</code></td><td>Required. One of <code>summarize</code> or <code>extract_keywords</code>.</td></tr>
+<tr><td><code>text</code></td><td>Required. Non-empty. Maximum 4,096 characters.</td></tr>
+<tr><td><code>max_items</code></td><td>Optional. Integer 1–10. Defaults to <code>3</code> when omitted.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Guardrail behavior:</strong></p>
+<ul>
+<li>Empty or whitespace <code>text</code> → <code>POLICY_VIOLATION</code> / FatalFailure</li>
+<li><code>text</code> over 4,096 characters → <code>POLICY_VIOLATION</code> / FatalFailure</li>
+<li><code>max_items</code> outside 1–10 range → <code>POLICY_VIOLATION</code> / FatalFailure</li>
+<li>Invalid JSON payload → <code>POLICY_VIOLATION</code> / FatalFailure</li>
+</ul>
+<p><strong>Mode semantics:</strong></p>
+<ul>
+<li><code>summarize</code> — extracts the first <code>max_items</code> sentences (<code>.</code>, <code>!</code>, <code>?</code> boundaries). If no sentence boundaries are found, returns the first 24 whitespace-delimited tokens.</li>
+<li><code>extract_keywords</code> — tokenises by non-alphanumeric boundaries, drops stop words and tokens shorter than 4 characters, ranks by frequency (descending), then alphabetically, and returns the top <code>max_items</code> keywords as a comma-separated string.</li>
+</ul>
+<p><strong>Example job submission:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let job = StasisWorkflowJobBuilder::new("job-textops-1")
+    .with_job_type("workflow.grapheme.textops")
+    .with_payload_ref(serde_json::to_string(&amp;serde_json::json!({
+        "mode": "extract_keywords",
+        "text": "Stasis provides durable orchestration for AI-driven workflows with policy enforcement.",
+        "max_items": 5
+    }))?)
+    .with_scheduled_at(Utc::now())
+    .build();
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="diagnostics-and-tracing"><a class="header" href="#diagnostics-and-tracing">Diagnostics and Tracing</a></h2>
+<p>Every Grapheme job attempt records a structured JSON <code>diagnostics</code> blob in the attempt record. This applies to both success and failure outcomes.</p>
+<h3 id="success-diagnostics"><a class="header" href="#success-diagnostics">Success diagnostics</a></h3>
+<pre><code class="language-json">{
+  "provider": "grapheme-sdk",
+  "status": "success",
+  "duration_ms": 45,
+  "execution_id": "grapheme:abc123def456"
+}
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>provider</code></td><td>Always <code>"grapheme-sdk"</code></td></tr>
+<tr><td><code>status</code></td><td>Always <code>"success"</code></td></tr>
+<tr><td><code>duration_ms</code></td><td>Wall-clock milliseconds from engine invocation to completion</td></tr>
+<tr><td><code>execution_id</code></td><td><code>grapheme:&lt;artifact_id&gt;</code> returned by the engine</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="failure-diagnostics"><a class="header" href="#failure-diagnostics">Failure diagnostics</a></h3>
+<pre><code class="language-json">{
+  "provider": "grapheme-sdk",
+  "status": "failure",
+  "duration_ms": 12,
+  "guardrail_code": "IMPORT_NOT_ALLOWLISTED",
+  "policy_reason": "grapheme policy violation: import 'grapheme/text' is not allowlisted"
+}
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>provider</code></td><td>Always <code>"grapheme-sdk"</code></td></tr>
+<tr><td><code>status</code></td><td>Always <code>"failure"</code></td></tr>
+<tr><td><code>duration_ms</code></td><td>Wall-clock milliseconds until failure was detected</td></tr>
+<tr><td><code>guardrail_code</code></td><td>Classified failure code (see table below)</td></tr>
+<tr><td><code>policy_reason</code></td><td>Full error message — only present when <code>guardrail_code</code> indicates a policy violation</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="guardrail-codes"><a class="header" href="#guardrail-codes">Guardrail codes</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Code</th><th>Trigger condition</th></tr>
+</thead>
+<tbody>
+<tr><td><code>IMPORT_NOT_ALLOWLISTED</code></td><td>An <code>import</code> statement references a module not in <code>allowed_imports</code></td></tr>
+<tr><td><code>SOURCE_TOO_LARGE</code></td><td>Source byte length exceeds <code>max_source_bytes</code></td></tr>
+<tr><td><code>EXECUTION_TIMEOUT</code></td><td>Engine execution did not complete within <code>execution_timeout</code></td></tr>
+<tr><td><code>INVALID_TIMEOUT_CONFIG</code></td><td><code>execution_timeout</code> is zero (misconfiguration guard)</td></tr>
+<tr><td><code>POLICY_VIOLATION</code></td><td>Payload-level validation failure in specialised handlers, or generic engine policy error</td></tr>
+<tr><td><code>EXECUTION_ERROR</code></td><td>Engine returned a non-policy error (e.g. parse error, runtime panic)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="lineage"><a class="header" href="#lineage">Lineage</a></h3>
+<p>All Grapheme job attempts are recorded in the durable attempt store and are reachable via <code>InvestigateRuntimeLineage</code>. The <code>execution_id</code> (<code>grapheme:&lt;artifact_id&gt;</code>) from success diagnostics is the stable reference to the engine artifact for a given execution.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::use_cases::investigate_runtime_lineage::InvestigateRuntimeLineage;
+
+let lineage = investigate.for_job("job-echo-1").await?;
+for attempt in &amp;lineage.attempts {
+    println!("attempt {} diagnostics: {}", attempt.attempt_number, attempt.diagnostics.as_deref().unwrap_or("none"));
+}
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="extending-the-workflowengine-port"><a class="header" href="#extending-the-workflowengine-port">Extending the WorkflowEngine Port</a></h2>
+<p>The <code>WorkflowEngine</code> port in <code>src/ports/outbound/runtime/workflow_engine.rs</code> decouples all handlers from <code>grapheme-sdk</code>. In-process test doubles can substitute the real engine:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use std::sync::Arc;
+use async_trait::async_trait;
+use stasis::ports::outbound::runtime::workflow_engine::{WorkflowEngine, WorkflowExecutionOutput};
+use stasis::domain::errors::Result;
+
+struct StubWorkflowEngine;
+
+#[async_trait]
+impl WorkflowEngine for StubWorkflowEngine {
+    async fn execute_grapheme_source(&amp;self, _source: &amp;str) -&gt; Result&lt;WorkflowExecutionOutput&gt; {
+        Ok(WorkflowExecutionOutput {
+            run_id: "grapheme:stub-001".to_string(),
+        })
+    }
+}
+<span class="boring">}</span></code></pre>
+<p>Pass it to any handler directly:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let engine = Arc::new(StubWorkflowEngine);
+let handler = GraphemeEchoJobHandler::new(engine);
+<span class="boring">}</span></code></pre>
+<p>This is the pattern used in tests that call <code>.without_grapheme_handlers()</code> and register a custom handler instead of the default <code>GraphemeSdkWorkflowEngine</code>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="chat-middleware.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="agent-coordination.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="chat-middleware.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="agent-coordination.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-c2a407aa.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid-eefea253.min.js"></script>
+        <script src="mermaid-init-ccf746f1.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

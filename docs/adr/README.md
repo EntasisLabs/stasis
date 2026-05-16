@@ -1,5 +1,15 @@
 # Architecture Decision Records
 
+## Document Metadata
+
+- Document Type: Architecture Standard
+- Audience: Engineer, Security, Architect
+- Stability: Stable
+- Last Verified: 2026-05-15
+- Verified Against:
+  - docs/adr/README.md
+  - docs-book/src/adr.md
+
 ## Purpose
 
 Track major architectural decisions with rationale, alternatives, and consequences.

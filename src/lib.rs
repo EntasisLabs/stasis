@@ -14,7 +14,11 @@ pub mod prelude {
     };
     pub use crate::application::orchestration::agent_session_payload::{
         AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode,
-        AgentTurnJobPayload, PromptJobPayload, ToolLoopJobPayload,
+        AgentTurnJobPayload, ConcurrentBranchJobPayload,
+        ConcurrentPatternJobPayload, HandoffPatternJobPayload,
+        HandoffTurnJobPayload, OrchestratorPatternJobPayload,
+        OrchestratorRouteJobPayload, PromptJobPayload,
+        SequentialPatternJobPayload, SequentialStageJobPayload, ToolLoopJobPayload,
     };
     pub use crate::application::orchestration::stasis_workflow_job_builder::StasisWorkflowJobBuilder;
     pub use crate::application::orchestration::prompt_pipeline::{
@@ -28,9 +32,20 @@ pub mod prelude {
     pub use crate::application::runtime::grapheme_healthcheck_job_handler::GraphemeHealthcheckJobHandler;
     pub use crate::application::runtime::grapheme_job_handler::GraphemeJobHandler;
     pub use crate::application::runtime::grapheme_textops_job_handler::GraphemeTextOpsJobHandler;
+    pub use crate::application::runtime::chat_client_middleware::ChatClientMiddleware;
+    pub use crate::application::runtime::default_chat_middlewares::{
+        deterministic_cache_key, CacheChatMiddleware, LoggingChatMiddleware,
+        TelemetryChatMiddleware, ToolCallInterceptionChatMiddleware,
+        CHAT_CACHE_HIT_TOTAL, CHAT_CACHE_MISS_TOTAL, CHAT_DURATION_MS,
+        CHAT_ERRORS_TOTAL, CHAT_REQUESTS_TOTAL, CHAT_TOOL_CALLS_TOTAL,
+    };
     pub use crate::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
     pub use crate::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
     pub use crate::application::runtime::prompt_chat_job_handler::PromptChatJobHandler;
+    pub use crate::application::runtime::concurrent_pattern_job_handler::ConcurrentPatternJobHandler;
+    pub use crate::application::runtime::handoff_pattern_job_handler::HandoffPatternJobHandler;
+    pub use crate::application::runtime::orchestrator_pattern_job_handler::OrchestratorPatternJobHandler;
+    pub use crate::application::runtime::sequential_pattern_job_handler::SequentialPatternJobHandler;
     pub use crate::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
     pub use crate::application::runtime::in_memory_runtime::{
         InMemoryRuntime, JobExecutionOutcome, JobHandler,
@@ -53,6 +68,9 @@ pub mod prelude {
     pub use crate::domain::runtime::outbox::{
         OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
     };
+    pub use crate::domain::runtime::thread::{
+        NewThread, NewThreadEvent, ThreadEvent, ThreadMergeMetadata, ThreadRecord,
+    };
     pub use crate::infrastructure::llm::genai_chat_client::GenaiChatClient;
     pub use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
     pub use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
@@ -62,15 +80,23 @@ pub mod prelude {
     pub use crate::infrastructure::runtime::system_clock::SystemClock;
     pub use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
     pub use crate::infrastructure::runtime::in_memory_runtime_metrics::InMemoryRuntimeMetrics;
+    pub use crate::infrastructure::runtime::in_memory_ai_chat_response_cache::InMemoryAiChatResponseCache;
+    pub use crate::infrastructure::runtime::in_memory_thread_store::InMemoryThreadStore;
     pub use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
+    pub use crate::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
     pub use crate::ports::outbound::runtime::clock::Clock;
     pub use crate::ports::outbound::runtime::id_generator::IdGenerator;
     pub use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
     pub use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
+    pub use crate::ports::outbound::runtime::thread_store::ThreadStore;
     pub use crate::ports::outbound::runtime::workflow_engine::{
         WorkflowEngine, WorkflowExecutionOutput,
     };
     pub use crate::ports::outbound::ai_chat_client::AiChatClient;
+    pub use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
+    pub use crate::ports::outbound::ai_chat_tool_interceptor::{
+        AiChatToolInterceptor, AiToolCallEnvelope,
+    };
     pub use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
     pub use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
     pub use crate::ports::outbound::memory::memory_models::{

@@ -29,6 +29,10 @@ impl SurrealJobStore {
         }
     }
 
+    pub fn db(&self) -> Surreal<Db> {
+        self.db.clone()
+    }
+
     fn port_err(prefix: &str, err: impl std::fmt::Display) -> StasisError {
         StasisError::PortFailure(format!("{prefix}: {err}"))
     }

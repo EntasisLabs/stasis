@@ -28,6 +28,7 @@ pub enum RuntimeEventType {
 pub struct RuntimeEvent {
     pub event_type: RuntimeEventType,
     pub job_id: String,
+    pub thread_id: Option<String>,
     pub correlation_id: String,
     pub causation_id: String,
     pub trace_id: String,

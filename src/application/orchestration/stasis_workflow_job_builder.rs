@@ -3,7 +3,9 @@ use chrono::{DateTime, Utc};
 use crate::application::orchestration::agent_session_payload::{
     AgentSessionJobPayload, AgentTurnJobPayload, MemoryAggregateJobPayload,
     MemoryRecallJobPayload, MemoryRollupJobPayload, MemorySchemaJobPayload,
-    MemoryTransformJobPayload, PromptJobPayload, ToolLoopJobPayload,
+    MemoryTransformJobPayload, PromptJobPayload, ConcurrentPatternJobPayload,
+    HandoffPatternJobPayload, OrchestratorPatternJobPayload,
+    SequentialPatternJobPayload, ToolLoopJobPayload,
 };
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::{BackoffPolicy, NewJob};
@@ -17,6 +19,10 @@ const JOB_TYPE_MEMORY_AGGREGATE: &str = "workflow.stasis.memory.aggregate";
 const JOB_TYPE_MEMORY_TRANSFORM: &str = "workflow.stasis.memory.transform";
 const JOB_TYPE_MEMORY_ROLLUP: &str = "workflow.stasis.memory.rollup";
 const JOB_TYPE_MEMORY_SCHEMA: &str = "workflow.stasis.memory.schema";
+const JOB_TYPE_ORCHESTRATION_SEQUENTIAL: &str = "workflow.stasis.orchestration.sequential";
+const JOB_TYPE_ORCHESTRATION_CONCURRENT: &str = "workflow.stasis.orchestration.concurrent";
+const JOB_TYPE_ORCHESTRATION_HANDOFF: &str = "workflow.stasis.orchestration.handoff";
+const JOB_TYPE_ORCHESTRATION_ORCHESTRATOR: &str = "workflow.stasis.orchestration.orchestrator";
 
 #[derive(Clone, Debug)]
 pub struct StasisWorkflowJobBuilder {
@@ -76,6 +82,50 @@ impl StasisWorkflowJobBuilder {
 
     pub fn for_memory_schema(id: impl Into<String>, payload: &MemorySchemaJobPayload) -> Result<Self> {
         Self::new(id.into(), JOB_TYPE_MEMORY_SCHEMA, payload.to_payload_ref()?)
+    }
+
+    pub fn for_orchestration_sequential(
+        id: impl Into<String>,
+        payload: &SequentialPatternJobPayload,
+    ) -> Result<Self> {
+        Self::new(
+            id.into(),
+            JOB_TYPE_ORCHESTRATION_SEQUENTIAL,
+            payload.to_payload_ref()?,
+        )
+    }
+
+    pub fn for_orchestration_concurrent(
+        id: impl Into<String>,
+        payload: &ConcurrentPatternJobPayload,
+    ) -> Result<Self> {
+        Self::new(
+            id.into(),
+            JOB_TYPE_ORCHESTRATION_CONCURRENT,
+            payload.to_payload_ref()?,
+        )
+    }
+
+    pub fn for_orchestration_handoff(
+        id: impl Into<String>,
+        payload: &HandoffPatternJobPayload,
+    ) -> Result<Self> {
+        Self::new(
+            id.into(),
+            JOB_TYPE_ORCHESTRATION_HANDOFF,
+            payload.to_payload_ref()?,
+        )
+    }
+
+    pub fn for_orchestration_orchestrator(
+        id: impl Into<String>,
+        payload: &OrchestratorPatternJobPayload,
+    ) -> Result<Self> {
+        Self::new(
+            id.into(),
+            JOB_TYPE_ORCHESTRATION_ORCHESTRATOR,
+            payload.to_payload_ref()?,
+        )
     }
 
     fn new(id: String, job_type: &'static str, payload_ref: String) -> Result<Self> {

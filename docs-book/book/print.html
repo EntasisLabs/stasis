@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-045a4fad.js";
+            window.path_to_searchindex_js = "searchindex-bf0615f1.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-6f90a697.js"></script>
+        <script src="toc-155ab26a.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -195,6 +195,22 @@
 <p>This book documents V1 runtime architecture and operational semantics. It does not define production deployment topology or UI dashboard design.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="stasis-architecture-overview"><a class="header" href="#stasis-architecture-overview">Stasis Architecture Overview</a></h1>
+<h2 id="document-metadata"><a class="header" href="#document-metadata">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Architecture Standard</li>
+<li>Audience: Engineer, SRE, Security, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/runtime/stasis_runtime_builder.rs</li>
+<li>src/application/use_cases/investigate_runtime_lineage.rs</li>
+<li>src/domain/runtime/outbox.rs</li>
+<li>tests/runtime_backend_parity.rs</li>
+<li>tests/architecture_conformance.rs</li>
+</ul>
+</li>
+</ul>
 <h2 id="document-status"><a class="header" href="#document-status">Document Status</a></h2>
 <ul>
 <li>Version: v1-draft</li>
@@ -202,7 +218,13 @@
 <li>Scope: Runtime architecture for durable job orchestration in Stasis</li>
 </ul>
 <h2 id="executive-summary"><a class="header" href="#executive-summary">Executive Summary</a></h2>
-<p>Stasis uses DDD + Hexagonal architecture and an event-driven runtime backed by SurrealDB. The runtime is designed for at-least-once job execution with deterministic idempotent handlers, durable leases, retries, and dead-letter handling.</p>
+<p>Stasis uses DDD + Hexagonal architecture and an event-driven runtime backed by SurrealDB. The platform now composes three capability planes under one framework boundary:</p>
+<ol>
+<li>Stasis orchestration/runtime core for durable job execution and observability.</li>
+<li>Grapheme workflow execution for policy-governed workflow jobs.</li>
+<li>Locus memory services for retrieval, storage, transform, rollup, and schema workflows.</li>
+</ol>
+<p>The runtime is designed for at-least-once job execution with deterministic idempotent handlers, durable leases, retries, dead-letter handling, replay, and lineage investigation.</p>
 <h2 id="architecture-principles"><a class="header" href="#architecture-principles">Architecture Principles</a></h2>
 <ol>
 <li>Durable by default: critical execution state lives in SurrealDB.</li>
@@ -210,7 +232,34 @@
 <li>Local determinism: chain-of-responsibility pipelines are used inside a single job execution path.</li>
 <li>Context by reference: STTP node IDs are passed across job boundaries rather than large payload blobs.</li>
 <li>Replaceable infrastructure: adapters implement ports so backends can evolve without domain rewrites.</li>
+<li>Capability isolation with unified contracts: Grapheme and Locus integrations remain behind Stasis ports and handlers.</li>
+<li>Diagnostics and lineage by default: orchestration handlers emit standardized diagnostics and outbox lineage metadata.</li>
 </ol>
+<h2 id="capability-planes"><a class="header" href="#capability-planes">Capability Planes</a></h2>
+<h3 id="1-stasis-core-plane"><a class="header" href="#1-stasis-core-plane">1) Stasis Core Plane</a></h3>
+<ul>
+<li>Runtime lifecycle: enqueue, lease, run, retry, dead-letter, replay.</li>
+<li>Orchestration patterns: sequential, concurrent, handoff, orchestrator-routed.</li>
+<li>Middleware chain: logging, telemetry, cache, and tool-call interception.</li>
+<li>Outbox/eventing: durable event capture and publish retries.</li>
+</ul>
+<h3 id="2-grapheme-plane"><a class="header" href="#2-grapheme-plane">2) Grapheme Plane</a></h3>
+<ul>
+<li>Workflow job execution via Grapheme-backed handlers.</li>
+<li>Guardrail-aware outcomes with policy classification in attempt diagnostics.</li>
+<li>Runtime parity behavior across in-memory and Surreal backends.</li>
+</ul>
+<h3 id="3-locus-plane"><a class="header" href="#3-locus-plane">3) Locus Plane</a></h3>
+<ul>
+<li>Memory recall/write and advanced memory operations (aggregate, transform, rollup, schema).</li>
+<li>Memory lineage projection into runtime outbox metadata:
+<ul>
+<li>input query IDs/fingerprint</li>
+<li>output memory node IDs</li>
+<li>retrieval path</li>
+</ul>
+</li>
+</ul>
 <h2 id="system-context"><a class="header" href="#system-context">System Context</a></h2>
 <pre class="mermaid">flowchart LR
   subgraph Clients
@@ -265,22 +314,53 @@
 <li>Leases jobs, executes handlers, heartbeats, and writes results.</li>
 </ul>
 <ol start="4">
+<li>Orchestration Pattern Handlers</li>
+</ol>
+<ul>
+<li>Typed orchestration handlers for sequential, concurrent, handoff, and orchestrator-routed flows.</li>
+<li>Thread-bound execution with explicit <code>thread_id</code> support and branch lineage semantics.</li>
+</ul>
+<ol start="5">
+<li>Grapheme Workflow Handlers</li>
+</ol>
+<ul>
+<li>Grapheme echo, textops, healthcheck, and guarded workflow execution.</li>
+</ul>
+<ol start="6">
+<li>Locus Memory Handlers</li>
+</ol>
+<ul>
+<li>Recall/write-aware prompt and tool-loop flows.</li>
+<li>Dedicated memory operation job handlers for aggregate/transform/rollup/schema.</li>
+</ul>
+<ol start="7">
 <li>Recurring Scheduler</li>
 </ol>
 <ul>
 <li>Materializes due recurring definitions into executable jobs.</li>
 </ul>
-<ol start="5">
+<ol start="8">
 <li>Outbox Publisher</li>
 </ol>
 <ul>
 <li>Publishes committed runtime/domain events safely after persistence.</li>
 </ul>
-<ol start="6">
+<ol start="9">
 <li>Observability Pipeline</li>
 </ol>
 <ul>
 <li>Emits metrics and traces keyed by correlation and trace IDs.</li>
+<li>Preserves attempt diagnostics with guardrail and orchestration metadata.</li>
+<li>Supports lineage investigation by job, execution, guardrail code, and thread selectors.</li>
+</ul>
+<h2 id="thread-and-lineage-model"><a class="header" href="#thread-and-lineage-model">Thread and Lineage Model</a></h2>
+<p>Stasis treats thread continuity as a first-class concern for orchestration observability.</p>
+<ul>
+<li><code>thread_id</code> is persisted in runtime lineage events.</li>
+<li>Concurrent branches create descendant thread IDs using <code>root::branch::&lt;branch_id&gt;</code> semantics.</li>
+<li>Concurrent completions emit explicit merge metadata (<code>ThreadMergeMetadata</code>) in diagnostics.</li>
+<li>Lineage investigation supports thread-only selectors with optional ancestry expansion.</li>
+<li>Root thread selectors can expand descendant branch lineage through indexed thread-prefix queries.</li>
 </ul>
 <h2 id="request-and-execution-flow"><a class="header" href="#request-and-execution-flow">Request and Execution Flow</a></h2>
 <pre class="mermaid">sequenceDiagram
@@ -338,6 +418,7 @@
 <li>asynchronous tool operations</li>
 <li>delayed and recurring workloads</li>
 <li>saga compensation and replay</li>
+<li>cross-plane interactions (Stasis core + Grapheme + Locus)</li>
 </ul>
 <h2 id="reliability-and-slo-controls"><a class="header" href="#reliability-and-slo-controls">Reliability and SLO Controls</a></h2>
 <ul>
@@ -370,183 +451,47 @@
 
 <h2 id="related-documents"><a class="header" href="#related-documents">Related Documents</a></h2>
 <ul>
-<li>Runtime draft: <a href="#stasis-v1-runtime-draft">Runtime V1 Draft</a></li>
+<li>Runtime draft: <a href="runtime-v1-draft.html">Runtime V1 Draft</a></li>
 <li>Job runtime design: <a href="#stasis-job-runtime-design">Job Runtime Design</a></li>
 <li>Database schema: <a href="#surrealdb-schema-specification">SurrealDB Schema</a></li>
+<li>Stasis framework RFC: <a href="stasis-framework-rfc.html">Stasis Framework RFC</a></li>
+<li>Stasis implementation plan: <a href="stasis-framework-implementation-plan.html">Stasis Framework Implementation Plan</a></li>
+<li>Locus integration plan: <a href="locus-integration-rfc-plan.html">Locus Integration RFC and Plan</a></li>
+<li>Microsoft-stack parity roadmap: <a href="microsoft-stack-parity-roadmap.html">Microsoft-Stack Parity Roadmap</a></li>
+<li>Microsoft-stack compatibility matrix: <a href="microsoft-stack-compatibility-matrix.html">Microsoft-Stack Compatibility Matrix</a></li>
 <li>ADR index: <a href="#architecture-decision-records">Architecture Decision Records</a></li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="stasis-v1-runtime-draft"><a class="header" href="#stasis-v1-runtime-draft">Stasis V1 Runtime Draft</a></h1>
-<h2 id="purpose"><a class="header" href="#purpose">Purpose</a></h2>
-<p>Define a V1 execution runtime for Stasis that combines DDD + Hexagonal boundaries with a durable, SurrealDB-backed job system inspired by Hangfire.</p>
-<h2 id="problem-statement"><a class="header" href="#problem-statement">Problem Statement</a></h2>
-<p>Linear orchestration is insufficient for agentic workloads that require retries, fan-out, delayed execution, and recurring automation. We need a durable runtime that can survive process crashes while preserving context continuity via STTP references.</p>
-<h2 id="v1-goals"><a class="header" href="#v1-goals">V1 Goals</a></h2>
-<ol>
-<li>Durable job queue backed by SurrealDB.</li>
-<li>Event-driven orchestration between agent capabilities.</li>
-<li>STTP node references as job input and output handles.</li>
-<li>Reliable retry, leasing, and dead-letter behavior.</li>
-<li>Recurring job support for periodic automations such as web scraping.</li>
-</ol>
-<h2 id="v1-non-goals"><a class="header" href="#v1-non-goals">V1 Non-Goals</a></h2>
-<ol>
-<li>Multi-region consensus scheduling.</li>
-<li>Exactly-once delivery guarantees.</li>
-<li>Full visual dashboard UI.</li>
-<li>Hard real-time execution guarantees.</li>
-</ol>
-<h2 id="architecture-summary"><a class="header" href="#architecture-summary">Architecture Summary</a></h2>
-<ul>
-<li>Local request path uses chain-of-responsibility for deterministic per-request processing.</li>
-<li>Cross-capability orchestration uses jobs and events.</li>
-<li>Jobs are persisted in SurrealDB and processed by leased workers.</li>
-<li>Large payloads are not inlined in job records; STTP and artifact references are stored instead.</li>
-</ul>
-<h2 id="job-classes"><a class="header" href="#job-classes">Job Classes</a></h2>
-<ol>
-<li>Fire-and-forget</li>
-<li>Delayed</li>
-<li>Recurring</li>
-<li>Continuation</li>
-<li>Compensation</li>
-</ol>
-<h2 id="runtime-components-1"><a class="header" href="#runtime-components-1">Runtime Components</a></h2>
-<ol>
-<li>Job Store</li>
-</ol>
-<ul>
-<li>Persists jobs, state transitions, leases, and run metadata.</li>
-</ul>
-<ol start="2">
-<li>Queue Dispatcher</li>
-</ol>
-<ul>
-<li>Polls due jobs by queue and attempts lease acquisition.</li>
-</ul>
-<ol start="3">
-<li>Worker Runtime</li>
-</ol>
-<ul>
-<li>Executes jobs, updates heartbeats, records outputs, and emits events.</li>
-</ul>
-<ol start="4">
-<li>Scheduler</li>
-</ol>
-<ul>
-<li>Materializes recurring definitions into concrete jobs.</li>
-</ul>
-<ol start="5">
-<li>Event Bus Port</li>
-</ol>
-<ul>
-<li>Publishes domain and runtime events to internal subscribers.</li>
-</ul>
-<ol start="6">
-<li>Outbox Port</li>
-</ol>
-<ul>
-<li>Ensures event publication consistency with state transitions.</li>
-</ul>
-<h2 id="state-machine"><a class="header" href="#state-machine">State Machine</a></h2>
-<p>Allowed states:</p>
-<ul>
-<li>enqueued</li>
-<li>leased</li>
-<li>running</li>
-<li>succeeded</li>
-<li>failed</li>
-<li>dead_letter</li>
-<li>canceled</li>
-</ul>
-<p>Core transitions:</p>
-<ul>
-<li>enqueued -&gt; leased</li>
-<li>leased -&gt; running</li>
-<li>running -&gt; succeeded</li>
-<li>running -&gt; failed</li>
-<li>failed -&gt; enqueued (retry)</li>
-<li>failed -&gt; dead_letter (attempts exhausted)</li>
-</ul>
-<h2 id="reliability-model"><a class="header" href="#reliability-model">Reliability Model</a></h2>
-<ul>
-<li>Delivery semantics: at-least-once.</li>
-<li>Safety mechanism: idempotency_key and deterministic handlers.</li>
-<li>Recovery: lease timeout and heartbeat expiry trigger re-queue.</li>
-<li>Failure handling: bounded retries + exponential backoff + dead-letter queue.</li>
-</ul>
-<h2 id="sttp-and-locus-integration"><a class="header" href="#sttp-and-locus-integration">STTP and Locus Integration</a></h2>
-<p>Input contract:</p>
-<ul>
-<li>sttp_input_node_id references the memory/context node required for execution.</li>
-</ul>
-<p>Output contract:</p>
-<ul>
-<li>sttp_output_node_id references a node produced by the worker after execution.</li>
-</ul>
-<p>A2A continuity:</p>
-<ul>
-<li>Downstream jobs consume the upstream output reference via correlation identifiers.</li>
-</ul>
-<h2 id="recurring-jobs-v1"><a class="header" href="#recurring-jobs-v1">Recurring Jobs V1</a></h2>
-<p>Recurring definition fields:</p>
-<ul>
-<li>recurring_id</li>
-<li>cron_expr</li>
-<li>timezone</li>
-<li>jitter_seconds</li>
-<li>enabled</li>
-<li>next_run_at</li>
-<li>last_run_at</li>
-</ul>
-<p>Execution rule:</p>
-<ul>
-<li>Scheduler acquires a lease, computes due definitions, and enqueues concrete jobs.</li>
-<li>Jitter spreads schedule bursts to avoid thundering-herd effects.</li>
-</ul>
-<h2 id="observability-v1"><a class="header" href="#observability-v1">Observability V1</a></h2>
-<p>Metrics:</p>
-<ul>
-<li>queue_depth by queue</li>
-<li>job_latency_ms</li>
-<li>success_rate</li>
-<li>retry_count</li>
-<li>dead_letter_count</li>
-<li>lease_timeout_recoveries</li>
-</ul>
-<p>Tracing fields:</p>
-<ul>
-<li>correlation_id</li>
-<li>causation_id</li>
-<li>trace_id</li>
-</ul>
-<h2 id="security-and-safety"><a class="header" href="#security-and-safety">Security and Safety</a></h2>
-<ol>
-<li>Avoid inline secret payloads in job rows.</li>
-<li>Encrypt sensitive artifacts outside job metadata if needed.</li>
-<li>Enforce queue-specific execution policies.</li>
-<li>Keep worker behavior idempotent.</li>
-</ol>
-<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
-<ol>
-<li>Implement in-memory behavior-compatible adapters for fast tests.</li>
-<li>Implement SurrealDB job store and recurring definitions.</li>
-<li>Add worker lease and heartbeat loop.</li>
-<li>Add outbox and event bus publication path.</li>
-<li>Enable recurring jobs for web scraping workloads.</li>
-</ol>
-<h2 id="exit-criteria-for-v1"><a class="header" href="#exit-criteria-for-v1">Exit Criteria for V1</a></h2>
-<ol>
-<li>Jobs survive process restart and continue execution.</li>
-<li>Retry/backoff/dead-letter paths are validated by tests.</li>
-<li>Recurring jobs materialize and execute on schedule.</li>
-<li>STTP input/output references are persisted per run.</li>
-<li>Event-driven continuation jobs are demonstrated end-to-end.</li>
-</ol>
-<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="stasis-job-runtime-design"><a class="header" href="#stasis-job-runtime-design">Stasis Job Runtime Design</a></h1>
+<h2 id="document-metadata-1"><a class="header" href="#document-metadata-1">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, SRE, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/runtime/in_memory_runtime.rs</li>
+<li>src/application/runtime/surreal_runtime.rs</li>
+<li>src/application/use_cases/investigate_runtime_lineage.rs</li>
+<li>src/domain/runtime/job.rs</li>
+<li>src/domain/runtime/job_attempt.rs</li>
+<li>src/domain/runtime/outbox.rs</li>
+<li>src/domain/runtime/thread.rs</li>
+<li>tests/runtime_backend_parity.rs</li>
+</ul>
+</li>
+</ul>
 <h2 id="scope-1"><a class="header" href="#scope-1">Scope</a></h2>
-<p>This document defines the implementation-facing design for a SurrealDB-backed distributed job runtime used by Stasis.</p>
+<p>This document defines the implementation-facing design for the distributed Stasis runtime across in-memory and Surreal backends.</p>
+<p>The runtime coordinates:</p>
+<ul>
+<li>core job lifecycle and scheduling</li>
+<li>orchestration pattern handlers</li>
+<li>Grapheme workflow handlers</li>
+<li>Locus memory-enabled handlers and memory operation workflows</li>
+<li>thread-aware lineage and diagnostics</li>
+</ul>
 <h2 id="domain-concepts"><a class="header" href="#domain-concepts">Domain Concepts</a></h2>
 <p>Job:</p>
 <ul>
@@ -559,6 +504,14 @@
 <p>Run Attempt:</p>
 <ul>
 <li>Single execution attempt of a job with timing and outcome metadata.</li>
+</ul>
+<p>Thread:</p>
+<ul>
+<li>First-class execution continuity record used by orchestration patterns.</li>
+</ul>
+<p>Thread Event:</p>
+<ul>
+<li>Time-ordered event stream bound to a thread, including branch/merge lifecycle semantics.</li>
 </ul>
 <p>Lease:</p>
 <ul>
@@ -591,6 +544,11 @@
 <li>finished_at: datetime | null</li>
 <li>last_error: object | null</li>
 </ul>
+<p>Notes:</p>
+<ul>
+<li><code>sttp_input_node_id</code> and <code>sttp_output_node_id</code> preserve cross-job context continuity.</li>
+<li><code>correlation_id</code>, <code>causation_id</code>, and <code>trace_id</code> are mandatory observability fields.</li>
+</ul>
 <h3 id="recurring-definition"><a class="header" href="#recurring-definition">Recurring Definition</a></h3>
 <p>Suggested fields:</p>
 <ul>
@@ -607,6 +565,42 @@
 <li>lease_owner: string | null</li>
 <li>lease_expires_at: datetime | null</li>
 </ul>
+<h3 id="run-attempt-record"><a class="header" href="#run-attempt-record">Run Attempt Record</a></h3>
+<p>Suggested fields:</p>
+<ul>
+<li>attempt_id: string</li>
+<li>job_id: string</li>
+<li>attempt_number: int</li>
+<li>worker_id: string</li>
+<li>started_at: datetime</li>
+<li>finished_at: datetime</li>
+<li>outcome: enum(succeeded|retryable_failure|fatal_failure)</li>
+<li>error_message: string | null</li>
+<li>sttp_output_node_id: string | null</li>
+<li>execution_id: string | null</li>
+<li>guardrail_code: string | null</li>
+<li>policy_reason: string | null</li>
+<li>duration_ms: int | null</li>
+<li>diagnostics: json string | null</li>
+</ul>
+<h3 id="thread-record"><a class="header" href="#thread-record">Thread Record</a></h3>
+<p>Suggested fields:</p>
+<ul>
+<li>thread_id: string</li>
+<li>parent_thread_id: string | null</li>
+<li>branch_label: string | null</li>
+<li>created_at: datetime</li>
+<li>updated_at: datetime</li>
+</ul>
+<h3 id="thread-event-record"><a class="header" href="#thread-event-record">Thread Event Record</a></h3>
+<p>Suggested fields:</p>
+<ul>
+<li>event_id: string</li>
+<li>thread_id: string</li>
+<li>event_kind: string</li>
+<li>payload_ref: string</li>
+<li>occurred_at: datetime</li>
+</ul>
 <h3 id="job-event-outbox"><a class="header" href="#job-event-outbox">Job Event (Outbox)</a></h3>
 <p>Suggested fields:</p>
 <ul>
@@ -620,12 +614,32 @@
 <li>created_at: datetime</li>
 <li>published_at: datetime | null</li>
 </ul>
+<p>Runtime event envelope fields:</p>
+<ul>
+<li>event_type</li>
+<li>job_id</li>
+<li>thread_id</li>
+<li>correlation_id</li>
+<li>causation_id</li>
+<li>trace_id</li>
+<li>sttp_input_node_id</li>
+<li>sttp_output_node_id</li>
+<li>execution_id</li>
+<li>input_memory_query_id</li>
+<li>input_memory_query_fingerprint</li>
+<li>output_memory_node_id</li>
+<li>retrieval_path</li>
+<li>occurred_at</li>
+<li>message</li>
+</ul>
 <h2 id="ports"><a class="header" href="#ports">Ports</a></h2>
 <p>Outbound ports:</p>
 <ul>
 <li>JobStore</li>
+<li>JobAttemptStore</li>
 <li>RecurringStore</li>
 <li>OutboxStore</li>
+<li>ThreadStore</li>
 <li>EventPublisher</li>
 <li>Clock</li>
 <li>IdGenerator</li>
@@ -634,6 +648,7 @@
 <ul>
 <li>JobCommands</li>
 <li>SchedulerCommands</li>
+<li>LineageInvestigation</li>
 </ul>
 <h2 id="core-algorithms"><a class="header" href="#core-algorithms">Core Algorithms</a></h2>
 <h3 id="lease-acquisition"><a class="header" href="#lease-acquisition">Lease Acquisition</a></h3>
@@ -653,6 +668,7 @@
 <li>persist result reference sttp_output_node_id</li>
 <li>mark succeeded</li>
 <li>write outbox events</li>
+<li>include standardized diagnostics for orchestration/policy outcomes when applicable</li>
 </ul>
 <ol start="5">
 <li>On failure:</li>
@@ -662,6 +678,45 @@
 <li>if attempts &lt; max_attempts, compute backoff and re-enqueue</li>
 <li>otherwise mark dead_letter and write failure event</li>
 </ul>
+<h3 id="orchestration-pattern-execution"><a class="header" href="#orchestration-pattern-execution">Orchestration Pattern Execution</a></h3>
+<p>Supported typed pattern handlers:</p>
+<ul>
+<li>sequential</li>
+<li>concurrent fan-out + merge</li>
+<li>handoff</li>
+<li>orchestrator-routed</li>
+</ul>
+<p>Pattern invariants:</p>
+<ol>
+<li>Emit deterministic diagnostics with provider, status, pattern, and termination fields.</li>
+<li>Emit <code>guardrail_code=POLICY_VIOLATION</code> and <code>policy_reason</code> for policy failures.</li>
+<li>Persist <code>thread_id</code> in success diagnostics and outbox runtime events.</li>
+</ol>
+<p>Concurrent-specific invariants:</p>
+<ol>
+<li>Branch thread IDs follow <code>root::branch::&lt;branch_id&gt;</code> naming.</li>
+<li>Branch completion events are persisted per branch thread.</li>
+<li>Merge metadata is emitted via <code>ThreadMergeMetadata</code>.</li>
+</ol>
+<h3 id="grapheme-execution"><a class="header" href="#grapheme-execution">Grapheme Execution</a></h3>
+<p>Grapheme handlers execute policy-governed workflow jobs and classify policy failures into guardrail outcomes.</p>
+<h3 id="locus-memory-execution"><a class="header" href="#locus-memory-execution">Locus Memory Execution</a></h3>
+<p>Memory-enabled handlers project memory lineage metadata into runtime outbox events.
+Dedicated memory operation handlers support aggregate, transform, rollup, and schema workflows.</p>
+<h3 id="lineage-investigation"><a class="header" href="#lineage-investigation">Lineage Investigation</a></h3>
+<p>Selectors supported:</p>
+<ul>
+<li>job_id</li>
+<li>execution_id</li>
+<li>guardrail_code</li>
+<li>thread_id (+ optional ancestry expansion)</li>
+</ul>
+<p>Thread selector behavior:</p>
+<ol>
+<li>Branch selectors can include parent ancestry.</li>
+<li>Root selectors can include descendant branch contexts through outbox thread-prefix expansion.</li>
+<li>Results are constrained to selected job IDs for deterministic reports.</li>
+</ol>
 <h3 id="recurring-materialization"><a class="header" href="#recurring-materialization">Recurring Materialization</a></h3>
 <ol>
 <li>Scheduler leases recurring definitions that are due.</li>
@@ -684,14 +739,25 @@
 <li>causation_id</li>
 <li>trace_id</li>
 <li>job_id</li>
+<li>thread_id</li>
 <li>sttp_input_node_id</li>
 <li>sttp_output_node_id</li>
+</ul>
+<p>Optional lineage extensions:</p>
+<ul>
+<li>execution_id</li>
+<li>input_memory_query_id</li>
+<li>input_memory_query_fingerprint</li>
+<li>output_memory_node_id</li>
+<li>retrieval_path</li>
+<li>message</li>
 </ul>
 <h2 id="failure-semantics"><a class="header" href="#failure-semantics">Failure Semantics</a></h2>
 <ul>
 <li>At-least-once processing is expected.</li>
 <li>Lease expiration enables recovery after worker crash.</li>
 <li>Dead-letter records must retain full diagnostics and replay metadata.</li>
+<li>Policy violations are terminal and classified explicitly for lineage querying.</li>
 </ul>
 <h2 id="surrealdb-notes"><a class="header" href="#surrealdb-notes">SurrealDB Notes</a></h2>
 <ul>
@@ -708,6 +774,10 @@
 <li>Recurring materialization correctness with timezone and jitter.</li>
 <li>Idempotent replay behavior.</li>
 <li>STTP input/output reference continuity across continuation jobs.</li>
+<li>Orchestration pattern success and policy-failure parity across backends.</li>
+<li>Thread store parity for create/append/fork/lineage behavior.</li>
+<li>Thread-only lineage investigation parity for root and branch selectors.</li>
+<li>Middleware chain parity (ordering, failure propagation, cache, telemetry, interception).</li>
 </ol>
 <h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
 <ol>
@@ -717,8 +787,2536 @@
 <li>Backoff policy defaults per queue class.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
+<h1 id="runtime-builder-and-wiring-guide"><a class="header" href="#runtime-builder-and-wiring-guide">Runtime Builder and Wiring Guide</a></h1>
+<h2 id="document-metadata-2"><a class="header" href="#document-metadata-2">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/runtime/stasis_runtime_builder.rs</li>
+<li>src/application/runtime/runtime_factory.rs</li>
+<li>src/infrastructure/runtime/in_memory_thread_store.rs</li>
+<li>src/infrastructure/runtime/surreal_thread_store.rs</li>
+<li>src/infrastructure/memory/locus_node_store_factory.rs</li>
+<li>src/infrastructure/llm/genai_chat_client.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose"><a class="header" href="#purpose">Purpose</a></h2>
+<p>Document the <code>StasisRuntimeBuilder</code> API — the single composition point for wiring a fully-functional Stasis runtime. Covers backend selection, handler sets, middleware, tool registration, memory integration, and extensibility.</p>
+<h2 id="invariants"><a class="header" href="#invariants">Invariants</a></h2>
+<ol>
+<li><code>StasisRuntimeBuilder::new(backend)</code> is the only supported entry point for runtime composition.</li>
+<li>All handler groups are <strong>included by default</strong>. Use <code>without_*</code> methods to opt out.</li>
+<li>If no chat client is provided, <code>GenaiChatClient::from_env()</code> is used — model selection is then driven by environment variables.</li>
+<li>If <code>.with_locus_memory()</code> is called and no explicit memory ports are provided, an in-memory Locus store is bootstrapped automatically.</li>
+<li>Middleware is applied in registration order — first registered wraps outermost.</li>
+<li><code>build()</code> is async and must be awaited. It wires all handlers into the runtime before returning <code>RuntimeComposition</code>.</li>
+</ol>
+<hr>
+<h2 id="backend-selection"><a class="header" href="#backend-selection">Backend Selection</a></h2>
+<p><code>RuntimeBackend</code> controls the persistence layer for jobs, attempts, outbox, and threads.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variant</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>RuntimeBackend::InMemory</code></td><td>In-process store. No persistence across restarts. Use for testing and development.</td></tr>
+<tr><td><code>RuntimeBackend::Surreal</code></td><td>SurrealDB-backed durable store. Use for production.</td></tr>
+</tbody>
+</table>
+</div>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::prelude::*;
+
+// Development / testing
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory);
+
+// Production
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::Surreal);
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="minimal-working-setup"><a class="header" href="#minimal-working-setup">Minimal Working Setup</a></h2>
+<p>This composes a runtime with all default handlers and <code>GenaiChatClient::from_env()</code> as the chat client:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<p>All handler groups are active. No middleware is applied beyond the chat client itself.</p>
+<hr>
+<h2 id="chat-client"><a class="header" href="#chat-client">Chat Client</a></h2>
+<p>Provide a custom <code>AiChatClient</code> implementation or rely on the default:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Custom client
+let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    .with_chat_client(Arc::new(MyCustomChatClient::new()))
+    .build()
+    .await?;
+
+// Default: GenaiChatClient::from_env()
+let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="chat-middleware"><a class="header" href="#chat-middleware">Chat Middleware</a></h2>
+<p>Middleware wraps the chat client in registration order. See <a href="#chat-middleware-pipeline">Chat Middleware Pipeline</a> for behavioral details on each middleware.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    .with_logging_chat_middleware()
+    .with_telemetry_chat_middleware(metrics.clone())
+    .with_cache_chat_middleware(Arc::new(InMemoryAiChatResponseCache::default()))
+    .with_tool_call_interception_chat_middleware(Arc::new(my_interceptor))
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<p>Convenience methods:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Method</th><th>Middleware registered</th></tr>
+</thead>
+<tbody>
+<tr><td><code>.with_logging_chat_middleware()</code></td><td><code>LoggingChatMiddleware</code></td></tr>
+<tr><td><code>.with_telemetry_chat_middleware(metrics)</code></td><td><code>TelemetryChatMiddleware</code></td></tr>
+<tr><td><code>.with_cache_chat_middleware(cache)</code></td><td><code>CacheChatMiddleware</code></td></tr>
+<tr><td><code>.with_tool_call_interception_chat_middleware(interceptor)</code></td><td><code>ToolCallInterceptionChatMiddleware</code></td></tr>
+<tr><td><code>.with_chat_middleware(m)</code></td><td>Any <code>ChatClientMiddleware</code> implementation</td></tr>
+<tr><td><code>.with_chat_middleware_arc(arc)</code></td><td>Pre-boxed <code>Arc&lt;dyn ChatClientMiddleware&gt;</code></td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="tool-registration"><a class="header" href="#tool-registration">Tool Registration</a></h2>
+<p>Tools are registered on the builder and made available to <code>workflow.stasis.tool_loop</code> and <code>workflow.stasis.agent_*</code> handlers.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    .with_tool(MyWebSearchTool)?
+    .with_tool(MyDatabaseTool)?
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<p>Tools must implement the <code>StasisTool</code> trait. Input schema validation (required fields, types, enums, <code>additionalProperties</code>) is enforced automatically at invocation time.</p>
+<hr>
+<h2 id="memory-integration"><a class="header" href="#memory-integration">Memory Integration</a></h2>
+<h3 id="automatic-locus-bootstrap"><a class="header" href="#automatic-locus-bootstrap">Automatic Locus bootstrap</a></h3>
+<p><code>.with_locus_memory()</code> bootstraps an in-memory Locus store and wires <code>LocusContextReader</code>, <code>LocusContextWriter</code>, and <code>LocusMemoryOperations</code> if none are provided explicitly:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    .with_locus_memory()
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<h3 id="explicit-memory-ports"><a class="header" href="#explicit-memory-ports">Explicit memory ports</a></h3>
+<p>Provide custom implementations for any combination of the three memory ports:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::Surreal)
+    .with_memory_context_reader(Arc::new(my_reader))
+    .with_memory_context_writer(Arc::new(my_writer))
+    .with_memory_operations(Arc::new(my_ops))
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<p>If <code>.with_locus_memory()</code> is also set, explicit ports take precedence over auto-bootstrapped ones.</p>
+<hr>
+<h2 id="thread-store"><a class="header" href="#thread-store">Thread Store</a></h2>
+<p>Thread records track execution continuity for orchestration patterns and agent sessions. If not provided, <code>InMemoryThreadStore</code> is used for <code>InMemory</code> backends and <code>SurrealThreadStore</code> for <code>Surreal</code> backends.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::Surreal)
+    .with_thread_store(Arc::new(SurrealThreadStore::new(db.clone())))
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="handler-groups"><a class="header" href="#handler-groups">Handler Groups</a></h2>
+<p>All handler groups are included by default. Opt out with <code>without_*</code> methods:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Method</th><th>Handlers disabled</th></tr>
+</thead>
+<tbody>
+<tr><td><code>.without_grapheme_handlers()</code></td><td><code>GraphemeJobHandler</code>, <code>GraphemeHealthcheckJobHandler</code>, <code>GraphemeEchoJobHandler</code>, <code>GraphemeTextOpsJobHandler</code></td></tr>
+<tr><td><code>.without_prompt_handler()</code></td><td><code>PromptChatJobHandler</code></td></tr>
+<tr><td><code>.without_tool_loop_handler()</code></td><td><code>ToolLoopJobHandler</code></td></tr>
+<tr><td><code>.without_agent_handlers()</code></td><td><code>AgentTurnJobHandler</code>, <code>AgentSessionJobHandler</code></td></tr>
+<tr><td><code>.without_memory_operation_handlers()</code></td><td><code>MemoryRecallJobHandler</code>, <code>MemoryAggregateJobHandler</code>, <code>MemoryTransformJobHandler</code>, <code>MemoryRollupJobHandler</code>, <code>MemorySchemaJobHandler</code></td></tr>
+<tr><td><code>.without_orchestration_pattern_handlers()</code></td><td><code>SequentialPatternJobHandler</code>, <code>ConcurrentPatternJobHandler</code>, <code>HandoffPatternJobHandler</code>, <code>OrchestratorPatternJobHandler</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Memory operation handlers are only registered when the corresponding memory ports are wired. Calling <code>.without_memory_operation_handlers()</code> is a no-op if memory ports are absent.</p>
+<h3 id="custom-handlers"><a class="header" href="#custom-handlers">Custom handlers</a></h3>
+<p>Add application-specific job handlers:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    .with_extra_handler(MyReportGenerationHandler)
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<p>Custom handlers must implement <code>JobHandler</code>. They are registered after all built-in handlers.</p>
+<hr>
+<h2 id="build-output-runtimecomposition"><a class="header" href="#build-output-runtimecomposition">Build Output: <code>RuntimeComposition</code></a></h2>
+<p><code>build()</code> returns <code>RuntimeComposition</code>, which carries the assembled runtime and all wired dependencies:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let composition = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    .build()
+    .await?;
+
+// Start the job processing loop
+composition.runtime.start().await?;
+<span class="boring">}</span></code></pre>
+<p><code>RuntimeComposition</code> exposes the underlying <code>InMemoryRuntime</code> or <code>SurrealRuntime</code> depending on the backend selected.</p>
+<hr>
+<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<ul>
+<li><code>StasisRuntimeBuilder</code> does not manage the job processing loop lifecycle. Callers start and stop the runtime independently.</li>
+<li>Builder instances are not reusable after <code>.build()</code> is called.</li>
+<li>Middleware order across process restarts is the caller’s responsibility.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="recurring-jobs"><a class="header" href="#recurring-jobs">Recurring Jobs</a></h1>
+<h2 id="document-metadata-3"><a class="header" href="#document-metadata-3">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, SRE</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/domain/runtime/recurring.rs</li>
+<li>src/application/runtime/in_memory_runtime.rs</li>
+</ul>
+</li>
+</ul>
 <h2 id="purpose-1"><a class="header" href="#purpose-1">Purpose</a></h2>
+<p>Document the <code>RecurringDefinition</code> contract, schedule materialization semantics, cron expression format, timezone handling, jitter, and the runtime methods used to register and tick recurring schedules.</p>
+<h2 id="invariants-1"><a class="header" href="#invariants-1">Invariants</a></h2>
+<ol>
+<li>A <code>RecurringDefinition</code> is a schedule template — it does not execute work itself. Each tick materializes a concrete <code>NewJob</code> enqueued into the target queue.</li>
+<li><code>cron_expr</code> is validated at materialization time using the <code>cron</code> crate’s <code>Schedule::from_str</code>. Invalid expressions cause a <code>PortFailure</code> error on the first tick.</li>
+<li><code>timezone</code> must be a valid IANA timezone string (e.g. <code>America/New_York</code>, <code>UTC</code>, <code>Europe/London</code>). Invalid timezone strings cause a <code>PortFailure</code> error.</li>
+<li><code>next_run_at</code> is updated after each materialization by calling <code>compute_next_run_at(now)</code>. The definition is persisted back to the store with the new <code>next_run_at</code> and <code>last_run_at</code>.</li>
+<li>Disabled definitions (<code>enabled: false</code>) are skipped during materialization without error.</li>
+<li>Definitions are leased before materialization to prevent duplicate jobs across concurrent scheduler instances.</li>
+</ol>
+<hr>
+<h2 id="recurringdefinition"><a class="header" href="#recurringdefinition">RecurringDefinition</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>id</code></td><td><code>String</code></td><td>Unique identifier for this recurring schedule</td></tr>
+<tr><td><code>queue</code></td><td><code>String</code></td><td>Target queue for materialized jobs</td></tr>
+<tr><td><code>job_type</code></td><td><code>String</code></td><td>Job type registered on the runtime</td></tr>
+<tr><td><code>payload_template_ref</code></td><td><code>String</code></td><td>Payload string passed as <code>payload_ref</code> and <code>sttp_input_node_id</code> on materialized jobs</td></tr>
+<tr><td><code>cron_expr</code></td><td><code>String</code></td><td>Cron expression defining the schedule</td></tr>
+<tr><td><code>timezone</code></td><td><code>String</code></td><td>IANA timezone for schedule evaluation</td></tr>
+<tr><td><code>jitter_seconds</code></td><td><code>i64</code></td><td>Seconds added to <code>scheduled_at</code> to spread load. Use <code>0</code> for no jitter</td></tr>
+<tr><td><code>enabled</code></td><td><code>bool</code></td><td>Whether this schedule is active</td></tr>
+<tr><td><code>max_attempts</code></td><td><code>u32</code></td><td><code>max_attempts</code> applied to each materialized job</td></tr>
+<tr><td><code>next_run_at</code></td><td><code>DateTime&lt;Utc&gt;</code></td><td>Next scheduled materialization time (UTC)</td></tr>
+<tr><td><code>last_run_at</code></td><td><code>Option&lt;DateTime&lt;Utc&gt;&gt;</code></td><td>Last materialization time (UTC)</td></tr>
+<tr><td><code>lease_owner</code></td><td><code>Option&lt;String&gt;</code></td><td>Scheduler instance holding the current lease</td></tr>
+<tr><td><code>lease_expires_at</code></td><td><code>Option&lt;DateTime&lt;Utc&gt;&gt;</code></td><td>Lease expiry time</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="cron-expression-format"><a class="header" href="#cron-expression-format">Cron Expression Format</a></h2>
+<p><code>cron_expr</code> uses the standard 5-field cron format as supported by the <code>cron</code> crate:</p>
+<pre><code>┌─────────── minute        (0–59)
+│ ┌───────── hour           (0–23)
+│ │ ┌─────── day of month   (1–31)
+│ │ │ ┌───── month          (1–12)
+│ │ │ │ ┌─── day of week    (0–6, Sun=0)
+│ │ │ │ │
+* * * * *
+</code></pre>
+<h3 id="examples"><a class="header" href="#examples">Examples</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Expression</th><th>Schedule</th></tr>
+</thead>
+<tbody>
+<tr><td><code>0 * * * *</code></td><td>Every hour at minute 0</td></tr>
+<tr><td><code>*/15 * * * *</code></td><td>Every 15 minutes</td></tr>
+<tr><td><code>0 9 * * 1-5</code></td><td>Weekdays at 09:00</td></tr>
+<tr><td><code>30 2 * * 0</code></td><td>Sundays at 02:30</td></tr>
+<tr><td><code>0 0 1 * *</code></td><td>First day of each month at midnight</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="timezone-handling"><a class="header" href="#timezone-handling">Timezone Handling</a></h2>
+<p><code>timezone</code> accepts any valid IANA timezone identifier. Schedule evaluation converts the reference time into the specified timezone before computing the next occurrence, then converts the result back to UTC for storage.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Schedule evaluated in US Eastern time
+RecurringDefinition {
+    timezone: "America/New_York".to_string(),
+    cron_expr: "0 9 * * 1-5".to_string(), // 09:00 ET on weekdays
+    ..
+}
+<span class="boring">}</span></code></pre>
+<p>Use <code>"UTC"</code> for schedules that should not adjust for local time or daylight saving transitions.</p>
+<hr>
+<h2 id="registering-a-recurring-definition"><a class="header" href="#registering-a-recurring-definition">Registering a Recurring Definition</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::prelude::*;
+
+let definition = RecurringDefinition {
+    id: "daily-report".to_string(),
+    queue: "reports".to_string(),
+    job_type: "workflow.report.generate".to_string(),
+    payload_template_ref: "{}".to_string(),
+    cron_expr: "0 6 * * *".to_string(),
+    timezone: "UTC".to_string(),
+    jitter_seconds: 0,
+    enabled: true,
+    max_attempts: 3,
+    next_run_at: Utc::now(),
+    last_run_at: None,
+    lease_owner: None,
+    lease_expires_at: None,
+};
+
+runtime.register_recurring(definition).await?;
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="schedule-materialization"><a class="header" href="#schedule-materialization">Schedule Materialization</a></h2>
+<p><code>materialize_recurring_now</code> processes all due definitions and enqueues jobs:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let count = runtime.materialize_recurring_now("scheduler-instance-1").await?;
+// count = number of jobs materialized this tick
+<span class="boring">}</span></code></pre>
+<p>The scheduler ID (<code>"scheduler-instance-1"</code>) identifies the calling instance for lease ownership. Use a stable, unique identifier per scheduler process.</p>
+<h3 id="what-happens-per-tick"><a class="header" href="#what-happens-per-tick">What happens per tick</a></h3>
+<p>For each due definition with <code>enabled: true</code>:</p>
+<ol>
+<li>A <code>NewJob</code> is created with:
+<ul>
+<li><code>job_type</code> from the definition</li>
+<li><code>queue</code> from the definition</li>
+<li><code>payload_ref</code> = <code>payload_template_ref</code></li>
+<li><code>max_attempts</code> from the definition</li>
+<li><code>idempotency_key</code> = <code>recurring:{id}:{unix_timestamp}</code> — prevents duplicate jobs if ticked twice within the same second</li>
+<li><code>scheduled_at</code> = <code>now + jitter_seconds</code></li>
+</ul>
+</li>
+<li>The job is enqueued.</li>
+<li><code>last_run_at</code> is set to <code>now</code>.</li>
+<li><code>next_run_at</code> is updated via <code>compute_next_run_at(now)</code>.</li>
+<li>The lease is released on the definition.</li>
+</ol>
+<h3 id="jitter"><a class="header" href="#jitter">Jitter</a></h3>
+<p><code>jitter_seconds</code> offsets the <code>scheduled_at</code> of materialized jobs. Use it to spread load when multiple recurring definitions fire simultaneously:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Spread three definitions by 10 seconds each
+definition_a.jitter_seconds = 0;
+definition_b.jitter_seconds = 10;
+definition_c.jitter_seconds = 20;
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="disabling-a-schedule"><a class="header" href="#disabling-a-schedule">Disabling a Schedule</a></h2>
+<p>Set <code>enabled: false</code> and save the definition. The next <code>materialize_recurring_now</code> tick will skip it without error:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>definition.enabled = false;
+runtime.recurring_store.save(definition).await?;
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="non-goals-1"><a class="header" href="#non-goals-1">Non-Goals</a></h2>
+<ul>
+<li><code>RecurringDefinition</code> does not support sub-minute schedules. The minimum granularity is one minute.</li>
+<li>Materialization does not guarantee exactly-once job creation in the presence of network partitions. The <code>idempotency_key</code> is the mechanism that deduplicates jobs created within the same second.</li>
+<li>The <code>payload_template_ref</code> is passed as a literal string — no template interpolation is performed at materialization time. Dynamic payloads require a custom scheduler that builds and registers definitions at runtime.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="retention-and-replay"><a class="header" href="#retention-and-replay">Retention and Replay</a></h1>
+<h2 id="document-metadata-4"><a class="header" href="#document-metadata-4">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, SRE</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/runtime/retention.rs</li>
+<li>src/application/runtime/replay_report.rs</li>
+<li>src/application/runtime/in_memory_runtime.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-2"><a class="header" href="#purpose-2">Purpose</a></h2>
+<p>Document the Stasis retention policy contract and the dead-letter replay interface. Covers policy configuration, what is pruned, prune report fields, replay semantics, and the <code>ReplayReport</code> shape.</p>
+<h2 id="invariants-2"><a class="header" href="#invariants-2">Invariants</a></h2>
+<ol>
+<li>Retention operates on <strong>terminal</strong> records only. Jobs in <code>Enqueued</code>, <code>Leased</code>, or <code>Running</code> state are never pruned.</li>
+<li>The cutoff is computed as <code>now - terminal_ttl_days</code>. Records with a terminal timestamp before the cutoff are eligible for pruning.</li>
+<li>Prune operations are non-transactional across the three stores (jobs, attempts, outbox events). A partial prune does not roll back.</li>
+<li>Dead-letter replay resets the job state to <code>Enqueued</code> with <code>attempts = 0</code>. Prior attempt records are preserved.</li>
+<li><code>get_replay_report</code> is a read-only operation — it does not trigger re-execution.</li>
+</ol>
+<hr>
+<h2 id="retentionpolicy"><a class="header" href="#retentionpolicy">RetentionPolicy</a></h2>
+<p><code>RetentionPolicy</code> controls how long terminal records are kept before they become eligible for pruning.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>terminal_ttl_days</code></td><td><code>i64</code></td><td><code>30</code></td><td>Days to retain terminal job records, attempt records, and non-pending outbox events</td></tr>
+</tbody>
+</table>
+</div>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::prelude::RetentionPolicy;
+
+let policy = RetentionPolicy {
+    terminal_ttl_days: 14,
+};
+
+runtime.configure_retention_policy(policy)?;
+<span class="boring">}</span></code></pre>
+<p><code>RetentionPolicy::default()</code> sets <code>terminal_ttl_days = 30</code>.</p>
+<h3 id="what-terminal-means-per-store"><a class="header" href="#what-terminal-means-per-store">What “terminal” means per store</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Store</th><th>Eligible records</th></tr>
+</thead>
+<tbody>
+<tr><td>Job store</td><td>Jobs in <code>Succeeded</code>, <code>Failed</code>, <code>DeadLetter</code>, or <code>Canceled</code> state</td></tr>
+<tr><td>Attempt store</td><td>Attempts with a <code>finished_at</code> before the cutoff</td></tr>
+<tr><td>Outbox store</td><td>Events in <code>Published</code> or <code>Failed</code> status (not <code>Pending</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="enforcing-retention"><a class="header" href="#enforcing-retention">Enforcing Retention</a></h2>
+<p>Three methods are available on <code>InMemoryRuntime</code> and <code>SurrealRuntime</code>:</p>
+<h3 id="enforce_retention_now"><a class="header" href="#enforce_retention_now"><code>enforce_retention_now()</code></a></h3>
+<p>Reads the current <code>RetentionPolicy</code>, computes the cutoff against the runtime clock, and prunes all three stores:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let report = runtime.enforce_retention_now().await?;
+<span class="boring">}</span></code></pre>
+<h3 id="enforce_retentionnow"><a class="header" href="#enforce_retentionnow"><code>enforce_retention(now)</code></a></h3>
+<p>Same as above but with an explicit <code>DateTime&lt;Utc&gt;</code> — useful for deterministic testing:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let cutoff_reference = Utc::now();
+let report = runtime.enforce_retention(cutoff_reference).await?;
+<span class="boring">}</span></code></pre>
+<h3 id="prune_terminal_recordscutoff"><a class="header" href="#prune_terminal_recordscutoff"><code>prune_terminal_records(cutoff)</code></a></h3>
+<p>Direct prune with an explicit cutoff timestamp, bypassing the policy:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let cutoff = Utc::now() - chrono::Duration::days(7);
+let report = runtime.prune_terminal_records(cutoff).await?;
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="retentionprunereport"><a class="header" href="#retentionprunereport">RetentionPruneReport</a></h2>
+<p>Returned by all retention enforcement methods.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>jobs_pruned</code></td><td><code>usize</code></td><td>Number of terminal job records removed</td></tr>
+<tr><td><code>attempts_pruned</code></td><td><code>usize</code></td><td>Number of finished attempt records removed</td></tr>
+<tr><td><code>outbox_events_pruned</code></td><td><code>usize</code></td><td>Number of non-pending outbox events removed</td></tr>
+</tbody>
+</table>
+</div>
+<p>All three fields are zero when nothing is eligible for pruning. A zero report is not an error.</p>
+<hr>
+<h2 id="dead-letter-replay"><a class="header" href="#dead-letter-replay">Dead-Letter Replay</a></h2>
+<p>Jobs that reach <code>DeadLetter</code> state (exhausted <code>max_attempts</code> or returned <code>FatalFailure</code>) can be re-enqueued for execution.</p>
+<h3 id="replay_dead_letter_nowjob_id"><a class="header" href="#replay_dead_letter_nowjob_id"><code>replay_dead_letter_now(job_id)</code></a></h3>
+<p>Resets a dead-lettered job to <code>Enqueued</code> state with <code>attempts = 0</code>, making it eligible for the next processing cycle:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let replayed = runtime.replay_dead_letter_now("job-abc-123").await?;
+
+if replayed {
+    // Job was found in DeadLetter state and re-enqueued
+} else {
+    // Job was not in DeadLetter state — no action taken
+}
+<span class="boring">}</span></code></pre>
+<p>Returns <code>true</code> if the job was found and reset, <code>false</code> if the job was not in dead-letter state.</p>
+<p>Prior <code>JobAttempt</code> records from the original execution are preserved. The re-enqueued job starts a new attempt sequence from <code>attempt_number = 1</code>.</p>
+<hr>
+<h2 id="replayreport"><a class="header" href="#replayreport">ReplayReport</a></h2>
+<p><code>ReplayReport</code> provides a pre-correlated view of all attempt records and outbox events for a given job, without triggering re-execution:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>job_id</code></td><td><code>String</code></td><td>The job being inspected</td></tr>
+<tr><td><code>attempts</code></td><td><code>Vec&lt;JobAttempt&gt;</code></td><td>All attempt records for this job, in store order</td></tr>
+<tr><td><code>lineage_events</code></td><td><code>Vec&lt;OutboxEvent&gt;</code></td><td>All outbox events associated with this job</td></tr>
+</tbody>
+</table>
+</div>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let report = runtime.get_replay_report("job-abc-123").await?;
+
+println!("attempts: {}", report.attempts.len());
+println!("events: {}", report.lineage_events.len());
+<span class="boring">}</span></code></pre>
+<h3 id="difference-from-investigateruntimelineage"><a class="header" href="#difference-from-investigateruntimelineage">Difference from <code>InvestigateRuntimeLineage</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th><code>ReplayReport</code></th><th><code>RuntimeLineageReport</code></th></tr>
+</thead>
+<tbody>
+<tr><td>Selector</td><td><code>job_id</code> only</td><td>job_id, execution_id, guardrail_code, thread_id</td></tr>
+<tr><td>Cross-filtering</td><td>None</td><td>Secondary filter refinement</td></tr>
+<tr><td>Thread ancestry</td><td>No</td><td>Yes (with <code>include_thread_ancestry</code>)</td></tr>
+<tr><td>Use case</td><td>Quick job-level inspection before replay</td><td>Multi-dimensional investigation</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="non-goals-2"><a class="header" href="#non-goals-2">Non-Goals</a></h2>
+<ul>
+<li>Retention enforcement is not scheduled automatically. Callers are responsible for running <code>enforce_retention_now()</code> on an appropriate cadence (e.g. a recurring job, a cron task, or a periodic operator call).</li>
+<li><code>replay_dead_letter_now</code> does not bypass <code>max_attempts</code>. The replayed job will dead-letter again if it fails the same number of times without a fix.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="lineage-and-observability"><a class="header" href="#lineage-and-observability">Lineage and Observability</a></h1>
+<h2 id="document-metadata-5"><a class="header" href="#document-metadata-5">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, SRE, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/use_cases/investigate_runtime_lineage.rs</li>
+<li>src/application/runtime/in_memory_runtime.rs</li>
+<li>src/domain/runtime/outbox.rs</li>
+<li>src/domain/runtime/job_attempt.rs</li>
+<li>tests/runtime_backend_parity.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-3"><a class="header" href="#purpose-3">Purpose</a></h2>
+<p>Document the Stasis lineage and observability surface: the <code>InvestigateRuntimeLineage</code> query interface, the outbox event model, <code>JobAttempt</code> records, and all runtime metric keys emitted by the job processing loop.</p>
+<h2 id="invariants-3"><a class="header" href="#invariants-3">Invariants</a></h2>
+<ol>
+<li>Every completed job execution produces at least one <code>JobAttempt</code> record and at least one <code>OutboxEvent</code>.</li>
+<li>A lineage query requires at least one selector. An empty query returns a <code>PortFailure</code> error.</li>
+<li><code>OutboxEvent</code> records are retained until pruned by the retention policy. Lineage queries operate on live store state.</li>
+<li><code>thread_id</code> queries with <code>include_thread_ancestry: true</code> expand to all ancestor thread IDs before filtering.</li>
+<li><code>execution_id</code> and <code>guardrail_code</code> filters are applied as secondary refinements on top of the primary selector result — they do not replace the primary selector.</li>
+</ol>
+<hr>
+<h2 id="investigateruntimelineage"><a class="header" href="#investigateruntimelineage">InvestigateRuntimeLineage</a></h2>
+<p>The <code>InvestigateRuntimeLineage</code> use case is the canonical entry point for correlating job attempts with outbox events across any selector dimension.</p>
+<h3 id="query-runtimelineagequery"><a class="header" href="#query-runtimelineagequery">Query: <code>RuntimeLineageQuery</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>job_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Select by exact job ID</td></tr>
+<tr><td><code>execution_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Select by execution ID emitted in handler diagnostics</td></tr>
+<tr><td><code>guardrail_code</code></td><td><code>Option&lt;String&gt;</code></td><td>Select by guardrail policy code from attempt record</td></tr>
+<tr><td><code>thread_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Select all jobs belonging to a thread</td></tr>
+<tr><td><code>include_thread_ancestry</code></td><td><code>bool</code></td><td>When <code>thread_id</code> is set, expand to include all ancestor threads</td></tr>
+</tbody>
+</table>
+</div>
+<p>Exactly one primary selector is required. <code>execution_id</code> and <code>guardrail_code</code> can be combined with any primary selector for secondary filtering.</p>
+<h3 id="selector-precedence"><a class="header" href="#selector-precedence">Selector precedence</a></h3>
+<p>The primary selector determines how records are fetched from the store. Secondary filters are applied in-memory after the initial fetch:</p>
+<pre><code>Primary:    job_id | execution_id | guardrail_code | thread_id
+Secondary:  execution_id, guardrail_code, job_id (applied as retain filters)
+</code></pre>
+<h3 id="response-runtimelineagereport"><a class="header" href="#response-runtimelineagereport">Response: <code>RuntimeLineageReport</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>attempts</code></td><td><code>Vec&lt;JobAttempt&gt;</code></td><td>All matching attempt records</td></tr>
+<tr><td><code>lineage_events</code></td><td><code>Vec&lt;OutboxEvent&gt;</code></td><td>All matching outbox events, cross-filtered to matched attempt job IDs</td></tr>
+<tr><td><code>thread_ancestry</code></td><td><code>Vec&lt;String&gt;</code></td><td>Thread IDs in the ancestry chain when <code>include_thread_ancestry</code> is true</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="runtime-api"><a class="header" href="#runtime-api">Runtime API</a></h3>
+<p><code>InvestigateRuntimeLineage</code> is exposed directly on <code>InMemoryRuntime</code> and <code>SurrealRuntime</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let report = runtime.investigate_lineage(RuntimeLineageQuery {
+    job_id: Some("job-abc-123".to_string()),
+    ..Default::default()
+}).await?;
+
+// By thread, with ancestry expansion
+let report = runtime.investigate_lineage(RuntimeLineageQuery {
+    thread_id: Some("thread-root-001".to_string()),
+    include_thread_ancestry: true,
+    ..Default::default()
+}).await?;
+<span class="boring">}</span></code></pre>
+<p>Focused query methods are also available for direct store access without cross-filtering:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>runtime.list_job_attempts("job-id").await?
+runtime.list_attempts_by_execution_id("exec-id").await?
+runtime.list_attempts_by_guardrail_code("guardrail-code").await?
+runtime.list_lineage_events("job-id").await?
+runtime.list_lineage_events_by_execution_id("exec-id").await?
+runtime.list_lineage_events_by_thread_id("thread-id").await?
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="jobattempt-record"><a class="header" href="#jobattempt-record">JobAttempt Record</a></h2>
+<p>One <code>JobAttempt</code> is written per execution attempt of a job.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>attempt_id</code></td><td><code>String</code></td><td>Unique attempt identifier</td></tr>
+<tr><td><code>job_id</code></td><td><code>String</code></td><td>Parent job ID</td></tr>
+<tr><td><code>attempt_number</code></td><td><code>u32</code></td><td>1-based attempt counter</td></tr>
+<tr><td><code>worker_id</code></td><td><code>String</code></td><td>Identity of the worker that executed the attempt</td></tr>
+<tr><td><code>started_at</code></td><td><code>DateTime&lt;Utc&gt;</code></td><td>Attempt start time</td></tr>
+<tr><td><code>finished_at</code></td><td><code>DateTime&lt;Utc&gt;</code></td><td>Attempt finish time</td></tr>
+<tr><td><code>outcome</code></td><td><code>JobAttemptOutcome</code></td><td><code>Succeeded</code>, <code>RetryableFailure</code>, or <code>FatalFailure</code></td></tr>
+<tr><td><code>error_message</code></td><td><code>Option&lt;String&gt;</code></td><td>Error text on failure</td></tr>
+<tr><td><code>sttp_output_node_id</code></td><td><code>Option&lt;String&gt;</code></td><td>STTP output node ID from the handler result</td></tr>
+<tr><td><code>execution_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Handler-emitted execution identifier for correlation</td></tr>
+<tr><td><code>guardrail_code</code></td><td><code>Option&lt;String&gt;</code></td><td>Policy violation code if a guardrail triggered</td></tr>
+<tr><td><code>policy_reason</code></td><td><code>Option&lt;String&gt;</code></td><td>Human-readable guardrail reason</td></tr>
+<tr><td><code>duration_ms</code></td><td><code>Option&lt;u64&gt;</code></td><td>Attempt wall-clock duration in milliseconds</td></tr>
+<tr><td><code>diagnostics</code></td><td><code>Option&lt;String&gt;</code></td><td>Handler-emitted JSON diagnostics blob</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="jobattemptoutcome"><a class="header" href="#jobattemptoutcome">JobAttemptOutcome</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variant</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Succeeded</code></td><td>Handler returned <code>JobExecutionOutcome::Success</code></td></tr>
+<tr><td><code>RetryableFailure</code></td><td>Handler returned <code>JobExecutionOutcome::RetryableFailure</code> — job scheduled for retry</td></tr>
+<tr><td><code>FatalFailure</code></td><td>Handler returned <code>JobExecutionOutcome::FatalFailure</code> or max attempts exceeded — job dead-lettered</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="outbox-event-model"><a class="header" href="#outbox-event-model">Outbox Event Model</a></h2>
+<p>Every terminal job state transition emits an <code>OutboxEvent</code> to the durable outbox.</p>
+<h3 id="outboxevent"><a class="header" href="#outboxevent">OutboxEvent</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>event_id</code></td><td><code>String</code></td><td>Unique event identifier</td></tr>
+<tr><td><code>status</code></td><td><code>OutboxStatus</code></td><td><code>Pending</code>, <code>Published</code>, or <code>Failed</code></td></tr>
+<tr><td><code>publish_attempts</code></td><td><code>u32</code></td><td>Number of publish delivery attempts</td></tr>
+<tr><td><code>published_at</code></td><td><code>Option&lt;DateTime&lt;Utc&gt;&gt;</code></td><td>Time of successful publish</td></tr>
+<tr><td><code>next_attempt_at</code></td><td><code>Option&lt;DateTime&lt;Utc&gt;&gt;</code></td><td>Scheduled time for next publish retry</td></tr>
+<tr><td><code>last_publish_error</code></td><td><code>Option&lt;String&gt;</code></td><td>Last publish delivery error</td></tr>
+<tr><td><code>event</code></td><td><code>RuntimeEvent</code></td><td>The event payload (see below)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="runtimeevent"><a class="header" href="#runtimeevent">RuntimeEvent</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>event_type</code></td><td><code>RuntimeEventType</code></td><td><code>JobSucceeded</code>, <code>JobRetryScheduled</code>, or <code>JobDeadLettered</code></td></tr>
+<tr><td><code>job_id</code></td><td><code>String</code></td><td>Job that produced this event</td></tr>
+<tr><td><code>thread_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Thread the job belongs to</td></tr>
+<tr><td><code>correlation_id</code></td><td><code>String</code></td><td>Propagated from the job</td></tr>
+<tr><td><code>causation_id</code></td><td><code>String</code></td><td>Propagated from the job</td></tr>
+<tr><td><code>trace_id</code></td><td><code>String</code></td><td>Propagated from the job</td></tr>
+<tr><td><code>sttp_input_node_id</code></td><td><code>String</code></td><td>STTP input node at job creation</td></tr>
+<tr><td><code>sttp_output_node_id</code></td><td><code>Option&lt;String&gt;</code></td><td>STTP output node set by the handler on success</td></tr>
+<tr><td><code>execution_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Handler-emitted execution correlation ID</td></tr>
+<tr><td><code>input_memory_query_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Locus memory recall query ID (memory-enabled paths)</td></tr>
+<tr><td><code>input_memory_query_fingerprint</code></td><td><code>Option&lt;String&gt;</code></td><td>Deterministic fingerprint of the memory query</td></tr>
+<tr><td><code>output_memory_node_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Locus memory store output node ID (memory-enabled paths)</td></tr>
+<tr><td><code>retrieval_path</code></td><td><code>Option&lt;String&gt;</code></td><td>Memory retrieval path descriptor</td></tr>
+<tr><td><code>occurred_at</code></td><td><code>DateTime&lt;Utc&gt;</code></td><td>Event timestamp</td></tr>
+<tr><td><code>message</code></td><td><code>Option&lt;String&gt;</code></td><td>Optional context message</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="outboxpublishpolicy"><a class="header" href="#outboxpublishpolicy">OutboxPublishPolicy</a></h3>
+<p>Controls retry behavior for outbox event delivery:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>max_attempts</code></td><td><code>8</code></td><td>Maximum publish delivery attempts</td></tr>
+<tr><td><code>base_delay_seconds</code></td><td><code>2</code></td><td>Initial retry delay</td></tr>
+<tr><td><code>max_delay_seconds</code></td><td><code>300</code></td><td>Maximum retry delay cap</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="runtime-metric-keys"><a class="header" href="#runtime-metric-keys">Runtime Metric Keys</a></h2>
+<p>All metric keys are emitted through the <code>RuntimeMetrics</code> port. Keys are stable <code>&amp;'static str</code> constants.</p>
+<h3 id="job-lifecycle-metrics"><a class="header" href="#job-lifecycle-metrics">Job lifecycle metrics</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Type</th><th>Emitted on</th></tr>
+</thead>
+<tbody>
+<tr><td><code>runtime.job.succeeded.total</code></td><td>counter</td><td>Job handler returned <code>Success</code></td></tr>
+<tr><td><code>runtime.job.retryable_failure.total</code></td><td>counter</td><td>Handler returned <code>RetryableFailure</code></td></tr>
+<tr><td><code>runtime.job.fatal_failure.total</code></td><td>counter</td><td>Handler returned <code>FatalFailure</code></td></tr>
+<tr><td><code>runtime.job.dead_letter.total</code></td><td>counter</td><td>Job moved to dead-letter (fatal failure or max attempts exceeded)</td></tr>
+<tr><td><code>runtime.job.retry_scheduled.total</code></td><td>counter</td><td>Job scheduled for retry after retryable failure</td></tr>
+<tr><td><code>runtime.job.process.duration_ms</code></td><td>duration</td><td>Per-job wall-clock processing time</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="outbox-metrics"><a class="header" href="#outbox-metrics">Outbox metrics</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Type</th><th>Emitted on</th></tr>
+</thead>
+<tbody>
+<tr><td><code>runtime.outbox.publish.success.total</code></td><td>counter</td><td>Outbox event successfully delivered</td></tr>
+<tr><td><code>runtime.outbox.publish.failure.total</code></td><td>counter</td><td>Outbox event delivery attempt failed</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="grapheme-metrics"><a class="header" href="#grapheme-metrics">Grapheme metrics</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Type</th><th>Emitted on</th></tr>
+</thead>
+<tbody>
+<tr><td><code>runtime.grapheme.guardrail_failure.total</code></td><td>counter</td><td>Grapheme job rejected by guardrail policy</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="chat-metrics"><a class="header" href="#chat-metrics">Chat metrics</a></h3>
+<p>Chat-layer metrics are documented in <a href="#chat-middleware-pipeline">Chat Middleware Pipeline</a>.</p>
+<hr>
+<h2 id="non-goals-3"><a class="header" href="#non-goals-3">Non-Goals</a></h2>
+<ul>
+<li><code>InvestigateRuntimeLineage</code> does not provide real-time streaming. It queries stored state.</li>
+<li>Metric emission requires a <code>RuntimeMetrics</code> implementation to be wired. The default <code>NoopRuntimeMetrics</code> silently discards all observations.</li>
+<li>Outbox event delivery to external subscribers requires an <code>EventPublisher</code> implementation registered via <code>register_event_publisher</code>.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="orchestration-patterns"><a class="header" href="#orchestration-patterns">Orchestration Patterns</a></h1>
+<h2 id="document-metadata-6"><a class="header" href="#document-metadata-6">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/orchestration/sequential_pattern_pipeline.rs</li>
+<li>src/application/orchestration/concurrent_pattern_pipeline.rs</li>
+<li>src/application/orchestration/handoff_pattern_pipeline.rs</li>
+<li>src/application/orchestration/orchestrator_pattern_pipeline.rs</li>
+<li>src/application/orchestration/agent_session_payload.rs</li>
+<li>src/application/runtime/sequential_pattern_job_handler.rs</li>
+<li>src/application/runtime/concurrent_pattern_job_handler.rs</li>
+<li>src/application/runtime/handoff_pattern_job_handler.rs</li>
+<li>src/application/runtime/orchestrator_pattern_job_handler.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-4"><a class="header" href="#purpose-4">Purpose</a></h2>
+<p>Define the four durable orchestration patterns available in Stasis, their execution semantics, payload contracts, and failure behavior. Each pattern maps to a registered job handler and a corresponding pipeline that runs inside the handler’s execution boundary.</p>
+<h2 id="scope-2"><a class="header" href="#scope-2">Scope</a></h2>
+<p>This document covers the four workflow-level patterns: Sequential, Concurrent, Handoff, and Orchestrator-Routed. Agent-level coordination (<code>workflow.stasis.agent_session</code>) is covered separately in the Agent Coordination reference.</p>
+<h2 id="invariants-4"><a class="header" href="#invariants-4">Invariants</a></h2>
+<ol>
+<li>Every pattern is submitted as a durable job and inherits retry, dead-letter, and lineage semantics from the runtime.</li>
+<li>All patterns execute through <code>PromptExecutionPipeline</code> internally — the chat middleware chain applies uniformly.</li>
+<li><code>{{input}}</code> and <code>{input}</code> template tokens are substituted with the output of the prior stage or the initial prompt.</li>
+<li><code>policy_profile</code> and <code>model_hint</code> set at the pattern level act as defaults and are overridden per-stage/branch/turn if provided.</li>
+<li>Thread records are created per execution for concurrent, handoff, and orchestrator patterns when a <code>ThreadStore</code> is wired.</li>
+</ol>
+<hr>
+<h2 id="pattern-1-sequential"><a class="header" href="#pattern-1-sequential">Pattern 1: Sequential</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.sequential</code></p>
+<p>Each stage executes in order. The output of stage N becomes the input to stage N+1 via <code>{{input}}</code> substitution. All stages must complete for the job to succeed.</p>
+<h3 id="when-to-use"><a class="header" href="#when-to-use">When to use</a></h3>
+<ul>
+<li>Multi-step pipelines where each step depends on the previous result (e.g. extract → summarize → format).</li>
+<li>Workflows where intermediate outputs must be inspectable in lineage.</li>
+</ul>
+<h3 id="payload"><a class="header" href="#payload">Payload</a></h3>
+<pre><code class="language-json">{
+  "initial_user_prompt": "string",
+  "trace_id": "string | null",
+  "correlation_id": "string | null",
+  "policy_profile": "string | null",
+  "model_hint": "string | null",
+  "stages": [
+    {
+      "stage_id": "string",
+      "user_prompt_template": "string",
+      "system_prompt": "string | null",
+      "policy_profile": "string | null",
+      "model_hint": "string | null"
+    }
+  ]
+}
+</code></pre>
+<p>Rust type: <code>SequentialPatternJobPayload</code> → <code>SequentialStageJobPayload</code></p>
+<h3 id="response-fields"><a class="header" href="#response-fields">Response fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>final_text</code></td><td>string</td><td>Output of the last stage</td></tr>
+<tr><td><code>stages</code></td><td>array</td><td>Per-stage results including <code>stage_id</code>, <code>rendered_prompt</code>, <code>output_text</code></td></tr>
+<tr><td><code>termination_reason</code></td><td>string</td><td>Always <code>completed_all_stages</code> on success</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="failure-semantics-1"><a class="header" href="#failure-semantics-1">Failure semantics</a></h3>
+<p>If any stage fails, the job fails at that stage. No partial results are persisted. The job is retried from the beginning per its <code>BackoffPolicy</code>.</p>
+<hr>
+<h2 id="pattern-2-concurrent"><a class="header" href="#pattern-2-concurrent">Pattern 2: Concurrent</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.concurrent</code></p>
+<p>All branches execute simultaneously using <code>tokio::task::JoinSet</code>. Branch results are merged after all branches complete. Branch order in the response is deterministic (sorted by <code>branch_id</code>).</p>
+<h3 id="when-to-use-1"><a class="header" href="#when-to-use-1">When to use</a></h3>
+<ul>
+<li>Fan-out analysis where independent perspectives on the same input are needed (e.g. risk assessment from multiple domains simultaneously).</li>
+<li>Latency-sensitive workflows where branches have no inter-dependency.</li>
+</ul>
+<h3 id="payload-1"><a class="header" href="#payload-1">Payload</a></h3>
+<pre><code class="language-json">{
+  "initial_user_prompt": "string",
+  "trace_id": "string | null",
+  "correlation_id": "string | null",
+  "policy_profile": "string | null",
+  "model_hint": "string | null",
+  "merge_strategy": "join_with_headers | join_lines | null",
+  "branches": [
+    {
+      "branch_id": "string",
+      "user_prompt_template": "string",
+      "system_prompt": "string | null",
+      "policy_profile": "string | null",
+      "model_hint": "string | null"
+    }
+  ]
+}
+</code></pre>
+<p>Rust type: <code>ConcurrentPatternJobPayload</code> → <code>ConcurrentBranchJobPayload</code></p>
+<h3 id="merge-strategies"><a class="header" href="#merge-strategies">Merge strategies</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Strategy</th><th>Behavior</th></tr>
+</thead>
+<tbody>
+<tr><td><code>join_with_headers</code> (default)</td><td>Sections separated by <code>[branch_id]\n{output}</code></td></tr>
+<tr><td><code>join_lines</code></td><td>Outputs joined with <code>\n</code> only, no headers</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="response-fields-1"><a class="header" href="#response-fields-1">Response fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>final_text</code></td><td>string</td><td>Merged output across all branches</td></tr>
+<tr><td><code>branches</code></td><td>array</td><td>Per-branch results: <code>branch_id</code>, <code>rendered_prompt</code>, <code>output_text</code></td></tr>
+<tr><td><code>termination_reason</code></td><td>string</td><td>Always <code>completed_all_branches</code> on success</td></tr>
+<tr><td><code>merge_strategy</code></td><td>string</td><td>Strategy applied</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="failure-semantics-1-1"><a class="header" href="#failure-semantics-1-1">Failure semantics</a></h3>
+<p>If any branch task fails (including a <code>JoinError</code>), the entire job fails. All branch tasks are awaited before any merge occurs — there is no partial merge.</p>
+<hr>
+<h2 id="pattern-3-handoff"><a class="header" href="#pattern-3-handoff">Pattern 3: Handoff</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.handoff</code></p>
+<p>Turns execute sequentially, each passing its output to the next via <code>{{input}}</code> substitution. Unlike Sequential (which is stage-based without actor identity), Handoff models distinct actors with explicit transition records emitted per transfer.</p>
+<h3 id="when-to-use-2"><a class="header" href="#when-to-use-2">When to use</a></h3>
+<ul>
+<li>Specialist-chain workflows where each actor has a distinct role and handoff transitions must be traceable (e.g. analyst → reviewer → formatter).</li>
+<li>Workflows where actor identity matters for lineage or audit.</li>
+</ul>
+<h3 id="payload-2"><a class="header" href="#payload-2">Payload</a></h3>
+<pre><code class="language-json">{
+  "initial_user_prompt": "string",
+  "trace_id": "string | null",
+  "correlation_id": "string | null",
+  "policy_profile": "string | null",
+  "model_hint": "string | null",
+  "turns": [
+    {
+      "actor_id": "string",
+      "user_prompt_template": "string",
+      "system_prompt": "string | null",
+      "policy_profile": "string | null",
+      "model_hint": "string | null"
+    }
+  ]
+}
+</code></pre>
+<p>Rust type: <code>HandoffPatternJobPayload</code> → <code>HandoffTurnJobPayload</code></p>
+<h3 id="response-fields-2"><a class="header" href="#response-fields-2">Response fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>final_text</code></td><td>string</td><td>Output of the last turn</td></tr>
+<tr><td><code>turns</code></td><td>array</td><td>Per-turn results: <code>actor_id</code>, <code>rendered_prompt</code>, <code>output_text</code></td></tr>
+<tr><td><code>handoffs</code></td><td>array</td><td>Transition records: <code>{ from_actor_id, to_actor_id }</code></td></tr>
+<tr><td><code>termination_reason</code></td><td>string</td><td>Always <code>completed_all_turns</code> on success</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="distinction-from-sequential"><a class="header" href="#distinction-from-sequential">Distinction from Sequential</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th>Sequential</th><th>Handoff</th></tr>
+</thead>
+<tbody>
+<tr><td>Unit</td><td>stage</td><td>actor turn</td></tr>
+<tr><td>Identity</td><td>stage_id</td><td>actor_id</td></tr>
+<tr><td>Transitions</td><td>none</td><td><code>HandoffTransition</code> records</td></tr>
+<tr><td>Use case</td><td>pipeline steps</td><td>specialist hand-off chains</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="failure-semantics-2"><a class="header" href="#failure-semantics-2">Failure semantics</a></h3>
+<p>Same as Sequential — failure at any turn fails the job; retried from the beginning.</p>
+<hr>
+<h2 id="pattern-4-orchestrator-routed"><a class="header" href="#pattern-4-orchestrator-routed">Pattern 4: Orchestrator-Routed</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.orchestrator</code></p>
+<p>Routes the initial prompt to exactly one route based on keyword scoring. Each route declares <code>selector_keywords</code>. The route with the highest keyword match count wins. If no keywords match, the first route is used as fallback.</p>
+<h3 id="when-to-use-3"><a class="header" href="#when-to-use-3">When to use</a></h3>
+<ul>
+<li>Dynamic dispatch where the appropriate handler for a prompt is not known statically (e.g. query routing, intent classification, domain dispatch).</li>
+<li>Single-execution workflows where only one specialized path should run per invocation.</li>
+</ul>
+<h3 id="payload-3"><a class="header" href="#payload-3">Payload</a></h3>
+<pre><code class="language-json">{
+  "initial_user_prompt": "string",
+  "trace_id": "string | null",
+  "correlation_id": "string | null",
+  "policy_profile": "string | null",
+  "model_hint": "string | null",
+  "routes": [
+    {
+      "route_id": "string",
+      "selector_keywords": ["string"],
+      "user_prompt_template": "string",
+      "system_prompt": "string | null",
+      "policy_profile": "string | null",
+      "model_hint": "string | null"
+    }
+  ]
+}
+</code></pre>
+<p>Rust type: <code>OrchestratorPatternJobPayload</code> → <code>OrchestratorRouteJobPayload</code></p>
+<h3 id="route-selection-algorithm"><a class="header" href="#route-selection-algorithm">Route selection algorithm</a></h3>
+<ol>
+<li>Lowercase the <code>initial_user_prompt</code>.</li>
+<li>For each route, count non-empty <code>selector_keywords</code> that appear as substrings in the prompt.</li>
+<li>Select the route with the highest score.</li>
+<li>If no route scores above zero, select <code>routes[0]</code> as fallback.</li>
+</ol>
+<p>The <code>selection_reason</code> field in the response carries <code>keyword_match score=N route_id=X</code> or <code>fallback_first_route route_id=X</code>.</p>
+<h3 id="payload-constraint"><a class="header" href="#payload-constraint">Payload constraint</a></h3>
+<p>At least one route must be defined. An empty <code>routes</code> array returns a <code>PortFailure</code> error and the job is dead-lettered after max attempts.</p>
+<h3 id="response-fields-3"><a class="header" href="#response-fields-3">Response fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>selected_route_id</code></td><td>string</td><td>Route that was executed</td></tr>
+<tr><td><code>selection_reason</code></td><td>string</td><td>Selection trace: match score or fallback indicator</td></tr>
+<tr><td><code>rendered_prompt</code></td><td>string</td><td>Final prompt sent to the model</td></tr>
+<tr><td><code>output_text</code></td><td>string</td><td>Model output</td></tr>
+<tr><td><code>termination_reason</code></td><td>string</td><td>Always <code>completed_selected_route</code> on success</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="submitting-pattern-jobs"><a class="header" href="#submitting-pattern-jobs">Submitting Pattern Jobs</a></h2>
+<p>Use <code>StasisWorkflowJobBuilder</code> to construct a <code>NewJob</code> for any pattern:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let job = StasisWorkflowJobBuilder::sequential()
+    .payload(payload.to_payload_ref()?)
+    .build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<p>Each pattern has a matching builder method on <code>StasisWorkflowJobBuilder</code>:</p>
+<ul>
+<li><code>.sequential()</code></li>
+<li><code>.concurrent()</code></li>
+<li><code>.handoff()</code></li>
+<li><code>.orchestrator()</code></li>
+</ul>
+<h2 id="non-goals-4"><a class="header" href="#non-goals-4">Non-Goals</a></h2>
+<ul>
+<li>These patterns do not manage state between separate job invocations. Cross-job continuity is handled via <code>thread_id</code> and Locus memory.</li>
+<li>Pattern pipelines do not perform tool invocations. Tool-augmented workflows use <code>workflow.stasis.tool_loop</code> or <code>workflow.stasis.agent_session</code>.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="chat-middleware-pipeline"><a class="header" href="#chat-middleware-pipeline">Chat Middleware Pipeline</a></h1>
+<h2 id="document-metadata-7"><a class="header" href="#document-metadata-7">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, SRE, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/runtime/chat_client_middleware.rs</li>
+<li>src/application/runtime/default_chat_middlewares.rs</li>
+<li>tests/chat_middleware_pipeline.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h2>
+<p>Document the chat middleware pipeline — the composable decorator chain that wraps every <code>AiChatClient</code> invocation inside the Stasis runtime. Covers the four built-in middleware, composition semantics, telemetry key contracts, and the <code>ChatClientMiddleware</code> extension interface.</p>
+<h2 id="invariants-5"><a class="header" href="#invariants-5">Invariants</a></h2>
+<ol>
+<li>Middleware is applied in registration order. The first registered middleware is the outermost wrapper — it receives the request first and the response last.</li>
+<li>All middleware operates at the <code>AiChatClient</code> boundary. Every <code>complete(request, options)</code> call passes through the full chain.</li>
+<li>Middleware is wired once at builder time (<code>StasisRuntimeBuilder</code>) and shared across all handlers that use the chat client.</li>
+<li>The <code>deterministic_cache_key</code> function produces a SHA-256 hex digest over the serialized <code>ChatRequest</code> and <code>ChatOptions</code>. Cache keys are stable across restarts for identical inputs.</li>
+<li><code>TelemetryChatMiddleware</code> and <code>CacheChatMiddleware</code> do not emit metrics unless a <code>RuntimeMetrics</code> port is provided.</li>
+</ol>
+<hr>
+<h2 id="middleware-execution-order"><a class="header" href="#middleware-execution-order">Middleware Execution Order</a></h2>
+<p>Middleware registered with <code>StasisRuntimeBuilder</code> wraps in LIFO order relative to the inner client:</p>
+<pre><code>Request → [Middleware A] → [Middleware B] → [Middleware C] → AiChatClient
+Response ← [Middleware A] ← [Middleware B] ← [Middleware C] ← AiChatClient
+</code></pre>
+<p>Recommended registration order:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder
+    .with_logging_chat_middleware()           // outermost — sees all requests and errors
+    .with_telemetry_chat_middleware(metrics)  // records duration and counters
+    .with_cache_chat_middleware(cache)        // short-circuits on hit before reaching model
+    .with_tool_call_interception_chat_middleware(interceptor) // innermost — intercepts model tool calls
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="built-in-middleware"><a class="header" href="#built-in-middleware">Built-in Middleware</a></h2>
+<h3 id="loggingchatmiddleware"><a class="header" href="#loggingchatmiddleware">LoggingChatMiddleware</a></h3>
+<p>Logs request and response metadata to stderr using the <code>stasis.chat</code> prefix.</p>
+<p><strong>On request:</strong></p>
+<pre><code>stasis.chat request messages=N options_present=true|false
+</code></pre>
+<p><strong>On success:</strong></p>
+<pre><code>stasis.chat response ok elapsed_ms=N
+</code></pre>
+<p><strong>On error:</strong></p>
+<pre><code>stasis.chat response error elapsed_ms=N error=&lt;message&gt;
+</code></pre>
+<p>No configuration required:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder.with_logging_chat_middleware()
+<span class="boring">}</span></code></pre>
+<hr>
+<h3 id="telemetrychatmiddleware"><a class="header" href="#telemetrychatmiddleware">TelemetryChatMiddleware</a></h3>
+<p>Emits counters and duration observations through the <code>RuntimeMetrics</code> port.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder.with_telemetry_chat_middleware(metrics)
+<span class="boring">}</span></code></pre>
+<h4 id="telemetry-keys"><a class="header" href="#telemetry-keys">Telemetry keys</a></h4>
+<p>All keys are <code>&amp;'static str</code> constants exported from <code>stasis::prelude</code>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Constant</th><th>Key</th><th>Type</th><th>Emitted on</th></tr>
+</thead>
+<tbody>
+<tr><td><code>CHAT_REQUESTS_TOTAL</code></td><td><code>runtime.chat.requests.total</code></td><td>counter</td><td>Every <code>complete()</code> call</td></tr>
+<tr><td><code>CHAT_ERRORS_TOTAL</code></td><td><code>runtime.chat.errors.total</code></td><td>counter</td><td>Every failed <code>complete()</code> call</td></tr>
+<tr><td><code>CHAT_DURATION_MS</code></td><td><code>runtime.chat.duration_ms</code></td><td>duration</td><td>Every <code>complete()</code> call (success or error)</td></tr>
+<tr><td><code>CHAT_CACHE_HIT_TOTAL</code></td><td><code>runtime.chat.cache.hit.total</code></td><td>counter</td><td>Cache hit in <code>CacheChatMiddleware</code></td></tr>
+<tr><td><code>CHAT_CACHE_MISS_TOTAL</code></td><td><code>runtime.chat.cache.miss.total</code></td><td>counter</td><td>Cache miss in <code>CacheChatMiddleware</code></td></tr>
+<tr><td><code>CHAT_TOOL_CALLS_TOTAL</code></td><td><code>runtime.chat.tool_calls.total</code></td><td>counter</td><td>Tool call intercepted in <code>ToolCallInterceptionChatMiddleware</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Note: <code>CHAT_CACHE_HIT_TOTAL</code>, <code>CHAT_CACHE_MISS_TOTAL</code>, and <code>CHAT_TOOL_CALLS_TOTAL</code> are emitted by their respective middleware, not by <code>TelemetryChatMiddleware</code>. All require a <code>RuntimeMetrics</code> port to be provided to that middleware.</p>
+<hr>
+<h3 id="cachechatmiddleware"><a class="header" href="#cachechatmiddleware">CacheChatMiddleware</a></h3>
+<p>Caches <code>ChatResponse</code> values keyed by a deterministic SHA-256 hash of the request. Returns the cached response immediately on hit without calling the model.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder.with_cache_chat_middleware(Arc::new(InMemoryAiChatResponseCache::default()))
+<span class="boring">}</span></code></pre>
+<h4 id="with-metrics"><a class="header" href="#with-metrics">With metrics</a></h4>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let cache_middleware = CacheChatMiddleware::new(cache)
+    .with_metrics(metrics.clone());
+
+builder.with_chat_middleware(cache_middleware)
+<span class="boring">}</span></code></pre>
+<h4 id="cache-key"><a class="header" href="#cache-key">Cache key</a></h4>
+<p>The cache key is computed by <code>deterministic_cache_key(request, options)</code>:</p>
+<pre><code>SHA-256(format!("request={:?}|options={:?}", request, options))
+→ "chat:&lt;hex&gt;"
+</code></pre>
+<p>Keys are stable for structurally identical requests. Any change to message content, model hint, or options produces a different key.</p>
+<h4 id="cache-interface"><a class="header" href="#cache-interface">Cache interface</a></h4>
+<p>The <code>AiChatResponseCache</code> port must be implemented to back this middleware. <code>InMemoryAiChatResponseCache</code> is provided for development and testing. Production deployments should implement a durable or distributed cache backend.</p>
+<hr>
+<h3 id="toolcallinterceptionchatmiddleware"><a class="header" href="#toolcallinterceptionchatmiddleware">ToolCallInterceptionChatMiddleware</a></h3>
+<p>Intercepts responses that contain tool calls and routes them through an <code>AiChatToolInterceptor</code> implementation. Emits <code>CHAT_TOOL_CALLS_TOTAL</code> per intercepted tool call when metrics are configured.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder.with_tool_call_interception_chat_middleware(Arc::new(my_interceptor))
+<span class="boring">}</span></code></pre>
+<h4 id="with-metrics-1"><a class="header" href="#with-metrics-1">With metrics</a></h4>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let interception_middleware = ToolCallInterceptionChatMiddleware::new(interceptor)
+    .with_metrics(metrics.clone());
+
+builder.with_chat_middleware(interception_middleware)
+<span class="boring">}</span></code></pre>
+<p>The <code>AiChatToolInterceptor</code> port receives an <code>AiToolCallEnvelope</code> for each intercepted call. Implement this port to log, audit, filter, or transform tool calls before they are processed by the tool loop.</p>
+<hr>
+<h2 id="implementing-custom-middleware"><a class="header" href="#implementing-custom-middleware">Implementing Custom Middleware</a></h2>
+<p>Implement <code>ChatClientMiddleware</code> to inject custom behavior into the pipeline:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use std::sync::Arc;
+use stasis::prelude::{AiChatClient, ChatClientMiddleware};
+
+pub struct MyMiddleware;
+
+impl ChatClientMiddleware for MyMiddleware {
+    fn wrap(&amp;self, inner: Arc&lt;dyn AiChatClient&gt;) -&gt; Arc&lt;dyn AiChatClient&gt; {
+        Arc::new(MyWrappedClient { inner })
+    }
+}
+<span class="boring">}</span></code></pre>
+<p>Register with the builder:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder.with_chat_middleware(MyMiddleware)
+<span class="boring">}</span></code></pre>
+<p>or with a pre-boxed arc:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder.with_chat_middleware_arc(Arc::new(MyMiddleware))
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="non-goals-5"><a class="header" href="#non-goals-5">Non-Goals</a></h2>
+<ul>
+<li>Middleware does not control routing between models or providers. Model selection is governed by <code>model_hint</code> in the job payload and the <code>AiChatClient</code> implementation.</li>
+<li>Middleware does not have access to job metadata (job_id, thread_id, trace_id). Those fields are available in handler diagnostics via the outbox, not in the chat pipeline.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="grapheme-workflow-handlers"><a class="header" href="#grapheme-workflow-handlers">Grapheme Workflow Handlers</a></h1>
+<h2 id="document-metadata-8"><a class="header" href="#document-metadata-8">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, Architect, SRE</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/runtime/grapheme_job_handler.rs</li>
+<li>src/application/runtime/grapheme_echo_job_handler.rs</li>
+<li>src/application/runtime/grapheme_healthcheck_job_handler.rs</li>
+<li>src/application/runtime/grapheme_textops_job_handler.rs</li>
+<li>src/infrastructure/runtime/grapheme_sdk_workflow_engine.rs</li>
+<li>src/ports/outbound/runtime/workflow_engine.rs</li>
+<li>src/application/runtime/stasis_runtime_builder.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-6"><a class="header" href="#purpose-6">Purpose</a></h2>
+<p>Document the Grapheme Workflow plane in Stasis — a policy-governed scripted workflow execution layer backed by <code>grapheme-sdk</code>. Covers the four registered job handlers, source resolution semantics, guardrail policy, diagnostics contracts, and tracing behavior.</p>
+<h2 id="scope-3"><a class="header" href="#scope-3">Scope</a></h2>
+<p>Grapheme jobs are one of the three capability planes in Stasis (alongside the orchestration core and Locus memory). They execute compiled Grapheme-language scripts inside a sandboxed engine with enforced policy limits. This document does not cover AI prompt handlers or Locus memory handlers.</p>
+<h2 id="invariants-6"><a class="header" href="#invariants-6">Invariants</a></h2>
+<ol>
+<li>Every Grapheme job inherits durable retry, dead-letter, and lineage semantics from the Stasis runtime.</li>
+<li>Policy validation runs before engine execution. Any guardrail violation produces a <code>FatalFailure</code> — no retry is attempted.</li>
+<li>All four handlers share a single <code>WorkflowEngine</code> port instance wired at builder time via <code>GraphemeSdkWorkflowEngine</code>.</li>
+<li><code>execution_id</code> in success diagnostics is the <code>grapheme:&lt;artifact_id&gt;</code> value returned by the engine.</li>
+<li>Every attempt record receives a <code>diagnostics</code> JSON blob regardless of outcome — success and failure paths both emit structured diagnostics.</li>
+<li>Grapheme handlers are enabled by default in <code>StasisRuntimeBuilder</code>. They can be suppressed with <code>.without_grapheme_handlers()</code> for tests or specialized runtimes that do not need workflow execution.</li>
+</ol>
+<hr>
+<h2 id="system-context-1"><a class="header" href="#system-context-1">System Context</a></h2>
+<p>Grapheme handlers sit between the Stasis worker runtime and the <code>grapheme-sdk</code> engine. The <code>WorkflowEngine</code> port decouples the handler layer from the SDK, allowing the engine implementation to be swapped in tests.</p>
+<pre><code>Worker Runtime
+    │
+    ▼
+[GraphemeJobHandler / specialised handler]
+    │
+    ▼
+WorkflowEngine port
+    │
+    ▼
+GraphemeSdkWorkflowEngine (infrastructure adapter)
+    │  ├── validate_source()  ← guardrail pre-check
+    │  ├── tokio::time::timeout()  ← execution timeout enforcement
+    │  └── GraphemeEngine::execute_source()  ← grapheme-sdk
+    ▼
+WorkflowExecutionOutput { run_id: "grapheme:&lt;artifact_id&gt;" }
+</code></pre>
+<hr>
+<h2 id="runtime-builder-wiring"><a class="header" href="#runtime-builder-wiring">Runtime Builder Wiring</a></h2>
+<p>Grapheme handlers are registered by <code>StasisRuntimeBuilder</code> when <code>include_grapheme_handlers</code> is <code>true</code> (the default).</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    // Grapheme handlers are on by default. Suppress with:
+    // .without_grapheme_handlers()
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<p>All four handlers share one <code>GraphemeSdkWorkflowEngine</code> instance created at build time:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+
+rt.register_handler(GraphemeJobHandler::new(workflow_engine.clone()))?;
+rt.register_handler(GraphemeHealthcheckJobHandler::new(workflow_engine.clone()))?;
+rt.register_handler(GraphemeEchoJobHandler::new(workflow_engine.clone()))?;
+rt.register_handler(GraphemeTextOpsJobHandler::new(workflow_engine.clone()))?;
+<span class="boring">}</span></code></pre>
+<p>To use custom guardrails:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::infrastructure::runtime::grapheme_sdk_workflow_engine::{
+    GraphemeSdkWorkflowEngine, GraphemeWorkflowGuardrails,
+};
+use std::time::Duration;
+
+let guardrails = GraphemeWorkflowGuardrails {
+    allowed_imports: vec!["grapheme/core".to_string(), "grapheme/text".to_string()],
+    max_source_bytes: 64 * 1024,
+    execution_timeout: Duration::from_secs(1),
+    max_steps: Some(5_000),
+    max_call_depth: Some(8),
+};
+
+let engine = Arc::new(GraphemeSdkWorkflowEngine::with_guardrails(guardrails));
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="guardrails-policy"><a class="header" href="#guardrails-policy">Guardrails Policy</a></h2>
+<p><code>GraphemeWorkflowGuardrails</code> is evaluated by <code>GraphemeSdkWorkflowEngine</code> before the script reaches the engine. All violations produce a <code>POLICY_VIOLATION</code>-class guardrail code in the attempt diagnostics.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Guardrail</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>allowed_imports</code></td><td><code>["grapheme/core"]</code></td><td>Import statements not in this list are rejected</td></tr>
+<tr><td><code>max_source_bytes</code></td><td><code>131,072</code> (128 KiB)</td><td>Source exceeding this limit is rejected before parsing</td></tr>
+<tr><td><code>execution_timeout</code></td><td><code>2 seconds</code></td><td>Execution aborted if the engine does not return within this duration</td></tr>
+<tr><td><code>max_steps</code></td><td><code>10,000</code></td><td>Maximum engine evaluation steps (passed to <code>GraphemeEngine::builder</code>)</td></tr>
+<tr><td><code>max_call_depth</code></td><td><code>16</code></td><td>Maximum call stack depth (passed to <code>GraphemeEngine::builder</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="import-validation"><a class="header" href="#import-validation">Import validation</a></h3>
+<p>The engine extracts all <code>import</code> statements and checks each module path against <code>allowed_imports</code>. Matching is exact string equality.</p>
+<pre><code class="language-grapheme">import core from "grapheme/core"   // ✓ allowed by default
+import text from "grapheme/text"   // ✗ rejected unless added to allowed_imports
+</code></pre>
+<h3 id="execution-model"><a class="header" href="#execution-model">Execution model</a></h3>
+<p>Scripts run inside <code>tokio::task::spawn_blocking</code> to prevent blocking the async runtime. The <code>tokio::time::timeout</code> wrapper enforces <code>execution_timeout</code> at the async boundary — the underlying synchronous engine call is cancelled if the deadline is exceeded.</p>
+<hr>
+<h2 id="source-resolution"><a class="header" href="#source-resolution">Source Resolution</a></h2>
+<p><code>GraphemeJobHandler</code> resolves the script source from <code>job.payload_ref</code> using a prefix convention:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Prefix</th><th>Resolution</th></tr>
+</thead>
+<tbody>
+<tr><td><code>grapheme:inline:&lt;source&gt;</code></td><td>Uses the text after the prefix as the script source</td></tr>
+<tr><td><code>grapheme:file:&lt;path&gt;</code></td><td>Reads the script from the filesystem path</td></tr>
+<tr><td><em>(no prefix)</em></td><td>Treated as a bare inline source string</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Examples:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Inline source
+job.payload_ref = "grapheme:inline:import core from \"grapheme/core\"\nquery Ping { core.echo(message: \"ping\") { state { current } } }".to_string();
+
+// File source
+job.payload_ref = "grapheme:file:/opt/workflows/summarize.gql".to_string();
+
+// Bare inline (no prefix)
+job.payload_ref = "import core from \"grapheme/core\"\nquery Ping { core.echo(message: \"ok\") { state { current } } }".to_string();
+<span class="boring">}</span></code></pre>
+<p>Specialised handlers (<code>GraphemeEchoJobHandler</code>, <code>GraphemeHealthcheckJobHandler</code>, <code>GraphemeTextOpsJobHandler</code>) synthesise a <code>grapheme:inline:</code> source internally — callers submit a structured JSON payload, not raw source.</p>
+<hr>
+<h2 id="handler-reference"><a class="header" href="#handler-reference">Handler Reference</a></h2>
+<h3 id="graphemejobhandler"><a class="header" href="#graphemejobhandler">GraphemeJobHandler</a></h3>
+<p><strong>Job type:</strong> <code>workflow.grapheme</code></p>
+<p>The base Grapheme handler. Accepts <code>payload_ref</code> directly (inline, file, or bare). Used when the caller constructs the Grapheme source or file path themselves.</p>
+<p><strong>Payload:</strong> raw <code>payload_ref</code> string (source or path, see Source Resolution above)</p>
+<p><strong>When to use:</strong> Integration points that produce Grapheme scripts at runtime or need to reference a script file on disk.</p>
+<hr>
+<h3 id="graphemeechojobhandler"><a class="header" href="#graphemeechojobhandler">GraphemeEchoJobHandler</a></h3>
+<p><strong>Job type:</strong> <code>workflow.grapheme.echo</code></p>
+<p>Accepts a JSON payload with a <code>message</code> field, synthesises an inline <code>core.echo</code> Grapheme script, and delegates to <code>GraphemeJobHandler</code>. Used for integration tests, health verification, and pipeline smoke checks.</p>
+<p><strong>Payload:</strong></p>
+<pre><code class="language-json">{
+  "message": "string"
+}
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Constraint</th></tr>
+</thead>
+<tbody>
+<tr><td><code>message</code></td><td>Required. Non-empty. Maximum 512 characters.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Guardrail behavior:</strong></p>
+<ul>
+<li>Empty or whitespace <code>message</code> → <code>POLICY_VIOLATION</code> / FatalFailure (no retry)</li>
+<li><code>message</code> over 512 characters → <code>POLICY_VIOLATION</code> / FatalFailure</li>
+</ul>
+<p><strong>Generated source:</strong></p>
+<pre><code class="language-grapheme">import core from "grapheme/core"
+
+query Echo {
+  core.echo(message: "&lt;sanitised message&gt;") {
+    state { current }
+  }
+}
+</code></pre>
+<p>Quote characters in the message are replaced with single quotes. Newlines and carriage returns are replaced with spaces before source generation.</p>
+<p><strong>Example job submission:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::orchestration::stasis_workflow_job_builder::StasisWorkflowJobBuilder;
+
+let job = StasisWorkflowJobBuilder::new("job-echo-1")
+    .with_job_type("workflow.grapheme.echo")
+    .with_payload_ref(serde_json::to_string(&amp;serde_json::json!({
+        "message": "hello from grapheme"
+    }))?)
+    .with_scheduled_at(Utc::now())
+    .build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<hr>
+<h3 id="graphemehealthcheckjobhandler"><a class="header" href="#graphemehealthcheckjobhandler">GraphemeHealthcheckJobHandler</a></h3>
+<p><strong>Job type:</strong> <code>workflow.grapheme.healthcheck</code></p>
+<p>Validates that the Grapheme engine is operational by executing an inline echo script. Accepts an optional message string in <code>payload_ref</code>. Falls back to <code>"stasis grapheme healthcheck"</code> when the payload is empty.</p>
+<p><strong>Payload:</strong> plain string in <code>payload_ref</code> (not JSON). Empty payload is valid.</p>
+<p><strong>When to use:</strong> Kubernetes/platform liveness probes, runtime startup verification, deployment validation.</p>
+<p><strong>Example job submission:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let job = StasisWorkflowJobBuilder::new("job-healthcheck-1")
+    .with_job_type("workflow.grapheme.healthcheck")
+    .with_payload_ref("deployment check".to_string())
+    .with_scheduled_at(Utc::now())
+    .build();
+<span class="boring">}</span></code></pre>
+<hr>
+<h3 id="graphemetextopsjobhandler"><a class="header" href="#graphemetextopsjobhandler">GraphemeTextOpsJobHandler</a></h3>
+<p><strong>Job type:</strong> <code>workflow.grapheme.textops</code></p>
+<p>Runs a text transformation pipeline (<code>summarize</code> or <code>extract_keywords</code>) over input text using a Grapheme-backed engine execution. Validates payload structure and limits before reaching the engine.</p>
+<p><strong>Payload:</strong></p>
+<pre><code class="language-json">{
+  "mode": "summarize" | "extract_keywords",
+  "text": "string",
+  "max_items": "number | null"
+}
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Constraint</th></tr>
+</thead>
+<tbody>
+<tr><td><code>mode</code></td><td>Required. One of <code>summarize</code> or <code>extract_keywords</code>.</td></tr>
+<tr><td><code>text</code></td><td>Required. Non-empty. Maximum 4,096 characters.</td></tr>
+<tr><td><code>max_items</code></td><td>Optional. Integer 1–10. Defaults to <code>3</code> when omitted.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Guardrail behavior:</strong></p>
+<ul>
+<li>Empty or whitespace <code>text</code> → <code>POLICY_VIOLATION</code> / FatalFailure</li>
+<li><code>text</code> over 4,096 characters → <code>POLICY_VIOLATION</code> / FatalFailure</li>
+<li><code>max_items</code> outside 1–10 range → <code>POLICY_VIOLATION</code> / FatalFailure</li>
+<li>Invalid JSON payload → <code>POLICY_VIOLATION</code> / FatalFailure</li>
+</ul>
+<p><strong>Mode semantics:</strong></p>
+<ul>
+<li><code>summarize</code> — extracts the first <code>max_items</code> sentences (<code>.</code>, <code>!</code>, <code>?</code> boundaries). If no sentence boundaries are found, returns the first 24 whitespace-delimited tokens.</li>
+<li><code>extract_keywords</code> — tokenises by non-alphanumeric boundaries, drops stop words and tokens shorter than 4 characters, ranks by frequency (descending), then alphabetically, and returns the top <code>max_items</code> keywords as a comma-separated string.</li>
+</ul>
+<p><strong>Example job submission:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let job = StasisWorkflowJobBuilder::new("job-textops-1")
+    .with_job_type("workflow.grapheme.textops")
+    .with_payload_ref(serde_json::to_string(&amp;serde_json::json!({
+        "mode": "extract_keywords",
+        "text": "Stasis provides durable orchestration for AI-driven workflows with policy enforcement.",
+        "max_items": 5
+    }))?)
+    .with_scheduled_at(Utc::now())
+    .build();
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="diagnostics-and-tracing"><a class="header" href="#diagnostics-and-tracing">Diagnostics and Tracing</a></h2>
+<p>Every Grapheme job attempt records a structured JSON <code>diagnostics</code> blob in the attempt record. This applies to both success and failure outcomes.</p>
+<h3 id="success-diagnostics"><a class="header" href="#success-diagnostics">Success diagnostics</a></h3>
+<pre><code class="language-json">{
+  "provider": "grapheme-sdk",
+  "status": "success",
+  "duration_ms": 45,
+  "execution_id": "grapheme:abc123def456"
+}
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>provider</code></td><td>Always <code>"grapheme-sdk"</code></td></tr>
+<tr><td><code>status</code></td><td>Always <code>"success"</code></td></tr>
+<tr><td><code>duration_ms</code></td><td>Wall-clock milliseconds from engine invocation to completion</td></tr>
+<tr><td><code>execution_id</code></td><td><code>grapheme:&lt;artifact_id&gt;</code> returned by the engine</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="failure-diagnostics"><a class="header" href="#failure-diagnostics">Failure diagnostics</a></h3>
+<pre><code class="language-json">{
+  "provider": "grapheme-sdk",
+  "status": "failure",
+  "duration_ms": 12,
+  "guardrail_code": "IMPORT_NOT_ALLOWLISTED",
+  "policy_reason": "grapheme policy violation: import 'grapheme/text' is not allowlisted"
+}
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>provider</code></td><td>Always <code>"grapheme-sdk"</code></td></tr>
+<tr><td><code>status</code></td><td>Always <code>"failure"</code></td></tr>
+<tr><td><code>duration_ms</code></td><td>Wall-clock milliseconds until failure was detected</td></tr>
+<tr><td><code>guardrail_code</code></td><td>Classified failure code (see table below)</td></tr>
+<tr><td><code>policy_reason</code></td><td>Full error message — only present when <code>guardrail_code</code> indicates a policy violation</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="guardrail-codes"><a class="header" href="#guardrail-codes">Guardrail codes</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Code</th><th>Trigger condition</th></tr>
+</thead>
+<tbody>
+<tr><td><code>IMPORT_NOT_ALLOWLISTED</code></td><td>An <code>import</code> statement references a module not in <code>allowed_imports</code></td></tr>
+<tr><td><code>SOURCE_TOO_LARGE</code></td><td>Source byte length exceeds <code>max_source_bytes</code></td></tr>
+<tr><td><code>EXECUTION_TIMEOUT</code></td><td>Engine execution did not complete within <code>execution_timeout</code></td></tr>
+<tr><td><code>INVALID_TIMEOUT_CONFIG</code></td><td><code>execution_timeout</code> is zero (misconfiguration guard)</td></tr>
+<tr><td><code>POLICY_VIOLATION</code></td><td>Payload-level validation failure in specialised handlers, or generic engine policy error</td></tr>
+<tr><td><code>EXECUTION_ERROR</code></td><td>Engine returned a non-policy error (e.g. parse error, runtime panic)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="lineage"><a class="header" href="#lineage">Lineage</a></h3>
+<p>All Grapheme job attempts are recorded in the durable attempt store and are reachable via <code>InvestigateRuntimeLineage</code>. The <code>execution_id</code> (<code>grapheme:&lt;artifact_id&gt;</code>) from success diagnostics is the stable reference to the engine artifact for a given execution.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::use_cases::investigate_runtime_lineage::InvestigateRuntimeLineage;
+
+let lineage = investigate.for_job("job-echo-1").await?;
+for attempt in &amp;lineage.attempts {
+    println!("attempt {} diagnostics: {}", attempt.attempt_number, attempt.diagnostics.as_deref().unwrap_or("none"));
+}
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="extending-the-workflowengine-port"><a class="header" href="#extending-the-workflowengine-port">Extending the WorkflowEngine Port</a></h2>
+<p>The <code>WorkflowEngine</code> port in <code>src/ports/outbound/runtime/workflow_engine.rs</code> decouples all handlers from <code>grapheme-sdk</code>. In-process test doubles can substitute the real engine:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use std::sync::Arc;
+use async_trait::async_trait;
+use stasis::ports::outbound::runtime::workflow_engine::{WorkflowEngine, WorkflowExecutionOutput};
+use stasis::domain::errors::Result;
+
+struct StubWorkflowEngine;
+
+#[async_trait]
+impl WorkflowEngine for StubWorkflowEngine {
+    async fn execute_grapheme_source(&amp;self, _source: &amp;str) -&gt; Result&lt;WorkflowExecutionOutput&gt; {
+        Ok(WorkflowExecutionOutput {
+            run_id: "grapheme:stub-001".to_string(),
+        })
+    }
+}
+<span class="boring">}</span></code></pre>
+<p>Pass it to any handler directly:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let engine = Arc::new(StubWorkflowEngine);
+let handler = GraphemeEchoJobHandler::new(engine);
+<span class="boring">}</span></code></pre>
+<p>This is the pattern used in tests that call <code>.without_grapheme_handlers()</code> and register a custom handler instead of the default <code>GraphemeSdkWorkflowEngine</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="agent-coordination"><a class="header" href="#agent-coordination">Agent Coordination</a></h1>
+<h2 id="document-metadata-9"><a class="header" href="#document-metadata-9">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/application/orchestration/agent_session_pipeline.rs</li>
+<li>src/application/orchestration/tool_loop_pipeline.rs</li>
+<li>src/application/orchestration/agent_session_payload.rs</li>
+<li>src/application/runtime/agent_session_job_handler.rs</li>
+<li>src/application/runtime/agent_turn_job_handler.rs</li>
+<li>tests/runtime_backend_parity.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-7"><a class="header" href="#purpose-7">Purpose</a></h2>
+<p>Document the agent coordination layer: <code>AgentSessionPipeline</code>, <code>AgentSessionCoordinator</code>, selection and termination strategy contracts, the <code>ToolLoopPipeline</code> underpinning, and the two job handler entry points (<code>workflow.stasis.agent_turn</code> and <code>workflow.stasis.agent_session</code>).</p>
+<h2 id="invariants-7"><a class="header" href="#invariants-7">Invariants</a></h2>
+<ol>
+<li>Every agent turn executes through <code>ToolLoopPipeline</code> — tool invocation, round management, and <code>ToolCallMode</code> enforcement are applied uniformly.</li>
+<li><code>AgentSessionCoordinator</code> enforces <code>max_turns_cap.max(1)</code> — a session of zero turns is not permitted.</li>
+<li>An empty <code>participants</code> list or empty <code>initial_user_prompt</code> returns <code>FatalFailure</code> immediately with <code>guardrail_code: POLICY_VIOLATION</code>.</li>
+<li>Turn prompts after the first are constructed from the running transcript: <code>"Session transcript so far:\n...\n\nContinue the collaboration from your role."</code> — the full transcript is carried forward.</li>
+<li><code>RoundRobinSelectionStrategy</code> uses an atomic cursor — it is safe for concurrent sessions but the cursor does not reset between sessions.</li>
+</ol>
+<hr>
+<h2 id="architecture"><a class="header" href="#architecture">Architecture</a></h2>
+<pre><code>workflow.stasis.agent_session (job)
+    └── AgentSessionJobHandler
+            └── AgentSessionCoordinator.run_session()
+                    ├── AgentSelectionStrategy.select_next_agent()
+                    ├── AgentSessionPipeline.execute_turn()
+                    │       └── ToolLoopPipeline.execute()
+                    │               └── PromptExecutionPipeline + ToolRegistry
+                    └── AgentTerminationStrategy.should_terminate()
+
+workflow.stasis.agent_turn (job)
+    └── AgentTurnJobHandler
+            └── AgentSessionPipeline.execute_turn()
+                    └── ToolLoopPipeline.execute()
+</code></pre>
+<hr>
+<h2 id="job-handler-workflowstasisagent_turn"><a class="header" href="#job-handler-workflowstasisagent_turn">Job Handler: <code>workflow.stasis.agent_turn</code></a></h2>
+<p>Executes a single agent turn — one tool-augmented prompt/response cycle for a named agent.</p>
+<h3 id="payload-agentturnjobpayload"><a class="header" href="#payload-agentturnjobpayload">Payload: <code>AgentTurnJobPayload</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>agent_id</code></td><td><code>String</code></td><td>Identity of the agent executing this turn</td></tr>
+<tr><td><code>thread_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Thread to associate the turn with</td></tr>
+<tr><td><code>user_prompt</code></td><td><code>String</code></td><td>Input prompt for this turn</td></tr>
+<tr><td><code>system_prompt</code></td><td><code>Option&lt;String&gt;</code></td><td>System prompt for the agent</td></tr>
+<tr><td><code>policy_profile</code></td><td><code>Option&lt;String&gt;</code></td><td>Policy profile identifier</td></tr>
+<tr><td><code>model_hint</code></td><td><code>Option&lt;String&gt;</code></td><td>Model preference hint</td></tr>
+<tr><td><code>tool_name</code></td><td><code>String</code></td><td>Tool the agent should use</td></tr>
+<tr><td><code>tool_input</code></td><td><code>Option&lt;Value&gt;</code></td><td>Initial tool input</td></tr>
+<tr><td><code>tool_call_mode</code></td><td><code>Option&lt;AgentToolCallMode&gt;</code></td><td><code>auto</code> or <code>strict</code></td></tr>
+<tr><td><code>memory_policy</code></td><td><code>Option&lt;MemoryPolicyPayload&gt;</code></td><td>Memory recall/store policy</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="job-handler-workflowstasisagent_session"><a class="header" href="#job-handler-workflowstasisagent_session">Job Handler: <code>workflow.stasis.agent_session</code></a></h2>
+<p>Executes a coordinated multi-turn session across one or more participants.</p>
+<h3 id="payload-agentsessionjobpayload"><a class="header" href="#payload-agentsessionjobpayload">Payload: <code>AgentSessionJobPayload</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>thread_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Shared thread for the session</td></tr>
+<tr><td><code>initial_user_prompt</code></td><td><code>String</code></td><td>Starting prompt for the session — must be non-empty</td></tr>
+<tr><td><code>participants</code></td><td><code>Vec&lt;AgentSessionParticipantPayload&gt;</code></td><td>Ordered list of participants</td></tr>
+<tr><td><code>policy_profile</code></td><td><code>Option&lt;String&gt;</code></td><td>Default policy profile</td></tr>
+<tr><td><code>model_hint</code></td><td><code>Option&lt;String&gt;</code></td><td>Default model hint</td></tr>
+<tr><td><code>max_turns</code></td><td><code>Option&lt;usize&gt;</code></td><td>Turn cap (defaults to <code>1</code> if zero or absent)</td></tr>
+<tr><td><code>tool_call_mode</code></td><td><code>Option&lt;AgentToolCallMode&gt;</code></td><td>Applied to all turns</td></tr>
+<tr><td><code>memory_policy</code></td><td><code>Option&lt;MemoryPolicyPayload&gt;</code></td><td>Memory policy for all turns</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="agentsessionparticipantpayload"><a class="header" href="#agentsessionparticipantpayload">AgentSessionParticipantPayload</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>agent_id</code></td><td><code>String</code></td><td>Participant identity</td></tr>
+<tr><td><code>system_prompt</code></td><td><code>Option&lt;String&gt;</code></td><td>System prompt for this participant</td></tr>
+<tr><td><code>tool_name</code></td><td><code>String</code></td><td>Tool this participant invokes</td></tr>
+<tr><td><code>tool_input</code></td><td><code>Option&lt;Value&gt;</code></td><td>Tool input for this participant</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="agenttoolcallmode"><a class="header" href="#agenttoolcallmode">AgentToolCallMode</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variant</th><th>Behavior</th></tr>
+</thead>
+<tbody>
+<tr><td><code>auto</code> (default)</td><td>Model decides whether to call tools</td></tr>
+<tr><td><code>strict</code></td><td>Model is required to call a tool on every round</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="tool-loop"><a class="header" href="#tool-loop">Tool Loop</a></h2>
+<p>Each agent turn executes through <code>ToolLoopPipeline</code>, which manages the prompt → tool call → prompt cycle:</p>
+<ul>
+<li>Up to <code>DEFAULT_MAX_TOOL_ROUNDS = 4</code> rounds per turn.</li>
+<li>If <code>tool_name</code> is non-empty, the registry is filtered to expose only that tool to the model.</li>
+<li><code>ToolInvocation</code> records are collected per round and returned in the turn response.</li>
+<li><code>termination_reason</code> describes why the loop stopped: <code>max_rounds_reached</code>, <code>no_tool_calls</code>, <code>completed</code>, etc.</li>
+</ul>
+<h3 id="toolloopexecutionresponse-fields"><a class="header" href="#toolloopexecutionresponse-fields">ToolLoopExecutionResponse fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>text</code></td><td><code>String</code></td><td>Final model response text</td></tr>
+<tr><td><code>tool_name</code></td><td><code>String</code></td><td>Tool that was active</td></tr>
+<tr><td><code>tool_output</code></td><td><code>Value</code></td><td>Final tool output</td></tr>
+<tr><td><code>tool_invocations</code></td><td><code>Vec&lt;ToolInvocation&gt;</code></td><td>All tool calls made during the loop</td></tr>
+<tr><td><code>rounds_executed</code></td><td><code>usize</code></td><td>Number of prompt/response rounds</td></tr>
+<tr><td><code>termination_reason</code></td><td><code>String</code></td><td>Why the loop stopped</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="selection-strategies"><a class="header" href="#selection-strategies">Selection Strategies</a></h2>
+<p><code>AgentSelectionStrategy</code> determines which participant runs each turn.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait AgentSelectionStrategy: Send + Sync {
+    fn select_next_agent(
+        &amp;self,
+        participants: &amp;[String],
+        thread_id: Option&lt;&amp;str&gt;,
+        transcript: &amp;[String],
+    ) -&gt; Result&lt;String&gt;;
+}
+<span class="boring">}</span></code></pre>
+<h3 id="roundrobinselectionstrategy"><a class="header" href="#roundrobinselectionstrategy">RoundRobinSelectionStrategy</a></h3>
+<p>Selects participants in round-robin order using an atomic cursor.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let strategy = RoundRobinSelectionStrategy::new();
+<span class="boring">}</span></code></pre>
+<p>The cursor is global to the strategy instance — it does not reset between <code>run_session</code> calls. For isolated sessions, create a new strategy instance per session.</p>
+<h3 id="custom-selection"><a class="header" href="#custom-selection">Custom selection</a></h3>
+<p>Implement <code>AgentSelectionStrategy</code> to select based on transcript content, thread state, or external routing logic:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ContentBasedStrategy;
+
+impl AgentSelectionStrategy for ContentBasedStrategy {
+    fn select_next_agent(
+        &amp;self,
+        participants: &amp;[String],
+        _thread_id: Option&lt;&amp;str&gt;,
+        transcript: &amp;[String],
+    ) -&gt; Result&lt;String&gt; {
+        // Route based on the last turn's content
+        let last = transcript.last().map(|s| s.as_str()).unwrap_or("");
+        if last.contains("error") {
+            participants.iter().find(|id| id.contains("debug"))
+                .cloned()
+                .ok_or_else(|| StasisError::PortFailure("no debug agent".into()))
+        } else {
+            Ok(participants[0].clone())
+        }
+    }
+}
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="termination-strategies"><a class="header" href="#termination-strategies">Termination Strategies</a></h2>
+<p><code>AgentTerminationStrategy</code> decides when a session ends early.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait AgentTerminationStrategy: Send + Sync {
+    fn should_terminate(&amp;self, turn_count: usize, last_response: &amp;str) -&gt; Result&lt;bool&gt;;
+}
+<span class="boring">}</span></code></pre>
+<h3 id="maxturnsterminationstrategy"><a class="header" href="#maxturnsterminationstrategy">MaxTurnsTerminationStrategy</a></h3>
+<p>Terminates when <code>turn_count &gt;= max_turns</code> or when the last response contains an optional <code>done_token</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Terminate after 5 turns
+let strategy = MaxTurnsTerminationStrategy::new(5);
+
+// Terminate after 5 turns OR when response contains "[DONE]"
+let strategy = MaxTurnsTerminationStrategy::new(5)
+    .with_done_token("[DONE]");
+<span class="boring">}</span></code></pre>
+<h3 id="custom-termination"><a class="header" href="#custom-termination">Custom termination</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct PolicyViolationTermination;
+
+impl AgentTerminationStrategy for PolicyViolationTermination {
+    fn should_terminate(&amp;self, _turn_count: usize, last_response: &amp;str) -&gt; Result&lt;bool&gt; {
+        Ok(last_response.contains("POLICY_VIOLATION"))
+    }
+}
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="agentsessioncoordinator"><a class="header" href="#agentsessioncoordinator">AgentSessionCoordinator</a></h2>
+<p><code>AgentSessionCoordinator</code> composes the pipeline with selection and termination strategies for direct programmatic use outside the job runtime:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let coordinator = AgentSessionCoordinator::new(
+    pipeline,
+    Arc::new(RoundRobinSelectionStrategy::new()),
+    Arc::new(MaxTurnsTerminationStrategy::new(5)),
+);
+
+let response = coordinator.run_session(AgentSessionRunRequest {
+    thread_id: Some("thread-001".to_string()),
+    initial_user_prompt: "Analyze the quarterly report.".to_string(),
+    participants: vec![analyst, reviewer],
+    context: PromptExecutionContext::default(),
+    max_turns_cap: 5,
+    policy: AgentTurnExecutionPolicy::default(),
+}).await?;
+<span class="boring">}</span></code></pre>
+<h3 id="agentsessionrunresponse"><a class="header" href="#agentsessionrunresponse">AgentSessionRunResponse</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>thread_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Thread ID for the session</td></tr>
+<tr><td><code>turns</code></td><td><code>Vec&lt;AgentTurnRecord&gt;</code></td><td>Per-turn records</td></tr>
+<tr><td><code>transcript</code></td><td><code>Vec&lt;String&gt;</code></td><td>Full session transcript as <code>"actor: text"</code> lines</td></tr>
+<tr><td><code>terminated</code></td><td><code>bool</code></td><td>Whether the termination strategy ended the session early</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="agentturnrecord"><a class="header" href="#agentturnrecord">AgentTurnRecord</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>turn_number</code></td><td><code>usize</code></td><td>1-based turn index</td></tr>
+<tr><td><code>agent_id</code></td><td><code>String</code></td><td>Agent that executed this turn</td></tr>
+<tr><td><code>response_text</code></td><td><code>String</code></td><td>Agent’s final response</td></tr>
+<tr><td><code>tool_name</code></td><td><code>String</code></td><td>Tool used</td></tr>
+<tr><td><code>rounds_executed</code></td><td><code>usize</code></td><td>Tool loop rounds within this turn</td></tr>
+<tr><td><code>termination_reason</code></td><td><code>String</code></td><td>How the tool loop ended</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="non-goals-6"><a class="header" href="#non-goals-6">Non-Goals</a></h2>
+<ul>
+<li><code>AgentSessionCoordinator</code> does not manage memory. Memory recall/write is handled by the job handlers (<code>AgentSessionJobHandler</code>, <code>AgentTurnJobHandler</code>) when a <code>MemoryContextReader</code>/<code>Writer</code> is wired.</li>
+<li>Strategy implementations do not have access to job metadata. Context must be encoded in the transcript or passed via <code>thread_id</code>.</li>
+<li>The <code>RoundRobinSelectionStrategy</code> cursor is not persistent — it resets on process restart.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="memory-operations-reference"><a class="header" href="#memory-operations-reference">Memory Operations Reference</a></h1>
+<h2 id="document-metadata-10"><a class="header" href="#document-metadata-10">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, Architect, SRE</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/ports/outbound/memory/memory_operations.rs</li>
+<li>src/ports/outbound/memory/memory_context_reader.rs</li>
+<li>src/ports/outbound/memory/memory_context_writer.rs</li>
+<li>src/ports/outbound/memory/memory_models.rs</li>
+<li>src/application/runtime/memory_recall_job_handler.rs</li>
+<li>src/application/runtime/memory_aggregate_job_handler.rs</li>
+<li>src/application/runtime/memory_transform_job_handler.rs</li>
+<li>src/application/runtime/memory_rollup_job_handler.rs</li>
+<li>src/application/runtime/memory_schema_job_handler.rs</li>
+<li>tests/locus_memory_adapters.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-8"><a class="header" href="#purpose-8">Purpose</a></h2>
+<p>Document the five Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (<code>MemoryContextReader</code>, <code>MemoryContextWriter</code>, <code>MemoryOperations</code>).</p>
+<h2 id="invariants-8"><a class="header" href="#invariants-8">Invariants</a></h2>
+<ol>
+<li>All five memory handlers are durable jobs — they inherit retry, dead-letter, and lineage semantics from the runtime.</li>
+<li>Memory handlers are only registered when a <code>MemoryContextReader</code> or <code>MemoryOperations</code> port is provided to the builder. Missing ports cause the handler to be silently skipped at build time.</li>
+<li>Invalid payloads produce a <code>FatalFailure</code> with <code>guardrail_code: POLICY_VIOLATION</code> — they are not retried.</li>
+<li><code>MemoryTransformRequest</code> defaults to <code>dry_run: true</code>. Callers must explicitly set <code>dry_run: false</code> to apply changes.</li>
+<li><code>MemoryScope</code> fields are optional. An empty scope means no session, tier, or time filtering — operations apply globally.</li>
+</ol>
+<hr>
+<h2 id="memory-port-interfaces"><a class="header" href="#memory-port-interfaces">Memory Port Interfaces</a></h2>
+<h3 id="memorycontextreader"><a class="header" href="#memorycontextreader">MemoryContextReader</a></h3>
+<p>Used by handlers that need to retrieve prior context before execution (prompt, tool loop, agent turn, agent session).</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait MemoryContextReader: Send + Sync {
+    async fn recall(&amp;self, request: &amp;MemoryRecallRequest) -&gt; Result&lt;MemoryRecallResponse&gt;;
+}
+<span class="boring">}</span></code></pre>
+<h3 id="memorycontextwriter"><a class="header" href="#memorycontextwriter">MemoryContextWriter</a></h3>
+<p>Used by handlers that need to persist execution output for future recall.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait MemoryContextWriter: Send + Sync {
+    async fn store_context(&amp;self, request: &amp;MemoryStoreRequest) -&gt; Result&lt;MemoryStoreResponse&gt;;
+}
+<span class="boring">}</span></code></pre>
+<h3 id="memoryoperations"><a class="header" href="#memoryoperations">MemoryOperations</a></h3>
+<p>Used by the five memory workflow handlers for aggregate, transform, rollup, and schema operations.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait MemoryOperations: Send + Sync {
+    async fn aggregate(&amp;self, request: &amp;MemoryAggregateRequest) -&gt; Result&lt;MemoryAggregateResponse&gt;;
+    async fn transform(&amp;self, request: &amp;MemoryTransformRequest) -&gt; Result&lt;MemoryTransformResponse&gt;;
+    async fn rollup(&amp;self, request: &amp;MemoryRollupRequest) -&gt; Result&lt;MemoryRollupResponse&gt;;
+    async fn schema(&amp;self) -&gt; Result&lt;MemorySchemaResponse&gt;;
+}
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="shared-types"><a class="header" href="#shared-types">Shared Types</a></h2>
+<h3 id="memoryscope"><a class="header" href="#memoryscope">MemoryScope</a></h3>
+<p>Filters applied to recall, aggregate, transform, and rollup operations.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>session_ids</code></td><td><code>Option&lt;Vec&lt;String&gt;&gt;</code></td><td>Restrict to specific session IDs. <code>None</code> = all sessions</td></tr>
+<tr><td><code>tiers</code></td><td><code>Option&lt;Vec&lt;String&gt;&gt;</code></td><td>Restrict to specific memory tiers. <code>None</code> = all tiers</td></tr>
+<tr><td><code>from_utc</code></td><td><code>Option&lt;DateTime&lt;Utc&gt;&gt;</code></td><td>Lower bound on node timestamp</td></tr>
+<tr><td><code>to_utc</code></td><td><code>Option&lt;DateTime&lt;Utc&gt;&gt;</code></td><td>Upper bound on node timestamp</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="memoryavecstate"><a class="header" href="#memoryavecstate">MemoryAvecState</a></h3>
+<p>AVEC scores used for resonance-based recall ranking.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>stability</code></td><td><code>f32</code></td><td>Stability dimension (0.0–1.0)</td></tr>
+<tr><td><code>friction</code></td><td><code>f32</code></td><td>Friction dimension (0.0–1.0)</td></tr>
+<tr><td><code>logic</code></td><td><code>f32</code></td><td>Logic dimension (0.0–1.0)</td></tr>
+<tr><td><code>autonomy</code></td><td><code>f32</code></td><td>Autonomy dimension (0.0–1.0)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="operation-1-recall"><a class="header" href="#operation-1-recall">Operation 1: Recall</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.memory.recall</code><br><strong>Port:</strong> <code>MemoryContextReader</code></p>
+<p>Retrieves memory nodes matching the provided scope and query parameters. Used inline by prompt/tool-loop/agent handlers and available as a standalone job.</p>
+<h3 id="request-memoryrecallrequest"><a class="header" href="#request-memoryrecallrequest">Request: <code>MemoryRecallRequest</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>scope</code></td><td><code>MemoryScope</code></td><td>empty</td><td>Scope filter</td></tr>
+<tr><td><code>current_avec</code></td><td><code>Option&lt;MemoryAvecState&gt;</code></td><td><code>None</code></td><td>AVEC state for resonance ranking</td></tr>
+<tr><td><code>query_text</code></td><td><code>Option&lt;String&gt;</code></td><td><code>None</code></td><td>Semantic query string</td></tr>
+<tr><td><code>limit</code></td><td><code>usize</code></td><td><code>20</code></td><td>Maximum nodes to retrieve</td></tr>
+<tr><td><code>alpha</code></td><td><code>f32</code></td><td><code>0.7</code></td><td>AVEC resonance weight</td></tr>
+<tr><td><code>beta</code></td><td><code>f32</code></td><td><code>0.3</code></td><td>Semantic similarity weight</td></tr>
+<tr><td><code>fallback_policy</code></td><td><code>MemoryFallbackPolicy</code></td><td><code>OnEmpty</code></td><td>Fallback behavior when results are empty</td></tr>
+<tr><td><code>strictness</code></td><td><code>MemoryStrictnessMode</code></td><td><code>Balanced</code></td><td>Retrieval strictness</td></tr>
+<tr><td><code>include_explain</code></td><td><code>bool</code></td><td><code>false</code></td><td>Include retrieval path explanation</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="memoryfallbackpolicy"><a class="header" href="#memoryfallbackpolicy">MemoryFallbackPolicy</a></h4>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variant</th><th>Behavior</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Never</code></td><td>Return empty result if no matches found</td></tr>
+<tr><td><code>OnEmpty</code> (default)</td><td>Broaden query if initial result is empty</td></tr>
+<tr><td><code>Always</code></td><td>Always attempt fallback broadening</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="memorystrictnessmode"><a class="header" href="#memorystrictnessmode">MemoryStrictnessMode</a></h4>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variant</th><th>Behavior</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Precision</code></td><td>High precision, lower recall — only high-confidence matches</td></tr>
+<tr><td><code>Balanced</code> (default)</td><td>Balanced precision/recall</td></tr>
+<tr><td><code>Recall</code></td><td>High recall, lower precision — broader matches</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="response-memoryrecallresponse"><a class="header" href="#response-memoryrecallresponse">Response: <code>MemoryRecallResponse</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>retrieved</code></td><td><code>usize</code></td><td>Number of nodes returned</td></tr>
+<tr><td><code>next_cursor</code></td><td><code>Option&lt;String&gt;</code></td><td>Cursor for pagination</td></tr>
+<tr><td><code>has_more</code></td><td><code>bool</code></td><td>Whether more results are available</td></tr>
+<tr><td><code>retrieval_path</code></td><td><code>Option&lt;String&gt;</code></td><td>Explanation of how results were retrieved</td></tr>
+<tr><td><code>fallback_triggered</code></td><td><code>bool</code></td><td>Whether fallback broadening was activated</td></tr>
+<tr><td><code>fallback_reason</code></td><td><code>Option&lt;String&gt;</code></td><td>Reason fallback was triggered</td></tr>
+<tr><td><code>node_sync_keys</code></td><td><code>Vec&lt;String&gt;</code></td><td>Sync keys of returned nodes</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="operation-2-store-context"><a class="header" href="#operation-2-store-context">Operation 2: Store Context</a></h2>
+<p><strong>Job type:</strong> Inline only (no standalone job handler)<br><strong>Port:</strong> <code>MemoryContextWriter</code></p>
+<p>Persists a raw STTP node string to memory for future recall. Called automatically by memory-enabled handlers after successful execution.</p>
+<h3 id="request-memorystorerequest"><a class="header" href="#request-memorystorerequest">Request: <code>MemoryStoreRequest</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>session_id</code></td><td><code>String</code></td><td>Session to associate the node with</td></tr>
+<tr><td><code>raw_node</code></td><td><code>String</code></td><td>Raw STTP node JSON string</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="response-memorystoreresponse"><a class="header" href="#response-memorystoreresponse">Response: <code>MemoryStoreResponse</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>node_id</code></td><td><code>String</code></td><td>Assigned node ID</td></tr>
+<tr><td><code>psi</code></td><td><code>f32</code></td><td>Node quality score (0.0–1.0)</td></tr>
+<tr><td><code>valid</code></td><td><code>bool</code></td><td>Whether the node passed schema validation</td></tr>
+<tr><td><code>validation_error</code></td><td><code>Option&lt;String&gt;</code></td><td>Validation failure reason if <code>valid</code> is false</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="operation-3-aggregate"><a class="header" href="#operation-3-aggregate">Operation 3: Aggregate</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.memory.aggregate</code><br><strong>Port:</strong> <code>MemoryOperations</code></p>
+<p>Groups memory nodes within the scope and produces aggregate statistics. Used for memory health analysis and maintenance.</p>
+<h3 id="request-memoryaggregaterequest"><a class="header" href="#request-memoryaggregaterequest">Request: <code>MemoryAggregateRequest</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>scope</code></td><td><code>MemoryScope</code></td><td>empty</td><td>Scope filter</td></tr>
+<tr><td><code>max_groups</code></td><td><code>usize</code></td><td><code>30</code></td><td>Maximum groups to produce</td></tr>
+<tr><td><code>max_nodes</code></td><td><code>usize</code></td><td><code>5000</code></td><td>Maximum nodes to scan</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="response-memoryaggregateresponse"><a class="header" href="#response-memoryaggregateresponse">Response: <code>MemoryAggregateResponse</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>total_groups</code></td><td><code>usize</code></td><td>Number of groups produced</td></tr>
+<tr><td><code>scanned_nodes</code></td><td><code>usize</code></td><td>Total nodes scanned</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="diagnostics-keys"><a class="header" href="#diagnostics-keys">Diagnostics keys</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td><code>provider</code></td><td><code>stasis-memory-aggregate</code></td></tr>
+<tr><td><code>status</code></td><td><code>success</code> or <code>failure</code></td></tr>
+<tr><td><code>total_groups</code></td><td>Result group count</td></tr>
+<tr><td><code>scanned_nodes</code></td><td>Nodes scanned</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="operation-4-transform"><a class="header" href="#operation-4-transform">Operation 4: Transform</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.memory.transform</code><br><strong>Port:</strong> <code>MemoryOperations</code></p>
+<p>Applies a batch transformation operation to memory nodes (embedding backfill or reindex). Defaults to <code>dry_run: true</code> — the payload must explicitly set <code>dry_run: false</code> to apply changes.</p>
+<h3 id="request-memorytransformrequest"><a class="header" href="#request-memorytransformrequest">Request: <code>MemoryTransformRequest</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>scope</code></td><td><code>MemoryScope</code></td><td>empty</td><td>Scope filter</td></tr>
+<tr><td><code>operation</code></td><td><code>MemoryTransformOperation</code></td><td><code>EmbedBackfill</code></td><td>Operation to apply</td></tr>
+<tr><td><code>dry_run</code></td><td><code>bool</code></td><td><code>true</code></td><td>Preview only — no writes when <code>true</code></td></tr>
+<tr><td><code>batch_size</code></td><td><code>usize</code></td><td><code>100</code></td><td>Nodes processed per batch</td></tr>
+<tr><td><code>max_nodes</code></td><td><code>usize</code></td><td><code>5000</code></td><td>Maximum nodes to process</td></tr>
+<tr><td><code>provider_id</code></td><td><code>Option&lt;String&gt;</code></td><td><code>None</code></td><td>Embedding provider override</td></tr>
+<tr><td><code>model</code></td><td><code>Option&lt;String&gt;</code></td><td><code>None</code></td><td>Embedding model override</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="memorytransformoperation"><a class="header" href="#memorytransformoperation">MemoryTransformOperation</a></h4>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variant</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>EmbedBackfill</code> (default)</td><td>Generate embeddings for nodes that are missing them</td></tr>
+<tr><td><code>ReindexEmbeddings</code></td><td>Regenerate embeddings for all nodes in scope</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="response-memorytransformresponse"><a class="header" href="#response-memorytransformresponse">Response: <code>MemoryTransformResponse</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>scanned</code></td><td><code>usize</code></td><td>Total nodes examined</td></tr>
+<tr><td><code>selected</code></td><td><code>usize</code></td><td>Nodes selected for transformation</td></tr>
+<tr><td><code>updated</code></td><td><code>usize</code></td><td>Nodes successfully transformed</td></tr>
+<tr><td><code>skipped</code></td><td><code>usize</code></td><td>Nodes skipped (already up-to-date)</td></tr>
+<tr><td><code>failed</code></td><td><code>usize</code></td><td>Nodes that failed transformation</td></tr>
+<tr><td><code>duplicate</code></td><td><code>usize</code></td><td>Nodes skipped as duplicates</td></tr>
+<tr><td><code>failures</code></td><td><code>Vec&lt;String&gt;</code></td><td>Error messages for failed nodes</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="diagnostics-keys-1"><a class="header" href="#diagnostics-keys-1">Diagnostics keys</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td><code>provider</code></td><td><code>stasis-memory-transform</code></td></tr>
+<tr><td><code>status</code></td><td><code>success</code> or <code>failure</code></td></tr>
+<tr><td><code>scanned</code></td><td>Total nodes scanned</td></tr>
+<tr><td><code>selected</code></td><td>Nodes selected</td></tr>
+<tr><td><code>updated</code></td><td>Nodes updated</td></tr>
+<tr><td><code>failed</code></td><td>Node failure count</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="operation-5-rollup"><a class="header" href="#operation-5-rollup">Operation 5: Rollup</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.memory.rollup</code><br><strong>Port:</strong> <code>MemoryOperations</code></p>
+<p>Creates monthly checkpoint rollups from stored nodes to reduce retrieval noise over long timelines.</p>
+<h3 id="request-memoryrolluprequest"><a class="header" href="#request-memoryrolluprequest">Request: <code>MemoryRollupRequest</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>scope</code></td><td><code>MemoryScope</code></td><td>empty</td><td>Scope filter</td></tr>
+<tr><td><code>max_days</code></td><td><code>usize</code></td><td><code>30</code></td><td>Maximum days of history to roll up</td></tr>
+<tr><td><code>max_nodes</code></td><td><code>usize</code></td><td><code>5000</code></td><td>Maximum nodes to process</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="response-memoryrollupresponse"><a class="header" href="#response-memoryrollupresponse">Response: <code>MemoryRollupResponse</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>total_groups</code></td><td><code>usize</code></td><td>Number of rollup groups produced</td></tr>
+<tr><td><code>scanned_nodes</code></td><td><code>usize</code></td><td>Total nodes scanned</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="operation-6-schema"><a class="header" href="#operation-6-schema">Operation 6: Schema</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.memory.schema</code><br><strong>Port:</strong> <code>MemoryOperations</code></p>
+<p>Returns the current memory schema version and capability descriptor. No payload fields are required beyond the job envelope.</p>
+<h3 id="response-memoryschemaresponse"><a class="header" href="#response-memoryschemaresponse">Response: <code>MemorySchemaResponse</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>schema_version</code></td><td><code>String</code></td><td>Current STTP schema version</td></tr>
+<tr><td><code>sort_fields</code></td><td><code>Vec&lt;String&gt;</code></td><td>Fields available for result sorting</td></tr>
+<tr><td><code>filter_fields</code></td><td><code>Vec&lt;String&gt;</code></td><td>Fields available for scope filtering</td></tr>
+<tr><td><code>group_by_fields</code></td><td><code>Vec&lt;String&gt;</code></td><td>Fields available for grouping</td></tr>
+<tr><td><code>fallback_policies</code></td><td><code>Vec&lt;String&gt;</code></td><td>Supported fallback policy names</td></tr>
+<tr><td><code>strictness_modes</code></td><td><code>Vec&lt;String&gt;</code></td><td>Supported strictness mode names</td></tr>
+<tr><td><code>transform_operations</code></td><td><code>Vec&lt;String&gt;</code></td><td>Supported transform operation names</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="diagnostics-keys-2"><a class="header" href="#diagnostics-keys-2">Diagnostics keys</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td><code>provider</code></td><td><code>stasis-memory-schema</code></td></tr>
+<tr><td><code>status</code></td><td><code>success</code> or <code>failure</code></td></tr>
+<tr><td><code>schema_version</code></td><td>Schema version string</td></tr>
+<tr><td><code>transform_operations</code></td><td>List of supported operations</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="non-goals-7"><a class="header" href="#non-goals-7">Non-Goals</a></h2>
+<ul>
+<li>Memory operations do not perform agent execution. They are maintenance and retrieval workflows, not orchestration patterns.</li>
+<li><code>MemoryContextReader</code> and <code>MemoryContextWriter</code> are separate interfaces from <code>MemoryOperations</code> by design — readers/writers can be wired without enabling bulk operation handlers.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="extension-points-and-port-contracts"><a class="header" href="#extension-points-and-port-contracts">Extension Points and Port Contracts</a></h1>
+<h2 id="document-metadata-11"><a class="header" href="#document-metadata-11">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/ports/outbound/ai_chat_client.rs</li>
+<li>src/ports/outbound/ai_chat_response_cache.rs</li>
+<li>src/ports/outbound/ai_chat_tool_interceptor.rs</li>
+<li>src/ports/outbound/runtime/runtime_metrics.rs</li>
+<li>src/ports/outbound/runtime/thread_store.rs</li>
+<li>src/ports/outbound/runtime/workflow_engine.rs</li>
+<li>src/ports/outbound/memory/memory_context_reader.rs</li>
+<li>src/ports/outbound/memory/memory_context_writer.rs</li>
+<li>src/ports/outbound/memory/memory_operations.rs</li>
+<li>src/application/orchestration/tool_registry.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-9"><a class="header" href="#purpose-9">Purpose</a></h2>
+<p>Document all port contracts that SDK consumers can implement to extend or replace Stasis infrastructure. Each entry covers the trait signature, what Stasis guarantees about call semantics, and the built-in implementation(s) provided.</p>
+<h2 id="architecture-principle"><a class="header" href="#architecture-principle">Architecture Principle</a></h2>
+<p>Stasis follows hexagonal architecture. All external dependencies are hidden behind ports (traits). Consumers implement ports to substitute infrastructure without touching domain or orchestration logic. The runtime builder (<code>StasisRuntimeBuilder</code>) is the single wiring point where port implementations are injected.</p>
+<hr>
+<h2 id="ai-layer-ports"><a class="header" href="#ai-layer-ports">AI Layer Ports</a></h2>
+<h3 id="aichatclient"><a class="header" href="#aichatclient">AiChatClient</a></h3>
+<p>The primary interface for all model interactions. Every prompt, tool loop, and agent turn goes through this port.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait AiChatClient: Send + Sync {
+    async fn complete(
+        &amp;self,
+        request: ChatRequest,
+        options: Option&lt;&amp;ChatOptions&gt;,
+    ) -&gt; Result&lt;ChatResponse&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Stasis guarantees:</strong></p>
+<ul>
+<li><code>complete</code> is called for every model interaction, including all pipeline patterns.</li>
+<li>The middleware chain wraps this port — all registered middleware decorates the implementation provided at build time.</li>
+<li><code>ChatRequest</code>, <code>ChatOptions</code>, and <code>ChatResponse</code> are from the <code>genai</code> crate.</li>
+</ul>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>GenaiChatClient</code></td><td>Production client backed by <code>genai</code>. Uses <code>from_env()</code> for model selection via environment variables</td></tr>
+<tr><td><code>MockLlmGateway</code></td><td>Test stub with configurable canned responses</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Wiring:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder.with_chat_client(Arc::new(GenaiChatClient::from_env()))
+<span class="boring">}</span></code></pre>
+<hr>
+<h3 id="aichatresponsecache"><a class="header" href="#aichatresponsecache">AiChatResponseCache</a></h3>
+<p>Backing store for <code>CacheChatMiddleware</code>. Implement this to use a persistent or distributed cache.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait AiChatResponseCache: Send + Sync {
+    fn get(&amp;self, key: &amp;str) -&gt; Option&lt;ChatResponse&gt;;
+    fn set(&amp;self, key: &amp;str, response: ChatResponse);
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Stasis guarantees:</strong></p>
+<ul>
+<li>Keys are deterministic SHA-256 hashes of <code>ChatRequest</code> + <code>ChatOptions</code> — key format is <code>"chat:&lt;hex&gt;"</code>.</li>
+<li><code>get</code> and <code>set</code> are called synchronously. Implementations must not block the async runtime.</li>
+</ul>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>InMemoryAiChatResponseCache</code></td><td>In-process cache with no expiry. For testing and single-process deployments</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h3 id="aichattoolinterceptor"><a class="header" href="#aichattoolinterceptor">AiChatToolInterceptor</a></h3>
+<p>Receives an envelope for every model response that contains tool calls.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait AiChatToolInterceptor: Send + Sync {
+    fn on_tool_calls(&amp;self, envelope: AiToolCallEnvelope);
+}
+<span class="boring">}</span></code></pre>
+<p><strong>AiToolCallEnvelope fields:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>request_fingerprint</code></td><td><code>String</code></td><td>Hash of the originating request</td></tr>
+<tr><td><code>tool_call_count</code></td><td><code>usize</code></td><td>Number of tool calls in the response</td></tr>
+<tr><td><code>tool_names</code></td><td><code>Vec&lt;String&gt;</code></td><td>Names of the tools called</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Stasis guarantees:</strong></p>
+<ul>
+<li><code>on_tool_calls</code> is called once per response that contains at least one tool call.</li>
+<li>The call is synchronous and happens before the tool loop processes the calls.</li>
+<li>Return value is <code>()</code> — this is an observation hook, not a veto.</li>
+</ul>
+<hr>
+<h2 id="observability-port"><a class="header" href="#observability-port">Observability Port</a></h2>
+<h3 id="runtimemetrics"><a class="header" href="#runtimemetrics">RuntimeMetrics</a></h3>
+<p>Receives counter increments and duration observations from the runtime’s job processing loop and chat middleware.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait RuntimeMetrics: Send + Sync {
+    fn incr_counter(&amp;self, name: &amp;str, value: u64);
+    fn observe_duration_ms(&amp;self, name: &amp;str, duration_ms: u64);
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Stasis guarantees:</strong></p>
+<ul>
+<li><code>incr_counter</code> and <code>observe_duration_ms</code> are called on hot paths. Implementations must not block.</li>
+<li>All metric key strings are stable <code>&amp;'static str</code> constants. See <a href="#lineage-and-observability">Lineage and Observability</a> for the full key table.</li>
+</ul>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>InMemoryRuntimeMetrics</code></td><td>In-process counter/duration store for testing</td></tr>
+<tr><td><code>NoopRuntimeMetrics</code></td><td>Silent discard — used by default when no metrics port is provided</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Wiring:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder.with_telemetry_chat_middleware(Arc::new(my_metrics_impl))
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="thread-store-port"><a class="header" href="#thread-store-port">Thread Store Port</a></h2>
+<h3 id="threadstore"><a class="header" href="#threadstore">ThreadStore</a></h3>
+<p>Manages execution continuity records for orchestration patterns and agent sessions.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait ThreadStore: Send + Sync {
+    async fn create_thread(&amp;self, thread: NewThread) -&gt; Result&lt;ThreadRecord&gt;;
+    async fn get_thread(&amp;self, thread_id: &amp;str) -&gt; Result&lt;Option&lt;ThreadRecord&gt;&gt;;
+    async fn append_event(&amp;self, event: NewThreadEvent) -&gt; Result&lt;ThreadEvent&gt;;
+    async fn list_events(&amp;self, thread_id: &amp;str) -&gt; Result&lt;Vec&lt;ThreadEvent&gt;&gt;;
+    async fn fork_thread(
+        &amp;self,
+        parent_thread_id: &amp;str,
+        child_thread_id: &amp;str,
+        branch_label: Option&lt;String&gt;,
+        created_at: DateTime&lt;Utc&gt;,
+    ) -&gt; Result&lt;ThreadRecord&gt;;
+    async fn list_lineage(&amp;self, thread_id: &amp;str) -&gt; Result&lt;Vec&lt;ThreadRecord&gt;&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Stasis guarantees:</strong></p>
+<ul>
+<li><code>fork_thread</code> creates a child <code>ThreadRecord</code> with <code>parent_thread_id</code> set — used by concurrent pattern to track branches.</li>
+<li><code>list_lineage</code> returns the full ancestry chain from the given thread ID back to the root.</li>
+<li><code>list_events</code> returns events in store order for the given thread.</li>
+</ul>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>InMemoryThreadStore</code></td><td>In-process store. Used automatically with <code>RuntimeBackend::InMemory</code></td></tr>
+<tr><td><code>SurrealThreadStore</code></td><td>SurrealDB-backed durable store. Used automatically with <code>RuntimeBackend::Surreal</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Wiring:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder.with_thread_store(Arc::new(SurrealThreadStore::new(db.clone())))
+<span class="boring">}</span></code></pre>
+<hr>
+<h2 id="workflow-engine-port"><a class="header" href="#workflow-engine-port">Workflow Engine Port</a></h2>
+<h3 id="workflowengine"><a class="header" href="#workflowengine">WorkflowEngine</a></h3>
+<p>Executes Grapheme workflow source programs. Required by Grapheme job handlers.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait WorkflowEngine: Send + Sync {
+    async fn execute_grapheme_source(&amp;self, source: &amp;str) -&gt; Result&lt;WorkflowExecutionOutput&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p><strong>WorkflowExecutionOutput:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>run_id</code></td><td><code>String</code></td><td>Execution run identifier</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>GraphemeSdkWorkflowEngine</code></td><td>Production Grapheme SDK execution engine. Wired automatically by the builder</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="memory-ports"><a class="header" href="#memory-ports">Memory Ports</a></h2>
+<p>Memory ports are documented in full in <a href="#memory-operations-reference">Memory Operations Reference</a>. Summary:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Method</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>MemoryContextReader</code></td><td><code>recall(request)</code></td><td>Retrieve prior context before job execution</td></tr>
+<tr><td><code>MemoryContextWriter</code></td><td><code>store_context(request)</code></td><td>Persist execution output after job completion</td></tr>
+<tr><td><code>MemoryOperations</code></td><td><code>aggregate</code>, <code>transform</code>, <code>rollup</code>, <code>schema</code></td><td>Bulk memory maintenance operations</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Ports implemented</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>LocusContextReader</code></td><td><code>MemoryContextReader</code></td><td>Locus-backed recall</td></tr>
+<tr><td><code>LocusContextWriter</code></td><td><code>MemoryContextWriter</code></td><td>Locus-backed store</td></tr>
+<tr><td><code>LocusMemoryOperations</code></td><td><code>MemoryOperations</code></td><td>Locus-backed aggregate/transform/rollup/schema</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="tool-registry"><a class="header" href="#tool-registry">Tool Registry</a></h2>
+<h3 id="stasistool"><a class="header" href="#stasistool">StasisTool</a></h3>
+<p>Implement this trait to register a tool with the runtime for use in tool loop and agent handlers.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait StasisTool: Send + Sync {
+    fn name(&amp;self) -&gt; &amp;'static str;
+    fn description(&amp;self) -&gt; Option&lt;&amp;'static str&gt; { None }
+    fn input_schema(&amp;self) -&gt; Option&lt;Value&gt; { None }
+    async fn invoke(&amp;self, input: Value) -&gt; Result&lt;Value&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Stasis guarantees:</strong></p>
+<ul>
+<li><code>input_schema</code> is used to validate tool input at invocation time. Schema validation enforces: <code>required</code> fields, <code>type</code> constraints, <code>enum</code> values, and <code>additionalProperties</code>.</li>
+<li><code>name</code> must be unique across all registered tools. Duplicate registration returns a <code>PortFailure</code> error.</li>
+<li><code>description</code> and <code>input_schema</code> are exposed to the model via the <code>genai</code> tool interface — descriptive values improve model tool-call accuracy.</li>
+</ul>
+<p><strong>Wiring:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>builder.with_tool(MyWebSearchTool)?
+       .with_tool(MyDatabaseTool)?
+<span class="boring">}</span></code></pre>
+<p><strong>Built-in implementations:</strong></p>
+<p>The <code>InMemoryToolRegistry</code> is the only provided registry. It is always used internally by the builder. Custom <code>ToolRegistry</code> implementations can be provided to the pipeline constructors directly if needed outside the builder path.</p>
+<hr>
+<h2 id="summary-table"><a class="header" href="#summary-table">Summary Table</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Required</th><th>Default</th><th>Builder method</th></tr>
+</thead>
+<tbody>
+<tr><td><code>AiChatClient</code></td><td>No</td><td><code>GenaiChatClient::from_env()</code></td><td><code>.with_chat_client(...)</code></td></tr>
+<tr><td><code>AiChatResponseCache</code></td><td>No</td><td>None</td><td><code>.with_cache_chat_middleware(cache)</code></td></tr>
+<tr><td><code>AiChatToolInterceptor</code></td><td>No</td><td>None</td><td><code>.with_tool_call_interception_chat_middleware(interceptor)</code></td></tr>
+<tr><td><code>RuntimeMetrics</code></td><td>No</td><td><code>NoopRuntimeMetrics</code></td><td><code>.with_telemetry_chat_middleware(metrics)</code></td></tr>
+<tr><td><code>ThreadStore</code></td><td>No</td><td><code>InMemoryThreadStore</code> / <code>SurrealThreadStore</code></td><td><code>.with_thread_store(...)</code></td></tr>
+<tr><td><code>WorkflowEngine</code></td><td>No</td><td><code>GraphemeSdkWorkflowEngine</code></td><td>Auto-wired</td></tr>
+<tr><td><code>MemoryContextReader</code></td><td>No</td><td>Auto-bootstrapped with <code>.with_locus_memory()</code></td><td><code>.with_memory_context_reader(...)</code></td></tr>
+<tr><td><code>MemoryContextWriter</code></td><td>No</td><td>Auto-bootstrapped with <code>.with_locus_memory()</code></td><td><code>.with_memory_context_writer(...)</code></td></tr>
+<tr><td><code>MemoryOperations</code></td><td>No</td><td>Auto-bootstrapped with <code>.with_locus_memory()</code></td><td><code>.with_memory_operations(...)</code></td></tr>
+<tr><td><code>StasisTool</code></td><td>No</td><td>None</td><td><code>.with_tool(tool)?</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>No port is strictly required. The runtime boots with all defaults when <code>StasisRuntimeBuilder::new(backend).build().await?</code> is called with no additional configuration.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
+<h2 id="document-metadata-12"><a class="header" href="#document-metadata-12">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, SRE, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>src/infrastructure/runtime/surreal_job_store.rs</li>
+<li>src/infrastructure/runtime/surreal_job_attempt_store.rs</li>
+<li>src/infrastructure/runtime/surreal_outbox_store.rs</li>
+<li>src/infrastructure/runtime/surreal_recurring_store.rs</li>
+<li>src/infrastructure/runtime/surreal_thread_store.rs</li>
+<li>tests/runtime_backend_parity.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-10"><a class="header" href="#purpose-10">Purpose</a></h2>
 <p>Define the V1 SurrealDB schema and indexing strategy for Stasis durable job orchestration.</p>
 <h2 id="design-constraints"><a class="header" href="#design-constraints">Design Constraints</a></h2>
 <ol>
@@ -726,12 +3324,15 @@
 <li>Append-observable state transitions via events/outbox.</li>
 <li>Small hot rows with reference-based payload model.</li>
 <li>Explicit keys for correlation, causation, and idempotency.</li>
+<li>First-class thread and lineage metadata for orchestration observability.</li>
 </ol>
 <h2 id="logical-entity-relationship"><a class="header" href="#logical-entity-relationship">Logical Entity Relationship</a></h2>
 <pre class="mermaid">erDiagram
   JOB ||--o{ JOB_ATTEMPT : has
   JOB ||--o{ OUTBOX_EVENT : emits
   RECURRING_DEFINITION ||--o{ JOB : materializes
+  THREAD ||--o{ THREAD_EVENT : has
+  THREAD ||--o{ THREAD : parent_of
   JOB ||--o| STTP_REFERENCE : consumes
   JOB ||--o| STTP_REFERENCE : produces
 
@@ -761,10 +3362,15 @@
     string job_id FK
     int attempt_number
     datetime started_at
-    datetime ended_at
+    datetime finished_at
     string outcome
-    object error_payload
+    string error_message
+    string sttp_output_node_id
+    string execution_id
+    string guardrail_code
+    string policy_reason
     int duration_ms
+    string diagnostics
   }
 
   RECURRING_DEFINITION {
@@ -784,11 +3390,42 @@
   OUTBOX_EVENT {
     string id PK
     string event_type
-    string aggregate_type
-    string aggregate_id
+    string job_id
+    string thread_id
+    string correlation_id
+    string causation_id
+    string trace_id
+    string sttp_input_node_id
+    string sttp_output_node_id
+    string execution_id
+    string input_memory_query_id
+    string input_memory_query_fingerprint
+    string output_memory_node_id
+    string retrieval_path
+    datetime occurred_at
+    string message
     string status
+    datetime next_attempt_at
+    string last_publish_error
+    int publish_attempts
     datetime created_at
     datetime published_at
+  }
+
+  THREAD {
+    string thread_id PK
+    string parent_thread_id
+    string branch_label
+    datetime created_at
+    datetime updated_at
+  }
+
+  THREAD_EVENT {
+    string event_id PK
+    string thread_id FK
+    string event_kind
+    string payload_ref
+    datetime occurred_at
   }
 
   STTP_REFERENCE {
@@ -840,19 +3477,25 @@ DEFINE INDEX idx_job_trace ON TABLE job COLUMNS trace_id;
 <pre><code class="language-sql">DEFINE TABLE job_attempt SCHEMAFULL;
 DEFINE FIELD job_id ON TABLE job_attempt TYPE record&lt;job&gt;;
 DEFINE FIELD attempt_number ON TABLE job_attempt TYPE int;
+DEFINE FIELD worker_id ON TABLE job_attempt TYPE string;
 DEFINE FIELD started_at ON TABLE job_attempt TYPE datetime;
-DEFINE FIELD ended_at ON TABLE job_attempt TYPE option&lt;datetime&gt;;
+DEFINE FIELD finished_at ON TABLE job_attempt TYPE datetime;
 DEFINE FIELD outcome ON TABLE job_attempt TYPE string ASSERT $value INSIDE [
-  'running',
   'succeeded',
-  'failed',
-  'canceled'
+  'retryable_failure',
+  'fatal_failure'
 ];
-DEFINE FIELD error_payload ON TABLE job_attempt TYPE option&lt;object&gt;;
+DEFINE FIELD error_message ON TABLE job_attempt TYPE option&lt;string&gt;;
+DEFINE FIELD sttp_output_node_id ON TABLE job_attempt TYPE option&lt;string&gt;;
+DEFINE FIELD execution_id ON TABLE job_attempt TYPE option&lt;string&gt;;
+DEFINE FIELD guardrail_code ON TABLE job_attempt TYPE option&lt;string&gt;;
+DEFINE FIELD policy_reason ON TABLE job_attempt TYPE option&lt;string&gt;;
 DEFINE FIELD duration_ms ON TABLE job_attempt TYPE option&lt;int&gt;;
-DEFINE FIELD worker_id ON TABLE job_attempt TYPE option&lt;string&gt;;
+DEFINE FIELD diagnostics ON TABLE job_attempt TYPE option&lt;string&gt;;
 
 DEFINE INDEX idx_attempt_job ON TABLE job_attempt COLUMNS job_id, attempt_number;
+DEFINE INDEX idx_attempt_execution ON TABLE job_attempt COLUMNS execution_id;
+DEFINE INDEX idx_attempt_guardrail ON TABLE job_attempt COLUMNS guardrail_code;
 </code></pre>
 <pre><code class="language-sql">DEFINE TABLE recurring_definition SCHEMAFULL;
 DEFINE FIELD queue ON TABLE recurring_definition TYPE string;
@@ -874,10 +3517,20 @@ DEFINE INDEX idx_recurring_lease_expiry ON TABLE recurring_definition COLUMNS le
 </code></pre>
 <pre><code class="language-sql">DEFINE TABLE outbox_event SCHEMAFULL;
 DEFINE FIELD event_type ON TABLE outbox_event TYPE string;
-DEFINE FIELD aggregate_type ON TABLE outbox_event TYPE string;
-DEFINE FIELD aggregate_id ON TABLE outbox_event TYPE string;
-DEFINE FIELD job_id ON TABLE outbox_event TYPE option&lt;record&lt;job&gt;&gt;;
-DEFINE FIELD payload ON TABLE outbox_event TYPE object;
+DEFINE FIELD job_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD thread_id ON TABLE outbox_event TYPE option&lt;string&gt;;
+DEFINE FIELD correlation_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD causation_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD trace_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD sttp_input_node_id ON TABLE outbox_event TYPE string;
+DEFINE FIELD sttp_output_node_id ON TABLE outbox_event TYPE option&lt;string&gt;;
+DEFINE FIELD execution_id ON TABLE outbox_event TYPE option&lt;string&gt;;
+DEFINE FIELD input_memory_query_id ON TABLE outbox_event TYPE option&lt;string&gt;;
+DEFINE FIELD input_memory_query_fingerprint ON TABLE outbox_event TYPE option&lt;string&gt;;
+DEFINE FIELD output_memory_node_id ON TABLE outbox_event TYPE option&lt;string&gt;;
+DEFINE FIELD retrieval_path ON TABLE outbox_event TYPE option&lt;string&gt;;
+DEFINE FIELD occurred_at ON TABLE outbox_event TYPE datetime;
+DEFINE FIELD message ON TABLE outbox_event TYPE option&lt;string&gt;;
 DEFINE FIELD status ON TABLE outbox_event TYPE string ASSERT $value INSIDE [
   'pending',
   'published',
@@ -886,15 +3539,40 @@ DEFINE FIELD status ON TABLE outbox_event TYPE string ASSERT $value INSIDE [
 DEFINE FIELD created_at ON TABLE outbox_event TYPE datetime DEFAULT time::now();
 DEFINE FIELD published_at ON TABLE outbox_event TYPE option&lt;datetime&gt;;
 DEFINE FIELD publish_attempts ON TABLE outbox_event TYPE int DEFAULT 0;
+DEFINE FIELD next_attempt_at ON TABLE outbox_event TYPE option&lt;datetime&gt;;
+DEFINE FIELD last_publish_error ON TABLE outbox_event TYPE option&lt;string&gt;;
 
-DEFINE INDEX idx_outbox_pending ON TABLE outbox_event COLUMNS status, created_at;
-DEFINE INDEX idx_outbox_aggregate ON TABLE outbox_event COLUMNS aggregate_type, aggregate_id;
+DEFINE INDEX idx_outbox_pending ON TABLE outbox_event COLUMNS status, occurred_at;
+DEFINE INDEX idx_outbox_job ON TABLE outbox_event COLUMNS job_id;
+DEFINE INDEX idx_outbox_execution ON TABLE outbox_event COLUMNS execution_id;
+DEFINE INDEX idx_outbox_thread ON TABLE outbox_event COLUMNS thread_id;
+
+DEFINE TABLE thread SCHEMAFULL;
+DEFINE FIELD thread_id ON TABLE thread TYPE string;
+DEFINE FIELD parent_thread_id ON TABLE thread TYPE option&lt;string&gt;;
+DEFINE FIELD branch_label ON TABLE thread TYPE option&lt;string&gt;;
+DEFINE FIELD created_at ON TABLE thread TYPE datetime;
+DEFINE FIELD updated_at ON TABLE thread TYPE datetime;
+
+DEFINE INDEX uq_thread_id ON TABLE thread COLUMNS thread_id UNIQUE;
+DEFINE INDEX idx_thread_parent ON TABLE thread COLUMNS parent_thread_id;
+
+DEFINE TABLE thread_event SCHEMAFULL;
+DEFINE FIELD event_id ON TABLE thread_event TYPE string;
+DEFINE FIELD thread_id ON TABLE thread_event TYPE string;
+DEFINE FIELD event_kind ON TABLE thread_event TYPE string;
+DEFINE FIELD payload_ref ON TABLE thread_event TYPE string;
+DEFINE FIELD occurred_at ON TABLE thread_event TYPE datetime;
+
+DEFINE INDEX uq_thread_event_id ON TABLE thread_event COLUMNS event_id UNIQUE;
+DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_id, occurred_at;
 </code></pre>
 <h2 id="leasing-and-concurrency-notes"><a class="header" href="#leasing-and-concurrency-notes">Leasing and Concurrency Notes</a></h2>
 <ol>
 <li>Lease updates should include compare-and-set predicates on state and current lease values.</li>
 <li>Worker heartbeat should only update rows leased by the same worker identity.</li>
 <li>Replay actions should emit explicit outbox events with causation lineage.</li>
+<li>Thread ancestry reads should primarily use indexed thread and thread_event access paths.</li>
 </ol>
 <h2 id="retention-and-archival-strategy"><a class="header" href="#retention-and-archival-strategy">Retention and Archival Strategy</a></h2>
 <ol>
@@ -910,7 +3588,20 @@ DEFINE INDEX idx_outbox_aggregate ON TABLE outbox_event COLUMNS aggregate_type, 
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture-decision-records"><a class="header" href="#architecture-decision-records">Architecture Decision Records</a></h1>
-<h2 id="purpose-2"><a class="header" href="#purpose-2">Purpose</a></h2>
+<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Architecture Standard</li>
+<li>Audience: Engineer, Security, Architect</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-05-15</li>
+<li>Verified Against:
+<ul>
+<li>docs/adr/README.md</li>
+<li>docs-book/src/adr.md</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-11"><a class="header" href="#purpose-11">Purpose</a></h2>
 <p>Track major architectural decisions with rationale, alternatives, and consequences.</p>
 <h2 id="adr-index"><a class="header" href="#adr-index">ADR Index</a></h2>
 <div class="table-wrapper">

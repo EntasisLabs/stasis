@@ -136,6 +136,108 @@ impl PromptJobPayload {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SequentialStageJobPayload {
+    pub stage_id: String,
+    pub user_prompt_template: String,
+    pub system_prompt: Option<String>,
+    pub policy_profile: Option<String>,
+    pub model_hint: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SequentialPatternJobPayload {
+    pub thread_id: Option<String>,
+    pub initial_user_prompt: String,
+    pub policy_profile: Option<String>,
+    pub model_hint: Option<String>,
+    pub stages: Vec<SequentialStageJobPayload>,
+}
+
+impl SequentialPatternJobPayload {
+    pub fn to_payload_ref(&self) -> Result<String> {
+        serde_json::to_string(self)
+            .map_err(|err| StasisError::PortFailure(format!("failed to encode sequential-pattern payload: {err}")))
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConcurrentBranchJobPayload {
+    pub branch_id: String,
+    pub user_prompt_template: String,
+    pub system_prompt: Option<String>,
+    pub policy_profile: Option<String>,
+    pub model_hint: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConcurrentPatternJobPayload {
+    pub thread_id: Option<String>,
+    pub initial_user_prompt: String,
+    pub policy_profile: Option<String>,
+    pub model_hint: Option<String>,
+    pub merge_strategy: Option<String>,
+    pub branches: Vec<ConcurrentBranchJobPayload>,
+}
+
+impl ConcurrentPatternJobPayload {
+    pub fn to_payload_ref(&self) -> Result<String> {
+        serde_json::to_string(self)
+            .map_err(|err| StasisError::PortFailure(format!("failed to encode concurrent-pattern payload: {err}")))
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HandoffTurnJobPayload {
+    pub actor_id: String,
+    pub user_prompt_template: String,
+    pub system_prompt: Option<String>,
+    pub policy_profile: Option<String>,
+    pub model_hint: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HandoffPatternJobPayload {
+    pub thread_id: Option<String>,
+    pub initial_user_prompt: String,
+    pub policy_profile: Option<String>,
+    pub model_hint: Option<String>,
+    pub turns: Vec<HandoffTurnJobPayload>,
+}
+
+impl HandoffPatternJobPayload {
+    pub fn to_payload_ref(&self) -> Result<String> {
+        serde_json::to_string(self)
+            .map_err(|err| StasisError::PortFailure(format!("failed to encode handoff-pattern payload: {err}")))
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OrchestratorRouteJobPayload {
+    pub route_id: String,
+    pub selector_keywords: Vec<String>,
+    pub user_prompt_template: String,
+    pub system_prompt: Option<String>,
+    pub policy_profile: Option<String>,
+    pub model_hint: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OrchestratorPatternJobPayload {
+    pub thread_id: Option<String>,
+    pub initial_user_prompt: String,
+    pub policy_profile: Option<String>,
+    pub model_hint: Option<String>,
+    pub routes: Vec<OrchestratorRouteJobPayload>,
+}
+
+impl OrchestratorPatternJobPayload {
+    pub fn to_payload_ref(&self) -> Result<String> {
+        serde_json::to_string(self)
+            .map_err(|err| StasisError::PortFailure(format!("failed to encode orchestrator-pattern payload: {err}")))
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MemoryRecallJobPayload {
     pub memory_policy: Option<MemoryPolicyPayload>,
 }

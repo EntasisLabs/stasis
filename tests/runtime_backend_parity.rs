@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex as StdMutex;
 use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
@@ -21,7 +22,10 @@ use stasis::application::orchestration::agent_session_payload::{
     AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode,
     AgentTurnJobPayload, MemoryAggregateJobPayload, MemoryRecallJobPayload,
     MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
-    PromptJobPayload, ToolLoopJobPayload,
+    PromptJobPayload, ConcurrentBranchJobPayload, ConcurrentPatternJobPayload,
+    HandoffPatternJobPayload, HandoffTurnJobPayload, SequentialPatternJobPayload,
+    SequentialStageJobPayload, OrchestratorPatternJobPayload,
+    OrchestratorRouteJobPayload, ToolLoopJobPayload,
 };
 use stasis::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline,
@@ -30,6 +34,10 @@ use stasis::application::orchestration::stasis_workflow_job_builder::StasisWorkf
 use stasis::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolLoopPipeline};
 use stasis::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
 use stasis::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
+use stasis::application::runtime::default_chat_middlewares::{
+    CHAT_CACHE_HIT_TOTAL, CHAT_CACHE_MISS_TOTAL, CHAT_REQUESTS_TOTAL, CHAT_TOOL_CALLS_TOTAL,
+    CacheChatMiddleware, ToolCallInterceptionChatMiddleware,
+};
 use stasis::application::runtime::in_memory_runtime::{InMemoryRuntime, JobExecutionOutcome, JobHandler};
 use stasis::application::runtime::memory_aggregate_job_handler::MemoryAggregateJobHandler;
 use stasis::application::runtime::memory_recall_job_handler::MemoryRecallJobHandler;
@@ -52,10 +60,13 @@ use stasis::domain::runtime::job::{BackoffPolicy, Job, JobState, NewJob};
 use stasis::domain::runtime::job_attempt::JobAttemptOutcome;
 use stasis::domain::runtime::outbox::{OutboxPublishPolicy, OutboxStatus, RuntimeEventType};
 use stasis::domain::runtime::recurring::RecurringDefinition;
+use stasis::domain::runtime::thread::{NewThread, NewThreadEvent};
 use stasis::infrastructure::runtime::grapheme_sdk_workflow_engine::{
     GraphemeSdkWorkflowEngine, GraphemeWorkflowGuardrails,
 };
+use stasis::infrastructure::runtime::in_memory_thread_store::InMemoryThreadStore;
 use stasis::infrastructure::runtime::in_memory_runtime_metrics::InMemoryRuntimeMetrics;
+use stasis::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
 use stasis::infrastructure::runtime::tokio_channel_event_publisher::TokioChannelEventPublisher;
 use stasis::ports::outbound::runtime::event_publisher::EventPublisher;
 use stasis::ports::outbound::runtime::clock::Clock;
@@ -63,8 +74,10 @@ use stasis::ports::outbound::runtime::id_generator::IdGenerator;
 use stasis::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use stasis::ports::outbound::runtime::job_store::JobStore;
 use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
+use stasis::ports::outbound::runtime::thread_store::ThreadStore;
 use stasis::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 use stasis::ports::outbound::ai_chat_client::AiChatClient;
+use stasis::ports::outbound::ai_chat_tool_interceptor::{AiChatToolInterceptor, AiToolCallEnvelope};
 use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use stasis::ports::outbound::memory::memory_models::{
@@ -263,6 +276,67 @@ impl AiChatClient for ScriptedChatClient {
 }
 
 #[derive(Clone)]
+struct PlainScriptedChatClient {
+    responses: Arc<Vec<String>>,
+    call_count: Arc<AtomicUsize>,
+}
+
+impl PlainScriptedChatClient {
+    fn new(responses: Vec<String>) -> Self {
+        Self {
+            responses: Arc::new(responses),
+            call_count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl AiChatClient for PlainScriptedChatClient {
+    async fn complete(&self, _request: ChatRequest, _options: Option<&ChatOptions>) -> Result<ChatResponse> {
+        let index = self.call_count.fetch_add(1, Ordering::SeqCst);
+        let text = self
+            .responses
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| "fallback response".to_string());
+
+        Ok(ChatResponse {
+            content: MessageContent::from_text(text),
+            reasoning_content: None,
+            model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            usage: Usage::default(),
+            captured_raw_body: None,
+        })
+    }
+}
+
+#[derive(Clone, Default)]
+struct EchoPromptChatClient;
+
+#[async_trait]
+impl AiChatClient for EchoPromptChatClient {
+    async fn complete(&self, request: ChatRequest, _options: Option<&ChatOptions>) -> Result<ChatResponse> {
+        let echoed_text = request
+            .messages
+            .iter()
+            .rev()
+            .filter_map(|message| message.content.first_text())
+            .next()
+            .unwrap_or_default();
+
+        Ok(ChatResponse {
+            content: MessageContent::from_text(format!("echo::{echoed_text}")),
+            reasoning_content: None,
+            model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            usage: Usage::default(),
+            captured_raw_body: None,
+        })
+    }
+}
+
+#[derive(Clone)]
 struct ModelToolCallScriptedClient {
     call_count: Arc<AtomicUsize>,
 }
@@ -313,6 +387,25 @@ impl AiChatClient for ModelToolCallScriptedClient {
             usage: Usage::default(),
             captured_raw_body: None,
         })
+    }
+}
+
+#[derive(Clone, Default)]
+struct RecordingToolCallInterceptor {
+    envelopes: Arc<StdMutex<Vec<AiToolCallEnvelope>>>,
+}
+
+impl RecordingToolCallInterceptor {
+    fn snapshot(&self) -> Vec<AiToolCallEnvelope> {
+        self.envelopes.lock().map(|state| state.clone()).unwrap_or_default()
+    }
+}
+
+impl AiChatToolInterceptor for RecordingToolCallInterceptor {
+    fn on_tool_calls(&self, envelope: AiToolCallEnvelope) {
+        if let Ok(mut state) = self.envelopes.lock() {
+            state.push(envelope);
+        }
     }
 }
 
@@ -539,6 +632,94 @@ fn build_prompt_job(
         .build()
 }
 
+fn build_orchestration_sequential_job(
+    job_id: &str,
+    payload: &SequentialPatternJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_orchestration_sequential(job_id.to_string(), payload)
+        .expect("orchestration-sequential payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
+fn build_orchestration_concurrent_job(
+    job_id: &str,
+    payload: &ConcurrentPatternJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_orchestration_concurrent(job_id.to_string(), payload)
+        .expect("orchestration-concurrent payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
+fn build_orchestration_handoff_job(
+    job_id: &str,
+    payload: &HandoffPatternJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_orchestration_handoff(job_id.to_string(), payload)
+        .expect("orchestration-handoff payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
+fn build_orchestration_orchestrator_job(
+    job_id: &str,
+    payload: &OrchestratorPatternJobPayload,
+    now: DateTime<Utc>,
+    idempotency_key: &str,
+    correlation_id: &str,
+    causation_id: &str,
+    trace_id: &str,
+    sttp_input_node_id: &str,
+) -> NewJob {
+    StasisWorkflowJobBuilder::for_orchestration_orchestrator(job_id.to_string(), payload)
+        .expect("orchestration-orchestrator payload should serialize")
+        .with_idempotency_key(idempotency_key)
+        .with_correlation_id(correlation_id)
+        .with_causation_id(causation_id)
+        .with_trace_id(trace_id)
+        .with_sttp_input_node_id(sttp_input_node_id)
+        .with_scheduled_at(now)
+        .with_backoff_policy(test_backoff_policy())
+        .build()
+}
+
 fn build_memory_recall_job(
     job_id: &str,
     payload: &MemoryRecallJobPayload,
@@ -559,6 +740,55 @@ fn build_memory_recall_job(
         .with_scheduled_at(now)
         .with_backoff_policy(test_backoff_policy())
         .build()
+}
+
+async fn attempt_diagnostics_for_job(runtime: &InMemoryRuntime, job_id: &str) -> JsonValue {
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(job_id)
+        .await
+        .expect("attempt list should succeed");
+    serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json")
+}
+
+fn assert_orchestration_success_diagnostics(
+    diagnostics: &JsonValue,
+    expected_provider: &str,
+    expected_pattern: &str,
+    expected_thread_id: &str,
+) {
+    assert_eq!(diagnostics.get("provider"), Some(&json!(expected_provider)));
+    assert_eq!(diagnostics.get("status"), Some(&json!("success")));
+    assert_eq!(diagnostics.get("pattern"), Some(&json!(expected_pattern)));
+    assert_eq!(diagnostics.get("thread_id"), Some(&json!(expected_thread_id)));
+    assert!(diagnostics
+        .get("termination_reason")
+        .and_then(|value| value.as_str())
+        .is_some());
+}
+
+fn assert_orchestration_policy_violation_diagnostics(
+    diagnostics: &JsonValue,
+    expected_provider: &str,
+    expected_pattern: &str,
+) {
+    assert_eq!(diagnostics.get("provider"), Some(&json!(expected_provider)));
+    assert_eq!(diagnostics.get("status"), Some(&json!("failure")));
+    assert_eq!(diagnostics.get("pattern"), Some(&json!(expected_pattern)));
+    assert_eq!(
+        diagnostics.get("guardrail_code"),
+        Some(&json!("POLICY_VIOLATION"))
+    );
+    assert!(diagnostics
+        .get("policy_reason")
+        .and_then(|value| value.as_str())
+        .is_some());
 }
 
 fn build_memory_aggregate_job(
@@ -2795,6 +3025,991 @@ async fn in_memory_runtime_builder_with_locus_memory_registers_memory_schema_han
 }
 
 #[tokio::test]
+async fn in_memory_runtime_builder_middleware_chain_enables_cache_telemetry_and_interception() {
+    let now = Utc::now();
+    let chat_client = Arc::new(ModelToolCallScriptedClient::new());
+    let metrics = Arc::new(InMemoryRuntimeMetrics::default());
+    let cache = Arc::new(stasis::infrastructure::runtime::in_memory_ai_chat_response_cache::InMemoryAiChatResponseCache::default());
+    let interceptor = Arc::new(RecordingToolCallInterceptor::default());
+
+    let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(chat_client.clone())
+        .with_chat_middleware(
+            ToolCallInterceptionChatMiddleware::new(interceptor.clone())
+                .with_metrics(metrics.clone()),
+        )
+        .with_telemetry_chat_middleware(metrics.clone())
+        .with_chat_middleware(CacheChatMiddleware::new(cache).with_metrics(metrics.clone()))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers();
+    let builder = builder.with_tool(MockWebSearchTool).expect("tool should register");
+
+    let runtime = builder
+        .build()
+        .await
+        .expect("runtime should build successfully");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime composition");
+    };
+
+    for idx in 1..=2 {
+        let job_id = format!("job-builder-mw-in-memory-{idx}");
+        let payload = ToolLoopJobPayload {
+            user_prompt: "latest rust trends".to_string(),
+            system_prompt: Some("be concise".to_string()),
+            policy_profile: Some("default".to_string()),
+            model_hint: None,
+            memory_policy: None,
+            tool_name: "stasis.web.search.mock".to_string(),
+            tool_input: Some(json!({ "query": "latest rust trends" })),
+            tool_call_mode: Some(AgentToolCallMode::Strict),
+        };
+
+        runtime
+            .enqueue(build_tool_loop_job(
+                &job_id,
+                &payload,
+                now,
+                &format!("idem-builder-mw-in-memory-{idx}"),
+                &format!("corr-builder-mw-in-memory-{idx}"),
+                &format!("cause-builder-mw-in-memory-{idx}"),
+                &format!("trace-builder-mw-in-memory-{idx}"),
+                &format!("sttp:in:builder:mw:in-memory:{idx}"),
+            ))
+            .await
+            .expect("tool-loop job should enqueue");
+
+        runtime
+            .process_once("default", "worker-builder-mw-in-memory", now)
+            .await
+            .expect("tool-loop processing should succeed");
+
+        let job = runtime
+            .job_store
+            .get(&job_id)
+            .await
+            .expect("job get should succeed")
+            .expect("job should exist");
+        assert_eq!(job.state, JobState::Succeeded);
+    }
+
+    assert_eq!(chat_client.call_count.load(Ordering::SeqCst), 2);
+
+    let envelopes = interceptor.snapshot();
+    assert_eq!(envelopes.len(), 2);
+    assert!(
+        envelopes
+            .iter()
+            .all(|env| env.tool_names == vec!["stasis.web.search.mock".to_string()])
+    );
+
+    let snapshot = metrics.snapshot();
+    assert_eq!(snapshot.counters.get(CHAT_REQUESTS_TOTAL).copied(), Some(4));
+    assert_eq!(snapshot.counters.get(CHAT_CACHE_MISS_TOTAL).copied(), Some(2));
+    assert_eq!(snapshot.counters.get(CHAT_CACHE_HIT_TOTAL).copied(), Some(2));
+    assert_eq!(snapshot.counters.get(CHAT_TOOL_CALLS_TOTAL).copied(), Some(2));
+}
+
+#[tokio::test]
+async fn surreal_runtime_builder_middleware_chain_enables_cache_telemetry_and_interception() {
+    let now = Utc::now();
+    let chat_client = Arc::new(ModelToolCallScriptedClient::new());
+    let metrics = Arc::new(InMemoryRuntimeMetrics::default());
+    let cache = Arc::new(stasis::infrastructure::runtime::in_memory_ai_chat_response_cache::InMemoryAiChatResponseCache::default());
+    let interceptor = Arc::new(RecordingToolCallInterceptor::default());
+
+    let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+        namespace: "test".to_string(),
+        database: "runtime_backend_parity_middleware_chain".to_string(),
+    })
+    .with_chat_client(chat_client.clone())
+    .with_chat_middleware(
+        ToolCallInterceptionChatMiddleware::new(interceptor.clone()).with_metrics(metrics.clone()),
+    )
+    .with_telemetry_chat_middleware(metrics.clone())
+    .with_chat_middleware(CacheChatMiddleware::new(cache).with_metrics(metrics.clone()))
+    .without_grapheme_handlers()
+    .without_prompt_handler()
+    .without_agent_handlers()
+    .without_memory_operation_handlers();
+    let builder = builder.with_tool(MockWebSearchTool).expect("tool should register");
+
+    let runtime = builder
+        .build()
+        .await
+        .expect("runtime should build successfully");
+
+    let RuntimeComposition::Surreal(runtime) = runtime else {
+        panic!("expected surreal runtime composition");
+    };
+
+    for idx in 1..=2 {
+        let job_id = format!("job-builder-mw-surreal-{idx}");
+        let payload = ToolLoopJobPayload {
+            user_prompt: "latest rust trends".to_string(),
+            system_prompt: Some("be concise".to_string()),
+            policy_profile: Some("default".to_string()),
+            model_hint: None,
+            memory_policy: None,
+            tool_name: "stasis.web.search.mock".to_string(),
+            tool_input: Some(json!({ "query": "latest rust trends" })),
+            tool_call_mode: Some(AgentToolCallMode::Strict),
+        };
+
+        runtime
+            .enqueue(build_tool_loop_job(
+                &job_id,
+                &payload,
+                now,
+                &format!("idem-builder-mw-surreal-{idx}"),
+                &format!("corr-builder-mw-surreal-{idx}"),
+                &format!("cause-builder-mw-surreal-{idx}"),
+                &format!("trace-builder-mw-surreal-{idx}"),
+                &format!("sttp:in:builder:mw:surreal:{idx}"),
+            ))
+            .await
+            .expect("tool-loop job should enqueue");
+
+        runtime
+            .process_once("default", "worker-builder-mw-surreal", now)
+            .await
+            .expect("tool-loop processing should succeed");
+
+        let job = runtime
+            .job_store
+            .get(&job_id)
+            .await
+            .expect("job get should succeed")
+            .expect("job should exist");
+        assert_eq!(job.state, JobState::Succeeded);
+    }
+
+    assert_eq!(chat_client.call_count.load(Ordering::SeqCst), 2);
+
+    let envelopes = interceptor.snapshot();
+    assert_eq!(envelopes.len(), 2);
+    assert!(
+        envelopes
+            .iter()
+            .all(|env| env.tool_names == vec!["stasis.web.search.mock".to_string()])
+    );
+
+    let snapshot = metrics.snapshot();
+    assert_eq!(snapshot.counters.get(CHAT_REQUESTS_TOTAL).copied(), Some(4));
+    assert_eq!(snapshot.counters.get(CHAT_CACHE_MISS_TOTAL).copied(), Some(2));
+    assert_eq!(snapshot.counters.get(CHAT_CACHE_HIT_TOTAL).copied(), Some(2));
+    assert_eq!(snapshot.counters.get(CHAT_TOOL_CALLS_TOTAL).copied(), Some(2));
+}
+
+#[tokio::test]
+async fn in_memory_orchestration_sequential_pattern_executes_all_stages() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(PlainScriptedChatClient::new(vec![
+            "stage-1-output".to_string(),
+            "stage-2-output".to_string(),
+        ])))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let payload = SequentialPatternJobPayload {
+        thread_id: Some("thread.sequential.1".to_string()),
+        initial_user_prompt: "start context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        stages: vec![
+            SequentialStageJobPayload {
+                stage_id: "analyze".to_string(),
+                user_prompt_template: "Analyze: {input}".to_string(),
+                system_prompt: Some("be concise".to_string()),
+                policy_profile: None,
+                model_hint: None,
+            },
+            SequentialStageJobPayload {
+                stage_id: "synthesize".to_string(),
+                user_prompt_template: "Synthesize: {input}".to_string(),
+                system_prompt: Some("be structured".to_string()),
+                policy_profile: None,
+                model_hint: None,
+            },
+        ],
+    };
+
+    runtime
+        .enqueue(build_orchestration_sequential_job(
+            "job-sequential-in-memory-1",
+            &payload,
+            now,
+            "idem-sequential-in-memory-1",
+            "corr-sequential-in-memory-1",
+            "cause-sequential-in-memory-1",
+            "trace-sequential-in-memory-1",
+            "sttp:in:orchestration:sequential:in-memory:1",
+        ))
+        .await
+        .expect("sequential job should enqueue");
+
+    runtime
+        .process_once("default", "worker-sequential-in-memory", now)
+        .await
+        .expect("sequential processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get("job-sequential-in-memory-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:orchestration:sequential:job-sequential-in-memory-1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-sequential-in-memory-1")
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-orchestration-sequential"))
+    );
+    assert_eq!(diagnostics.get("pattern"), Some(&json!("sequential")));
+    assert_eq!(diagnostics.get("stages_executed"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.get("termination_reason"),
+        Some(&json!("completed_all_stages"))
+    );
+}
+
+#[tokio::test]
+async fn surreal_orchestration_sequential_pattern_policy_violation_dead_letters_job() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+        namespace: "test".to_string(),
+        database: "runtime_backend_parity_orchestration_sequential_failure".to_string(),
+    })
+    .with_chat_client(Arc::new(PlainScriptedChatClient::new(vec!["unused".to_string()])))
+    .without_grapheme_handlers()
+    .without_prompt_handler()
+    .without_tool_loop_handler()
+    .without_agent_handlers()
+    .without_memory_operation_handlers()
+    .build()
+    .await
+    .expect("runtime should build");
+
+    let RuntimeComposition::Surreal(runtime) = runtime else {
+        panic!("expected surreal runtime");
+    };
+
+    let payload = SequentialPatternJobPayload {
+        thread_id: Some("thread.sequential.invalid.1".to_string()),
+        initial_user_prompt: "   ".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        stages: vec![SequentialStageJobPayload {
+            stage_id: "analyze".to_string(),
+            user_prompt_template: "Analyze: {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+
+    runtime
+        .enqueue(build_orchestration_sequential_job(
+            "job-sequential-surreal-invalid-1",
+            &payload,
+            now,
+            "idem-sequential-surreal-invalid-1",
+            "corr-sequential-surreal-invalid-1",
+            "cause-sequential-surreal-invalid-1",
+            "trace-sequential-surreal-invalid-1",
+            "sttp:in:orchestration:sequential:surreal:invalid:1",
+        ))
+        .await
+        .expect("sequential job should enqueue");
+
+    runtime
+        .process_once("default", "worker-sequential-surreal", now)
+        .await
+        .expect("sequential processing should complete");
+
+    let job = runtime
+        .job_store
+        .get("job-sequential-surreal-invalid-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-sequential-surreal-invalid-1")
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
+    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("initial_user_prompt must be non-empty")
+    );
+}
+
+#[tokio::test]
+async fn surreal_orchestration_concurrent_pattern_executes_all_branches() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+        namespace: "test".to_string(),
+        database: "runtime_backend_parity_orchestration_concurrent_success".to_string(),
+    })
+    .with_chat_client(Arc::new(EchoPromptChatClient))
+    .without_grapheme_handlers()
+    .without_prompt_handler()
+    .without_tool_loop_handler()
+    .without_agent_handlers()
+    .without_memory_operation_handlers()
+    .build()
+    .await
+    .expect("runtime should build");
+
+    let RuntimeComposition::Surreal(runtime) = runtime else {
+        panic!("expected surreal runtime");
+    };
+
+    let payload = ConcurrentPatternJobPayload {
+        thread_id: Some("thread.concurrent.1".to_string()),
+        initial_user_prompt: "base context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        merge_strategy: Some("join_with_headers".to_string()),
+        branches: vec![
+            ConcurrentBranchJobPayload {
+                branch_id: "branch.b".to_string(),
+                user_prompt_template: "Branch B uses {input}".to_string(),
+                system_prompt: Some("be direct".to_string()),
+                policy_profile: None,
+                model_hint: None,
+            },
+            ConcurrentBranchJobPayload {
+                branch_id: "branch.a".to_string(),
+                user_prompt_template: "Branch A uses {input}".to_string(),
+                system_prompt: Some("be concise".to_string()),
+                policy_profile: None,
+                model_hint: None,
+            },
+        ],
+    };
+
+    runtime
+        .enqueue(build_orchestration_concurrent_job(
+            "job-concurrent-surreal-1",
+            &payload,
+            now,
+            "idem-concurrent-surreal-1",
+            "corr-concurrent-surreal-1",
+            "cause-concurrent-surreal-1",
+            "trace-concurrent-surreal-1",
+            "sttp:in:orchestration:concurrent:surreal:1",
+        ))
+        .await
+        .expect("concurrent job should enqueue");
+
+    runtime
+        .process_once("default", "worker-concurrent-surreal", now)
+        .await
+        .expect("concurrent processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get("job-concurrent-surreal-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:orchestration:concurrent:job-concurrent-surreal-1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-concurrent-surreal-1")
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-orchestration-concurrent"))
+    );
+    assert_eq!(diagnostics.get("pattern"), Some(&json!("concurrent")));
+    assert_eq!(diagnostics.get("branches_executed"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.get("termination_reason"),
+        Some(&json!("completed_all_branches"))
+    );
+
+    let final_text = diagnostics
+        .get("final_text")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    assert!(final_text.contains("[branch.a]"));
+    assert!(final_text.contains("[branch.b]"));
+}
+
+#[tokio::test]
+async fn in_memory_orchestration_concurrent_pattern_policy_violation_dead_letters_job() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(EchoPromptChatClient))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let payload = ConcurrentPatternJobPayload {
+        thread_id: Some("thread.concurrent.invalid.1".to_string()),
+        initial_user_prompt: "base context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        merge_strategy: None,
+        branches: vec![],
+    };
+
+    runtime
+        .enqueue(build_orchestration_concurrent_job(
+            "job-concurrent-in-memory-invalid-1",
+            &payload,
+            now,
+            "idem-concurrent-in-memory-invalid-1",
+            "corr-concurrent-in-memory-invalid-1",
+            "cause-concurrent-in-memory-invalid-1",
+            "trace-concurrent-in-memory-invalid-1",
+            "sttp:in:orchestration:concurrent:in-memory:invalid:1",
+        ))
+        .await
+        .expect("concurrent job should enqueue");
+
+    runtime
+        .process_once("default", "worker-concurrent-in-memory", now)
+        .await
+        .expect("concurrent processing should complete");
+
+    let job = runtime
+        .job_store
+        .get("job-concurrent-in-memory-invalid-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-concurrent-in-memory-invalid-1")
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
+    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("payload.branches must include at least one branch")
+    );
+}
+
+#[tokio::test]
+async fn in_memory_orchestration_concurrent_pattern_persists_branch_thread_lineage() {
+    let now = Utc::now();
+    let thread_store = Arc::new(InMemoryThreadStore::default());
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_thread_store(thread_store.clone())
+        .with_chat_client(Arc::new(EchoPromptChatClient))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let root_thread_id = "thread.concurrent.lineage.1".to_string();
+    let payload = ConcurrentPatternJobPayload {
+        thread_id: Some(root_thread_id.clone()),
+        initial_user_prompt: "review architecture".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        merge_strategy: Some("join_with_headers".to_string()),
+        branches: vec![
+            ConcurrentBranchJobPayload {
+                branch_id: "alpha".to_string(),
+                user_prompt_template: "Alpha branch: {input}".to_string(),
+                system_prompt: None,
+                policy_profile: None,
+                model_hint: None,
+            },
+            ConcurrentBranchJobPayload {
+                branch_id: "beta".to_string(),
+                user_prompt_template: "Beta branch: {input}".to_string(),
+                system_prompt: None,
+                policy_profile: None,
+                model_hint: None,
+            },
+        ],
+    };
+
+    runtime
+        .enqueue(build_orchestration_concurrent_job(
+            "job-concurrent-lineage-in-memory-1",
+            &payload,
+            now,
+            "idem-concurrent-lineage-in-memory-1",
+            "corr-concurrent-lineage-in-memory-1",
+            "cause-concurrent-lineage-in-memory-1",
+            "trace-concurrent-lineage-in-memory-1",
+            "sttp:in:orchestration:concurrent:lineage:in-memory:1",
+        ))
+        .await
+        .expect("concurrent job should enqueue");
+
+    runtime
+        .process_once("default", "worker-concurrent-lineage", now)
+        .await
+        .expect("concurrent processing should succeed");
+
+    let lineage = thread_store
+        .list_lineage("thread.concurrent.lineage.1::branch::alpha")
+        .await
+        .expect("lineage should load");
+    assert_eq!(lineage.len(), 2);
+    assert_eq!(lineage[0].thread_id, root_thread_id);
+    assert_eq!(lineage[1].thread_id, "thread.concurrent.lineage.1::branch::alpha");
+
+    let events = thread_store
+        .list_events("thread.concurrent.lineage.1::branch::alpha")
+        .await
+        .expect("branch events should load");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_kind, "orchestration.concurrent.branch.completed");
+}
+
+#[tokio::test]
+async fn in_memory_orchestration_handoff_pattern_executes_turns_and_emits_transitions() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(PlainScriptedChatClient::new(vec![
+            "agent-alpha output".to_string(),
+            "agent-beta output".to_string(),
+        ])))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let payload = HandoffPatternJobPayload {
+        thread_id: Some("thread.handoff.1".to_string()),
+        initial_user_prompt: "initial context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        turns: vec![
+            HandoffTurnJobPayload {
+                actor_id: "agent.alpha".to_string(),
+                user_prompt_template: "Alpha handles: {input}".to_string(),
+                system_prompt: Some("be analytical".to_string()),
+                policy_profile: None,
+                model_hint: None,
+            },
+            HandoffTurnJobPayload {
+                actor_id: "agent.beta".to_string(),
+                user_prompt_template: "Beta finalizes: {input}".to_string(),
+                system_prompt: Some("be concise".to_string()),
+                policy_profile: None,
+                model_hint: None,
+            },
+        ],
+    };
+
+    runtime
+        .enqueue(build_orchestration_handoff_job(
+            "job-handoff-in-memory-1",
+            &payload,
+            now,
+            "idem-handoff-in-memory-1",
+            "corr-handoff-in-memory-1",
+            "cause-handoff-in-memory-1",
+            "trace-handoff-in-memory-1",
+            "sttp:in:orchestration:handoff:in-memory:1",
+        ))
+        .await
+        .expect("handoff job should enqueue");
+
+    runtime
+        .process_once("default", "worker-handoff-in-memory", now)
+        .await
+        .expect("handoff processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get("job-handoff-in-memory-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:orchestration:handoff:job-handoff-in-memory-1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-handoff-in-memory-1")
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-orchestration-handoff"))
+    );
+    assert_eq!(diagnostics.get("pattern"), Some(&json!("handoff")));
+    assert_eq!(diagnostics.get("turns_executed"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.get("termination_reason"),
+        Some(&json!("completed_all_turns"))
+    );
+    let handoffs = diagnostics
+        .get("handoffs")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(handoffs.len(), 1);
+    assert_eq!(
+        handoffs[0].get("from_actor_id"),
+        Some(&json!("agent.alpha"))
+    );
+    assert_eq!(handoffs[0].get("to_actor_id"), Some(&json!("agent.beta")));
+}
+
+#[tokio::test]
+async fn surreal_orchestration_handoff_pattern_policy_violation_dead_letters_job() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+        namespace: "test".to_string(),
+        database: "runtime_backend_parity_orchestration_handoff_failure".to_string(),
+    })
+    .with_chat_client(Arc::new(EchoPromptChatClient))
+    .without_grapheme_handlers()
+    .without_prompt_handler()
+    .without_tool_loop_handler()
+    .without_agent_handlers()
+    .without_memory_operation_handlers()
+    .build()
+    .await
+    .expect("runtime should build");
+
+    let RuntimeComposition::Surreal(runtime) = runtime else {
+        panic!("expected surreal runtime");
+    };
+
+    let payload = HandoffPatternJobPayload {
+        thread_id: Some("thread.handoff.invalid.1".to_string()),
+        initial_user_prompt: "initial context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        turns: vec![HandoffTurnJobPayload {
+            actor_id: " ".to_string(),
+            user_prompt_template: "broken actor {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+
+    runtime
+        .enqueue(build_orchestration_handoff_job(
+            "job-handoff-surreal-invalid-1",
+            &payload,
+            now,
+            "idem-handoff-surreal-invalid-1",
+            "corr-handoff-surreal-invalid-1",
+            "cause-handoff-surreal-invalid-1",
+            "trace-handoff-surreal-invalid-1",
+            "sttp:in:orchestration:handoff:surreal:invalid:1",
+        ))
+        .await
+        .expect("handoff job should enqueue");
+
+    runtime
+        .process_once("default", "worker-handoff-surreal", now)
+        .await
+        .expect("handoff processing should complete");
+
+    let job = runtime
+        .job_store
+        .get("job-handoff-surreal-invalid-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-handoff-surreal-invalid-1")
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
+    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("turns[].actor_id must be non-empty")
+    );
+}
+
+#[tokio::test]
+async fn in_memory_orchestration_orchestrator_pattern_selects_matching_route() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(EchoPromptChatClient))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let payload = OrchestratorPatternJobPayload {
+        thread_id: Some("thread.orchestrator.1".to_string()),
+        initial_user_prompt: "Need SQL query tuning help".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        routes: vec![
+            OrchestratorRouteJobPayload {
+                route_id: "route.general".to_string(),
+                selector_keywords: vec!["summary".to_string(), "overview".to_string()],
+                user_prompt_template: "General route: {input}".to_string(),
+                system_prompt: None,
+                policy_profile: None,
+                model_hint: None,
+            },
+            OrchestratorRouteJobPayload {
+                route_id: "route.sql".to_string(),
+                selector_keywords: vec!["sql".to_string(), "query".to_string()],
+                user_prompt_template: "SQL route: {input}".to_string(),
+                system_prompt: Some("be technical".to_string()),
+                policy_profile: None,
+                model_hint: None,
+            },
+        ],
+    };
+
+    runtime
+        .enqueue(build_orchestration_orchestrator_job(
+            "job-orchestrator-in-memory-1",
+            &payload,
+            now,
+            "idem-orchestrator-in-memory-1",
+            "corr-orchestrator-in-memory-1",
+            "cause-orchestrator-in-memory-1",
+            "trace-orchestrator-in-memory-1",
+            "sttp:in:orchestration:orchestrator:in-memory:1",
+        ))
+        .await
+        .expect("orchestrator job should enqueue");
+
+    runtime
+        .process_once("default", "worker-orchestrator-in-memory", now)
+        .await
+        .expect("orchestrator processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get("job-orchestrator-in-memory-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:orchestration:orchestrator:job-orchestrator-in-memory-1")
+    );
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-orchestrator-in-memory-1")
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-orchestration-orchestrator"))
+    );
+    assert_eq!(diagnostics.get("pattern"), Some(&json!("orchestrator")));
+    assert_eq!(
+        diagnostics.get("selected_route_id"),
+        Some(&json!("route.sql"))
+    );
+    assert!(
+        diagnostics
+            .get("selection_reason")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .contains("keyword_match")
+    );
+}
+
+#[tokio::test]
+async fn surreal_orchestration_orchestrator_pattern_policy_violation_dead_letters_job() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+        namespace: "test".to_string(),
+        database: "runtime_backend_parity_orchestration_orchestrator_failure".to_string(),
+    })
+    .with_chat_client(Arc::new(EchoPromptChatClient))
+    .without_grapheme_handlers()
+    .without_prompt_handler()
+    .without_tool_loop_handler()
+    .without_agent_handlers()
+    .without_memory_operation_handlers()
+    .build()
+    .await
+    .expect("runtime should build");
+
+    let RuntimeComposition::Surreal(runtime) = runtime else {
+        panic!("expected surreal runtime");
+    };
+
+    let payload = OrchestratorPatternJobPayload {
+        thread_id: Some("thread.orchestrator.invalid.1".to_string()),
+        initial_user_prompt: "routing".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        routes: vec![OrchestratorRouteJobPayload {
+            route_id: " ".to_string(),
+            selector_keywords: vec!["routing".to_string()],
+            user_prompt_template: "route: {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+
+    runtime
+        .enqueue(build_orchestration_orchestrator_job(
+            "job-orchestrator-surreal-invalid-1",
+            &payload,
+            now,
+            "idem-orchestrator-surreal-invalid-1",
+            "corr-orchestrator-surreal-invalid-1",
+            "cause-orchestrator-surreal-invalid-1",
+            "trace-orchestrator-surreal-invalid-1",
+            "sttp:in:orchestration:orchestrator:surreal:invalid:1",
+        ))
+        .await
+        .expect("orchestrator job should enqueue");
+
+    runtime
+        .process_once("default", "worker-orchestrator-surreal", now)
+        .await
+        .expect("orchestrator processing should complete");
+
+    let job = runtime
+        .job_store
+        .get("job-orchestrator-surreal-invalid-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-orchestrator-surreal-invalid-1")
+        .await
+        .expect("attempt list should succeed");
+    assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
+    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("routes[].route_id must be non-empty")
+    );
+}
+
+#[tokio::test]
 async fn agent_session_coordinator_runs_multi_turn_with_round_robin_and_max_turns() {
     let chat_client = Arc::new(ScriptedChatClient::new(vec![
         "draft turn 1".to_string(),
@@ -3368,6 +4583,157 @@ async fn surreal_runtime_matches_core_flow_and_recurring_materialization() {
         .expect("publish pending should succeed");
     assert_eq!(published, 1);
     assert_eq!(published_count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn in_memory_thread_store_supports_create_append_fork_and_lineage() {
+    let store = InMemoryThreadStore::default();
+    let now = Utc::now();
+
+    store
+        .create_thread(NewThread {
+            thread_id: "thread.root.1".to_string(),
+            parent_thread_id: None,
+            branch_label: Some("root".to_string()),
+            created_at: now,
+        })
+        .await
+        .expect("root thread should create");
+
+    store
+        .append_event(NewThreadEvent {
+            event_id: "event.root.1".to_string(),
+            thread_id: "thread.root.1".to_string(),
+            event_kind: "message".to_string(),
+            payload_ref: "sttp:event:root:1".to_string(),
+            occurred_at: now + Duration::seconds(1),
+        })
+        .await
+        .expect("root event should append");
+
+    store
+        .fork_thread(
+            "thread.root.1",
+            "thread.child.1",
+            Some("exploration".to_string()),
+            now + Duration::seconds(2),
+        )
+        .await
+        .expect("child thread should fork");
+
+    store
+        .append_event(NewThreadEvent {
+            event_id: "event.child.1".to_string(),
+            thread_id: "thread.child.1".to_string(),
+            event_kind: "message".to_string(),
+            payload_ref: "sttp:event:child:1".to_string(),
+            occurred_at: now + Duration::seconds(3),
+        })
+        .await
+        .expect("child event should append");
+
+    let root_events = store
+        .list_events("thread.root.1")
+        .await
+        .expect("root events should load");
+    assert_eq!(root_events.len(), 1);
+    assert_eq!(root_events[0].event_id, "event.root.1");
+
+    let lineage = store
+        .list_lineage("thread.child.1")
+        .await
+        .expect("lineage should load");
+    assert_eq!(lineage.len(), 2);
+    assert_eq!(lineage[0].thread_id, "thread.root.1");
+    assert_eq!(lineage[1].thread_id, "thread.child.1");
+}
+
+#[tokio::test]
+async fn surreal_thread_store_supports_create_append_fork_and_lineage() {
+    let db = Surreal::new::<Mem>(())
+        .await
+        .expect("surreal mem should initialize");
+    db.use_ns("test")
+        .use_db("runtime_thread_store_parity")
+        .await
+        .expect("namespace and db should be selected");
+
+    let store = SurrealThreadStore::new(db);
+    let now = Utc::now();
+
+    store
+        .create_thread(NewThread {
+            thread_id: "thread.root.2".to_string(),
+            parent_thread_id: None,
+            branch_label: Some("root".to_string()),
+            created_at: now,
+        })
+        .await
+        .expect("root thread should create");
+
+    store
+        .append_event(NewThreadEvent {
+            event_id: "event.root.2".to_string(),
+            thread_id: "thread.root.2".to_string(),
+            event_kind: "message".to_string(),
+            payload_ref: "sttp:event:root:2".to_string(),
+            occurred_at: now + Duration::seconds(1),
+        })
+        .await
+        .expect("root event should append");
+
+    store
+        .fork_thread(
+            "thread.root.2",
+            "thread.child.2",
+            Some("analysis".to_string()),
+            now + Duration::seconds(2),
+        )
+        .await
+        .expect("child thread should fork");
+
+    store
+        .append_event(NewThreadEvent {
+            event_id: "event.child.2".to_string(),
+            thread_id: "thread.child.2".to_string(),
+            event_kind: "message".to_string(),
+            payload_ref: "sttp:event:child:2".to_string(),
+            occurred_at: now + Duration::seconds(3),
+        })
+        .await
+        .expect("child event should append");
+
+    let child_events = store
+        .list_events("thread.child.2")
+        .await
+        .expect("child events should load");
+    assert_eq!(child_events.len(), 1);
+    assert_eq!(child_events[0].event_id, "event.child.2");
+
+    let lineage = store
+        .list_lineage("thread.child.2")
+        .await
+        .expect("lineage should load");
+    assert_eq!(lineage.len(), 2);
+    assert_eq!(lineage[0].thread_id, "thread.root.2");
+    assert_eq!(lineage[1].thread_id, "thread.child.2");
+}
+
+#[tokio::test]
+async fn in_memory_thread_store_rejects_event_append_for_unknown_thread() {
+    let store = InMemoryThreadStore::default();
+    let err = store
+        .append_event(NewThreadEvent {
+            event_id: "event.missing.1".to_string(),
+            thread_id: "thread.missing.1".to_string(),
+            event_kind: "message".to_string(),
+            payload_ref: "sttp:event:missing:1".to_string(),
+            occurred_at: Utc::now(),
+        })
+        .await
+        .expect_err("append should fail for missing thread");
+
+    assert!(err.to_string().contains("thread not found"));
 }
 
 #[tokio::test]
@@ -4773,4 +6139,674 @@ async fn lineage_investigator_requires_selector() {
     assert!(err
         .to_string()
         .contains("requires at least one selector"));
+}
+
+#[tokio::test]
+async fn lineage_investigator_filters_by_branch_thread_and_includes_ancestry() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(EchoPromptChatClient))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let root_thread_id = "thread.lineage.selector.1".to_string();
+    let payload = ConcurrentPatternJobPayload {
+        thread_id: Some(root_thread_id.clone()),
+        initial_user_prompt: "lineage selector context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        merge_strategy: Some("join_with_headers".to_string()),
+        branches: vec![
+            ConcurrentBranchJobPayload {
+                branch_id: "alpha".to_string(),
+                user_prompt_template: "Alpha branch: {input}".to_string(),
+                system_prompt: None,
+                policy_profile: None,
+                model_hint: None,
+            },
+            ConcurrentBranchJobPayload {
+                branch_id: "beta".to_string(),
+                user_prompt_template: "Beta branch: {input}".to_string(),
+                system_prompt: None,
+                policy_profile: None,
+                model_hint: None,
+            },
+        ],
+    };
+
+    let job_id = "job-lineage-thread-selector-1";
+    runtime
+        .enqueue(build_orchestration_concurrent_job(
+            job_id,
+            &payload,
+            now,
+            "idem-lineage-thread-selector-1",
+            "corr-lineage-thread-selector-1",
+            "cause-lineage-thread-selector-1",
+            "trace-lineage-thread-selector-1",
+            "sttp:in:lineage:thread:selector:1",
+        ))
+        .await
+        .expect("concurrent job should enqueue");
+
+    runtime
+        .process_once("default", "worker-lineage-thread-selector", now)
+        .await
+        .expect("processing should succeed");
+
+    let report = runtime
+        .investigate_lineage(RuntimeLineageQuery {
+            thread_id: Some("thread.lineage.selector.1::branch::alpha".to_string()),
+            include_thread_ancestry: true,
+            ..RuntimeLineageQuery::default()
+        })
+        .await
+        .expect("lineage investigation should succeed");
+
+    assert_eq!(report.attempts.len(), 1);
+    assert_eq!(report.lineage_events.len(), 1);
+    assert_eq!(report.lineage_events[0].event.job_id, job_id);
+    assert_eq!(
+        report.thread_ancestry,
+        vec![
+            "thread.lineage.selector.1".to_string(),
+            "thread.lineage.selector.1::branch::alpha".to_string(),
+        ]
+    );
+
+    let root_report = runtime
+        .investigate_lineage(RuntimeLineageQuery {
+            thread_id: Some(root_thread_id),
+            include_thread_ancestry: true,
+            ..RuntimeLineageQuery::default()
+        })
+        .await
+        .expect("root lineage investigation should succeed");
+
+    assert!(
+        root_report
+            .thread_ancestry
+            .contains(&"thread.lineage.selector.1::branch::alpha".to_string())
+    );
+    assert!(
+        root_report
+            .thread_ancestry
+            .contains(&"thread.lineage.selector.1::branch::beta".to_string())
+    );
+}
+
+#[tokio::test]
+async fn lineage_investigator_root_thread_selector_expands_descendants_in_memory() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(EchoPromptChatClient))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let root_thread_id = "thread.lineage.root.expand.1";
+    let branch_thread_id = "thread.lineage.root.expand.1::branch::alpha";
+
+    let root_payload = SequentialPatternJobPayload {
+        thread_id: Some(root_thread_id.to_string()),
+        initial_user_prompt: "root context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        stages: vec![SequentialStageJobPayload {
+            stage_id: "root-stage".to_string(),
+            user_prompt_template: "Root stage: {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+
+    let branch_payload = SequentialPatternJobPayload {
+        thread_id: Some(branch_thread_id.to_string()),
+        initial_user_prompt: "branch context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        stages: vec![SequentialStageJobPayload {
+            stage_id: "branch-stage".to_string(),
+            user_prompt_template: "Branch stage: {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+
+    runtime
+        .enqueue(build_orchestration_sequential_job(
+            "job-lineage-root-expand-in-memory-root",
+            &root_payload,
+            now,
+            "idem-lineage-root-expand-in-memory-root",
+            "corr-lineage-root-expand-in-memory-root",
+            "cause-lineage-root-expand-in-memory-root",
+            "trace-lineage-root-expand-in-memory-root",
+            "sttp:in:lineage:root:expand:in-memory:root",
+        ))
+        .await
+        .expect("root job should enqueue");
+
+    runtime
+        .enqueue(build_orchestration_sequential_job(
+            "job-lineage-root-expand-in-memory-branch",
+            &branch_payload,
+            now,
+            "idem-lineage-root-expand-in-memory-branch",
+            "corr-lineage-root-expand-in-memory-branch",
+            "cause-lineage-root-expand-in-memory-branch",
+            "trace-lineage-root-expand-in-memory-branch",
+            "sttp:in:lineage:root:expand:in-memory:branch",
+        ))
+        .await
+        .expect("branch job should enqueue");
+
+    runtime
+        .process_once("default", "worker-lineage-root-expand-in-memory", now)
+        .await
+        .expect("first processing should succeed");
+    runtime
+        .process_once("default", "worker-lineage-root-expand-in-memory", now)
+        .await
+        .expect("second processing should succeed");
+
+    let report = runtime
+        .investigate_lineage(RuntimeLineageQuery {
+            thread_id: Some(root_thread_id.to_string()),
+            include_thread_ancestry: true,
+            ..RuntimeLineageQuery::default()
+        })
+        .await
+        .expect("root lineage investigation should succeed");
+
+    assert_eq!(report.attempts.len(), 2);
+    assert_eq!(report.lineage_events.len(), 2);
+    assert!(report
+        .lineage_events
+        .iter()
+        .any(|event| event.event.thread_id.as_deref() == Some(root_thread_id)));
+    assert!(report
+        .lineage_events
+        .iter()
+        .any(|event| event.event.thread_id.as_deref() == Some(branch_thread_id)));
+    assert!(report
+        .thread_ancestry
+        .contains(&root_thread_id.to_string()));
+    assert!(report
+        .thread_ancestry
+        .contains(&branch_thread_id.to_string()));
+}
+
+#[tokio::test]
+async fn lineage_investigator_root_thread_selector_expands_descendants_surreal() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+        namespace: "test".to_string(),
+        database: "runtime_backend_parity_lineage_root_expand_surreal".to_string(),
+    })
+    .with_chat_client(Arc::new(EchoPromptChatClient))
+    .without_grapheme_handlers()
+    .without_prompt_handler()
+    .without_tool_loop_handler()
+    .without_agent_handlers()
+    .without_memory_operation_handlers()
+    .build()
+    .await
+    .expect("runtime should build");
+
+    let RuntimeComposition::Surreal(runtime) = runtime else {
+        panic!("expected surreal runtime");
+    };
+
+    let root_thread_id = "thread.lineage.root.expand.2";
+    let branch_thread_id = "thread.lineage.root.expand.2::branch::alpha";
+
+    let root_payload = SequentialPatternJobPayload {
+        thread_id: Some(root_thread_id.to_string()),
+        initial_user_prompt: "root context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        stages: vec![SequentialStageJobPayload {
+            stage_id: "root-stage".to_string(),
+            user_prompt_template: "Root stage: {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+
+    let branch_payload = SequentialPatternJobPayload {
+        thread_id: Some(branch_thread_id.to_string()),
+        initial_user_prompt: "branch context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        stages: vec![SequentialStageJobPayload {
+            stage_id: "branch-stage".to_string(),
+            user_prompt_template: "Branch stage: {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+
+    runtime
+        .enqueue(build_orchestration_sequential_job(
+            "job-lineage-root-expand-surreal-root",
+            &root_payload,
+            now,
+            "idem-lineage-root-expand-surreal-root",
+            "corr-lineage-root-expand-surreal-root",
+            "cause-lineage-root-expand-surreal-root",
+            "trace-lineage-root-expand-surreal-root",
+            "sttp:in:lineage:root:expand:surreal:root",
+        ))
+        .await
+        .expect("root job should enqueue");
+
+    runtime
+        .enqueue(build_orchestration_sequential_job(
+            "job-lineage-root-expand-surreal-branch",
+            &branch_payload,
+            now,
+            "idem-lineage-root-expand-surreal-branch",
+            "corr-lineage-root-expand-surreal-branch",
+            "cause-lineage-root-expand-surreal-branch",
+            "trace-lineage-root-expand-surreal-branch",
+            "sttp:in:lineage:root:expand:surreal:branch",
+        ))
+        .await
+        .expect("branch job should enqueue");
+
+    runtime
+        .process_once("default", "worker-lineage-root-expand-surreal", now)
+        .await
+        .expect("first processing should succeed");
+    runtime
+        .process_once("default", "worker-lineage-root-expand-surreal", now)
+        .await
+        .expect("second processing should succeed");
+
+    let report = runtime
+        .investigate_lineage(RuntimeLineageQuery {
+            thread_id: Some(root_thread_id.to_string()),
+            include_thread_ancestry: true,
+            ..RuntimeLineageQuery::default()
+        })
+        .await
+        .expect("root lineage investigation should succeed");
+
+    assert_eq!(report.attempts.len(), 2);
+    assert_eq!(report.lineage_events.len(), 2);
+    assert!(report
+        .lineage_events
+        .iter()
+        .any(|event| event.event.thread_id.as_deref() == Some(root_thread_id)));
+    assert!(report
+        .lineage_events
+        .iter()
+        .any(|event| event.event.thread_id.as_deref() == Some(branch_thread_id)));
+    assert!(report
+        .thread_ancestry
+        .contains(&root_thread_id.to_string()));
+    assert!(report
+        .thread_ancestry
+        .contains(&branch_thread_id.to_string()));
+}
+
+#[tokio::test]
+async fn in_memory_orchestration_handlers_emit_standard_success_diagnostics() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(EchoPromptChatClient))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let sequential_payload = SequentialPatternJobPayload {
+        thread_id: Some("thread.std.sequential.1".to_string()),
+        initial_user_prompt: "context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        stages: vec![SequentialStageJobPayload {
+            stage_id: "s1".to_string(),
+            user_prompt_template: "S1 {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+    let concurrent_payload = ConcurrentPatternJobPayload {
+        thread_id: Some("thread.std.concurrent.1".to_string()),
+        initial_user_prompt: "context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        merge_strategy: Some("join_with_headers".to_string()),
+        branches: vec![ConcurrentBranchJobPayload {
+            branch_id: "b1".to_string(),
+            user_prompt_template: "B1 {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+    let handoff_payload = HandoffPatternJobPayload {
+        thread_id: Some("thread.std.handoff.1".to_string()),
+        initial_user_prompt: "context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        turns: vec![HandoffTurnJobPayload {
+            actor_id: "actor.a".to_string(),
+            user_prompt_template: "Turn {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+    let orchestrator_payload = OrchestratorPatternJobPayload {
+        thread_id: Some("thread.std.orchestrator.1".to_string()),
+        initial_user_prompt: "needs sql".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        routes: vec![OrchestratorRouteJobPayload {
+            route_id: "route.sql".to_string(),
+            selector_keywords: vec!["sql".to_string()],
+            user_prompt_template: "Route {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+
+    runtime
+        .enqueue(build_orchestration_sequential_job(
+            "job-std-sequential-success",
+            &sequential_payload,
+            now,
+            "idem-std-sequential-success",
+            "corr-std-sequential-success",
+            "cause-std-sequential-success",
+            "trace-std-sequential-success",
+            "sttp:in:std:sequential:success",
+        ))
+        .await
+        .expect("sequential should enqueue");
+    runtime
+        .enqueue(build_orchestration_concurrent_job(
+            "job-std-concurrent-success",
+            &concurrent_payload,
+            now,
+            "idem-std-concurrent-success",
+            "corr-std-concurrent-success",
+            "cause-std-concurrent-success",
+            "trace-std-concurrent-success",
+            "sttp:in:std:concurrent:success",
+        ))
+        .await
+        .expect("concurrent should enqueue");
+    runtime
+        .enqueue(build_orchestration_handoff_job(
+            "job-std-handoff-success",
+            &handoff_payload,
+            now,
+            "idem-std-handoff-success",
+            "corr-std-handoff-success",
+            "cause-std-handoff-success",
+            "trace-std-handoff-success",
+            "sttp:in:std:handoff:success",
+        ))
+        .await
+        .expect("handoff should enqueue");
+    runtime
+        .enqueue(build_orchestration_orchestrator_job(
+            "job-std-orchestrator-success",
+            &orchestrator_payload,
+            now,
+            "idem-std-orchestrator-success",
+            "corr-std-orchestrator-success",
+            "cause-std-orchestrator-success",
+            "trace-std-orchestrator-success",
+            "sttp:in:std:orchestrator:success",
+        ))
+        .await
+        .expect("orchestrator should enqueue");
+
+    for _ in 0..4 {
+        runtime
+            .process_once("default", "worker-std-success", now)
+            .await
+            .expect("processing should succeed");
+    }
+
+    assert_orchestration_success_diagnostics(
+        &attempt_diagnostics_for_job(&runtime, "job-std-sequential-success").await,
+        "stasis-orchestration-sequential",
+        "sequential",
+        "thread.std.sequential.1",
+    );
+    assert_orchestration_success_diagnostics(
+        &attempt_diagnostics_for_job(&runtime, "job-std-concurrent-success").await,
+        "stasis-orchestration-concurrent",
+        "concurrent",
+        "thread.std.concurrent.1",
+    );
+    assert_orchestration_success_diagnostics(
+        &attempt_diagnostics_for_job(&runtime, "job-std-handoff-success").await,
+        "stasis-orchestration-handoff",
+        "handoff",
+        "thread.std.handoff.1",
+    );
+    assert_orchestration_success_diagnostics(
+        &attempt_diagnostics_for_job(&runtime, "job-std-orchestrator-success").await,
+        "stasis-orchestration-orchestrator",
+        "orchestrator",
+        "thread.std.orchestrator.1",
+    );
+}
+
+#[tokio::test]
+async fn in_memory_orchestration_handlers_emit_standard_policy_violation_diagnostics() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(EchoPromptChatClient))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let sequential_payload = SequentialPatternJobPayload {
+        thread_id: Some("thread.std.sequential.invalid.1".to_string()),
+        initial_user_prompt: " ".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        stages: vec![SequentialStageJobPayload {
+            stage_id: "s1".to_string(),
+            user_prompt_template: "S1 {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+    let concurrent_payload = ConcurrentPatternJobPayload {
+        thread_id: Some("thread.std.concurrent.invalid.1".to_string()),
+        initial_user_prompt: "context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        merge_strategy: None,
+        branches: vec![],
+    };
+    let handoff_payload = HandoffPatternJobPayload {
+        thread_id: Some("thread.std.handoff.invalid.1".to_string()),
+        initial_user_prompt: "context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        turns: vec![HandoffTurnJobPayload {
+            actor_id: " ".to_string(),
+            user_prompt_template: "Turn {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+    let orchestrator_payload = OrchestratorPatternJobPayload {
+        thread_id: Some("thread.std.orchestrator.invalid.1".to_string()),
+        initial_user_prompt: "context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        routes: vec![OrchestratorRouteJobPayload {
+            route_id: " ".to_string(),
+            selector_keywords: vec!["sql".to_string()],
+            user_prompt_template: "Route {input}".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        }],
+    };
+
+    runtime
+        .enqueue(build_orchestration_sequential_job(
+            "job-std-sequential-failure",
+            &sequential_payload,
+            now,
+            "idem-std-sequential-failure",
+            "corr-std-sequential-failure",
+            "cause-std-sequential-failure",
+            "trace-std-sequential-failure",
+            "sttp:in:std:sequential:failure",
+        ))
+        .await
+        .expect("sequential should enqueue");
+    runtime
+        .enqueue(build_orchestration_concurrent_job(
+            "job-std-concurrent-failure",
+            &concurrent_payload,
+            now,
+            "idem-std-concurrent-failure",
+            "corr-std-concurrent-failure",
+            "cause-std-concurrent-failure",
+            "trace-std-concurrent-failure",
+            "sttp:in:std:concurrent:failure",
+        ))
+        .await
+        .expect("concurrent should enqueue");
+    runtime
+        .enqueue(build_orchestration_handoff_job(
+            "job-std-handoff-failure",
+            &handoff_payload,
+            now,
+            "idem-std-handoff-failure",
+            "corr-std-handoff-failure",
+            "cause-std-handoff-failure",
+            "trace-std-handoff-failure",
+            "sttp:in:std:handoff:failure",
+        ))
+        .await
+        .expect("handoff should enqueue");
+    runtime
+        .enqueue(build_orchestration_orchestrator_job(
+            "job-std-orchestrator-failure",
+            &orchestrator_payload,
+            now,
+            "idem-std-orchestrator-failure",
+            "corr-std-orchestrator-failure",
+            "cause-std-orchestrator-failure",
+            "trace-std-orchestrator-failure",
+            "sttp:in:std:orchestrator:failure",
+        ))
+        .await
+        .expect("orchestrator should enqueue");
+
+    for _ in 0..4 {
+        runtime
+            .process_once("default", "worker-std-failure", now)
+            .await
+            .expect("processing should complete");
+    }
+
+    let sequential_attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-std-sequential-failure")
+        .await
+        .expect("attempt list should succeed");
+    let concurrent_attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-std-concurrent-failure")
+        .await
+        .expect("attempt list should succeed");
+    let handoff_attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-std-handoff-failure")
+        .await
+        .expect("attempt list should succeed");
+    let orchestrator_attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-std-orchestrator-failure")
+        .await
+        .expect("attempt list should succeed");
+
+    assert_eq!(sequential_attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(concurrent_attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(handoff_attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(
+        orchestrator_attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
+
+    assert_orchestration_policy_violation_diagnostics(
+        &attempt_diagnostics_for_job(&runtime, "job-std-sequential-failure").await,
+        "stasis-orchestration-sequential",
+        "sequential",
+    );
+    assert_orchestration_policy_violation_diagnostics(
+        &attempt_diagnostics_for_job(&runtime, "job-std-concurrent-failure").await,
+        "stasis-orchestration-concurrent",
+        "concurrent",
+    );
+    assert_orchestration_policy_violation_diagnostics(
+        &attempt_diagnostics_for_job(&runtime, "job-std-handoff-failure").await,
+        "stasis-orchestration-handoff",
+        "handoff",
+    );
+    assert_orchestration_policy_violation_diagnostics(
+        &attempt_diagnostics_for_job(&runtime, "job-std-orchestrator-failure").await,
+        "stasis-orchestration-orchestrator",
+        "orchestrator",
+    );
 }

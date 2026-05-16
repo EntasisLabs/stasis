@@ -1,5 +1,21 @@
 # Stasis Framework RFC: Unified AI Orchestration Architecture
 
+## Document Metadata
+
+- Document Type: Architecture Standard
+- Audience: Engineer, Security, Architect
+- Stability: Evolving
+- Last Verified: 2026-05-15
+- Verified Against:
+	- src/application/runtime/stasis_runtime_builder.rs
+	- src/application/runtime/default_chat_middlewares.rs
+	- src/application/runtime/sequential_pattern_job_handler.rs
+	- src/application/runtime/concurrent_pattern_job_handler.rs
+	- src/application/runtime/handoff_pattern_job_handler.rs
+	- src/application/runtime/orchestrator_pattern_job_handler.rs
+	- src/ports/outbound/runtime/thread_store.rs
+	- tests/architecture_conformance.rs
+
 Status: Draft (alignment baseline)
 Date: 2026-05-14
 Owner: Stasis Core
@@ -11,6 +27,8 @@ Define the canonical architecture for Stasis as a framework that unifies:
 - Tool and function routing
 - Agent orchestration (single and multi-agent)
 - Runtime job orchestration (queueing, retries, dead-letter, replay, lineage)
+- Grapheme workflow execution integration (policy-governed workflow handlers)
+- Locus memory integration (memory recall/write and advanced memory operations)
 
 This RFC is the source of truth to prevent product-layer drift and boundary leakage.
 
@@ -30,6 +48,10 @@ Stasis should play the role analogous to an Extensions.AI + Agent Framework stac
 - Applications define business workflows and policies.
 - Stasis executes, routes, retries, traces, and audits.
 - Infrastructure adapters (for example genai) are hidden behind Stasis ports.
+
+Stasis also serves as the integration boundary for:
+- Grapheme runtime workflows through Stasis handler contracts.
+- Locus memory capabilities through Stasis memory ports/adapters.
 
 ## 4. Core Principles
 
@@ -93,6 +115,8 @@ External APIs/libraries (OpenAI, Anthropic, Ollama, etc.)
 3. Tool registration must go through Stasis registries/contracts.
 4. Agent-to-tool and agent-to-agent execution must go through Stasis runtime pipeline.
 5. Job state, retries, replay, and lineage are authored by Stasis only.
+6. Grapheme workflow engines are consumed only through Stasis workflow ports/handlers.
+7. Locus memory services are consumed only through Stasis memory ports/adapters.
 
 ## 7. Canonical Stasis Execution Flow
 
@@ -105,6 +129,11 @@ External APIs/libraries (OpenAI, Anthropic, Ollama, etc.)
 7. Stasis returns final result object to application.
 
 The same flow applies in synchronous and queued/background execution modes.
+
+Extended lineage guarantees:
+- Thread-aware lineage fields are persisted in runtime outbox events.
+- Memory lineage fields are projected when memory-enabled handlers execute.
+- Pattern diagnostics include standardized status/pattern/termination metadata.
 
 ## 8. Stasis Contract Surface (Target)
 
@@ -130,6 +159,11 @@ This section defines intended API categories, not final signatures.
 - Retry/dead-letter controls
 - Recurring scheduling
 - Replay and lineage query APIs
+
+5. Integration Contracts
+- Grapheme workflow engine port + handlers.
+- Locus memory reader/writer/operations ports + handlers.
+- Thread store and thread event contracts for orchestration continuity.
 
 ## 9. genai Integration Strategy
 

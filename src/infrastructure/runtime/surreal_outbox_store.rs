@@ -37,6 +37,7 @@ struct OutboxRecord {
     last_publish_error: Option<String>,
     event_type: String,
     job_id: String,
+    thread_id: Option<String>,
     correlation_id: String,
     causation_id: String,
     trace_id: String,
@@ -70,6 +71,7 @@ impl From<OutboxEvent> for OutboxRecord {
                 RuntimeEventType::JobDeadLettered => "job_dead_lettered".to_string(),
             },
             job_id: value.event.job_id,
+            thread_id: value.event.thread_id,
             correlation_id: value.event.correlation_id,
             causation_id: value.event.causation_id,
             trace_id: value.event.trace_id,
@@ -122,6 +124,7 @@ impl TryFrom<OutboxRecord> for OutboxEvent {
             event: RuntimeEvent {
                 event_type,
                 job_id: value.job_id,
+                thread_id: value.thread_id,
                 correlation_id: value.correlation_id,
                 causation_id: value.causation_id,
                 trace_id: value.trace_id,
@@ -213,6 +216,56 @@ impl OutboxStore for SurrealOutboxStore {
         let mut events: Vec<OutboxEvent> = rows
             .into_iter()
             .filter_map(|row| OutboxEvent::try_from(row).ok())
+            .collect();
+
+        events.sort_by_key(|evt| evt.event.occurred_at);
+        Ok(events)
+    }
+
+    async fn list_by_thread_id(&self, thread_id: &str) -> Result<Vec<OutboxEvent>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::table($table) WHERE thread_id = $thread_id")
+            .bind(("table", self.table.clone()))
+            .bind(("thread_id", thread_id.to_string()))
+            .await
+            .map_err(|e| Self::port_err("list outbox events by thread id", e))?;
+
+        let rows: Vec<OutboxRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode outbox events by thread id", e))?;
+
+        let mut events: Vec<OutboxEvent> = rows
+            .into_iter()
+            .filter_map(|row| OutboxEvent::try_from(row).ok())
+            .collect();
+
+        events.sort_by_key(|evt| evt.event.occurred_at);
+        Ok(events)
+    }
+
+    async fn list_by_thread_prefix(&self, thread_prefix: &str) -> Result<Vec<OutboxEvent>> {
+        let mut response = self
+            .db
+            .query("SELECT * FROM type::table($table)")
+            .bind(("table", self.table.clone()))
+            .await
+            .map_err(|e| Self::port_err("list outbox events by thread prefix", e))?;
+
+        let rows: Vec<OutboxRecord> = response
+            .take(0)
+            .map_err(|e| Self::port_err("decode outbox events by thread prefix", e))?;
+
+        let mut events: Vec<OutboxEvent> = rows
+            .into_iter()
+            .filter_map(|row| OutboxEvent::try_from(row).ok())
+            .filter(|evt| {
+                evt.event
+                    .thread_id
+                    .as_deref()
+                    .map(|thread_id| thread_id.starts_with(thread_prefix))
+                    .unwrap_or(false)
+            })
             .collect();
 
         events.sort_by_key(|evt| evt.event.occurred_at);
