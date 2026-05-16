@@ -3,6 +3,7 @@ use std::sync::Arc;
 use genai::chat::{ChatMessage, ChatRequest, ToolResponse};
 use serde::Serialize;
 use serde_json::Value;
+use tokio::sync::mpsc;
 
 use crate::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline, PromptExecutionRequest,
@@ -62,6 +63,14 @@ impl ToolLoopPipeline {
     }
 
     pub async fn execute(&self, request: ToolLoopExecutionRequest) -> Result<ToolLoopExecutionResponse> {
+        self.execute_with_stream(request, None).await
+    }
+
+    pub async fn execute_with_stream(
+        &self,
+        request: ToolLoopExecutionRequest,
+        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+    ) -> Result<ToolLoopExecutionResponse> {
         let context = request.context.clone();
         let selected_tool_name = request.tool_name.clone();
 
@@ -84,10 +93,18 @@ impl ToolLoopPipeline {
             for _ in 0..DEFAULT_MAX_TOOL_ROUNDS {
                 rounds_executed += 1;
                 let chat_request = ChatRequest::new(messages.clone()).with_tools(tools.clone());
-                let completion = self
-                    .prompt_pipeline
-                    .complete_chat(chat_request, context.clone())
-                    .await?;
+                let completion = match chunk_tx {
+                    Some(tx) => {
+                        self.prompt_pipeline
+                            .complete_chat_stream(chat_request, context.clone(), Some(tx))
+                            .await?
+                    }
+                    None => {
+                        self.prompt_pipeline
+                            .complete_chat(chat_request, context.clone())
+                            .await?
+                    }
+                };
                 let response = completion.response;
                 let maybe_text = response
                     .first_text()

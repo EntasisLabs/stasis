@@ -1,8 +1,10 @@
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use genai::adapter::AdapterKind;
+use genai::chat::{ChatOptions, ChatRequest, ChatResponse, ChatStreamEvent, MessageContent, Usage};
 use genai::resolver::{AuthData, Endpoint};
 use genai::{Client, ServiceTarget};
-use genai::chat::{ChatOptions, ChatRequest, ChatResponse};
+use tokio::sync::mpsc;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::ports::outbound::ai_chat_client::AiChatClient;
@@ -148,6 +150,73 @@ impl AiChatClient for GenaiChatClient {
                 ))
             })?;
         Ok(response)
+    }
+
+    async fn complete_stream(
+        &self,
+        request: ChatRequest,
+        options: Option<&ChatOptions>,
+        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+    ) -> Result<ChatResponse> {
+        let stream_options = options
+            .cloned()
+            .unwrap_or_default()
+            .with_capture_content(true)
+            .with_capture_usage(true);
+
+        let mut stream_response = self
+            .client
+            .exec_chat_stream(&self.model, request, Some(&stream_options))
+            .await
+            .map_err(|err| {
+                StasisError::PortFailure(format!(
+                    "genai chat stream failed for model '{}': {}",
+                    self.model, err
+                ))
+            })?;
+
+        let model_iden = stream_response.model_iden.clone();
+        let mut streamed_text = String::new();
+        let mut captured_content: Option<MessageContent> = None;
+        let mut usage: Usage = Usage::default();
+
+        while let Some(event) = stream_response.stream.next().await {
+            match event.map_err(|err| {
+                StasisError::PortFailure(format!(
+                    "genai chat stream event failed for model '{}': {}",
+                    self.model, err
+                ))
+            })? {
+                ChatStreamEvent::Chunk(chunk) => {
+                    if !chunk.content.is_empty() {
+                        streamed_text.push_str(&chunk.content);
+                        if let Some(tx) = chunk_tx {
+                            let _ = tx.send(chunk.content);
+                        }
+                    }
+                }
+                ChatStreamEvent::End(end) => {
+                    captured_content = end.captured_content;
+                    usage = end.captured_usage.unwrap_or_default();
+                }
+                _ => {}
+            }
+        }
+
+        let content = match captured_content {
+            Some(content) => content,
+            None if !streamed_text.is_empty() => MessageContent::from_text(streamed_text),
+            None => MessageContent::default(),
+        };
+
+        Ok(ChatResponse {
+            content,
+            reasoning_content: None,
+            model_iden: model_iden.clone(),
+            provider_model_iden: model_iden,
+            usage,
+            captured_raw_body: None,
+        })
     }
 }
 

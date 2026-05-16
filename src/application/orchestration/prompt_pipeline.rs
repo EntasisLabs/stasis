@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use genai::chat::{ChatMessage, ChatRequest, ChatResponse};
+use tokio::sync::mpsc;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::ports::outbound::ai_chat_client::AiChatClient;
@@ -68,6 +69,19 @@ impl PromptExecutionPipeline {
         context: PromptExecutionContext,
     ) -> Result<PromptChatCompletion> {
         let response = self.chat_client.complete(request, None).await?;
+        Ok(PromptChatCompletion {
+            response,
+            metadata: context,
+        })
+    }
+
+    pub async fn complete_chat_stream(
+        &self,
+        request: ChatRequest,
+        context: PromptExecutionContext,
+        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+    ) -> Result<PromptChatCompletion> {
+        let response = self.chat_client.complete_stream(request, None, chunk_tx).await?;
         Ok(PromptChatCompletion {
             response,
             metadata: context,

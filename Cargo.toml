@@ -26,3 +26,4 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 cron = "0.12"
 grapheme-sdk = "0.1.0"
+futures-util = "0.3"

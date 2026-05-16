@@ -1,3 +1,7 @@
+pub mod events;
+pub mod session;
+pub mod tools;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,6 +11,8 @@ use serde_json::{Value, json};
 use stasis::prelude::{
     GenaiChatClient, RuntimeBackend, RuntimeComposition, StasisRuntimeBuilder, StasisTool,
 };
+
+pub use tools::{TuiRuntime, build_tui_runtime};
 
 const DEFAULT_LLM_MODEL: &str = "gpt-4o-mini";
 const DEFAULT_LLM_PROVIDER: &str = "openai";
@@ -96,6 +102,14 @@ pub fn resolve_llm_base_url(
     std::env::var(&medousa_provider_key)
         .ok()
         .or_else(|| std::env::var(&stasis_provider_key).ok())
+        .or_else(|| {
+            // Honour the standard Ollama env var so users don't need a separate flag.
+            if provider.eq_ignore_ascii_case("ollama") {
+                std::env::var("OLLAMA_HOST").ok()
+            } else {
+                None
+            }
+        })
         .or_else(|| std::env::var("MEDOUSA_LLM_BASE_URL").ok())
         .or_else(|| std::env::var("STASIS_LLM_BASE_URL").ok())
 }
