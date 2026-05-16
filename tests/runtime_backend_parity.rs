@@ -5615,7 +5615,7 @@ async fn in_memory_grapheme_textops_rejects_invalid_payload_schema() {
 #[tokio::test]
 async fn grapheme_sdk_rejects_non_allowlisted_import() {
     let engine = GraphemeSdkWorkflowEngine::new();
-    let source = r#"import sql from "grapheme/sql"
+    let source = r#"import sql from "acme/sql"
 
 query Run {
   sql.query(connection: "local", sql: "select 1") {
@@ -5671,7 +5671,7 @@ async fn in_memory_grapheme_policy_failure_records_guardrail_diagnostics() {
         .register_handler(GraphemeJobHandler::new(workflow_engine))
         .expect("grapheme handler should register");
 
-    let source = r#"import sql from "grapheme/sql"
+        let source = r#"import sql from "acme/sql"
 
 query Run {
   sql.query(connection: "local", sql: "select 1") {

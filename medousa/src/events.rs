@@ -6,6 +6,12 @@ pub enum TuiEvent {
         tool_name: String,
         input_summary: String,
     },
+    /// Full tool payload emitted after an invocation completes.
+    ToolPayload {
+        tool_name: String,
+        tool_input: serde_json::Value,
+        tool_output: serde_json::Value,
+    },
     /// A job was enqueued into the Stasis runtime.
     JobEnqueued {
         job_id: String,

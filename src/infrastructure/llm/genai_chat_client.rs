@@ -158,6 +158,7 @@ impl AiChatClient for GenaiChatClient {
         options: Option<&ChatOptions>,
         chunk_tx: Option<&mpsc::UnboundedSender<String>>,
     ) -> Result<ChatResponse> {
+        let fallback_request = request.clone();
         let stream_options = options
             .cloned()
             .unwrap_or_default()
@@ -208,6 +209,17 @@ impl AiChatClient for GenaiChatClient {
             None if !streamed_text.is_empty() => MessageContent::from_text(streamed_text),
             None => MessageContent::default(),
         };
+
+        // Some provider/tool-call stream paths can terminate without emitting
+        // chunks or captured content. Fall back to a regular completion so
+        // the tool-loop layer does not receive an empty phantom response.
+        if content.first_text().is_none() && content.tool_calls().is_empty() {
+            let fallback = self.complete(fallback_request, options).await?;
+            if let (Some(tx), Some(text)) = (chunk_tx, fallback.first_text()) {
+                let _ = tx.send(text.to_string());
+            }
+            return Ok(fallback);
+        }
 
         Ok(ChatResponse {
             content,

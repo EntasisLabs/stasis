@@ -28,17 +28,69 @@ pub trait ToolRegistry: Send + Sync {
 #[derive(Clone, Default)]
 pub struct InMemoryToolRegistry {
     tools: Arc<RwLock<HashMap<String, Arc<dyn StasisTool>>>>,
+    alias_by_original: Arc<RwLock<HashMap<String, String>>>,
+    original_by_alias: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl InMemoryToolRegistry {
     pub fn register_tool<T: StasisTool + 'static>(&self, tool: T) -> Result<()> {
+        let tool_name = tool.name().to_string();
         let mut tools = self
             .tools
             .write()
             .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))?;
 
-        tools.insert(tool.name().to_string(), Arc::new(tool));
+        let mut alias_by_original = self
+            .alias_by_original
+            .write()
+            .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))?;
+
+        let mut original_by_alias = self
+            .original_by_alias
+            .write()
+            .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))?;
+
+        let alias = Self::allocate_alias(&tool_name, &original_by_alias);
+
+        alias_by_original.insert(tool_name.clone(), alias.clone());
+        original_by_alias.insert(alias, tool_name.clone());
+
+        tools.insert(tool_name, Arc::new(tool));
         Ok(())
+    }
+
+    fn allocate_alias(tool_name: &str, original_by_alias: &HashMap<String, String>) -> String {
+        let base = Self::sanitize_tool_name(tool_name);
+        if !original_by_alias.contains_key(&base) {
+            return base;
+        }
+
+        let mut suffix = 2usize;
+        loop {
+            let candidate = format!("{base}_{suffix}");
+            if !original_by_alias.contains_key(&candidate) {
+                return candidate;
+            }
+            suffix += 1;
+        }
+    }
+
+    fn sanitize_tool_name(name: &str) -> String {
+        let mut out = String::with_capacity(name.len());
+        for ch in name.chars() {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                out.push(ch);
+            } else {
+                out.push('_');
+            }
+        }
+
+        let trimmed = out.trim_matches('_');
+        if trimmed.is_empty() {
+            "tool".to_string()
+        } else {
+            trimmed.to_string()
+        }
     }
 
     fn validate_input_against_schema(schema: &Value, input: &Value) -> Result<()> {
@@ -162,9 +214,19 @@ impl ToolRegistry for InMemoryToolRegistry {
             .read()
             .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))?;
 
+        let alias_by_original = self
+            .alias_by_original
+            .read()
+            .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))?;
+
         let mut definitions = Vec::with_capacity(tools.len());
-        for tool in tools.values() {
-            let mut definition = Tool::new(tool.name());
+        for (original_name, tool) in tools.iter() {
+            let advertised_name = alias_by_original
+                .get(original_name)
+                .cloned()
+                .unwrap_or_else(|| original_name.clone());
+
+            let mut definition = Tool::new(advertised_name);
             if let Some(description) = tool.description() {
                 definition = definition.with_description(description);
             }
@@ -178,13 +240,25 @@ impl ToolRegistry for InMemoryToolRegistry {
     }
 
     async fn invoke_tool(&self, tool_name: &str, input: Value) -> Result<Value> {
+        let resolved_name = {
+            let original_by_alias = self
+                .original_by_alias
+                .read()
+                .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))?;
+
+            original_by_alias
+                .get(tool_name)
+                .cloned()
+                .unwrap_or_else(|| tool_name.to_string())
+        };
+
         let tool = {
             let tools = self
                 .tools
                 .read()
                 .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))?;
 
-            tools.get(tool_name).cloned().ok_or_else(|| {
+            tools.get(&resolved_name).cloned().ok_or_else(|| {
                 StasisError::PortFailure(format!("tool not registered: {}", tool_name))
             })?
         };

@@ -25,7 +25,8 @@ pub struct GraphemeWorkflowGuardrails {
 impl Default for GraphemeWorkflowGuardrails {
     fn default() -> Self {
         Self {
-            allowed_imports: vec!["grapheme/core".to_string()],
+            // Allow all built-in Grapheme namespace modules by default.
+            allowed_imports: vec!["grapheme/*".to_string()],
             max_source_bytes: 128 * 1024,
             execution_timeout: Duration::from_secs(2),
             max_steps: Some(10_000),
@@ -62,7 +63,12 @@ impl GraphemeSdkWorkflowEngine {
 
         let imports = Self::extract_imports(source);
         for import in imports {
-            if !self.guardrails.allowed_imports.iter().any(|m| m == &import) {
+            if !self
+                .guardrails
+                .allowed_imports
+                .iter()
+                .any(|pattern| Self::import_is_allowed(pattern, &import))
+            {
                 return Err(StasisError::PortFailure(format!(
                     "grapheme policy violation: import '{}' is not allowlisted",
                     import
@@ -71,6 +77,13 @@ impl GraphemeSdkWorkflowEngine {
         }
 
         Ok(())
+    }
+
+    fn import_is_allowed(pattern: &str, import: &str) -> bool {
+        if let Some(prefix) = pattern.strip_suffix('*') {
+            return import.starts_with(prefix);
+        }
+        pattern == import
     }
 
     fn extract_imports(source: &str) -> Vec<String> {

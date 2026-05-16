@@ -11,7 +11,7 @@ use crate::application::orchestration::prompt_pipeline::{
 use crate::application::orchestration::tool_registry::ToolRegistry;
 use crate::domain::errors::{Result, StasisError};
 
-const DEFAULT_MAX_TOOL_ROUNDS: usize = 4;
+const DEFAULT_MAX_TOOL_ROUNDS: usize = 10;
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub enum ToolCallMode {
@@ -63,7 +63,17 @@ impl ToolLoopPipeline {
     }
 
     pub async fn execute(&self, request: ToolLoopExecutionRequest) -> Result<ToolLoopExecutionResponse> {
-        self.execute_with_stream(request, None).await
+        self.execute_internal(request, Vec::new(), None, DEFAULT_MAX_TOOL_ROUNDS)
+            .await
+    }
+
+    pub async fn execute_with_prior_messages(
+        &self,
+        request: ToolLoopExecutionRequest,
+        prior_messages: Vec<ChatMessage>,
+    ) -> Result<ToolLoopExecutionResponse> {
+        self.execute_internal(request, prior_messages, None, DEFAULT_MAX_TOOL_ROUNDS)
+            .await
     }
 
     pub async fn execute_with_stream(
@@ -71,18 +81,62 @@ impl ToolLoopPipeline {
         request: ToolLoopExecutionRequest,
         chunk_tx: Option<&mpsc::UnboundedSender<String>>,
     ) -> Result<ToolLoopExecutionResponse> {
+        self.execute_internal(request, Vec::new(), chunk_tx, DEFAULT_MAX_TOOL_ROUNDS)
+            .await
+    }
+
+    pub async fn execute_with_stream_prior_messages(
+        &self,
+        request: ToolLoopExecutionRequest,
+        prior_messages: Vec<ChatMessage>,
+        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+    ) -> Result<ToolLoopExecutionResponse> {
+        self.execute_internal(
+            request,
+            prior_messages,
+            chunk_tx,
+            DEFAULT_MAX_TOOL_ROUNDS,
+        )
+        .await
+    }
+
+    pub async fn execute_with_stream_prior_messages_max_rounds(
+        &self,
+        request: ToolLoopExecutionRequest,
+        prior_messages: Vec<ChatMessage>,
+        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+        max_tool_rounds: usize,
+    ) -> Result<ToolLoopExecutionResponse> {
+        self.execute_internal(request, prior_messages, chunk_tx, max_tool_rounds)
+            .await
+    }
+
+    async fn execute_internal(
+        &self,
+        request: ToolLoopExecutionRequest,
+        prior_messages: Vec<ChatMessage>,
+        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+        max_tool_rounds: usize,
+    ) -> Result<ToolLoopExecutionResponse> {
+        let max_tool_rounds = max_tool_rounds.max(1);
         let context = request.context.clone();
         let selected_tool_name = request.tool_name.clone();
 
-        let mut messages = Vec::with_capacity(2);
+        let mut messages = Vec::with_capacity(2 + prior_messages.len());
         if let Some(system_prompt) = request.system_prompt.clone() {
             messages.push(ChatMessage::system(system_prompt));
         }
+        messages.extend(prior_messages);
         messages.push(ChatMessage::user(request.user_prompt.clone()));
 
         let mut tools = self.tool_registry.list_tools().await?;
         if !selected_tool_name.trim().is_empty() {
-            tools.retain(|tool| tool.name == selected_tool_name);
+            let selected_sanitized =  sanitize_tool_name_for_model(&selected_tool_name);
+            tools.retain(|tool| {
+                tool.name == selected_tool_name
+                    || tool.name == selected_sanitized
+                    || tool.name.starts_with(&format!("{selected_sanitized}_"))
+            });
         }
 
         let mut invocations = Vec::new();
@@ -90,7 +144,7 @@ impl ToolLoopPipeline {
         let mut fallback_draft_text: Option<String> = None;
         let mut rounds_executed = 0usize;
         if !tools.is_empty() {
-            for _ in 0..DEFAULT_MAX_TOOL_ROUNDS {
+            for _ in 0..max_tool_rounds {
                 rounds_executed += 1;
                 let chat_request = ChatRequest::new(messages.clone()).with_tools(tools.clone());
                 let completion = match chunk_tx {
@@ -172,7 +226,7 @@ impl ToolLoopPipeline {
             if !should_use_legacy_fallback {
                 return Err(StasisError::PortFailure(
                     format!(
-                        "tool loop exceeded max rounds ({DEFAULT_MAX_TOOL_ROUNDS}) without final response"
+                        "tool loop exceeded max rounds ({max_tool_rounds}) without final response"
                     ),
                 ));
             }
@@ -230,5 +284,23 @@ impl ToolLoopPipeline {
             rounds_executed,
             termination_reason: "legacy_fallback_no_model_tool_call".to_string(),
         })
+    }
+}
+
+fn sanitize_tool_name_for_model(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+
+    let trimmed = out.trim_matches('_');
+    if trimmed.is_empty() {
+        "tool".to_string()
+    } else {
+        trimmed.to_string()
     }
 }
