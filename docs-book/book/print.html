@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bf0615f1.js";
+            window.path_to_searchindex_js = "searchindex-3f437709.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-155ab26a.js"></script>
+        <script src="toc-efbb9846.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -200,12 +200,17 @@
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, SRE, Security, Architect</li>
 <li>Stability: Evolving</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-05-17</li>
 <li>Verified Against:
 <ul>
 <li>src/application/runtime/stasis_runtime_builder.rs</li>
 <li>src/application/use_cases/investigate_runtime_lineage.rs</li>
+<li>src/application/use_cases/manage_delivery_endpoints.rs</li>
 <li>src/domain/runtime/outbox.rs</li>
+<li>src/domain/runtime/delivery_endpoint.rs</li>
+<li>src/ports/outbound/runtime/delivery_endpoint_store.rs</li>
+<li>src/sdk/control_plane_sdk.rs</li>
+<li>src/infrastructure/runtime/http_webhook_event_publisher.rs</li>
 <li>tests/runtime_backend_parity.rs</li>
 <li>tests/architecture_conformance.rs</li>
 </ul>
@@ -224,6 +229,12 @@
 <li>Grapheme workflow execution for policy-governed workflow jobs.</li>
 <li>Locus memory services for retrieval, storage, transform, rollup, and schema workflows.</li>
 </ol>
+<p>The runtime now includes an explicit control-plane foundation for command-center operations:</p>
+<ol>
+<li>Delivery endpoint registry (HTTP webhook, TCP, Kafka, RabbitMQ target definitions).</li>
+<li>Control-plane endpoint commands for register, enable/disable, and list operations.</li>
+<li>Durable endpoint persistence adapters (in-memory and Surreal).</li>
+</ol>
 <p>The runtime is designed for at-least-once job execution with deterministic idempotent handlers, durable leases, retries, dead-letter handling, replay, and lineage investigation.</p>
 <h2 id="architecture-principles"><a class="header" href="#architecture-principles">Architecture Principles</a></h2>
 <ol>
@@ -234,6 +245,7 @@
 <li>Replaceable infrastructure: adapters implement ports so backends can evolve without domain rewrites.</li>
 <li>Capability isolation with unified contracts: Grapheme and Locus integrations remain behind Stasis ports and handlers.</li>
 <li>Diagnostics and lineage by default: orchestration handlers emit standardized diagnostics and outbox lineage metadata.</li>
+<li>Operator-first control plane: runtime and delivery controls are modeled as explicit command contracts.</li>
 </ol>
 <h2 id="capability-planes"><a class="header" href="#capability-planes">Capability Planes</a></h2>
 <h3 id="1-stasis-core-plane"><a class="header" href="#1-stasis-core-plane">1) Stasis Core Plane</a></h3>
@@ -259,6 +271,12 @@
 <li>retrieval path</li>
 </ul>
 </li>
+</ul>
+<h3 id="4-control-and-delivery-plane"><a class="header" href="#4-control-and-delivery-plane">4) Control and Delivery Plane</a></h3>
+<ul>
+<li>Control-plane command contracts for endpoint management.</li>
+<li>Delivery endpoint registry with protocol-aware target definitions.</li>
+<li>Event publisher adapters for external fanout and system integration.</li>
 </ul>
 <h2 id="system-context"><a class="header" href="#system-context">System Context</a></h2>
 <pre class="mermaid">flowchart LR
@@ -353,6 +371,22 @@
 <li>Preserves attempt diagnostics with guardrail and orchestration metadata.</li>
 <li>Supports lineage investigation by job, execution, guardrail code, and thread selectors.</li>
 </ul>
+<ol start="10">
+<li>Control Plane Endpoint Registry</li>
+</ol>
+<ul>
+<li>Maintains outbound endpoint definitions used by delivery routing.</li>
+<li>Supports protocol metadata and enabled/disabled state transitions.</li>
+<li>Persists endpoint records through pluggable store adapters.</li>
+</ul>
+<ol start="11">
+<li>Delivery Publisher Adapters</li>
+</ol>
+<ul>
+<li>Bridges outbox events to external delivery targets.</li>
+<li>Supports adapter-per-protocol evolution without domain rewrites.</li>
+<li>Starts with HTTP webhook publishing and expands to additional transports.</li>
+</ul>
 <h2 id="thread-and-lineage-model"><a class="header" href="#thread-and-lineage-model">Thread and Lineage Model</a></h2>
 <p>Stasis treats thread continuity as a first-class concern for orchestration observability.</p>
 <ul>
@@ -419,6 +453,22 @@
 <li>delayed and recurring workloads</li>
 <li>saga compensation and replay</li>
 <li>cross-plane interactions (Stasis core + Grapheme + Locus)</li>
+<li>external event fanout via outbox publishers</li>
+</ul>
+<h2 id="distributed-deployment-mode"><a class="header" href="#distributed-deployment-mode">Distributed Deployment Mode</a></h2>
+<p>Stasis supports single-node deployment by default and is evolving toward an optional distributed deployment mode.</p>
+<p>Distributed mode direction:</p>
+<ol>
+<li>Global coordinator cluster for control-plane policies and rollups.</li>
+<li>Regional or edge orchestration clusters for locality-aware execution.</li>
+<li>Worker pools with lease-safe job processing across shared durable state.</li>
+<li>Event fanout from outbox pipelines to protocol endpoints through pluggable publishers.</li>
+</ol>
+<p>Operational behavior in distributed mode:</p>
+<ul>
+<li>At-least-once processing semantics remain unchanged.</li>
+<li>Lease ownership and idempotency keys remain the duplicate-prevention boundary.</li>
+<li>Edge clusters can continue local execution and sync upstream when available.</li>
 </ul>
 <h2 id="reliability-and-slo-controls"><a class="header" href="#reliability-and-slo-controls">Reliability and SLO Controls</a></h2>
 <ul>
@@ -427,6 +477,7 @@
 <li>Duplicate safety: idempotency key + deterministic handlers.</li>
 <li>Failure isolation: retry with backoff and dead-letter queue.</li>
 <li>Recovery: operator replay with full causation chain.</li>
+<li>External delivery safety: outbox publish retries and failed-event status tracking.</li>
 </ul>
 <h2 id="security-and-compliance-considerations"><a class="header" href="#security-and-compliance-considerations">Security and Compliance Considerations</a></h2>
 <ol>
@@ -434,6 +485,8 @@
 <li>Keep tenant and auth context explicit in command contracts.</li>
 <li>Preserve immutable audit fields for state transitions.</li>
 <li>Apply queue-level policy controls for privileged job types.</li>
+<li>Separate endpoint credentials from endpoint metadata and rotate secrets independently.</li>
+<li>Restrict control-plane write operations (endpoint registration and routing changes) by role.</li>
 </ol>
 <h2 id="decision-diagram"><a class="header" href="#decision-diagram">Decision Diagram</a></h2>
 <pre class="mermaid">flowchart TD
@@ -453,6 +506,7 @@
 <ul>
 <li>Runtime draft: <a href="runtime-v1-draft.html">Runtime V1 Draft</a></li>
 <li>Job runtime design: <a href="#stasis-job-runtime-design">Job Runtime Design</a></li>
+<li>Control plane and endpoint routing: <a href="#control-plane-and-endpoint-routing">Control Plane and Endpoint Routing</a></li>
 <li>Database schema: <a href="#surrealdb-schema-specification">SurrealDB Schema</a></li>
 <li>Stasis framework RFC: <a href="stasis-framework-rfc.html">Stasis Framework RFC</a></li>
 <li>Stasis implementation plan: <a href="stasis-framework-implementation-plan.html">Stasis Framework Implementation Plan</a></li>
@@ -2996,12 +3050,18 @@ pub trait MemoryOperations: Send + Sync {
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
 <li>Stability: Evolving</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-05-17</li>
 <li>Verified Against:
 <ul>
+<li>src/ports/inbound/control_plane_commands.rs</li>
 <li>src/ports/outbound/ai_chat_client.rs</li>
 <li>src/ports/outbound/ai_chat_response_cache.rs</li>
-<li>src/ports/outbound/ai_chat_tool_interceptor.rs</li>
+<li>src/ports/outbound/ai_chat_tool_interceptor.rs
+<ul>
+<li>src/ports/outbound/runtime/delivery_endpoint_store.rs</li>
+<li>src/ports/outbound/runtime/event_publisher.rs</li>
+</ul>
+</li>
 <li>src/ports/outbound/runtime/runtime_metrics.rs</li>
 <li>src/ports/outbound/runtime/thread_store.rs</li>
 <li>src/ports/outbound/runtime/workflow_engine.rs</li>
@@ -3014,8 +3074,40 @@ pub trait MemoryOperations: Send + Sync {
 </ul>
 <h2 id="purpose-9"><a class="header" href="#purpose-9">Purpose</a></h2>
 <p>Document all port contracts that SDK consumers can implement to extend or replace Stasis infrastructure. Each entry covers the trait signature, what Stasis guarantees about call semantics, and the built-in implementation(s) provided.</p>
+<p>This reference includes both outbound ports and selected inbound control-plane contracts used to drive runtime operations.</p>
 <h2 id="architecture-principle"><a class="header" href="#architecture-principle">Architecture Principle</a></h2>
 <p>Stasis follows hexagonal architecture. All external dependencies are hidden behind ports (traits). Consumers implement ports to substitute infrastructure without touching domain or orchestration logic. The runtime builder (<code>StasisRuntimeBuilder</code>) is the single wiring point where port implementations are injected.</p>
+<hr>
+<h2 id="control-plane-inbound-port"><a class="header" href="#control-plane-inbound-port">Control Plane Inbound Port</a></h2>
+<h3 id="controlplanecommands"><a class="header" href="#controlplanecommands">ControlPlaneCommands</a></h3>
+<p>Defines operator-facing endpoint registry commands.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait ControlPlaneCommands {
+    async fn register_delivery_endpoint(
+        &amp;self,
+        request: RegisterDeliveryEndpointRequest,
+    ) -&gt; Result&lt;RegisterDeliveryEndpointResponse&gt;;
+    async fn set_delivery_endpoint_enabled(
+        &amp;self,
+        request: SetDeliveryEndpointEnabledRequest,
+    ) -&gt; Result&lt;()&gt;;
+    async fn list_delivery_endpoints(&amp;self) -&gt; Result&lt;Vec&lt;DeliveryEndpoint&gt;&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ControlPlaneSdk</code></td><td>Application-level command service that orchestrates endpoint registry use cases</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
 <hr>
 <h2 id="ai-layer-ports"><a class="header" href="#ai-layer-ports">AI Layer Ports</a></h2>
 <h3 id="aichatclient"><a class="header" href="#aichatclient">AiChatClient</a></h3>
@@ -3141,6 +3233,60 @@ pub trait AiChatClient: Send + Sync {
 </span><span class="boring">fn main() {
 </span>builder.with_telemetry_chat_middleware(Arc::new(my_metrics_impl))
 <span class="boring">}</span></code></pre>
+<hr>
+<h2 id="delivery-endpoint-store-port"><a class="header" href="#delivery-endpoint-store-port">Delivery Endpoint Store Port</a></h2>
+<h3 id="deliveryendpointstore"><a class="header" href="#deliveryendpointstore">DeliveryEndpointStore</a></h3>
+<p>Persists and retrieves delivery endpoint registrations used by control-plane and delivery routing flows.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait DeliveryEndpointStore: Send + Sync {
+    async fn insert(&amp;self, endpoint: NewDeliveryEndpoint) -&gt; Result&lt;DeliveryEndpoint&gt;;
+    async fn get(&amp;self, endpoint_id: &amp;str) -&gt; Result&lt;Option&lt;DeliveryEndpoint&gt;&gt;;
+    async fn list(&amp;self) -&gt; Result&lt;Vec&lt;DeliveryEndpoint&gt;&gt;;
+    async fn set_enabled(&amp;self, endpoint_id: &amp;str, enabled: bool) -&gt; Result&lt;bool&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>InMemoryDeliveryEndpointStore</code></td><td>In-process endpoint registry for tests and local development</td></tr>
+<tr><td><code>SurrealDeliveryEndpointStore</code></td><td>SurrealDB-backed durable endpoint registry</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="event-publisher-port"><a class="header" href="#event-publisher-port">Event Publisher Port</a></h2>
+<h3 id="eventpublisher"><a class="header" href="#eventpublisher">EventPublisher</a></h3>
+<p>Publishes outbox events to external subscribers after durability has been established in runtime stores.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait EventPublisher: Send + Sync {
+    async fn publish(&amp;self, event: &amp;OutboxEvent) -&gt; Result&lt;()&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Stasis guarantees:</strong></p>
+<ul>
+<li>Called only from outbox publish flows after event persistence.</li>
+<li>Publish failures are recorded on outbox events and retried per outbox publish policy.</li>
+</ul>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>TokioChannelEventPublisher</code></td><td>In-process channel adapter for tests and local integration</td></tr>
+<tr><td><code>HttpWebhookEventPublisher</code></td><td>HTTP POST webhook adapter for external event delivery</td></tr>
+</tbody>
+</table>
+</div>
 <hr>
 <h2 id="thread-store-port"><a class="header" href="#thread-store-port">Thread Store Port</a></h2>
 <h3 id="threadstore"><a class="header" href="#threadstore">ThreadStore</a></h3>
@@ -3287,6 +3433,8 @@ pub trait StasisTool: Send + Sync {
 <tr><td><code>AiChatResponseCache</code></td><td>No</td><td>None</td><td><code>.with_cache_chat_middleware(cache)</code></td></tr>
 <tr><td><code>AiChatToolInterceptor</code></td><td>No</td><td>None</td><td><code>.with_tool_call_interception_chat_middleware(interceptor)</code></td></tr>
 <tr><td><code>RuntimeMetrics</code></td><td>No</td><td><code>NoopRuntimeMetrics</code></td><td><code>.with_telemetry_chat_middleware(metrics)</code></td></tr>
+<tr><td><code>DeliveryEndpointStore</code></td><td>No</td><td>None</td><td>Inject through control-plane composition</td></tr>
+<tr><td><code>EventPublisher</code></td><td>No</td><td>None</td><td><code>runtime.register_event_publisher(...)</code></td></tr>
 <tr><td><code>ThreadStore</code></td><td>No</td><td><code>InMemoryThreadStore</code> / <code>SurrealThreadStore</code></td><td><code>.with_thread_store(...)</code></td></tr>
 <tr><td><code>WorkflowEngine</code></td><td>No</td><td><code>GraphemeSdkWorkflowEngine</code></td><td>Auto-wired</td></tr>
 <tr><td><code>MemoryContextReader</code></td><td>No</td><td>Auto-bootstrapped with <code>.with_locus_memory()</code></td><td><code>.with_memory_context_reader(...)</code></td></tr>
@@ -3298,8 +3446,498 @@ pub trait StasisTool: Send + Sync {
 </div>
 <p>No port is strictly required. The runtime boots with all defaults when <code>StasisRuntimeBuilder::new(backend).build().await?</code> is called with no additional configuration.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
+<h1 id="control-plane-and-endpoint-routing"><a class="header" href="#control-plane-and-endpoint-routing">Control Plane and Endpoint Routing</a></h1>
 <h2 id="document-metadata-12"><a class="header" href="#document-metadata-12">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Architecture and Delivery Reference</li>
+<li>Audience: Engineer, Platform, SRE, Architect</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-05-17</li>
+<li>Verified Against:
+<ul>
+<li>src/ports/inbound/control_plane_commands.rs</li>
+<li>src/application/use_cases/manage_delivery_endpoints.rs</li>
+<li>src/ports/outbound/runtime/delivery_endpoint_store.rs</li>
+<li>src/sdk/control_plane_sdk.rs</li>
+<li>src/infrastructure/runtime/in_memory_delivery_endpoint_store.rs</li>
+<li>src/infrastructure/runtime/surreal_delivery_endpoint_store.rs</li>
+<li>src/infrastructure/runtime/http_webhook_event_publisher.rs</li>
+<li>src/infrastructure/runtime/http_cluster_command_forwarder.rs</li>
+<li>src/infrastructure/runtime/surreal_cluster_forward_outcome_store.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-10"><a class="header" href="#purpose-10">Purpose</a></h2>
+<p>Document the command-center foundation for Stasis runtime operations and outbound delivery routing.</p>
+<p>This reference covers:</p>
+<ol>
+<li>Control-plane command contracts.</li>
+<li>Delivery endpoint registry model.</li>
+<li>Endpoint persistence ports and built-in adapters.</li>
+<li>Event-publisher routing direction and phased rollout.</li>
+</ol>
+<h2 id="scope-4"><a class="header" href="#scope-4">Scope</a></h2>
+<p>In scope:</p>
+<ul>
+<li>endpoint registration and lifecycle toggling.</li>
+<li>adapter boundaries for endpoint persistence and event delivery.</li>
+<li>distributed-ready delivery topology direction.</li>
+</ul>
+<p>Out of scope:</p>
+<ul>
+<li>full dashboard UI implementation.</li>
+<li>complete transport matrix (Kafka, RabbitMQ, TCP runtime adapters are planned).</li>
+<li>multi-cluster membership and scheduler federation internals.</li>
+</ul>
+<h2 id="forwarded-command-durability-and-guardrails"><a class="header" href="#forwarded-command-durability-and-guardrails">Forwarded Command Durability and Guardrails</a></h2>
+<p>Forwarded control-plane commands now support:</p>
+<ol>
+<li>Durable outcome storage through <code>SurrealClusterForwardOutcomeStore</code>.</li>
+<li>In-memory development outcome storage through <code>InMemoryClusterForwardOutcomeStore</code>.</li>
+<li>Correlation-ID dedupe in <code>HttpClusterCommandForwarder</code> to prevent accidental duplicate dispatch on repeated operator retries.</li>
+</ol>
+<p>Runtime metric additions:</p>
+<ol>
+<li><code>cluster_forward_idempotent_hits_total</code> for dedupe cache hits.</li>
+</ol>
+<h2 id="control-plane-contract"><a class="header" href="#control-plane-contract">Control Plane Contract</a></h2>
+<p>The primary inbound contract is <code>ControlPlaneCommands</code>.</p>
+<p>Current operations:</p>
+<ol>
+<li>register delivery endpoint.</li>
+<li>enable/disable delivery endpoint.</li>
+<li>list registered endpoints.</li>
+</ol>
+<p>Built-in implementation:</p>
+<ul>
+<li><code>ControlPlaneSdk</code> orchestrates endpoint management use cases over a <code>DeliveryEndpointStore</code>.</li>
+</ul>
+<h2 id="delivery-endpoint-model"><a class="header" href="#delivery-endpoint-model">Delivery Endpoint Model</a></h2>
+<p><code>DeliveryEndpoint</code> defines protocol-aware delivery targets.</p>
+<p>Key fields:</p>
+<ol>
+<li><code>endpoint_id</code> and <code>name</code>.</li>
+<li><code>protocol</code> (<code>HttpWebhook</code>, <code>Tcp</code>, <code>Kafka</code>, <code>RabbitMq</code>).</li>
+<li><code>target</code> plus optional metadata.</li>
+<li><code>enabled</code> lifecycle flag.</li>
+<li>immutable <code>created_at</code> and mutable <code>updated_at</code> timestamps.</li>
+</ol>
+<h2 id="persistence-port"><a class="header" href="#persistence-port">Persistence Port</a></h2>
+<p><code>DeliveryEndpointStore</code> abstracts endpoint persistence.</p>
+<p>Operations:</p>
+<ol>
+<li>insert endpoint.</li>
+<li>get endpoint by ID.</li>
+<li>list endpoints.</li>
+<li>set enabled state.</li>
+</ol>
+<p>Built-in adapters:</p>
+<ol>
+<li><code>InMemoryDeliveryEndpointStore</code> for local and test flows.</li>
+<li><code>SurrealDeliveryEndpointStore</code> for durable runtime deployments.</li>
+</ol>
+<h2 id="event-delivery-adapter-direction"><a class="header" href="#event-delivery-adapter-direction">Event Delivery Adapter Direction</a></h2>
+<p>Outbox publication remains the reliability boundary for external delivery.</p>
+<p>Current built-in adapter:</p>
+<ol>
+<li><code>HttpWebhookEventPublisher</code> posts normalized runtime event payloads to configured webhook URLs.</li>
+</ol>
+<p>Planned adapter set:</p>
+<ol>
+<li>TCP publisher.</li>
+<li>Kafka publisher.</li>
+<li>RabbitMQ publisher.</li>
+</ol>
+<h2 id="delivery-flow-current-and-next"><a class="header" href="#delivery-flow-current-and-next">Delivery Flow (Current and Next)</a></h2>
+<p>Current flow:</p>
+<ol>
+<li>Runtime commits durable outbox events.</li>
+<li>Event publisher sends to configured external subscriber implementation.</li>
+</ol>
+<p>Target flow:</p>
+<ol>
+<li>Control plane manages protocol endpoints in the endpoint registry.</li>
+<li>Routing policy selects endpoint sets by event/job criteria.</li>
+<li>Publisher adapters fan out events with retry-aware outbox coordination.</li>
+</ol>
+<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
+<h3 id="phase-1-implemented"><a class="header" href="#phase-1-implemented">Phase 1 (Implemented)</a></h3>
+<ol>
+<li>Endpoint model and store port.</li>
+<li>Inbound control-plane contract.</li>
+<li>Endpoint management use cases.</li>
+<li>In-memory and Surreal endpoint store adapters.</li>
+<li>Control-plane SDK wiring.</li>
+</ol>
+<h3 id="phase-2-next"><a class="header" href="#phase-2-next">Phase 2 (Next)</a></h3>
+<ol>
+<li>Routing policy and dispatcher integration.</li>
+<li>Protocol adapter expansion (TCP, Kafka, RabbitMQ).</li>
+<li>Delivery diagnostics enrichment per endpoint attempt.</li>
+</ol>
+<h3 id="phase-3"><a class="header" href="#phase-3">Phase 3</a></h3>
+<ol>
+<li>Distributed cluster coordination for control-plane operations.</li>
+<li>Regional/edge execution with upstream summary sync.</li>
+<li>Command-center API and dashboard surfaces.</li>
+</ol>
+<h2 id="operational-guidance"><a class="header" href="#operational-guidance">Operational Guidance</a></h2>
+<ol>
+<li>Keep endpoint credentials in dedicated secret stores, not endpoint metadata.</li>
+<li>Enforce role-based access on control-plane mutation operations.</li>
+<li>Use deterministic correlation and causation IDs for all external fanout events.</li>
+<li>Start with webhook integration to validate end-to-end delivery and observability before enabling additional transport adapters.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="command-center-dashboard-concept"><a class="header" href="#command-center-dashboard-concept">Command Center Dashboard Concept</a></h1>
+<h2 id="purpose-11"><a class="header" href="#purpose-11">Purpose</a></h2>
+<p>This page starts the Phase 4 UI direction with an operator-facing command center surface.</p>
+<p>It is intentionally a prototype slice focused on:</p>
+<ol>
+<li>cluster situational awareness.</li>
+<li>forwarded command outcomes and quick replay entry points.</li>
+<li>queue ownership risk and failover readiness.</li>
+</ol>
+<h2 id="visual-prototype"><a class="header" href="#visual-prototype">Visual Prototype</a></h2>
+<div class="cc-shell">
+  <header class="cc-header">
+    
+<div>
+      
+<p class="cc-kicker">Stasis Control Plane</p>
+
+      
+<h2>Distributed Command Center</h2>
+
+    </div>
+
+    
+<div class="cc-badges">
+      <span>phase 4 preview</span>
+      <span>operator mode</span>
+    </div>
+
+  </header>
+  <section class="cc-kpi-grid">
+    <article class="cc-card">
+      
+<h3>Live Coordinators</h3>
+
+      
+<p class="cc-value">3</p>
+
+      
+<p class="cc-meta">2 healthy | 1 degraded</p>
+
+    </article>
+    <article class="cc-card">
+      
+<h3>Forwarded Commands (1h)</h3>
+
+      
+<p class="cc-value">129</p>
+
+      
+<p class="cc-meta">7 failed | 4 replay candidates</p>
+
+    </article>
+    <article class="cc-card">
+      
+<h3>Queue Ownership Conflicts</h3>
+
+      
+<p class="cc-value">2</p>
+
+      
+<p class="cc-meta">single-owner violations</p>
+
+    </article>
+    <article class="cc-card">
+      
+<h3>Idempotent Dedupe Hits</h3>
+
+      
+<p class="cc-value">11</p>
+
+      
+<p class="cc-meta">cluster_forward_idempotent_hits_total</p>
+
+    </article>
+  </section>
+  <section class="cc-panels">
+    <article class="cc-panel">
+      
+<h3>Recent Forward Outcomes</h3>
+
+      
+<table>
+        
+<thead>
+          
+<tr>
+            <th>When</th>
+            <th>Target</th>
+            <th>Command</th>
+            <th>Result</th>
+            <th>Action</th>
+          </tr>
+
+        </thead>
+
+        
+<tbody>
+          
+<tr>
+            <td>08:44:12</td>
+            <td>eu-west</td>
+            <td>coordinator.failover</td>
+            <td><span class="cc-pill fail">failed</span></td>
+            <td><button>Replay</button></td>
+          </tr>
+
+          
+<tr>
+            <td>08:43:51</td>
+            <td>us-east</td>
+            <td>queue_ownership.rebalance</td>
+            <td><span class="cc-pill ok">accepted</span></td>
+            <td><button disabled="">Replay</button></td>
+          </tr>
+
+          
+<tr>
+            <td>08:43:08</td>
+            <td>eu-west</td>
+            <td>coordinator.handoff</td>
+            <td><span class="cc-pill ok">accepted</span></td>
+            <td><button disabled="">Replay</button></td>
+          </tr>
+
+        </tbody>
+
+      </table>
+
+    </article>
+<pre><code>&lt;article class="cc-panel"&gt;
+  &lt;h3&gt;Queue Ownership Heatmap&lt;/h3&gt;
+  &lt;ul&gt;
+    &lt;li&gt;&lt;span&gt;default&lt;/span&gt;&lt;strong&gt;node-a, node-c&lt;/strong&gt;&lt;/li&gt;
+    &lt;li&gt;&lt;span&gt;priority&lt;/span&gt;&lt;strong&gt;node-b&lt;/strong&gt;&lt;/li&gt;
+    &lt;li&gt;&lt;span&gt;dlq&lt;/span&gt;&lt;strong&gt;node-a&lt;/strong&gt;&lt;/li&gt;
+    &lt;li&gt;&lt;span&gt;memory-ops&lt;/span&gt;&lt;strong&gt;node-c&lt;/strong&gt;&lt;/li&gt;
+  &lt;/ul&gt;
+  &lt;p class="cc-footnote"&gt;Next step: bind this panel to ListQueueOwnershipHealth + conflict tracing events.&lt;/p&gt;
+&lt;/article&gt;
+</code></pre>
+  </section>
+</div>
+
+<style>
+.cc-shell {
+  --ink: #171b24;
+  --muted: #506178;
+  --surface: #f7f7f2;
+  --surface-strong: #ece8da;
+  --line: #d7d0bb;
+  --accent: #b14a1f;
+  --accent-2: #177e89;
+  --ok: #2b7a0b;
+  --fail: #a40f2a;
+  color: var(--ink);
+  background:
+    radial-gradient(130% 70% at 100% 0%, rgba(177, 74, 31, 0.14), transparent 52%),
+    radial-gradient(90% 50% at 0% 100%, rgba(23, 126, 137, 0.14), transparent 56%),
+    linear-gradient(135deg, #fbfaf5 0%, #f6f2e7 100%);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 22px;
+  font-family: "IBM Plex Sans", "Manrope", "Segoe UI", sans-serif;
+}
+
+.cc-header {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+
+.cc-header h2 {
+  margin: 4px 0 0;
+  font-size: clamp(1.25rem, 2.6vw, 2rem);
+  letter-spacing: -0.02em;
+}
+
+.cc-kicker {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.cc-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cc-badges span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  background: var(--surface);
+}
+
+.cc-kpi-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin-bottom: 14px;
+}
+
+.cc-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 12px;
+  animation: cc-rise 440ms ease both;
+}
+
+.cc-card h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-weight: 560;
+}
+
+.cc-value {
+  margin: 5px 0;
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  color: var(--ink);
+  font-weight: 680;
+}
+
+.cc-meta {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.cc-panels {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 2.1fr 1fr;
+}
+
+.cc-panel {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 82%, white 18%);
+  padding: 12px;
+}
+
+.cc-panel h3 {
+  margin: 0 0 10px;
+}
+
+.cc-panel table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.cc-panel th,
+.cc-panel td {
+  text-align: left;
+  padding: 7px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cc-panel button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.cc-panel button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cc-pill {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.77rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 620;
+}
+
+.cc-pill.ok {
+  color: var(--ok);
+  background: rgba(43, 122, 11, 0.12);
+}
+
+.cc-pill.fail {
+  color: var(--fail);
+  background: rgba(164, 15, 42, 0.14);
+}
+
+.cc-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.cc-panel li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px dashed var(--line);
+  padding-bottom: 6px;
+}
+
+.cc-panel li span {
+  color: var(--muted);
+}
+
+.cc-footnote {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+@keyframes cc-rise {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 900px) {
+  .cc-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .cc-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+</style>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
+<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
@@ -3312,11 +3950,12 @@ pub trait StasisTool: Send + Sync {
 <li>src/infrastructure/runtime/surreal_outbox_store.rs</li>
 <li>src/infrastructure/runtime/surreal_recurring_store.rs</li>
 <li>src/infrastructure/runtime/surreal_thread_store.rs</li>
+<li>src/infrastructure/runtime/surreal_cluster_forward_outcome_store.rs</li>
 <li>tests/runtime_backend_parity.rs</li>
 </ul>
 </li>
 </ul>
-<h2 id="purpose-10"><a class="header" href="#purpose-10">Purpose</a></h2>
+<h2 id="purpose-12"><a class="header" href="#purpose-12">Purpose</a></h2>
 <p>Define the V1 SurrealDB schema and indexing strategy for Stasis durable job orchestration.</p>
 <h2 id="design-constraints"><a class="header" href="#design-constraints">Design Constraints</a></h2>
 <ol>
@@ -3326,6 +3965,22 @@ pub trait StasisTool: Send + Sync {
 <li>Explicit keys for correlation, causation, and idempotency.</li>
 <li>First-class thread and lineage metadata for orchestration observability.</li>
 </ol>
+<h2 id="control-plane-extension-tables"><a class="header" href="#control-plane-extension-tables">Control Plane Extension Tables</a></h2>
+<p>Forwarded command outcomes can be persisted durably for distributed command-center operations.</p>
+<pre><code class="language-sql">DEFINE TABLE cluster_forward_outcome SCHEMAFULL;
+DEFINE FIELD target_region ON TABLE cluster_forward_outcome TYPE string;
+DEFINE FIELD command_name ON TABLE cluster_forward_outcome TYPE string;
+DEFINE FIELD correlation_id ON TABLE cluster_forward_outcome TYPE option&lt;string&gt;;
+DEFINE FIELD accepted ON TABLE cluster_forward_outcome TYPE bool;
+DEFINE FIELD attempts ON TABLE cluster_forward_outcome TYPE int;
+DEFINE FIELD error ON TABLE cluster_forward_outcome TYPE option&lt;string&gt;;
+DEFINE FIELD completed_at ON TABLE cluster_forward_outcome TYPE datetime;
+
+DEFINE INDEX idx_cluster_forward_outcome_completed_at
+  ON TABLE cluster_forward_outcome COLUMNS completed_at;
+DEFINE INDEX idx_cluster_forward_outcome_corr
+  ON TABLE cluster_forward_outcome COLUMNS correlation_id;
+</code></pre>
 <h2 id="logical-entity-relationship"><a class="header" href="#logical-entity-relationship">Logical Entity Relationship</a></h2>
 <pre class="mermaid">erDiagram
   JOB ||--o{ JOB_ATTEMPT : has
@@ -3588,7 +4243,7 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture-decision-records"><a class="header" href="#architecture-decision-records">Architecture Decision Records</a></h1>
-<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
+<h2 id="document-metadata-14"><a class="header" href="#document-metadata-14">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>
@@ -3601,7 +4256,7 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 </ul>
 </li>
 </ul>
-<h2 id="purpose-11"><a class="header" href="#purpose-11">Purpose</a></h2>
+<h2 id="purpose-13"><a class="header" href="#purpose-13">Purpose</a></h2>
 <p>Track major architectural decisions with rationale, alternatives, and consequences.</p>
 <h2 id="adr-index"><a class="header" href="#adr-index">ADR Index</a></h2>
 <div class="table-wrapper">

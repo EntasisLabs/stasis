@@ -28,6 +28,11 @@
 ## Integration
 
 - [Extension Points and Port Contracts](./extension-points.md)
+- [Control Plane and Endpoint Routing](./control-plane-endpoint-routing.md)
+
+## Command Center
+
+- [Dashboard Concept](./command-center-dashboard.md)
 
 ## Data Contracts
 

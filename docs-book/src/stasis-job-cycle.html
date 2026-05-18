@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stasis — Job Lifecycle Explorer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Syne:wght@400;600;700;800&display=swap');
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root {
+  --bg:     #09090b;
+  --bg2:    #0f1013;
+  --bg3:    #141519;
+  --surf:   #1a1d23;
+  --surf2:  #21252e;
+  --border: rgba(255,255,255,0.06);
+  --bord2:  rgba(255,255,255,0.11);
+  --text:   #e2e4ed;
+  --text2:  #7a7f98;
+  --text3:  #3e4258;
+  --mono:   'IBM Plex Mono', monospace;
+  --sans:   'Syne', sans-serif;
+
+  /* State colors */
+  --enq:    #5b8af0;
+  --lea:    #e0a030;
+  --run:    #3ecfa0;
+  --suc:    #3ecfa0;
+  --fail:   #e05555;
+  --dead:   #884aaa;
+  --canc:   #555870;
+}
+
+html { background: var(--bg); color: var(--text); font-family: var(--sans); }
+body { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+
+/* ── Header ── */
+.hdr {
+  border-bottom: 1px solid var(--border);
+  padding: 18px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg2);
+}
+.hdr-left { display: flex; flex-direction: column; gap: 2px; }
+.hdr-eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.hdr h1 {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+.hdr h1 em { font-style: normal; color: var(--enq); }
+.hdr-right { display: flex; align-items: center; gap: 10px; }
+
+/* ── Main grid ── */
+.app {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 0;
+  height: calc(100vh - 61px);
+  overflow: hidden;
+}
+
+/* ── Left: canvas + controls ── */
+.canvas-col {
+  display: flex;
+  flex-direction: column;
+  padding: 24px 28px;
+  gap: 16px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+
+/* ── Scenario picker ── */
+.scenario-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.scen-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-right: 4px;
+}
+.scen-btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surf);
+  color: var(--text2);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-weight: 500;
+}
+.scen-btn:hover { border-color: var(--bord2); color: var(--text); }
+.scen-btn.active { border-color: var(--enq); color: var(--enq); background: rgba(91,138,240,0.08); }
+
+/* ── State machine SVG card ── */
+.sm-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 20px 16px;
+  position: relative;
+}
+.sm-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sm-title::after { content:''; flex:1; height:1px; background: var(--border); }
+#sm-svg { width:100%; display:block; }
+
+/* ── Controls row ── */
+.ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.btn {
+  padding: 8px 16px;
+  border-radius: 7px;
+  border: 1px solid var(--bord2);
+  background: var(--surf);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.13s;
+  display: flex; align-items: center; gap: 6px;
+  letter-spacing: 0.03em;
+}
+.btn:hover { background: var(--surf2); }
+.btn:active { transform: scale(0.97); }
+.btn.primary { background: var(--enq); border-color: transparent; color: #fff; font-weight: 600; }
+.btn.primary:hover { background: #3d6ddc; }
+.btn.danger { background: rgba(224,85,85,0.12); border-color: rgba(224,85,85,0.3); color: var(--fail); }
+.btn.danger:hover { background: rgba(224,85,85,0.2); }
+.btn.replay { background: rgba(136,74,170,0.12); border-color: rgba(136,74,170,0.3); color: var(--dead); }
+.btn.replay:hover { background: rgba(136,74,170,0.22); }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+
+/* ── Job record card ── */
+.job-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.job-card-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.job-card-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.state-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.04em;
+  transition: all 0.3s;
+}
+.fields-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surf);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.field-row.wide { grid-column: 1/-1; }
+.fk {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text3);
+  letter-spacing: 0.06em;
+}
+.fv {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text2);
+  transition: color 0.3s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fv.highlight { color: var(--text); }
+
+/* ── Right panel ── */
+.right-col {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Attempt list ── */
+.panel-section {
+  border-bottom: 1px solid var(--border);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.panel-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.attempt-item {
+  background: var(--surf);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid transparent;
+  transition: all 0.3s;
+  animation: slideIn 0.25s ease;
+}
+@keyframes slideIn { from { opacity:0; transform: translateY(-4px); } to { opacity:1; transform: none; } }
+.attempt-item.success { border-color: rgba(62,207,160,0.2); }
+.attempt-item.fail    { border-color: rgba(224,85,85,0.2); }
+.attempt-item.fatal   { border-color: rgba(136,74,170,0.2); }
+.attempt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.attempt-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text3);
+}
+.attempt-outcome {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+.attempt-outcome.success { background: rgba(62,207,160,0.1); color: var(--suc); }
+.attempt-outcome.fail    { background: rgba(224,85,85,0.1); color: var(--fail); }
+.attempt-outcome.fatal   { background: rgba(136,74,170,0.1); color: var(--dead); }
+.attempt-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  line-height: 1.5;
+}
+.attempt-meta span { color: var(--text2); }
+
+/* ── Outbox log ── */
+.outbox-section {
+  flex: 1;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+.outbox-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.outbox-event {
+  background: var(--surf);
+  border-radius: 7px;
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-left: 2px solid var(--text3);
+  animation: slideIn 0.2s ease;
+}
+.outbox-event.succeeded { border-left-color: var(--suc); }
+.outbox-event.retry     { border-left-color: var(--lea); }
+.outbox-event.dead      { border-left-color: var(--dead); }
+.oe-type {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.oe-type.succeeded { color: var(--suc); }
+.oe-type.retry     { color: var(--lea); }
+.oe-type.dead      { color: var(--dead); }
+.oe-meta {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text3);
+  line-height: 1.5;
+}
+.oe-status {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  display: inline-block;
+  width: fit-content;
+  margin-top: 2px;
+}
+.oe-status.pending   { background: rgba(91,138,240,0.1); color: var(--enq); }
+.oe-status.published { background: rgba(62,207,160,0.1); color: var(--suc); }
+
+/* ── Lease heartbeat ── */
+.lease-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lease-bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+}
+.lease-bar-track {
+  height: 4px;
+  background: var(--surf);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.lease-bar-fill {
+  height: 100%;
+  background: var(--lea);
+  border-radius: 2px;
+  transition: width 0.1s linear;
+  width: 100%;
+}
+
+/* scrollbar */
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bord2); border-radius: 2px; }
+
+/* ── Legend ── */
+.legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0 0;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+}
+.legend-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="hdr">
+  <div class="hdr-left">
+    <span class="hdr-eyebrow">stasis / runtime</span>
+    <h1>Job <em>Lifecycle</em> Explorer</h1>
+  </div>
+  <div class="hdr-right">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--enq)"></div>enqueued</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--lea)"></div>leased</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--run)"></div>running</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--fail)"></div>failed</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--dead)"></div>dead-letter</div>
+    </div>
+  </div>
+</header>
+
+<div class="app">
+  <!-- Left -->
+  <div class="canvas-col">
+
+    <!-- Scenario picker -->
+    <div class="scenario-row">
+      <span class="scen-label">scenario</span>
+      <button class="scen-btn active" data-s="success" onclick="pickScenario('success', this)">✓ happy path</button>
+      <button class="scen-btn" data-s="retry" onclick="pickScenario('retry', this)">↺ retry + succeed</button>
+      <button class="scen-btn" data-s="exhaust" onclick="pickScenario('exhaust', this)">✗ exhaust retries</button>
+      <button class="scen-btn" data-s="replay" onclick="pickScenario('replay', this)">⟳ dead-letter replay</button>
+      <button class="scen-btn" data-s="cancel" onclick="pickScenario('cancel', this)">⊘ cancel before lease</button>
+    </div>
+
+    <!-- State machine diagram -->
+    <div class="sm-card">
+      <div class="sm-title">state machine</div>
+      <svg id="sm-svg" viewBox="0 0 680 340" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M2 1.5L8 5L2 8.5" fill="none" stroke="context-stroke" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </marker>
+        </defs>
+
+        <!-- START dot -->
+        <circle id="sm-start" cx="50" cy="170" r="8" fill="#3e4258"/>
+        <circle cx="50" cy="170" r="4" fill="#7a7f98"/>
+
+        <!-- ENQUEUED -->
+        <g id="smn-enqueued">
+          <rect x="90" y="145" width="110" height="50" rx="8" fill="#1a1d23" stroke="#3e4258" stroke-width="1"/>
+          <text x="145" y="165" text-anchor="middle" font-size="9" fill="#3e4258" font-family="IBM Plex Mono">state</text>
+          <text x="145" y="180" text-anchor="middle" font-size="12" fill="#7a7f98" font-family="IBM Plex Mono" font-weight="600">enqueued</text>
+        </g>
+
+        <!-- LEASED -->
+        <g id="smn-leased">
+          <rect x="255" y="145" width="110" height="50" rx="8" fill="#1a1d23" stroke="#3e4258" stroke-width="1"/>
+          <text x="310" y="165" text-anchor="middle" font-size="9" fill="#3e4258" font-family="IBM Plex Mono">state</text>
+          <text x="310" y="180" text-anchor="middle" font-size="12" fill="#7a7f98" font-family="IBM Plex Mono" font-weight="600">leased</text>
+        </g>
+
+        <!-- RUNNING -->
+        <g id="smn-running">
+          <rect x="420" y="145" width="110" height="50" rx="8" fill="#1a1d23" stroke="#3e4258" stroke-width="1"/>
+          <text x="475" y="165" text-anchor="middle" font-size="9" fill="#3e4258" font-family="IBM Plex Mono">state</text>
+          <text x="475" y="180" text-anchor="middle" font-size="12" fill="#7a7f98" font-family="IBM Plex Mono" font-weight="600">running</text>
+        </g>
+
+        <!-- SUCCEEDED -->
+        <g id="smn-succeeded">
+          <rect x="560" y="60" width="110" height="50" rx="8" fill="#1a1d23" stroke="#3e4258" stroke-width="1"/>
+          <text x="615" y="80" text-anchor="middle" font-size="9" fill="#3e4258" font-family="IBM Plex Mono">state</text>
+          <text x="615" y="95" text-anchor="middle" font-size="12" fill="#7a7f98" font-family="IBM Plex Mono" font-weight="600">succeeded</text>
+        </g>
+
+        <!-- FAILED -->
+        <g id="smn-failed">
+          <rect x="560" y="145" width="110" height="50" rx="8" fill="#1a1d23" stroke="#3e4258" stroke-width="1"/>
+          <text x="615" y="165" text-anchor="middle" font-size="9" fill="#3e4258" font-family="IBM Plex Mono">state</text>
+          <text x="615" y="180" text-anchor="middle" font-size="12" fill="#7a7f98" font-family="IBM Plex Mono" font-weight="600">failed</text>
+        </g>
+
+        <!-- DEAD LETTER -->
+        <g id="smn-dead_letter">
+          <rect x="560" y="230" width="110" height="50" rx="8" fill="#1a1d23" stroke="#3e4258" stroke-width="1"/>
+          <text x="615" y="250" text-anchor="middle" font-size="9" fill="#3e4258" font-family="IBM Plex Mono">state</text>
+          <text x="615" y="265" text-anchor="middle" font-size="12" fill="#7a7f98" font-family="IBM Plex Mono" font-weight="600">dead_letter</text>
+        </g>
+
+        <!-- CANCELED -->
+        <g id="smn-canceled">
+          <rect x="255" y="265" width="110" height="50" rx="8" fill="#1a1d23" stroke="#3e4258" stroke-width="1"/>
+          <text x="310" y="285" text-anchor="middle" font-size="9" fill="#3e4258" font-family="IBM Plex Mono">state</text>
+          <text x="310" y="300" text-anchor="middle" font-size="12" fill="#7a7f98" font-family="IBM Plex Mono" font-weight="600">canceled</text>
+        </g>
+
+        <!-- END dots -->
+        <circle id="sm-end-suc" cx="680" cy="85" r="6" fill="#3e4258"/>
+        <circle cx="680" cy="85" r="3" fill="#7a7f98"/>
+        <circle id="sm-end-canc" cx="680" cy="290" r="6" fill="#3e4258"/>
+        <circle cx="680" cy="290" r="3" fill="#7a7f98"/>
+
+        <!-- ── Edges ── -->
+        <!-- start → enqueued -->
+        <line id="edge-start-enq" x1="58" y1="170" x2="88" y2="170" stroke="#3e4258" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <!-- enqueued → leased -->
+        <line id="edge-enq-lea" x1="200" y1="170" x2="253" y2="170" stroke="#3e4258" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#arr)"/>
+        <text x="226" y="162" text-anchor="middle" font-size="8" fill="#3e4258" font-family="IBM Plex Mono">lease acquired</text>
+
+        <!-- leased → running -->
+        <line id="edge-lea-run" x1="365" y1="170" x2="418" y2="170" stroke="#3e4258" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#arr)"/>
+        <text x="391" y="162" text-anchor="middle" font-size="8" fill="#3e4258" font-family="IBM Plex Mono">worker starts</text>
+
+        <!-- running → succeeded -->
+        <path id="edge-run-suc" d="M475 145 Q475 120 560 85" stroke="#3e4258" stroke-width="1" stroke-dasharray="3 2" fill="none" marker-end="url(#arr)"/>
+        <text x="536" y="110" text-anchor="middle" font-size="8" fill="#3e4258" font-family="IBM Plex Mono">success</text>
+
+        <!-- running → failed -->
+        <line id="edge-run-fail" x1="530" y1="170" x2="558" y2="170" stroke="#3e4258" stroke-width="1" stroke-dasharray="3 2" fill="none" marker-end="url(#arr)"/>
+        <text x="544" y="163" text-anchor="middle" font-size="8" fill="#3e4258" font-family="IBM Plex Mono">error</text>
+
+        <!-- failed → enqueued (retry) -->
+        <path id="edge-fail-enq" d="M615 145 Q615 60 145 145" stroke="#3e4258" stroke-width="1" stroke-dasharray="4 3" fill="none" marker-end="url(#arr)"/>
+        <text x="390" y="55" text-anchor="middle" font-size="8" fill="#3e4258" font-family="IBM Plex Mono">retry scheduled</text>
+
+        <!-- failed → dead -->
+        <line id="edge-fail-dead" x1="615" y1="195" x2="615" y2="228" stroke="#3e4258" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#arr)"/>
+        <text x="638" y="215" font-size="8" fill="#3e4258" font-family="IBM Plex Mono">exhausted</text>
+
+        <!-- dead → enqueued (replay) -->
+        <path id="edge-dead-enq" d="M560 268 Q145 330 145 200" stroke="#3e4258" stroke-width="1" stroke-dasharray="4 3" fill="none" marker-end="url(#arr)"/>
+        <text x="290" y="338" text-anchor="middle" font-size="8" fill="#3e4258" font-family="IBM Plex Mono">operator replay</text>
+
+        <!-- leased → enqueued (timeout) -->
+        <path id="edge-lea-enq-timeout" d="M310 145 Q310 110 200 145" stroke="#3e4258" stroke-width="0.8" stroke-dasharray="2 3" fill="none" marker-end="url(#arr)"/>
+        <text x="255" y="108" text-anchor="middle" font-size="8" fill="#3e4258" font-family="IBM Plex Mono">lease timeout</text>
+
+        <!-- enqueued → canceled -->
+        <path id="edge-enq-canc" d="M145 195 Q145 265 253 290" stroke="#3e4258" stroke-width="0.8" stroke-dasharray="2 3" fill="none" marker-end="url(#arr)"/>
+        <text x="166" y="250" font-size="8" fill="#3e4258" font-family="IBM Plex Mono">canceled</text>
+
+        <!-- succeeded → end -->
+        <line id="edge-suc-end" x1="670" y1="85" x2="673" y2="85" stroke="#3e4258" stroke-width="1.5" marker-end="url(#arr)"/>
+        <!-- canceled → end -->
+        <line id="edge-canc-end" x1="365" y1="290" x2="673" y2="290" stroke="#3e4258" stroke-width="1" stroke-dasharray="2 3" marker-end="url(#arr)"/>
+
+        <!-- Current state indicator (pulsing circle) -->
+        <circle id="cur-indicator" cx="145" cy="170" r="22" fill="none" stroke="var(--enq)" stroke-width="1.5" opacity="0" stroke-dasharray="4 3"/>
+      </svg>
+    </div>
+
+    <!-- Controls -->
+    <div class="ctrl-row">
+      <button class="btn primary" id="main-btn" onclick="step()">▶ Start</button>
+      <button class="btn" id="reset-btn" onclick="fullReset()">↺ Reset</button>
+      <button class="btn danger" id="fail-btn" onclick="injectFailure()" disabled>✗ Inject failure</button>
+      <button class="btn replay" id="replay-btn" onclick="doReplay()" disabled>⟳ Replay</button>
+    </div>
+
+    <!-- Job record -->
+    <div class="job-card">
+      <div class="job-card-hdr">
+        <span class="job-card-title">job record</span>
+        <span class="state-badge" id="state-badge" style="background:rgba(62,66,88,0.3);color:var(--text3)">—</span>
+      </div>
+      <div class="fields-grid">
+        <div class="field-row"><span class="fk">job_id</span><span class="fv" id="f-job-id">—</span></div>
+        <div class="field-row"><span class="fk">job_type</span><span class="fv" id="f-job-type">—</span></div>
+        <div class="field-row"><span class="fk">state</span><span class="fv" id="f-state">—</span></div>
+        <div class="field-row"><span class="fk">attempts</span><span class="fv" id="f-attempts">—</span></div>
+        <div class="field-row"><span class="fk">max_attempts</span><span class="fv" id="f-max-att">—</span></div>
+        <div class="field-row"><span class="fk">priority</span><span class="fv" id="f-priority">—</span></div>
+        <div class="field-row wide"><span class="fk">lease_owner</span><span class="fv" id="f-lease-owner">null</span></div>
+        <div class="field-row wide"><span class="fk">idempotency_key</span><span class="fv" id="f-idemp">—</span></div>
+        <div class="field-row wide"><span class="fk">correlation_id</span><span class="fv" id="f-corr">—</span></div>
+        <div class="field-row"><span class="fk">scheduled_at</span><span class="fv" id="f-sched">—</span></div>
+        <div class="field-row"><span class="fk">heartbeat_at</span><span class="fv" id="f-hb">null</span></div>
+        <div class="field-row wide"><span class="fk">last_error</span><span class="fv" id="f-err">null</span></div>
+      </div>
+
+      <!-- Lease heartbeat bar (shown only when leased/running) -->
+      <div id="lease-section" style="display:none">
+        <div class="lease-bar-wrap">
+          <div class="lease-bar-row">
+            <span>lease expiry</span>
+            <span id="lease-pct">100%</span>
+          </div>
+          <div class="lease-bar-track">
+            <div class="lease-bar-fill" id="lease-fill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Right -->
+  <div class="right-col">
+
+    <!-- Attempts -->
+    <div class="panel-section" style="flex:0 0 auto; max-height: 45%;">
+      <div class="panel-label">job_attempts</div>
+      <div id="attempt-list" style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;max-height:200px">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--text3)">no attempts yet</div>
+      </div>
+    </div>
+
+    <!-- Outbox -->
+    <div class="outbox-section">
+      <div class="panel-label">outbox_events</div>
+      <div class="outbox-list" id="outbox-list">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--text3)">no events yet</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════ */
+const SCENARIOS = {
+  success: {
+    label: 'happy path',
+    maxAttempts: 3,
+    steps: ['enqueue','lease','run','succeed'],
+  },
+  retry: {
+    label: 'retry + succeed',
+    maxAttempts: 3,
+    steps: ['enqueue','lease','run','fail','enqueue','lease','run','succeed'],
+  },
+  exhaust: {
+    label: 'exhaust retries',
+    maxAttempts: 2,
+    steps: ['enqueue','lease','run','fail','enqueue','lease','run','fail','dead'],
+  },
+  replay: {
+    label: 'dead-letter replay',
+    maxAttempts: 1,
+    steps: ['enqueue','lease','run','fail','dead','replay-wait'],
+  },
+  cancel: {
+    label: 'cancel before lease',
+    steps: ['enqueue','cancel'],
+    maxAttempts: 3,
+  },
+};
+
+let scenario = 'success';
+let stepIdx = 0;
+let running = false;
+let attemptNum = 0;
+let currentAttemptStarted = null;
+let failInjected = false;
+let leaseInterval = null;
+let leaseTime = 0;
+let hbInterval = null;
+let timers = [];
+
+const STATE_COLORS = {
+  enqueued:   'var(--enq)',
+  leased:     'var(--lea)',
+  running:    'var(--run)',
+  succeeded:  'var(--suc)',
+  failed:     'var(--fail)',
+  dead_letter:'var(--dead)',
+  canceled:   'var(--canc)',
+};
+
+const ERRORS = [
+  'handler timeout: execution exceeded 30s',
+  'network error: upstream service unavailable',
+  'assertion failed: sttp_output_node_id missing',
+];
+
+function ts() {
+  const n = new Date();
+  return `${h(n.getHours())}:${h(n.getMinutes())}:${h(n.getSeconds())}`;
+}
+function h(v){ return String(v).padStart(2,'0'); }
+function uid(){ return Math.random().toString(36).slice(2,9); }
+function delay(ms){ return new Promise(r=>{ timers.push(setTimeout(r,ms)); }); }
+
+/* ═══════════════════════════════════════════
+   SCENARIO PICKER
+═══════════════════════════════════════════ */
+function pickScenario(s, btn) {
+  if (running) return;
+  scenario = s;
+  document.querySelectorAll('.scen-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  fullReset();
+}
+
+/* ═══════════════════════════════════════════
+   RESET
+═══════════════════════════════════════════ */
+function fullReset() {
+  timers.forEach(clearTimeout); timers = [];
+  clearInterval(leaseInterval); leaseInterval = null;
+  clearInterval(hbInterval); hbInterval = null;
+  stepIdx = 0; running = false; attemptNum = 0;
+  currentAttemptStarted = null; failInjected = false;
+
+  // Reset all nodes
+  const nodes = ['enqueued','leased','running','succeeded','failed','dead_letter','canceled'];
+  nodes.forEach(n => setNodeState(n, 'idle'));
+  resetIndicator();
+
+  // Reset fields
+  setField('job-id', '—'); setField('job-type','—'); setField('state','—');
+  setField('attempts','—'); setField('max-att','—'); setField('priority','—');
+  setField('lease-owner','null'); setField('idemp','—'); setField('corr','—');
+  setField('sched','—'); setField('hb','null'); setField('err','null');
+  setStateBadge('—', null);
+
+  // Reset lease bar
+  document.getElementById('lease-section').style.display='none';
+  document.getElementById('lease-fill').style.width='100%';
+
+  // Reset attempts + outbox
+  document.getElementById('attempt-list').innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--text3)">no attempts yet</div>';
+  document.getElementById('outbox-list').innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--text3)">no events yet</div>';
+
+  // Reset buttons
+  document.getElementById('main-btn').textContent = '▶ Start';
+  document.getElementById('main-btn').disabled = false;
+  document.getElementById('fail-btn').disabled = true;
+  document.getElementById('replay-btn').disabled = true;
+}
+
+/* ═══════════════════════════════════════════
+   NODE / FIELD HELPERS
+═══════════════════════════════════════════ */
+function setNodeState(nodeId, state) {
+  const g = document.getElementById(`smn-${nodeId}`);
+  if (!g) return;
+  const rect = g.querySelector('rect');
+  const texts = g.querySelectorAll('text');
+  if (state === 'active') {
+    const col = STATE_COLORS[nodeId] || 'var(--enq)';
+    rect.style.fill = col.replace(')', ', 0.12)').replace('var','rgba').replace('rgba(--','rgba(').replace('--enq','91,138,240').replace('--lea','224,160,48').replace('--run','62,207,160').replace('--suc','62,207,160').replace('--fail','224,85,85').replace('--dead','136,74,170').replace('--canc','85,88,112');
+    // simpler: just use opacity fills via inline
+    rect.style.fill = 'transparent';
+    rect.style.stroke = col;
+    rect.style.strokeWidth = '1.5';
+    texts[0].style.fill = col;
+    texts[1].style.fill = col;
+  } else if (state === 'done') {
+    const col = STATE_COLORS[nodeId] || 'var(--enq)';
+    rect.style.fill = 'transparent';
+    rect.style.stroke = col;
+    rect.style.strokeWidth = '1';
+    rect.style.opacity = '0.4';
+    texts[0].style.fill = col;
+    texts[0].style.opacity = '0.5';
+    texts[1].style.fill = col;
+    texts[1].style.opacity = '0.5';
+  } else {
+    rect.style.fill = '#1a1d23';
+    rect.style.stroke = '#3e4258';
+    rect.style.strokeWidth = '1';
+    rect.style.opacity = '1';
+    texts[0].style.fill = '#3e4258';
+    texts[1].style.fill = '#7a7f98';
+    texts[0].style.opacity = '1';
+    texts[1].style.opacity = '1';
+  }
+}
+
+function moveIndicator(nodeId) {
+  const positions = {
+    enqueued:   {cx:145,cy:170},
+    leased:     {cx:310,cy:170},
+    running:    {cx:475,cy:170},
+    succeeded:  {cx:615,cy:85},
+    failed:     {cx:615,cy:170},
+    dead_letter:{cx:615,cy:255},
+    canceled:   {cx:310,cy:290},
+  };
+  const p = positions[nodeId];
+  if (!p) return;
+  const ind = document.getElementById('cur-indicator');
+  ind.setAttribute('cx', p.cx);
+  ind.setAttribute('cy', p.cy);
+  ind.style.opacity = '1';
+  ind.style.stroke = STATE_COLORS[nodeId] || 'var(--enq)';
+  // pulse animation
+  ind.style.animation = 'none';
+  ind.offsetHeight;
+  ind.style.animation = 'pulse 1.4s ease-out infinite';
+}
+
+function resetIndicator() {
+  const ind = document.getElementById('cur-indicator');
+  ind.style.opacity = '0';
+}
+
+function setField(id, val, highlight=false) {
+  const el = document.getElementById(`f-${id}`);
+  if (!el) return;
+  el.textContent = val;
+  el.className = highlight ? 'fv highlight' : 'fv';
+}
+
+function setStateBadge(label, colorVar) {
+  const el = document.getElementById('state-badge');
+  el.textContent = label;
+  if (colorVar) {
+    const colorMap = {
+      'var(--enq)':'rgba(91,138,240,0.15)',
+      'var(--lea)':'rgba(224,160,48,0.15)',
+      'var(--run)':'rgba(62,207,160,0.15)',
+      'var(--suc)':'rgba(62,207,160,0.15)',
+      'var(--fail)':'rgba(224,85,85,0.15)',
+      'var(--dead)':'rgba(136,74,170,0.15)',
+      'var(--canc)':'rgba(85,88,112,0.15)',
+    };
+    el.style.background = colorMap[colorVar] || 'rgba(62,66,88,0.3)';
+    el.style.color = colorVar;
+    el.style.border = `1px solid ${colorVar.replace('var(','rgba(').replace(')','').replace('--enq','91,138,240,0.3').replace('--lea','224,160,48,0.3').replace('--run','62,207,160,0.3').replace('--suc','62,207,160,0.3').replace('--fail','224,85,85,0.3').replace('--dead','136,74,170,0.3').replace('--canc','85,88,112,0.3')}`;
+  } else {
+    el.style.background='rgba(62,66,88,0.3)';
+    el.style.color='var(--text3)';
+    el.style.border='none';
+  }
+}
+
+/* ═══════════════════════════════════════════
+   ATTEMPT + OUTBOX HELPERS
+═══════════════════════════════════════════ */
+function addAttempt(outcome, durationMs, error='') {
+  const list = document.getElementById('attempt-list');
+  if (list.children[0]?.style?.color === 'var(--text3)' || list.textContent.includes('no attempts')) list.innerHTML='';
+  attemptNum++;
+  const cls = outcome === 'succeeded' ? 'success' : outcome === 'fatal_failure' ? 'fatal' : 'fail';
+  const div = document.createElement('div');
+  div.className = `attempt-item ${cls}`;
+  div.innerHTML = `
+    <div class="attempt-header">
+      <span class="attempt-num">attempt #${attemptNum}</span>
+      <span class="attempt-outcome ${cls}">${outcome}</span>
+    </div>
+    <div class="attempt-meta">
+      worker: <span>worker-${uid()}</span>  ·  duration: <span>${durationMs}ms</span><br>
+      ${error ? `error: <span style="color:var(--fail)">${error}</span>` : `execution_id: <span>exec-${uid()}</span>`}
+    </div>`;
+  list.appendChild(div);
+  list.scrollTop = list.scrollHeight;
+}
+
+function addOutboxEvent(type, extra='') {
+  const list = document.getElementById('outbox-list');
+  if (list.textContent.includes('no events')) list.innerHTML='';
+  const cls = type === 'JobSucceeded' ? 'succeeded' : type === 'JobRetryScheduled' ? 'retry' : 'dead';
+  const statusCls = 'pending';
+  const div = document.createElement('div');
+  div.className = `outbox-event ${cls}`;
+  div.innerHTML = `
+    <div class="oe-type ${cls}">${type}</div>
+    <div class="oe-meta">job_id: <span style="color:var(--text2)">${currentJobId}</span>  ·  occurred_at: ${ts()}<br>${extra}</div>
+    <span class="oe-status pending">pending</span>`;
+  list.appendChild(div);
+  list.scrollTop = list.scrollHeight;
+
+  // After a moment, flip to published
+  timers.push(setTimeout(() => {
+    const badge = div.querySelector('.oe-status');
+    if (badge) { badge.className='oe-status published'; badge.textContent='published'; }
+  }, 900));
+}
+
+/* ═══════════════════════════════════════════
+   LEASE BAR
+═══════════════════════════════════════════ */
+function startLeaseBar() {
+  document.getElementById('lease-section').style.display='block';
+  leaseTime = 100;
+  document.getElementById('lease-fill').style.width='100%';
+  document.getElementById('lease-pct').textContent='100%';
+  clearInterval(leaseInterval);
+  leaseInterval = setInterval(() => {
+    leaseTime -= 1.4;
+    if (leaseTime < 0) leaseTime = 0;
+    document.getElementById('lease-fill').style.width = leaseTime + '%';
+    document.getElementById('lease-fill').style.background = leaseTime < 30 ? 'var(--fail)' : 'var(--lea)';
+    document.getElementById('lease-pct').textContent = Math.round(leaseTime) + '%';
+    // Heartbeat refresh every ~25%
+    if (leaseTime < 50 && leaseTime > 48) {
+      document.getElementById('lease-fill').style.width='80%';
+      leaseTime = 80;
+      setField('hb', ts(), true);
+    }
+  }, 60);
+}
+function stopLeaseBar() {
+  clearInterval(leaseInterval); leaseInterval = null;
+  document.getElementById('lease-section').style.display='none';
+}
+
+/* ═══════════════════════════════════════════
+   MAIN STEP ENGINE
+═══════════════════════════════════════════ */
+let currentJobId = '';
+let currentStep = null;
+
+async function step() {
+  if (running) return;
+  running = true;
+  document.getElementById('main-btn').disabled = true;
+
+  const sc = SCENARIOS[scenario];
+  const steps = sc.steps;
+
+  if (stepIdx === 0) {
+    // Init job
+    currentJobId = `job-${uid()}`;
+    setField('job-id', currentJobId, true);
+    setField('job-type', 'workflow.stasis.sequential');
+    setField('max-att', sc.maxAttempts);
+    setField('priority', '100');
+    setField('idemp', `key-${uid()}`);
+    setField('corr', `corr-${uid()}`);
+  }
+
+  const action = steps[stepIdx];
+  currentStep = action;
+  await executeStep(action, sc);
+  stepIdx++;
+
+  running = false;
+
+  // Decide what button shows next
+  if (stepIdx >= steps.length) {
+    document.getElementById('main-btn').disabled = true;
+    if (scenario === 'replay' && steps[steps.length-1] === 'replay-wait') {
+      document.getElementById('replay-btn').disabled = false;
+    }
+  } else {
+    document.getElementById('main-btn').disabled = false;
+    const next = steps[stepIdx];
+    if (next === 'fail') document.getElementById('main-btn').textContent = '▶ Next (will fail)';
+    else if (next === 'enqueue') document.getElementById('main-btn').textContent = '▶ Next (retry)';
+    else document.getElementById('main-btn').textContent = '▶ Next';
+  }
+}
+
+async function executeStep(action, sc) {
+  switch(action) {
+
+    case 'enqueue': {
+      setNodeState('failed', 'done'); setNodeState('dead_letter','done');
+      setNodeState('enqueued','active');
+      moveIndicator('enqueued');
+      setField('state','enqueued',true);
+      setStateBadge('enqueued','var(--enq)');
+      const att = parseInt(document.getElementById('f-attempts').textContent) || 0;
+      setField('attempts', att === 0 ? 0 : att);
+      setField('sched', ts());
+      setField('lease-owner','null');
+      setField('hb','null');
+      setField('err','null');
+      stopLeaseBar();
+      await delay(500);
+      break;
+    }
+
+    case 'lease': {
+      setNodeState('enqueued','done');
+      setNodeState('leased','active');
+      moveIndicator('leased');
+      setField('state','leased',true);
+      setStateBadge('leased','var(--lea)');
+      const wid = `worker-${uid()}`;
+      setField('lease-owner', wid, true);
+      startLeaseBar();
+      await delay(700);
+      break;
+    }
+
+    case 'run': {
+      setNodeState('leased','done');
+      setNodeState('running','active');
+      moveIndicator('running');
+      setField('state','running',true);
+      setStateBadge('running','var(--run)');
+      currentAttemptStarted = Date.now();
+      document.getElementById('fail-btn').disabled = false;
+      await delay(800);
+      break;
+    }
+
+    case 'succeed': {
+      document.getElementById('fail-btn').disabled = true;
+      stopLeaseBar();
+      const dur = Date.now() - (currentAttemptStarted || Date.now());
+      addAttempt('succeeded', Math.round(dur) + 200);
+      setNodeState('running','done');
+      setNodeState('succeeded','active');
+      moveIndicator('succeeded');
+      setField('state','succeeded',true);
+      setStateBadge('succeeded','var(--suc)');
+      setField('hb','null');
+      const curAtt = parseInt(document.getElementById('f-attempts').textContent) || 0;
+      setField('attempts', curAtt+1);
+      addOutboxEvent('JobSucceeded', `sttp_output_node_id: node-${uid()}`);
+      await delay(500);
+      break;
+    }
+
+    case 'fail': {
+      document.getElementById('fail-btn').disabled = true;
+      stopLeaseBar();
+      const dur = Date.now() - (currentAttemptStarted || Date.now());
+      const err = ERRORS[Math.floor(Math.random()*ERRORS.length)];
+      addAttempt('retryable_failure', Math.round(dur) + 180, err);
+      setNodeState('running','done');
+      setNodeState('failed','active');
+      moveIndicator('failed');
+      setField('state','failed',true);
+      setStateBadge('failed','var(--fail)');
+      setField('err', err, true);
+      const curAtt = parseInt(document.getElementById('f-attempts').textContent) || 0;
+      setField('attempts', curAtt+1);
+      const maxA = parseInt(document.getElementById('f-max-att').textContent);
+      const newAtt = curAtt+1;
+      if (newAtt < maxA) {
+        addOutboxEvent('JobRetryScheduled', `attempt: ${newAtt}/${maxA}  backoff: ${2**newAtt}s`);
+      }
+      await delay(600);
+      break;
+    }
+
+    case 'dead': {
+      const curAtt = parseInt(document.getElementById('f-attempts').textContent) || 0;
+      addAttempt('fatal_failure', 0, 'max_attempts exhausted');
+      setNodeState('failed','done');
+      setNodeState('dead_letter','active');
+      moveIndicator('dead_letter');
+      setField('state','dead_letter',true);
+      setStateBadge('dead_letter','var(--dead)');
+      addOutboxEvent('JobDeadLettered', `attempts: ${curAtt}/${document.getElementById('f-max-att').textContent}`);
+      await delay(500);
+      break;
+    }
+
+    case 'replay-wait': {
+      // waiting for operator
+      document.getElementById('replay-btn').disabled = false;
+      break;
+    }
+
+    case 'cancel': {
+      setNodeState('enqueued','done');
+      setNodeState('canceled','active');
+      moveIndicator('canceled');
+      setField('state','canceled',true);
+      setStateBadge('canceled','var(--canc)');
+      await delay(400);
+      break;
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════
+   INJECT FAILURE (manual)
+═══════════════════════════════════════════ */
+function injectFailure() {
+  if (!running && currentStep === 'run') {
+    // Fast-forward to failure
+    document.getElementById('fail-btn').disabled = true;
+    // Find 'succeed' in remaining steps and replace with 'fail'
+    const sc = SCENARIOS[scenario];
+    if (sc.steps[stepIdx] === 'succeed') {
+      sc.steps[stepIdx] = 'fail';
+      document.getElementById('main-btn').textContent = '▶ Next (will fail)';
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════
+   REPLAY
+═══════════════════════════════════════════ */
+async function doReplay() {
+  document.getElementById('replay-btn').disabled = true;
+  // Reset to enqueued from dead-letter
+  const sc = SCENARIOS[scenario];
+  sc.steps.push('enqueue','lease','run','succeed');
+  stepIdx = sc.steps.length - 4;
+  setNodeState('dead_letter','done');
+  document.getElementById('main-btn').textContent = '▶ Next (replay)';
+  document.getElementById('main-btn').disabled = false;
+}
+
+/* ═══════════════════════════════════════════
+   PULSE KEYFRAME
+═══════════════════════════════════════════ */
+const styleEl = document.createElement('style');
+styleEl.textContent = `
+  @keyframes pulse {
+    0%   { r: 22; opacity: 0.8; }
+    70%  { r: 28; opacity: 0; }
+    100% { r: 28; opacity: 0; }
+  }
+`;
+document.head.appendChild(styleEl);
+</script>
+</body>
+</html>

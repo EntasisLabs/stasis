@@ -1,4 +1,12 @@
+pub mod cluster_command_forwarder;
+pub mod cluster_forward_outcome_store;
+pub mod cluster_node_store;
+pub mod cluster_control_event_sink;
 pub mod clock;
+pub mod delivery_endpoint_store;
+pub mod endpoint_routing_policy;
+pub mod endpoint_delivery_status_store;
+pub mod endpoint_transport_publisher;
 pub mod event_publisher;
 pub mod id_generator;
 pub mod job_attempt_store;

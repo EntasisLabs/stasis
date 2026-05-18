@@ -12,6 +12,7 @@
   - src/infrastructure/runtime/surreal_outbox_store.rs
   - src/infrastructure/runtime/surreal_recurring_store.rs
   - src/infrastructure/runtime/surreal_thread_store.rs
+  - src/infrastructure/runtime/surreal_cluster_forward_outcome_store.rs
   - tests/runtime_backend_parity.rs
 
 ## Purpose
@@ -25,6 +26,26 @@ Define the V1 SurrealDB schema and indexing strategy for Stasis durable job orch
 3. Small hot rows with reference-based payload model.
 4. Explicit keys for correlation, causation, and idempotency.
 5. First-class thread and lineage metadata for orchestration observability.
+
+## Control Plane Extension Tables
+
+Forwarded command outcomes can be persisted durably for distributed command-center operations.
+
+```sql
+DEFINE TABLE cluster_forward_outcome SCHEMAFULL;
+DEFINE FIELD target_region ON TABLE cluster_forward_outcome TYPE string;
+DEFINE FIELD command_name ON TABLE cluster_forward_outcome TYPE string;
+DEFINE FIELD correlation_id ON TABLE cluster_forward_outcome TYPE option<string>;
+DEFINE FIELD accepted ON TABLE cluster_forward_outcome TYPE bool;
+DEFINE FIELD attempts ON TABLE cluster_forward_outcome TYPE int;
+DEFINE FIELD error ON TABLE cluster_forward_outcome TYPE option<string>;
+DEFINE FIELD completed_at ON TABLE cluster_forward_outcome TYPE datetime;
+
+DEFINE INDEX idx_cluster_forward_outcome_completed_at
+  ON TABLE cluster_forward_outcome COLUMNS completed_at;
+DEFINE INDEX idx_cluster_forward_outcome_corr
+  ON TABLE cluster_forward_outcome COLUMNS correlation_id;
+```
 
 ## Logical Entity Relationship
 

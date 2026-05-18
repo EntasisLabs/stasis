@@ -5,11 +5,14 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
 - Stability: Evolving
-- Last Verified: 2026-05-15
+- Last Verified: 2026-05-17
 - Verified Against:
+    - src/ports/inbound/control_plane_commands.rs
   - src/ports/outbound/ai_chat_client.rs
   - src/ports/outbound/ai_chat_response_cache.rs
   - src/ports/outbound/ai_chat_tool_interceptor.rs
+    - src/ports/outbound/runtime/delivery_endpoint_store.rs
+    - src/ports/outbound/runtime/event_publisher.rs
   - src/ports/outbound/runtime/runtime_metrics.rs
   - src/ports/outbound/runtime/thread_store.rs
   - src/ports/outbound/runtime/workflow_engine.rs
@@ -22,9 +25,42 @@
 
 Document all port contracts that SDK consumers can implement to extend or replace Stasis infrastructure. Each entry covers the trait signature, what Stasis guarantees about call semantics, and the built-in implementation(s) provided.
 
+This reference includes both outbound ports and selected inbound control-plane contracts used to drive runtime operations.
+
 ## Architecture Principle
 
 Stasis follows hexagonal architecture. All external dependencies are hidden behind ports (traits). Consumers implement ports to substitute infrastructure without touching domain or orchestration logic. The runtime builder (`StasisRuntimeBuilder`) is the single wiring point where port implementations are injected.
+
+---
+
+## Control Plane Inbound Port
+
+### ControlPlaneCommands
+
+Defines operator-facing endpoint registry commands.
+
+```rust
+#[async_trait]
+pub trait ControlPlaneCommands {
+    async fn register_delivery_endpoint(
+        &self,
+        request: RegisterDeliveryEndpointRequest,
+    ) -> Result<RegisterDeliveryEndpointResponse>;
+    async fn set_delivery_endpoint_enabled(
+        &self,
+        request: SetDeliveryEndpointEnabledRequest,
+    ) -> Result<()>;
+    async fn list_delivery_endpoints(&self) -> Result<Vec<DeliveryEndpoint>>;
+}
+```
+
+**Built-in implementations:**
+
+| Type | Description |
+|---|---|
+| `ControlPlaneSdk` | Application-level command service that orchestrates endpoint registry use cases |
+
+---
 
 ---
 
@@ -142,6 +178,58 @@ pub trait RuntimeMetrics: Send + Sync {
 ```rust
 builder.with_telemetry_chat_middleware(Arc::new(my_metrics_impl))
 ```
+
+---
+
+## Delivery Endpoint Store Port
+
+### DeliveryEndpointStore
+
+Persists and retrieves delivery endpoint registrations used by control-plane and delivery routing flows.
+
+```rust
+#[async_trait]
+pub trait DeliveryEndpointStore: Send + Sync {
+    async fn insert(&self, endpoint: NewDeliveryEndpoint) -> Result<DeliveryEndpoint>;
+    async fn get(&self, endpoint_id: &str) -> Result<Option<DeliveryEndpoint>>;
+    async fn list(&self) -> Result<Vec<DeliveryEndpoint>>;
+    async fn set_enabled(&self, endpoint_id: &str, enabled: bool) -> Result<bool>;
+}
+```
+
+**Built-in implementations:**
+
+| Type | Description |
+|---|---|
+| `InMemoryDeliveryEndpointStore` | In-process endpoint registry for tests and local development |
+| `SurrealDeliveryEndpointStore` | SurrealDB-backed durable endpoint registry |
+
+---
+
+## Event Publisher Port
+
+### EventPublisher
+
+Publishes outbox events to external subscribers after durability has been established in runtime stores.
+
+```rust
+#[async_trait]
+pub trait EventPublisher: Send + Sync {
+    async fn publish(&self, event: &OutboxEvent) -> Result<()>;
+}
+```
+
+**Stasis guarantees:**
+
+- Called only from outbox publish flows after event persistence.
+- Publish failures are recorded on outbox events and retried per outbox publish policy.
+
+**Built-in implementations:**
+
+| Type | Description |
+|---|---|
+| `TokioChannelEventPublisher` | In-process channel adapter for tests and local integration |
+| `HttpWebhookEventPublisher` | HTTP POST webhook adapter for external event delivery |
 
 ---
 
@@ -278,6 +366,8 @@ The `InMemoryToolRegistry` is the only provided registry. It is always used inte
 | `AiChatResponseCache` | No | None | `.with_cache_chat_middleware(cache)` |
 | `AiChatToolInterceptor` | No | None | `.with_tool_call_interception_chat_middleware(interceptor)` |
 | `RuntimeMetrics` | No | `NoopRuntimeMetrics` | `.with_telemetry_chat_middleware(metrics)` |
+| `DeliveryEndpointStore` | No | None | Inject through control-plane composition |
+| `EventPublisher` | No | None | `runtime.register_event_publisher(...)` |
 | `ThreadStore` | No | `InMemoryThreadStore` / `SurrealThreadStore` | `.with_thread_store(...)` |
 | `WorkflowEngine` | No | `GraphemeSdkWorkflowEngine` | Auto-wired |
 | `MemoryContextReader` | No | Auto-bootstrapped with `.with_locus_memory()` | `.with_memory_context_reader(...)` |

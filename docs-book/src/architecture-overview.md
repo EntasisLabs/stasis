@@ -5,11 +5,16 @@
 - Document Type: Architecture Standard
 - Audience: Engineer, SRE, Security, Architect
 - Stability: Evolving
-- Last Verified: 2026-05-15
+- Last Verified: 2026-05-17
 - Verified Against:
   - src/application/runtime/stasis_runtime_builder.rs
   - src/application/use_cases/investigate_runtime_lineage.rs
+  - src/application/use_cases/manage_delivery_endpoints.rs
   - src/domain/runtime/outbox.rs
+  - src/domain/runtime/delivery_endpoint.rs
+  - src/ports/outbound/runtime/delivery_endpoint_store.rs
+  - src/sdk/control_plane_sdk.rs
+  - src/infrastructure/runtime/http_webhook_event_publisher.rs
   - tests/runtime_backend_parity.rs
   - tests/architecture_conformance.rs
 
@@ -27,6 +32,12 @@ Stasis uses DDD + Hexagonal architecture and an event-driven runtime backed by S
 2. Grapheme workflow execution for policy-governed workflow jobs.
 3. Locus memory services for retrieval, storage, transform, rollup, and schema workflows.
 
+The runtime now includes an explicit control-plane foundation for command-center operations:
+
+1. Delivery endpoint registry (HTTP webhook, TCP, Kafka, RabbitMQ target definitions).
+2. Control-plane endpoint commands for register, enable/disable, and list operations.
+3. Durable endpoint persistence adapters (in-memory and Surreal).
+
 The runtime is designed for at-least-once job execution with deterministic idempotent handlers, durable leases, retries, dead-letter handling, replay, and lineage investigation.
 
 ## Architecture Principles
@@ -38,6 +49,7 @@ The runtime is designed for at-least-once job execution with deterministic idemp
 5. Replaceable infrastructure: adapters implement ports so backends can evolve without domain rewrites.
 6. Capability isolation with unified contracts: Grapheme and Locus integrations remain behind Stasis ports and handlers.
 7. Diagnostics and lineage by default: orchestration handlers emit standardized diagnostics and outbox lineage metadata.
+8. Operator-first control plane: runtime and delivery controls are modeled as explicit command contracts.
 
 ## Capability Planes
 
@@ -61,6 +73,12 @@ The runtime is designed for at-least-once job execution with deterministic idemp
   - input query IDs/fingerprint
   - output memory node IDs
   - retrieval path
+
+### 4) Control and Delivery Plane
+
+- Control-plane command contracts for endpoint management.
+- Delivery endpoint registry with protocol-aware target definitions.
+- Event publisher adapters for external fanout and system integration.
 
 ## System Context
 
@@ -130,6 +148,16 @@ flowchart LR
 - Emits metrics and traces keyed by correlation and trace IDs.
 - Preserves attempt diagnostics with guardrail and orchestration metadata.
 - Supports lineage investigation by job, execution, guardrail code, and thread selectors.
+
+10. Control Plane Endpoint Registry
+- Maintains outbound endpoint definitions used by delivery routing.
+- Supports protocol metadata and enabled/disabled state transitions.
+- Persists endpoint records through pluggable store adapters.
+
+11. Delivery Publisher Adapters
+- Bridges outbox events to external delivery targets.
+- Supports adapter-per-protocol evolution without domain rewrites.
+- Starts with HTTP webhook publishing and expands to additional transports.
 
 ## Thread and Lineage Model
 
@@ -201,6 +229,24 @@ Use events and jobs for cross-capability orchestration:
 - delayed and recurring workloads
 - saga compensation and replay
 - cross-plane interactions (Stasis core + Grapheme + Locus)
+- external event fanout via outbox publishers
+
+## Distributed Deployment Mode
+
+Stasis supports single-node deployment by default and is evolving toward an optional distributed deployment mode.
+
+Distributed mode direction:
+
+1. Global coordinator cluster for control-plane policies and rollups.
+2. Regional or edge orchestration clusters for locality-aware execution.
+3. Worker pools with lease-safe job processing across shared durable state.
+4. Event fanout from outbox pipelines to protocol endpoints through pluggable publishers.
+
+Operational behavior in distributed mode:
+
+- At-least-once processing semantics remain unchanged.
+- Lease ownership and idempotency keys remain the duplicate-prevention boundary.
+- Edge clusters can continue local execution and sync upstream when available.
 
 ## Reliability and SLO Controls
 
@@ -209,6 +255,7 @@ Use events and jobs for cross-capability orchestration:
 - Duplicate safety: idempotency key + deterministic handlers.
 - Failure isolation: retry with backoff and dead-letter queue.
 - Recovery: operator replay with full causation chain.
+- External delivery safety: outbox publish retries and failed-event status tracking.
 
 ## Security and Compliance Considerations
 
@@ -216,6 +263,8 @@ Use events and jobs for cross-capability orchestration:
 2. Keep tenant and auth context explicit in command contracts.
 3. Preserve immutable audit fields for state transitions.
 4. Apply queue-level policy controls for privileged job types.
+5. Separate endpoint credentials from endpoint metadata and rotate secrets independently.
+6. Restrict control-plane write operations (endpoint registration and routing changes) by role.
 
 ## Decision Diagram
 
@@ -237,6 +286,7 @@ flowchart TD
 
 - Runtime draft: [Runtime V1 Draft](./runtime-v1-draft.md)
 - Job runtime design: [Job Runtime Design](./runtime-job-design.md)
+- Control plane and endpoint routing: [Control Plane and Endpoint Routing](./control-plane-endpoint-routing.md)
 - Database schema: [SurrealDB Schema](./surrealdb-schema.md)
 - Stasis framework RFC: [Stasis Framework RFC](./stasis-framework-rfc.md)
 - Stasis implementation plan: [Stasis Framework Implementation Plan](./stasis-framework-implementation-plan.md)

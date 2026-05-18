@@ -41,10 +41,12 @@ pub mod prelude {
     };
     pub use crate::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
     pub use crate::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
-    pub use crate::application::runtime::prompt_chat_job_handler::PromptChatJobHandler;
+    pub use crate::application::runtime::coordinator_failover_job_handler::CoordinatorFailoverJobHandler;
     pub use crate::application::runtime::concurrent_pattern_job_handler::ConcurrentPatternJobHandler;
     pub use crate::application::runtime::handoff_pattern_job_handler::HandoffPatternJobHandler;
     pub use crate::application::runtime::orchestrator_pattern_job_handler::OrchestratorPatternJobHandler;
+    pub use crate::application::runtime::prompt_chat_job_handler::PromptChatJobHandler;
+    pub use crate::application::runtime::queue_ownership_rebalance_job_handler::QueueOwnershipRebalanceJobHandler;
     pub use crate::application::runtime::sequential_pattern_job_handler::SequentialPatternJobHandler;
     pub use crate::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
     pub use crate::application::runtime::in_memory_runtime::{
@@ -55,15 +57,58 @@ pub mod prelude {
     pub use crate::application::use_cases::investigate_runtime_lineage::{
         InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
     };
+    pub use crate::application::use_cases::manage_delivery_endpoints::{
+        ListDeliveryEndpoints, RegisterDeliveryEndpoint, SetDeliveryEndpointEnabled,
+    };
+    pub use crate::application::use_cases::manage_cluster_nodes::{
+        HeartbeatClusterNode, ListClusterNodeHealth, ListQueueOwnershipHealth,
+        PruneExpiredClusterNodes, RegisterClusterNode,
+        RunClusterHeartbeatSweep, ForwardClusterControlCommand,
+        InitiateCoordinatorHandoff, InitiateCoordinatorFailover,
+        ListClusterForwardOutcomes, RebalanceQueueOwnership,
+    };
+    pub use crate::application::use_cases::query_endpoint_delivery_statuses::{
+        GetEndpointDeliveryStatus, ListEndpointDeliveryStatuses,
+        ListEndpointDiagnosticsReadModel, ListEndpointFailureRateTrends,
+        ListTopUnhealthyEndpoints, PruneEndpointDeliveryStatuses,
+    };
     pub use crate::application::runtime::runtime_factory::{
         RuntimeBackend, RuntimeComposition, RuntimeFactory,
     };
     pub use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
     pub use crate::application::runtime::surreal_runtime::SurrealRuntime;
-    pub use crate::application::dto::{InvokeAgentRequest, RegisterAgentRequest};
+    pub use crate::application::dto::{
+        ClusterNodeHealthRow, HeartbeatClusterNodeRequest,
+        EndpointDiagnosticsReadModelRow, EndpointFailureRateTrendRow,
+        EndpointFailureTrendDirection, InvokeAgentRequest,
+        ListClusterNodeHealthRequest, ListQueueOwnershipHealthRequest,
+        ListEndpointDiagnosticsReadModelRequest,
+        ListEndpointFailureRateTrendsRequest, ListTopUnhealthyEndpointsRequest,
+        PruneEndpointDeliveryStatusesRequest, PruneExpiredClusterNodesRequest,
+        QueueOwnershipHealthRow, RegisterAgentRequest, RegisterClusterNodeRequest,
+        RunClusterHeartbeatSweepRequest, RunClusterHeartbeatSweepResponse,
+        ForwardClusterCommandRequest, ForwardClusterCommandResponse,
+        InitiateCoordinatorHandoffRequest, InitiateCoordinatorHandoffResponse,
+        InitiateCoordinatorFailoverRequest, InitiateCoordinatorFailoverResponse,
+        RebalanceQueueOwnershipRequest, RebalanceQueueOwnershipResponse,
+        ListClusterForwardOutcomesRequest, ClusterForwardOutcomeRow,
+        RegisterDeliveryEndpointRequest, RegisterDeliveryEndpointResponse,
+        SetDeliveryEndpointEnabledRequest,
+    };
     pub use crate::domain::entities::agent::Agent;
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, JobState, NewJob};
+    pub use crate::domain::runtime::delivery_endpoint::{
+        DeliveryEndpoint, DeliveryProtocol, NewDeliveryEndpoint,
+    };
+    pub use crate::domain::runtime::cluster_node::{
+        ClusterControlEvent, ClusterNode, ClusterNodeHealth,
+        ClusterNodeHealthSnapshot, ClusterNodeRole, ClusterForwardCommand,
+        ClusterForwardOutcome,
+        NewClusterNode,
+        QueueOwnershipMode,
+    };
+    pub use crate::domain::runtime::endpoint_delivery_status::EndpointDeliveryStatus;
     pub use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
     pub use crate::domain::runtime::outbox::{
         OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
@@ -80,18 +125,61 @@ pub mod prelude {
     pub use crate::infrastructure::runtime::system_clock::SystemClock;
     pub use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
     pub use crate::infrastructure::runtime::in_memory_runtime_metrics::InMemoryRuntimeMetrics;
+    pub use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
+    pub use crate::infrastructure::runtime::in_memory_cluster_control_event_sink::InMemoryClusterControlEventSink;
+    pub use crate::infrastructure::runtime::in_memory_cluster_command_forwarder::InMemoryClusterCommandForwarder;
+    pub use crate::infrastructure::runtime::in_memory_cluster_forward_outcome_store::InMemoryClusterForwardOutcomeStore;
+    pub use crate::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
+    pub use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
+    pub use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
+    pub use crate::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
+    pub use crate::infrastructure::runtime::endpoint_routing_policy::{
+        AllowAllEndpointRoutingPolicy, EndpointRouteRule, RuleBasedEndpointRoutingPolicy,
+    };
+    pub use crate::infrastructure::runtime::http_webhook_event_publisher::HttpWebhookEventPublisher;
+    pub use crate::infrastructure::runtime::http_webhook_event_publisher::HttpWebhookTransportPublisher;
+    #[cfg(feature = "transport-kafka")]
+    pub use crate::infrastructure::runtime::kafka_rskafka_transport_publisher::RskafkaTransportPublisher;
+    #[cfg(feature = "transport-kafka-wasm")]
+    pub use crate::infrastructure::runtime::kafka_wasm_transport_publisher::WasmKafkaTransportPublisher;
     pub use crate::infrastructure::runtime::in_memory_ai_chat_response_cache::InMemoryAiChatResponseCache;
     pub use crate::infrastructure::runtime::in_memory_thread_store::InMemoryThreadStore;
     pub use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
+    pub use crate::infrastructure::runtime::http_cluster_command_forwarder::HttpClusterCommandForwarder;
+    pub use crate::infrastructure::runtime::http_cluster_command_forwarder::{
+        CLUSTER_FORWARD_ATTEMPTS_TOTAL, CLUSTER_FORWARD_DURATION_MS,
+        CLUSTER_FORWARD_IDEMPOTENT_HITS_TOTAL,
+        CLUSTER_FORWARD_FAILURES_TOTAL, CLUSTER_FORWARD_NO_ROUTE_TOTAL,
+        CLUSTER_FORWARD_REJECTED_TOTAL, CLUSTER_FORWARD_RETRIES_TOTAL,
+        CLUSTER_FORWARD_SUCCESSES_TOTAL,
+    };
+    #[cfg(feature = "transport-rabbitmq")]
+    pub use crate::infrastructure::runtime::rabbitmq_lapin_transport_publisher::LapinRabbitMqTransportPublisher;
     pub use crate::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
+    pub use crate::infrastructure::runtime::tcp_socket_transport_publisher::TcpSocketTransportPublisher;
+    pub use crate::infrastructure::runtime::noop_cluster_control_event_sink::NoopClusterControlEventSink;
+    pub use crate::infrastructure::runtime::noop_cluster_command_forwarder::NoopClusterCommandForwarder;
+    pub use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
+    pub use crate::infrastructure::runtime::surreal_cluster_forward_outcome_store::SurrealClusterForwardOutcomeStore;
+    pub use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
+    pub use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
     pub use crate::ports::outbound::runtime::clock::Clock;
+    pub use crate::ports::outbound::runtime::cluster_control_event_sink::ClusterControlEventSink;
+    pub use crate::ports::outbound::runtime::cluster_command_forwarder::ClusterCommandForwarder;
+    pub use crate::ports::outbound::runtime::cluster_forward_outcome_store::ClusterForwardOutcomeStore;
+    pub use crate::ports::outbound::runtime::cluster_node_store::ClusterNodeStore;
     pub use crate::ports::outbound::runtime::id_generator::IdGenerator;
+    pub use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
+    pub use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
+    pub use crate::ports::outbound::runtime::endpoint_routing_policy::EndpointRoutingPolicy;
+    pub use crate::ports::outbound::runtime::endpoint_transport_publisher::EndpointTransportPublisher;
     pub use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
     pub use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
     pub use crate::ports::outbound::runtime::thread_store::ThreadStore;
     pub use crate::ports::outbound::runtime::workflow_engine::{
         WorkflowEngine, WorkflowExecutionOutput,
     };
+    pub use crate::ports::inbound::control_plane_commands::ControlPlaneCommands;
     pub use crate::ports::outbound::ai_chat_client::AiChatClient;
     pub use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
     pub use crate::ports::outbound::ai_chat_tool_interceptor::{
@@ -112,6 +200,7 @@ pub mod prelude {
     pub use crate::infrastructure::llm::genai_gateway::GenaiLlmGateway;
     pub use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
     pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
+    pub use crate::sdk::control_plane_sdk::ControlPlaneSdk;
     pub use crate::sdk::stasis_sdk::StasisSdk;
 }
 

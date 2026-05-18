@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bf0615f1.js";
+            window.path_to_searchindex_js = "searchindex-3f437709.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-155ab26a.js"></script>
+        <script src="toc-efbb9846.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -180,12 +180,18 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
 <li>Stability: Evolving</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-05-17</li>
 <li>Verified Against:
 <ul>
+<li>src/ports/inbound/control_plane_commands.rs</li>
 <li>src/ports/outbound/ai_chat_client.rs</li>
 <li>src/ports/outbound/ai_chat_response_cache.rs</li>
-<li>src/ports/outbound/ai_chat_tool_interceptor.rs</li>
+<li>src/ports/outbound/ai_chat_tool_interceptor.rs
+<ul>
+<li>src/ports/outbound/runtime/delivery_endpoint_store.rs</li>
+<li>src/ports/outbound/runtime/event_publisher.rs</li>
+</ul>
+</li>
 <li>src/ports/outbound/runtime/runtime_metrics.rs</li>
 <li>src/ports/outbound/runtime/thread_store.rs</li>
 <li>src/ports/outbound/runtime/workflow_engine.rs</li>
@@ -198,8 +204,40 @@
 </ul>
 <h2 id="purpose"><a class="header" href="#purpose">Purpose</a></h2>
 <p>Document all port contracts that SDK consumers can implement to extend or replace Stasis infrastructure. Each entry covers the trait signature, what Stasis guarantees about call semantics, and the built-in implementation(s) provided.</p>
+<p>This reference includes both outbound ports and selected inbound control-plane contracts used to drive runtime operations.</p>
 <h2 id="architecture-principle"><a class="header" href="#architecture-principle">Architecture Principle</a></h2>
 <p>Stasis follows hexagonal architecture. All external dependencies are hidden behind ports (traits). Consumers implement ports to substitute infrastructure without touching domain or orchestration logic. The runtime builder (<code>StasisRuntimeBuilder</code>) is the single wiring point where port implementations are injected.</p>
+<hr>
+<h2 id="control-plane-inbound-port"><a class="header" href="#control-plane-inbound-port">Control Plane Inbound Port</a></h2>
+<h3 id="controlplanecommands"><a class="header" href="#controlplanecommands">ControlPlaneCommands</a></h3>
+<p>Defines operator-facing endpoint registry commands.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait ControlPlaneCommands {
+    async fn register_delivery_endpoint(
+        &amp;self,
+        request: RegisterDeliveryEndpointRequest,
+    ) -&gt; Result&lt;RegisterDeliveryEndpointResponse&gt;;
+    async fn set_delivery_endpoint_enabled(
+        &amp;self,
+        request: SetDeliveryEndpointEnabledRequest,
+    ) -&gt; Result&lt;()&gt;;
+    async fn list_delivery_endpoints(&amp;self) -&gt; Result&lt;Vec&lt;DeliveryEndpoint&gt;&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ControlPlaneSdk</code></td><td>Application-level command service that orchestrates endpoint registry use cases</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
 <hr>
 <h2 id="ai-layer-ports"><a class="header" href="#ai-layer-ports">AI Layer Ports</a></h2>
 <h3 id="aichatclient"><a class="header" href="#aichatclient">AiChatClient</a></h3>
@@ -325,6 +363,60 @@ pub trait AiChatClient: Send + Sync {
 </span><span class="boring">fn main() {
 </span>builder.with_telemetry_chat_middleware(Arc::new(my_metrics_impl))
 <span class="boring">}</span></code></pre>
+<hr>
+<h2 id="delivery-endpoint-store-port"><a class="header" href="#delivery-endpoint-store-port">Delivery Endpoint Store Port</a></h2>
+<h3 id="deliveryendpointstore"><a class="header" href="#deliveryendpointstore">DeliveryEndpointStore</a></h3>
+<p>Persists and retrieves delivery endpoint registrations used by control-plane and delivery routing flows.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait DeliveryEndpointStore: Send + Sync {
+    async fn insert(&amp;self, endpoint: NewDeliveryEndpoint) -&gt; Result&lt;DeliveryEndpoint&gt;;
+    async fn get(&amp;self, endpoint_id: &amp;str) -&gt; Result&lt;Option&lt;DeliveryEndpoint&gt;&gt;;
+    async fn list(&amp;self) -&gt; Result&lt;Vec&lt;DeliveryEndpoint&gt;&gt;;
+    async fn set_enabled(&amp;self, endpoint_id: &amp;str, enabled: bool) -&gt; Result&lt;bool&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>InMemoryDeliveryEndpointStore</code></td><td>In-process endpoint registry for tests and local development</td></tr>
+<tr><td><code>SurrealDeliveryEndpointStore</code></td><td>SurrealDB-backed durable endpoint registry</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="event-publisher-port"><a class="header" href="#event-publisher-port">Event Publisher Port</a></h2>
+<h3 id="eventpublisher"><a class="header" href="#eventpublisher">EventPublisher</a></h3>
+<p>Publishes outbox events to external subscribers after durability has been established in runtime stores.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait EventPublisher: Send + Sync {
+    async fn publish(&amp;self, event: &amp;OutboxEvent) -&gt; Result&lt;()&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Stasis guarantees:</strong></p>
+<ul>
+<li>Called only from outbox publish flows after event persistence.</li>
+<li>Publish failures are recorded on outbox events and retried per outbox publish policy.</li>
+</ul>
+<p><strong>Built-in implementations:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>TokioChannelEventPublisher</code></td><td>In-process channel adapter for tests and local integration</td></tr>
+<tr><td><code>HttpWebhookEventPublisher</code></td><td>HTTP POST webhook adapter for external event delivery</td></tr>
+</tbody>
+</table>
+</div>
 <hr>
 <h2 id="thread-store-port"><a class="header" href="#thread-store-port">Thread Store Port</a></h2>
 <h3 id="threadstore"><a class="header" href="#threadstore">ThreadStore</a></h3>
@@ -471,6 +563,8 @@ pub trait StasisTool: Send + Sync {
 <tr><td><code>AiChatResponseCache</code></td><td>No</td><td>None</td><td><code>.with_cache_chat_middleware(cache)</code></td></tr>
 <tr><td><code>AiChatToolInterceptor</code></td><td>No</td><td>None</td><td><code>.with_tool_call_interception_chat_middleware(interceptor)</code></td></tr>
 <tr><td><code>RuntimeMetrics</code></td><td>No</td><td><code>NoopRuntimeMetrics</code></td><td><code>.with_telemetry_chat_middleware(metrics)</code></td></tr>
+<tr><td><code>DeliveryEndpointStore</code></td><td>No</td><td>None</td><td>Inject through control-plane composition</td></tr>
+<tr><td><code>EventPublisher</code></td><td>No</td><td>None</td><td><code>runtime.register_event_publisher(...)</code></td></tr>
 <tr><td><code>ThreadStore</code></td><td>No</td><td><code>InMemoryThreadStore</code> / <code>SurrealThreadStore</code></td><td><code>.with_thread_store(...)</code></td></tr>
 <tr><td><code>WorkflowEngine</code></td><td>No</td><td><code>GraphemeSdkWorkflowEngine</code></td><td>Auto-wired</td></tr>
 <tr><td><code>MemoryContextReader</code></td><td>No</td><td>Auto-bootstrapped with <code>.with_locus_memory()</code></td><td><code>.with_memory_context_reader(...)</code></td></tr>
@@ -490,7 +584,7 @@ pub trait StasisTool: Send + Sync {
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="surrealdb-schema.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="control-plane-endpoint-routing.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -504,7 +598,7 @@ pub trait StasisTool: Send + Sync {
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="surrealdb-schema.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="control-plane-endpoint-routing.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
