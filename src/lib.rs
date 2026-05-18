@@ -1,4 +1,5 @@
 pub mod application;
+pub mod dashboard;
 pub mod domain;
 pub mod infrastructure;
 pub mod ports;
@@ -202,6 +203,9 @@ pub mod prelude {
     pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
     pub use crate::sdk::control_plane_sdk::ControlPlaneSdk;
     pub use crate::sdk::stasis_sdk::StasisSdk;
+    pub use crate::dashboard::router as dashboard_router;
+    pub use crate::dashboard::DashboardState;
+    pub use crate::dashboard::InMemoryDashboardQueryService;
 }
 
 #[cfg(test)]

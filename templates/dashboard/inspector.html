@@ -1,0 +1,74 @@
+{% if let Some(job) = self.as_job() %}
+<div class="inspector-card">
+  <h3>Job {{ job.id }}</h3>
+  <ul class="meta-list">
+    <li>Status: {{ job.status }}</li>
+    <li>Queue: {{ job.queue }}</li>
+    <li>Trace: {{ job.trace_id }}</li>
+    <li>Correlation: {{ job.correlation_id }}</li>
+    <li>Causation: {{ job.causation_id }}</li>
+    {% if let Some(err) = job.last_error %}
+    <li>Last Error: {{ err }}</li>
+    {% endif %}
+  </ul>
+</div>
+{% else if let Some(attempt) = self.as_attempt() %}
+<div class="inspector-card">
+  <h3>Attempt {{ attempt.attempt_id }}</h3>
+  <ul class="meta-list">
+    <li>Job: {{ attempt.job_id }}</li>
+    <li>Outcome: {{ attempt.outcome }}</li>
+    <li>Worker: {{ attempt.worker_id }}</li>
+    {% if let Some(ms) = attempt.duration_ms %}
+    <li>Duration: {{ ms }} ms</li>
+    {% endif %}
+    {% if let Some(code) = attempt.guardrail_code %}
+    <li>Guardrail: {{ code }}</li>
+    {% endif %}
+    {% if let Some(reason) = attempt.policy_reason %}
+    <li>Policy: {{ reason }}</li>
+    {% endif %}
+  </ul>
+</div>
+{% else if let Some(node) = self.as_node() %}
+<div class="inspector-card">
+  <h3>Node {{ node.node_id }}</h3>
+  <ul class="meta-list">
+    <li>Role: {{ node.role }}</li>
+    <li>Region: {{ node.region }}</li>
+    <li>Health: {{ node.health }}</li>
+    <li>Capabilities: {{ node.capability_tags|join(", ") }}</li>
+    <li>Queues: {{ node.queue_ownership|join(", ") }}</li>
+  </ul>
+</div>
+{% else if let Some(endpoint) = self.as_endpoint() %}
+<div class="inspector-card">
+  <h3>Endpoint {{ endpoint.endpoint_id }}</h3>
+  <ul class="meta-list">
+    <li>Protocol: {{ endpoint.protocol }}</li>
+    <li>Target: {{ endpoint.target }}</li>
+    <li>Enabled: {{ endpoint.enabled }}</li>
+    <li>Success Count: {{ endpoint.success_count }}</li>
+    <li>Failure Count: {{ endpoint.failure_count }}</li>
+    {% if let Some(err) = endpoint.last_error %}
+    <li>Last Error: {{ err }}</li>
+    {% endif %}
+  </ul>
+</div>
+{% else if let Some(event) = self.as_event() %}
+<div class="inspector-card">
+  <h3>Event {{ event.event_id }}</h3>
+  <ul class="meta-list">
+    <li>Type: {{ event.event_type }}</li>
+    <li>Job: {{ event.job_id }}</li>
+    <li>Correlation: {{ event.correlation_id }}</li>
+    <li>Trace: {{ event.trace_id }}</li>
+    <li>Status: {{ event.status }}</li>
+  </ul>
+</div>
+{% else %}
+<div class="inspector-card">
+  <h3>Inspector</h3>
+  <p>Select a job, event, node, endpoint, or attempt to inspect details.</p>
+</div>
+{% endif %}

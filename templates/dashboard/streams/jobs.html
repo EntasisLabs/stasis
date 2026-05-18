@@ -1,0 +1,21 @@
+<div class="cc-stream-list">
+  {% for job in jobs %}
+  <button class="cc-stream-row" type="button" hx-get="/inspect/job/{{ job.id }}" hx-target="#inspector-body" hx-swap="innerHTML">
+    {% if job.status == "succeeded" %}
+    <span class="status-dot dot-ok"></span>
+    {% else if job.status == "running" || job.status == "leased" || job.status == "enqueued" %}
+    <span class="status-dot dot-run"></span>
+    {% else %}
+    <span class="status-dot dot-fail"></span>
+    {% endif %}
+
+    <span>
+      <span class="cc-stream-main">
+        <span class="cc-stream-id">{{ job.id }}</span>
+        <span class="cc-stream-ts">{{ job.updated_at }}</span>
+      </span>
+      <span class="cc-stream-sub">{{ job.status }} | queue {{ job.queue }} | attempts {{ job.attempts }}</span>
+    </span>
+  </button>
+  {% endfor %}
+</div>

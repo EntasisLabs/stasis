@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stasis Command Center</title>
+    <link rel="stylesheet" href="/assets/dashboard.css" />
+  </head>
+  <body>
+    <div class="cockpit" id="cockpit">
+      <aside class="cc-sidebar" id="command-center-nav">
+        <div class="cc-sidebar-top">
+          <h1 class="cc-sidebar-logo"><span class="cc-sidebar-logo-text">Command Center</span></h1>
+          <div class="cc-sidebar-controls">
+            <button id="sidebar-pin" class="cc-sidebar-pin" type="button" aria-label="Pin command center" aria-pressed="false">Pin</button>
+            <button id="sidebar-toggle" class="cc-sidebar-toggle" type="button" aria-label="Collapse command center" aria-expanded="true">
+              <span aria-hidden="true">&lsaquo;</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="cc-section">
+          <span class="cc-section-label"><span>Execution</span></span>
+          <a class="cc-nav-item active" href="#" data-initial="J" data-nav-action="stream" data-panel-id="job-stream"><span>Jobs</span></a>
+          <a class="cc-nav-item" href="#" data-initial="A" data-nav-action="placeholder" data-placeholder-title="Attempts" data-placeholder-detail="Attempt timeline drill-down is next in the control-surface phase."><span>Attempts</span></a>
+          <a class="cc-nav-item" href="#" data-initial="S" data-nav-action="placeholder" data-placeholder-title="Scheduler" data-placeholder-detail="Scheduler controls will land with recurring-job operations."><span>Scheduler</span></a>
+        </div>
+
+        <div class="cc-section">
+          <span class="cc-section-label"><span>Delivery</span></span>
+          <a class="cc-nav-item" href="#" data-initial="O" data-nav-action="stream" data-panel-id="outbox-stream"><span>Outbox</span></a>
+          <a class="cc-nav-item" href="#" data-initial="E" data-nav-action="inspect" data-inspect-url="/inspect/endpoint/endpoint.webhook.ops"><span>Endpoints</span></a>
+          <a class="cc-nav-item" href="#" data-initial="R" data-nav-action="placeholder" data-placeholder-title="Routing" data-placeholder-detail="Routing map view will be attached to endpoint fan-out metrics."><span>Routing</span></a>
+        </div>
+
+        <div class="cc-section">
+          <span class="cc-section-label"><span>Distributed</span></span>
+          <a class="cc-nav-item" href="#" data-initial="C" data-nav-action="stream" data-panel-id="node-stream"><span>Cluster</span></a>
+          <a class="cc-nav-item" href="#" data-initial="F" data-nav-action="placeholder" data-placeholder-title="Forwarding" data-placeholder-detail="Cross-node forwarding controls will be surfaced with action routes."><span>Forwarding</span></a>
+          <a class="cc-nav-item" href="#" data-initial="N" data-nav-action="stream" data-panel-id="node-stream"><span>Node Health</span></a>
+        </div>
+
+        <div class="cc-section">
+          <span class="cc-section-label"><span>Debugging</span></span>
+          <a class="cc-nav-item" href="#" data-initial="L" data-nav-action="placeholder" data-placeholder-title="Lineage" data-placeholder-detail="Lineage graph exploration is queued after action controls."><span>Lineage</span></a>
+          <a class="cc-nav-item" href="#" data-initial="T" data-nav-action="placeholder" data-placeholder-title="Threads" data-placeholder-detail="Thread and trace explorer will use timeline/event joins."><span>Threads</span></a>
+          <a class="cc-nav-item" href="#" data-initial="R" data-nav-action="placeholder" data-placeholder-title="Replay" data-placeholder-detail="Replay commands are planned with POST control routes."><span>Replay</span></a>
+        </div>
+      </aside>
+
+      <main class="cc-main">
+        <header class="cc-topbar">
+          <div>
+            <div class="cc-topbar-title">Control Plane Cockpit</div>
+            <div class="cc-topbar-ts">Refreshed {{ refreshed_at }}</div>
+          </div>
+          <div class="cc-topbar-right">Everything is inspectable</div>
+        </header>
+
+        <section class="cc-metrics">
+          <article class="cc-metric"><div class="cc-metric-label">Job Throughput</div><div class="cc-metric-value">{{ dto.kpis.job_throughput }}</div></article>
+          <article class="cc-metric"><div class="cc-metric-label">Queue Pressure</div><div class="cc-metric-value">{{ dto.kpis.queue_pressure }}</div></article>
+          <article class="cc-metric"><div class="cc-metric-label">Outbox Lag</div><div class="cc-metric-value">{{ dto.kpis.outbox_lag }}</div></article>
+          <article class="cc-metric"><div class="cc-metric-label">Cluster Health</div><div class="cc-metric-value">{{ dto.kpis.cluster_health }}</div></article>
+          <article class="cc-metric"><div class="cc-metric-label">Endpoint Failure Trend</div><div class="cc-metric-value">{{ dto.kpis.endpoint_failure_rate }}</div></article>
+        </section>
+
+        <section class="cc-panels">
+          <article class="cc-panel">
+            <header class="cc-panel-header">
+              Job Runtime Stream
+              <span class="live-badge"><span class="live-dot"></span>live</span>
+            </header>
+            <div class="cc-panel-body" id="job-stream" hx-get="/stream/jobs" hx-trigger="load, every 3s" hx-swap="innerHTML">
+              <p class="loading">Loading jobs...</p>
+            </div>
+          </article>
+
+          <article class="cc-panel">
+            <header class="cc-panel-header">
+              Outbox Event Stream
+              <span class="live-badge"><span class="live-dot"></span>live</span>
+            </header>
+            <div class="cc-panel-body" id="outbox-stream" hx-get="/stream/outbox" hx-trigger="load, every 3s" hx-swap="innerHTML">
+              <p class="loading">Loading outbox events...</p>
+            </div>
+          </article>
+
+          <article class="cc-panel">
+            <header class="cc-panel-header">Cluster Node Grid</header>
+            <div class="cc-panel-body" id="node-stream" hx-get="/stream/nodes" hx-trigger="load, every 5s" hx-swap="innerHTML">
+              <p class="loading">Loading cluster nodes...</p>
+            </div>
+          </article>
+        </section>
+      </main>
+
+      <aside class="cc-inspect">
+        <div class="cc-inspect-header">Inspector</div>
+        <div class="cc-inspect-body" id="inspector-body">
+          <div class="cc-inspect-empty">Select a row to inspect details</div>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      (function () {
+        var cockpit = document.getElementById("cockpit");
+        var toggle = document.getElementById("sidebar-toggle");
+        var pin = document.getElementById("sidebar-pin");
+        if (!cockpit || !toggle || !pin) {
+          return;
+        }
+
+        var collapseStorageKey = "stasis.dashboard.sidebar.collapsed";
+        var pinStorageKey = "stasis.dashboard.sidebar.pinned";
+
+        function applyCollapsed(collapsed) {
+          cockpit.classList.toggle("sidebar-collapsed", collapsed);
+          toggle.setAttribute("aria-expanded", String(!collapsed));
+          toggle.setAttribute(
+            "aria-label",
+            collapsed ? "Expand command center" : "Collapse command center"
+          );
+        }
+
+        function applyPinned(pinned) {
+          cockpit.classList.toggle("sidebar-pinned", pinned);
+          pin.setAttribute("aria-pressed", String(pinned));
+          pin.textContent = pinned ? "Pinned" : "Pin";
+          pin.setAttribute("aria-label", pinned ? "Unpin command center" : "Pin command center");
+        }
+
+        function readStorageBoolean(key) {
+          try {
+            return window.localStorage.getItem(key) === "1";
+          } catch (e) {
+            return false;
+          }
+        }
+
+        function writeStorageBoolean(key, value) {
+          try {
+            window.localStorage.setItem(key, value ? "1" : "0");
+          } catch (e) {}
+        }
+
+        var userCollapsed = readStorageBoolean(collapseStorageKey);
+        var pinned = readStorageBoolean(pinStorageKey);
+
+        function applyLayout() {
+          var forcedMobileCollapse = window.innerWidth <= 1100 && !pinned;
+          applyCollapsed(forcedMobileCollapse || userCollapsed);
+          applyPinned(pinned);
+        }
+
+        applyLayout();
+
+        toggle.addEventListener("click", function () {
+          userCollapsed = !userCollapsed;
+          writeStorageBoolean(collapseStorageKey, userCollapsed);
+          applyLayout();
+        });
+
+        pin.addEventListener("click", function () {
+          pinned = !pinned;
+          writeStorageBoolean(pinStorageKey, pinned);
+          applyLayout();
+        });
+
+        window.addEventListener("resize", applyLayout);
+
+        function requestInto(element) {
+          var url = element.getAttribute("hx-get");
+          if (!url) {
+            return;
+          }
+
+          var targetSelector = element.getAttribute("hx-target");
+          var swap = element.getAttribute("hx-swap") || "innerHTML";
+          var target = targetSelector ? document.querySelector(targetSelector) : element;
+          if (!target) {
+            return;
+          }
+
+          fetch(url, {
+            method: "GET",
+            headers: {
+              "HX-Request": "true",
+            },
+          })
+            .then(function (response) {
+              if (!response.ok) {
+                throw new Error("Request failed: " + response.status);
+              }
+              return response.text();
+            })
+            .then(function (html) {
+              if (swap === "outerHTML") {
+                target.outerHTML = html;
+              } else {
+                target.innerHTML = html;
+              }
+            })
+            .catch(function (error) {
+              target.innerHTML = '<div class="cc-request-error">Request error: ' + error.message + "</div>";
+            });
+        }
+
+        function parseInterval(triggerPart) {
+          var match = /^every\s+([0-9]+(?:\.[0-9]+)?)(ms|s)$/i.exec(triggerPart.trim());
+          if (!match) {
+            return null;
+          }
+          var value = Number(match[1]);
+          if (!isFinite(value) || value <= 0) {
+            return null;
+          }
+          return match[2].toLowerCase() === "s" ? value * 1000 : value;
+        }
+
+        function initHxLite() {
+          var nodes = document.querySelectorAll("[hx-get][hx-trigger]");
+          nodes.forEach(function (node) {
+            if (node.dataset.hxLiteReady === "1") {
+              return;
+            }
+            node.dataset.hxLiteReady = "1";
+
+            var trigger = node.getAttribute("hx-trigger") || "";
+            var parts = trigger.split(",").map(function (item) {
+              return item.trim();
+            });
+
+            if (parts.indexOf("load") >= 0) {
+              requestInto(node);
+            }
+
+            parts.forEach(function (part) {
+              var interval = parseInterval(part);
+              if (interval) {
+                window.setInterval(function () {
+                  requestInto(node);
+                }, interval);
+              }
+            });
+          });
+        }
+
+        function setInspectorPlaceholder(title, detail) {
+          var target = document.getElementById("inspector-body");
+          if (!target) {
+            return;
+          }
+          target.innerHTML =
+            '<div class="inspector-card"><h3>' +
+            title +
+            '</h3><p class="cc-inspector-note">' +
+            detail +
+            "</p></div>";
+        }
+
+        function activateNavItem(item) {
+          var navItems = document.querySelectorAll(".cc-nav-item");
+          navItems.forEach(function (navItem) {
+            navItem.classList.toggle("active", navItem === item);
+          });
+        }
+
+        document.querySelectorAll(".cc-nav-item").forEach(function (item) {
+          item.addEventListener("click", function (event) {
+            event.preventDefault();
+            activateNavItem(item);
+
+            var action = item.getAttribute("data-nav-action");
+            if (action === "stream") {
+              var panelId = item.getAttribute("data-panel-id");
+              if (!panelId) {
+                return;
+              }
+              var panel = document.getElementById(panelId);
+              if (!panel) {
+                return;
+              }
+              requestInto(panel);
+              panel.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+              return;
+            }
+
+            if (action === "inspect") {
+              var inspectUrl = item.getAttribute("data-inspect-url");
+              if (!inspectUrl) {
+                return;
+              }
+              var proxy = document.createElement("div");
+              proxy.setAttribute("hx-get", inspectUrl);
+              proxy.setAttribute("hx-target", "#inspector-body");
+              proxy.setAttribute("hx-swap", "innerHTML");
+              requestInto(proxy);
+              return;
+            }
+
+            if (action === "placeholder") {
+              var title = item.getAttribute("data-placeholder-title") || "Panel";
+              var detail = item.getAttribute("data-placeholder-detail") || "This section is coming soon.";
+              setInspectorPlaceholder(title, detail);
+            }
+          });
+        });
+
+        document.addEventListener("click", function (event) {
+          var trigger = event.target.closest("[hx-get]");
+          if (!trigger) {
+            return;
+          }
+
+          if (trigger.tagName === "A" || trigger.tagName === "BUTTON") {
+            event.preventDefault();
+          }
+          requestInto(trigger);
+        });
+
+        initHxLite();
+      })();
+    </script>
+  </body>
+</html>

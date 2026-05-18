@@ -1,0 +1,420 @@
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Fraunces:ital,wght@0,300;0,500;1,300&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  .cc-root {
+    display: flex;
+    height: 520px;
+    background: #F0EBE1;
+    border-radius: 10px;
+    overflow: hidden;
+    font-family: 'IBM Plex Mono', monospace;
+    border: 1px solid #D4CAB8;
+  }
+
+  .cc-sidebar {
+    width: 168px;
+    flex-shrink: 0;
+    background: #E6DDD0;
+    border-right: 1px solid #C9BFA9;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 0;
+  }
+
+  .cc-sidebar-logo {
+    font-family: 'Fraunces', serif;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    color: #3D3328;
+    padding: 0 16px 16px;
+    border-bottom: 1px solid #C9BFA9;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+  }
+
+  .cc-section-label {
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    color: #9A8E7D;
+    text-transform: uppercase;
+    padding: 10px 16px 5px;
+  }
+
+  .cc-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    font-size: 12px;
+    color: #5C5044;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: all 0.1s;
+  }
+  .cc-nav-item:hover { background: #DDD4C5; color: #2A2017; }
+  .cc-nav-item.active {
+    color: #2A2017;
+    background: #D4C9B5;
+    border-left: 2px solid #8B6F47;
+    font-weight: 500;
+  }
+  .cc-nav-item i { font-size: 13px; opacity: 0.7; }
+
+  .cc-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .cc-topbar {
+    padding: 12px 20px 10px;
+    border-bottom: 1px solid #C9BFA9;
+    background: #EDE6D9;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+
+  .cc-topbar-title {
+    font-family: 'Fraunces', serif;
+    font-size: 15px;
+    font-weight: 500;
+    color: #2A2017;
+    font-style: italic;
+  }
+
+  .cc-topbar-ts {
+    font-size: 10px;
+    color: #9A8E7D;
+    letter-spacing: 0.05em;
+    margin-top: 2px;
+  }
+
+  .cc-topbar-right {
+    font-size: 10px;
+    color: #9A8E7D;
+    letter-spacing: 0.06em;
+  }
+
+  .cc-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    border-bottom: 1px solid #C9BFA9;
+  }
+
+  .cc-metric {
+    padding: 14px 18px;
+    border-right: 1px solid #C9BFA9;
+  }
+  .cc-metric:last-child { border-right: none; }
+
+  .cc-metric-label {
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #9A8E7D;
+    margin-bottom: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cc-metric-value {
+    font-size: 18px;
+    font-weight: 500;
+    color: #2A2017;
+    line-height: 1.1;
+  }
+
+  .cc-metric-sub {
+    font-size: 10px;
+    color: #7A6E60;
+    margin-top: 4px;
+  }
+
+  .pill {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 3px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .pill-warn { background: #F5D49A; color: #7A4F0A; }
+  .pill-ok   { background: #B8D9B0; color: #1E5E18; }
+  .pill-bad  { background: #F5B4A8; color: #7A1C10; }
+
+  .cc-panels {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+    min-height: 0;
+  }
+
+  .cc-panel {
+    border-right: 1px solid #C9BFA9;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .cc-panel:last-child { border-right: none; }
+
+  .cc-panel-header {
+    padding: 10px 16px;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #9A8E7D;
+    border-bottom: 1px solid #C9BFA9;
+    background: #EAE3D6;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .cc-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 14px;
+  }
+
+  .cc-stream-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid #D9D0C1;
+    font-size: 10px;
+    color: #5C5044;
+  }
+  .cc-stream-row:last-child { border-bottom: none; }
+
+  .cc-stream-ts { color: #9A8E7D; min-width: 64px; }
+  .cc-stream-id { color: #3D3328; font-weight: 500; min-width: 70px; }
+
+  .status-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  }
+  .dot-ok  { background: #4E9645; }
+  .dot-run { background: #C28B18; }
+  .dot-fail{ background: #C23A2A; }
+
+  .cc-node-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding: 12px 14px;
+  }
+
+  .cc-node {
+    background: #E6DDD0;
+    border: 1px solid #C9BFA9;
+    border-radius: 5px;
+    padding: 8px 10px;
+    font-size: 10px;
+  }
+  .cc-node-name { font-weight: 500; color: #2A2017; margin-bottom: 3px; }
+  .cc-node-stat { color: #7A6E60; font-size: 9px; }
+  .cc-node.degraded { border-left: 3px solid #C28B18; }
+  .cc-node.healthy  { border-left: 3px solid #4E9645; }
+
+  .cc-inspect {
+    width: 220px;
+    flex-shrink: 0;
+    background: #EDE6D9;
+    border-left: 1px solid #C9BFA9;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .cc-inspect-header {
+    padding: 10px 14px;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #9A8E7D;
+    border-bottom: 1px solid #C9BFA9;
+    background: #E6DDD0;
+  }
+
+  .cc-inspect-body {
+    flex: 1;
+    padding: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .cc-inspect-empty {
+    text-align: center;
+    color: #9A8E7D;
+    font-size: 10px;
+    line-height: 1.7;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 300;
+  }
+
+  .live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 9px;
+    color: #9A8E7D;
+  }
+  .live-dot {
+    width: 5px; height: 5px; border-radius: 50%; background: #4E9645;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+</style>
+
+<h2 class="sr-only">Command Center dashboard showing control plane cockpit with job throughput, queue pressure, outbox lag, cluster health, and endpoint failure trend metrics alongside live job, outbox event, and cluster node streams.</h2>
+
+<div class="cc-root">
+
+  <div class="cc-sidebar">
+    <div class="cc-sidebar-logo">Command Center</div>
+
+    <div class="cc-section-label">Execution</div>
+    <div class="cc-nav-item active"><i class="ti ti-player-play" aria-hidden="true"></i> Jobs</div>
+    <div class="cc-nav-item"><i class="ti ti-refresh" aria-hidden="true"></i> Attempts</div>
+    <div class="cc-nav-item"><i class="ti ti-calendar" aria-hidden="true"></i> Scheduler</div>
+
+    <div class="cc-section-label">Delivery</div>
+    <div class="cc-nav-item"><i class="ti ti-mail" aria-hidden="true"></i> Outbox</div>
+    <div class="cc-nav-item"><i class="ti ti-plug" aria-hidden="true"></i> Endpoints</div>
+    <div class="cc-nav-item"><i class="ti ti-route" aria-hidden="true"></i> Routing</div>
+
+    <div class="cc-section-label">Distributed</div>
+    <div class="cc-nav-item"><i class="ti ti-topology-star" aria-hidden="true"></i> Cluster</div>
+    <div class="cc-nav-item"><i class="ti ti-arrows-right-left" aria-hidden="true"></i> Forwarding</div>
+    <div class="cc-nav-item"><i class="ti ti-activity" aria-hidden="true"></i> Node Health</div>
+
+    <div class="cc-section-label">Debugging</div>
+    <div class="cc-nav-item"><i class="ti ti-git-branch" aria-hidden="true"></i> Lineage</div>
+    <div class="cc-nav-item"><i class="ti ti-subtask" aria-hidden="true"></i> Threads</div>
+    <div class="cc-nav-item"><i class="ti ti-history" aria-hidden="true"></i> Replay</div>
+  </div>
+
+  <div class="cc-main">
+    <div class="cc-topbar">
+      <div>
+        <div class="cc-topbar-title">Control Plane Cockpit</div>
+        <div class="cc-topbar-ts">refreshed 2026-05-18 · 01:24:41 UTC</div>
+      </div>
+      <div class="cc-topbar-right">everything is inspectable</div>
+    </div>
+
+    <div class="cc-metrics">
+      <div class="cc-metric">
+        <div class="cc-metric-label">Job Throughput</div>
+        <div class="cc-metric-value">134<span style="font-size:12px; color:#7A6E60">/s</span></div>
+        <div class="cc-metric-sub">2.1% fail <span class="pill pill-warn">↑ watch</span></div>
+      </div>
+      <div class="cc-metric">
+        <div class="cc-metric-label">Queue Pressure</div>
+        <div class="cc-metric-value">1.8</div>
+        <div class="cc-metric-sub">enqueued / running</div>
+      </div>
+      <div class="cc-metric">
+        <div class="cc-metric-label">Outbox Lag</div>
+        <div class="cc-metric-value">12<span style="font-size:12px; color:#7A6E60"> pend</span></div>
+        <div class="cc-metric-sub">2 failed <span class="pill pill-bad">action needed</span></div>
+      </div>
+      <div class="cc-metric">
+        <div class="cc-metric-label">Endpoint Failure</div>
+        <div class="cc-metric-value">3.9<span style="font-size:12px; color:#7A6E60">%</span></div>
+        <div class="cc-metric-sub">trend worsening <span class="pill pill-bad">↑</span></div>
+      </div>
+    </div>
+
+    <div class="cc-panels">
+      <div class="cc-panel">
+        <div class="cc-panel-header">
+          Job Runtime Stream
+          <span class="live-badge"><span class="live-dot"></span>live</span>
+        </div>
+        <div class="cc-panel-body">
+          <div class="cc-stream-row"><span class="status-dot dot-ok"></span><span class="cc-stream-ts">01:24:40</span><span class="cc-stream-id">job_8f2a</span><span>completed · 142ms</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-run"></span><span class="cc-stream-ts">01:24:39</span><span class="cc-stream-id">job_9c1e</span><span>running · 2.1s</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-fail"></span><span class="cc-stream-ts">01:24:37</span><span class="cc-stream-id">job_3b4d</span><span>failed · timeout</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-ok"></span><span class="cc-stream-ts">01:24:36</span><span class="cc-stream-id">job_1a9f</span><span>completed · 89ms</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-ok"></span><span class="cc-stream-ts">01:24:35</span><span class="cc-stream-id">job_7e6c</span><span>completed · 203ms</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-run"></span><span class="cc-stream-ts">01:24:33</span><span class="cc-stream-id">job_2d5b</span><span>running · 8.4s</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-ok"></span><span class="cc-stream-ts">01:24:31</span><span class="cc-stream-id">job_6f0a</span><span>completed · 67ms</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-fail"></span><span class="cc-stream-ts">01:24:28</span><span class="cc-stream-id">job_4c3e</span><span>failed · conn err</span></div>
+        </div>
+      </div>
+
+      <div class="cc-panel">
+        <div class="cc-panel-header">
+          Outbox Event Stream
+          <span class="live-badge"><span class="live-dot"></span>live</span>
+        </div>
+        <div class="cc-panel-body">
+          <div class="cc-stream-row"><span class="status-dot dot-ok"></span><span class="cc-stream-ts">01:24:41</span><span class="cc-stream-id">evt_c3a1</span><span>delivered · ep_02</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-run"></span><span class="cc-stream-ts">01:24:40</span><span class="cc-stream-id">evt_d7f2</span><span>pending · ep_01</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-run"></span><span class="cc-stream-ts">01:24:39</span><span class="cc-stream-id">evt_a1b9</span><span>pending · ep_04</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-fail"></span><span class="cc-stream-ts">01:24:37</span><span class="cc-stream-id">evt_e5c0</span><span>failed · ep_03 404</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-ok"></span><span class="cc-stream-ts">01:24:35</span><span class="cc-stream-id">evt_b2d4</span><span>delivered · ep_01</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-ok"></span><span class="cc-stream-ts">01:24:32</span><span class="cc-stream-id">evt_f9a3</span><span>delivered · ep_02</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-fail"></span><span class="cc-stream-ts">01:24:29</span><span class="cc-stream-id">evt_g4b1</span><span>failed · ep_03 503</span></div>
+          <div class="cc-stream-row"><span class="status-dot dot-ok"></span><span class="cc-stream-ts">01:24:26</span><span class="cc-stream-id">evt_h0e5</span><span>delivered · ep_04</span></div>
+        </div>
+      </div>
+
+      <div class="cc-panel" style="border-right:none;">
+        <div class="cc-panel-header">Cluster Node Grid</div>
+        <div class="cc-node-grid">
+          <div class="cc-node healthy">
+            <div class="cc-node-name">node-01</div>
+            <div class="cc-node-stat">134 jobs · 12ms p99</div>
+          </div>
+          <div class="cc-node healthy">
+            <div class="cc-node-name">node-02</div>
+            <div class="cc-node-stat">98 jobs · 9ms p99</div>
+          </div>
+          <div class="cc-node degraded">
+            <div class="cc-node-name">node-03</div>
+            <div class="cc-node-stat">41 jobs · 340ms p99</div>
+          </div>
+          <div class="cc-node healthy">
+            <div class="cc-node-name">node-04</div>
+            <div class="cc-node-stat">117 jobs · 15ms p99</div>
+          </div>
+          <div class="cc-node healthy">
+            <div class="cc-node-name">node-05</div>
+            <div class="cc-node-stat">88 jobs · 11ms p99</div>
+          </div>
+          <div class="cc-node healthy" style="opacity:0.5;">
+            <div class="cc-node-name">node-06</div>
+            <div class="cc-node-stat">idle</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cc-inspect">
+    <div class="cc-inspect-header">Inspector</div>
+    <div class="cc-inspect-body">
+      <div class="cc-inspect-empty">select a row<br>to inspect details</div>
+    </div>
+  </div>
+
+</div>
