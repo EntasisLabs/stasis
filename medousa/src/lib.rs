@@ -2,6 +2,7 @@ pub mod events;
 pub mod daemon_api;
 pub mod settings_guard;
 pub mod session;
+pub mod tui;
 pub mod tools;
 
 use std::sync::Arc;

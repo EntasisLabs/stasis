@@ -25,7 +25,6 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use medousa::{
-    tools::extract_module_ops_from_source,
     build_tui_runtime,
     EnqueueAskRequest,
     EnqueueResponse,
@@ -43,9 +42,20 @@ use medousa::{
         save_tui_defaults, ApiKeyStorageBackend, ConversationTurn, SessionHistorySummary,
         TuiDefaults,
     },
+    tui::allowlist_preview::analyze_allowlist_preview,
+    tui::settings::{
+        RuntimeSettings, cycle_backend, cycle_tool_call_mode, parse_bool_with_default,
+        parse_usize_with_bounds, resolve_backend_name, resolve_bool_arg,
+        resolve_tool_call_mode_name, resolve_usize_arg, settings_validation_errors,
+    },
 };
 use stasis::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolLoopExecutionRequest};
 use stasis::prelude::{ChatMessage, PromptExecutionContext};
+
+#[path = "medousa_tui/command_preview_ui.rs"]
+mod command_preview_ui;
+#[path = "medousa_tui/settings_ui.rs"]
+mod settings_ui;
 
 static SYSTEM_PROMPT: &str = r#"You are operating inside Medousa, a tool-first runtime assistant environment.
 
@@ -149,20 +159,6 @@ enum UiMode {
     AllowlistPreview,
     ThinkingPeek,
     ThinkingPanel,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeSettings {
-    backend: String,
-    provider: String,
-    model: String,
-    base_url: String,
-    api_key: String,
-    allowed_modules: String,
-    tool_call_mode: String,
-    max_tool_rounds: String,
-    thinking_capture: String,
-    thinking_max_lines: String,
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -610,149 +606,7 @@ fn handle_observability_key_event(code: KeyCode, state: &mut TuiState) -> EventO
 }
 
 fn handle_allowlist_preview_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
-    let analysis = analyze_allowlist_preview(
-        &state.allowlist_preview_source,
-        &state.settings_draft.allowed_modules,
-    );
-
-    match code {
-        KeyCode::Backspace => {
-            state.allowlist_preview_source.pop();
-        }
-        KeyCode::Char(c) => {
-            state.allowlist_preview_source.push(c);
-        }
-        KeyCode::Enter => {
-            state.allowlist_preview_source.push('\n');
-        }
-        KeyCode::Tab => {
-            if !analysis.invalid_allowlist.is_empty() {
-                push_obs(
-                    state,
-                    format!(
-                        "⚠ allowlist preview invalid allowlist ids: {}",
-                        analysis.invalid_allowlist.join(", ")
-                    ),
-                );
-                return EventOutcome::Continue;
-            }
-            if analysis.referenced_ops.is_empty() {
-                push_obs(
-                    state,
-                    "allowlist preview: no module operation calls found in source".to_string(),
-                );
-                return EventOutcome::Continue;
-            }
-            if analysis.blocked_ops.is_empty() {
-                push_obs(
-                    state,
-                    format!(
-                        "✓ allowlist preview: all referenced ops allowed ({})",
-                        analysis.referenced_ops.join(", ")
-                    ),
-                );
-            } else {
-                push_obs(
-                    state,
-                    format!(
-                        "⚠ allowlist preview: blocked ops {}",
-                        analysis.blocked_ops.join(", ")
-                    ),
-                );
-            }
-        }
-        KeyCode::F(5) => {
-            if analysis.referenced_ops.is_empty() {
-                push_obs(
-                    state,
-                    "⚠ allowlist preview replace skipped: no referenced ops detected"
-                        .to_string(),
-                );
-            } else {
-                state.settings_draft.allowed_modules = analysis.referenced_ops.join(",");
-                push_obs(
-                    state,
-                    format!(
-                        "✓ allowlist preview replaced draft allowlist with {} op(s)",
-                        analysis.referenced_ops.len()
-                    ),
-                );
-            }
-        }
-        KeyCode::F(6) => {
-            if analysis.referenced_ops.is_empty() {
-                push_obs(
-                    state,
-                    "⚠ allowlist preview append skipped: no referenced ops detected".to_string(),
-                );
-            } else {
-                let mut merged = parse_allowed_modules(&state.settings_draft.allowed_modules);
-                let mut seen = merged
-                    .iter()
-                    .cloned()
-                    .collect::<HashSet<String>>();
-
-                let mut appended = 0usize;
-                for op in &analysis.referenced_ops {
-                    if seen.insert(op.clone()) {
-                        merged.push(op.clone());
-                        appended += 1;
-                    }
-                }
-
-                state.settings_draft.allowed_modules = merged.join(",");
-                push_obs(
-                    state,
-                    format!(
-                        "✓ allowlist preview appended {appended} op(s) to draft allowlist"
-                    ),
-                );
-            }
-        }
-        _ => {}
-    }
-    EventOutcome::Continue
-}
-
-struct AllowlistPreviewAnalysis {
-    referenced_ops: Vec<String>,
-    blocked_ops: Vec<String>,
-    invalid_allowlist: Vec<String>,
-}
-
-fn analyze_allowlist_preview(source: &str, allowed_modules_csv: &str) -> AllowlistPreviewAnalysis {
-    let referenced_ops = extract_module_ops_from_source(source);
-    let allowed_modules = parse_allowed_modules(allowed_modules_csv);
-    let invalid_allowlist = invalid_module_ids(&allowed_modules);
-
-    if !invalid_allowlist.is_empty() {
-        return AllowlistPreviewAnalysis {
-            referenced_ops,
-            blocked_ops: Vec::new(),
-            invalid_allowlist,
-        };
-    }
-
-    if allowed_modules.is_empty() {
-        return AllowlistPreviewAnalysis {
-            referenced_ops,
-            blocked_ops: Vec::new(),
-            invalid_allowlist,
-        };
-    }
-
-    let allowed_set = allowed_modules.into_iter().collect::<HashSet<_>>();
-    let blocked_ops = referenced_ops
-        .iter()
-        .filter(|op| !allowed_set.contains(op.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    AllowlistPreviewAnalysis {
-        referenced_ops,
-        blocked_ops,
-        invalid_allowlist,
-    }
+    command_preview_ui::handle_allowlist_preview_key_event(code, state)
 }
 
 fn start_prompt_run(
@@ -1219,124 +1073,13 @@ async fn daemon_register_recurring_prompt(
     Ok(response.json::<RegisterRecurringResponse>().await?)
 }
 
-#[derive(Clone, Copy)]
-struct PaletteAction {
-    title: &'static str,
-    command: &'static str,
-}
-
-const PALETTE_ACTIONS: [PaletteAction; 14] = [
-    PaletteAction {
-        title: "New Session",
-        command: "/new",
-    },
-    PaletteAction {
-        title: "Open History",
-        command: "/history",
-    },
-    PaletteAction {
-        title: "Open Settings",
-        command: "/settings",
-    },
-    PaletteAction {
-        title: "Allowlist Preview",
-        command: "/allowlist-preview",
-    },
-    PaletteAction {
-        title: "Clear API Key",
-        command: "/clear-key",
-    },
-    PaletteAction {
-        title: "Rotate API Key",
-        command: "/rotate-key",
-    },
-    PaletteAction {
-        title: "Show Current Model",
-        command: "/model",
-    },
-    PaletteAction {
-        title: "Stop Generation",
-        command: "/stop",
-    },
-    PaletteAction {
-        title: "Regenerate Last Response",
-        command: "/regen",
-    },
-    PaletteAction {
-        title: "Export Transcript (Markdown)",
-        command: "/export md",
-    },
-    PaletteAction {
-        title: "Export Transcript (JSONL)",
-        command: "/export jsonl",
-    },
-    PaletteAction {
-        title: "Set Model (Open Settings)",
-        command: "/settings",
-    },
-    PaletteAction {
-        title: "Daemon Health",
-        command: "/daemon health",
-    },
-    PaletteAction {
-        title: "Daemon Command Help",
-        command: "/daemon",
-    },
-];
-
-fn filtered_palette_actions(query: &str) -> Vec<PaletteAction> {
-    let q = query.trim().to_ascii_lowercase();
-    if q.is_empty() {
-        return PALETTE_ACTIONS.to_vec();
-    }
-
-    PALETTE_ACTIONS
-        .iter()
-        .copied()
-        .filter(|action| {
-            action.title.to_ascii_lowercase().contains(&q)
-                || action.command.to_ascii_lowercase().contains(&q)
-        })
-        .collect()
-}
-
 async fn handle_command_palette_key_event(
     code: KeyCode,
     state: &mut TuiState,
     tui_rt: &mut TuiRuntime,
     event_tx: &mpsc::Sender<TuiEvent>,
 ) -> EventOutcome {
-    match code {
-        KeyCode::Backspace => {
-            state.command_query.pop();
-            state.command_selected = 0;
-        }
-        KeyCode::Char(c) => {
-            state.command_query.push(c);
-            state.command_selected = 0;
-        }
-        KeyCode::Up => {
-            state.command_selected = state.command_selected.saturating_sub(1);
-        }
-        KeyCode::Down => {
-            let max = filtered_palette_actions(&state.command_query)
-                .len()
-                .saturating_sub(1);
-            state.command_selected = (state.command_selected + 1).min(max);
-        }
-        KeyCode::Enter => {
-            let actions = filtered_palette_actions(&state.command_query);
-            if let Some(action) = actions.get(state.command_selected).copied() {
-                state.mode = UiMode::Chat;
-                state.command_query.clear();
-                state.command_selected = 0;
-                return handle_slash_command(action.command, state, tui_rt, event_tx).await;
-            }
-        }
-        _ => {}
-    }
-
-    EventOutcome::Continue
+    command_preview_ui::handle_command_palette_key_event(code, state, tui_rt, event_tx).await
 }
 
 fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
@@ -1517,178 +1260,11 @@ async fn handle_settings_key_event(
     tui_rt: &mut TuiRuntime,
     event_tx: &mpsc::Sender<TuiEvent>,
 ) -> EventOutcome {
-    if state.settings_editing {
-        match code {
-            KeyCode::Enter => {
-                state.settings_editing = false;
-            }
-            KeyCode::Backspace => {
-                let target = selected_settings_field_mut(state);
-                target.pop();
-            }
-            KeyCode::Char(c) => {
-                let target = selected_settings_field_mut(state);
-                target.push(c);
-            }
-            _ => {}
-        }
-        return EventOutcome::Continue;
-    }
-
-    match code {
-        KeyCode::Char(' ') | KeyCode::Right => {
-            quick_adjust_setting(state, true);
-        }
-        KeyCode::Left => {
-            quick_adjust_setting(state, false);
-        }
-        KeyCode::Char('+') | KeyCode::Char('=') => {
-            if state.settings_selected == 7 || state.settings_selected == 9 {
-                quick_adjust_setting(state, true);
-            }
-        }
-        KeyCode::Char('-') => {
-            if state.settings_selected == 7 || state.settings_selected == 9 {
-                quick_adjust_setting(state, false);
-            }
-        }
-        KeyCode::Up => {
-            state.settings_selected = state.settings_selected.saturating_sub(1);
-        }
-        KeyCode::Down => {
-            state.settings_selected = (state.settings_selected + 1).min(15);
-        }
-        KeyCode::Enter => match state.settings_selected {
-            1..=5 => {
-                state.settings_editing = true;
-            }
-            0 | 6 | 7 | 8 | 9 => {
-                quick_adjust_setting(state, true);
-            }
-            10 => {
-                emit_settings_validation_summary(state);
-            }
-            11 => {
-                state.settings_draft.api_key.clear();
-                push_obs(state, "✓ settings draft: api key marked for clear".to_string());
-            }
-            12 => {
-                let key = state.settings_draft.api_key.trim().to_string();
-                if key.is_empty() {
-                    push_obs(
-                        state,
-                        "⚠ key rotation requires a non-empty draft API key".to_string(),
-                    );
-                } else {
-                    save_tui_api_key(Some(&key));
-                    state.settings.api_key = key.clone();
-                    state.settings_draft.api_key = key;
-                    push_obs(state, "✓ api key rotated in secure storage".to_string());
-                }
-            }
-            13 => {
-                state.settings_draft = state.settings.clone();
-                state.settings_editing = false;
-                push_obs(state, "✓ settings draft reverted to last applied".to_string());
-            }
-            14 => {
-                apply_settings(state, tui_rt, event_tx).await;
-                state.mode = UiMode::Chat;
-            }
-            15 => {
-                state.settings_draft = state.settings.clone();
-                state.mode = UiMode::Chat;
-            }
-            _ => {}
-        },
-        _ => {}
-    }
-
-    EventOutcome::Continue
-}
-
-fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
-    match state.settings_selected {
-        0 => {
-            state.settings_draft.backend = cycle_backend(&state.settings_draft.backend, forward);
-        }
-        6 => {
-            state.settings_draft.tool_call_mode =
-                cycle_tool_call_mode(&state.settings_draft.tool_call_mode, forward);
-        }
-        7 => {
-            let current = parse_usize_with_bounds(&state.settings_draft.max_tool_rounds, 10, 1, 50);
-            let step = if current < 20 { 1 } else { 5 };
-            let next = if forward {
-                current.saturating_add(step)
-            } else {
-                current.saturating_sub(step)
-            }
-            .clamp(1, 50);
-            state.settings_draft.max_tool_rounds = next.to_string();
-        }
-        8 => {
-            let value = parse_bool_with_default(&state.settings_draft.thinking_capture, true);
-            state.settings_draft.thinking_capture = (!value).to_string();
-        }
-        9 => {
-            let current = parse_usize_with_bounds(&state.settings_draft.thinking_max_lines, 300, 50, 5000);
-            let step = if current < 500 { 50 } else { 100 };
-            let next = if forward {
-                current.saturating_add(step)
-            } else {
-                current.saturating_sub(step)
-            }
-            .clamp(50, 5000);
-            state.settings_draft.thinking_max_lines = next.to_string();
-        }
-        _ => {}
-    }
-}
-
-fn selected_settings_field_mut(state: &mut TuiState) -> &mut String {
-    match state.settings_selected {
-        0 => &mut state.settings_draft.backend,
-        1 => &mut state.settings_draft.provider,
-        2 => &mut state.settings_draft.model,
-        3 => &mut state.settings_draft.base_url,
-        4 => &mut state.settings_draft.api_key,
-        5 => &mut state.settings_draft.allowed_modules,
-        6 => &mut state.settings_draft.tool_call_mode,
-        7 => &mut state.settings_draft.max_tool_rounds,
-        8 => &mut state.settings_draft.thinking_capture,
-        9 => &mut state.settings_draft.thinking_max_lines,
-        _ => &mut state.settings_draft.base_url,
-    }
-}
-
-fn settings_validation_errors(settings: &RuntimeSettings) -> Vec<String> {
-    let mut errors = Vec::new();
-    let allowed_modules = parse_allowed_modules(&settings.allowed_modules);
-    let invalid_modules = invalid_module_ids(&allowed_modules);
-    if !invalid_modules.is_empty() {
-        errors.push(format!(
-            "invalid allowed module ids: {}",
-            invalid_modules.join(", ")
-        ));
-    }
-    errors
+    settings_ui::handle_settings_key_event(code, state, tui_rt, event_tx).await
 }
 
 fn emit_settings_validation_summary(state: &mut TuiState) -> bool {
-    let errors = settings_validation_errors(&state.settings_draft);
-    if errors.is_empty() {
-        push_obs(
-            state,
-            "✓ settings validation passed (draft ready to apply)".to_string(),
-        );
-        true
-    } else {
-        for error in errors {
-            push_obs(state, format!("⚠ settings validation: {error}"));
-        }
-        false
-    }
+    settings_ui::emit_settings_validation_summary(state)
 }
 
 async fn apply_settings(
@@ -2341,284 +1917,15 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
 }
 
 fn render_command_palette_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
-    let area = frame.area();
-    let popup = centered_rect(area, 72, 58);
-    frame.render_widget(Clear, popup);
-
-    let actions = filtered_palette_actions(&state.command_query);
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        format!(" Query: {}", state.command_query),
-        Style::default().fg(Color::Cyan),
-    )));
-    lines.push(Line::from(Span::styled(
-        " Up/Down: select  Enter: run  Esc/Ctrl+K: close ",
-        Style::default().fg(Color::DarkGray),
-    )));
-    lines.push(Line::from(""));
-
-    if actions.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "No matching commands.",
-            Style::default().fg(Color::Gray),
-        )));
-    } else {
-        for (idx, action) in actions.iter().enumerate() {
-            let marker = if idx == state.command_selected { ">" } else { " " };
-            let style = if idx == state.command_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            lines.push(Line::from(Span::styled(
-                format!("{marker} {}  ({})", action.title, action.command),
-                style,
-            )));
-        }
-    }
-
-    let panel = Paragraph::new(Text::from(lines))
-        .block(
-            Block::default()
-                .title(" Command Palette ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(ui_accent_primary()))
-                .style(Style::default().bg(ui_modal_bg())),
-        )
-        .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(panel, popup);
+    command_preview_ui::render_command_palette_overlay(frame, state)
 }
 
 fn render_allowlist_preview_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
-    let area = frame.area();
-    let popup = centered_rect(area, 86, 70);
-    frame.render_widget(Clear, popup);
-
-    let analysis = analyze_allowlist_preview(
-        &state.allowlist_preview_source,
-        &state.settings_draft.allowed_modules,
-    );
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        " Type source, Enter: newline, Tab: emit verdict, F5: replace allowlist, F6: append allowlist, Esc: close ",
-        Style::default().fg(Color::DarkGray),
-    )));
-    lines.push(Line::from(Span::styled(
-        " Uses same parser/policy shape as runtime module enforcement ",
-        Style::default().fg(Color::Cyan),
-    )));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!(
-            "Draft allowlist: {}",
-            if state.settings_draft.allowed_modules.trim().is_empty() {
-                "(all operations allowed)".to_string()
-            } else {
-                state.settings_draft.allowed_modules.clone()
-            }
-        ),
-        Style::default().fg(Color::White),
-    )));
-    lines.push(Line::from(Span::styled("Source (editable):", Style::default().fg(Color::Yellow))));
-    if state.allowlist_preview_source.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  (empty)",
-            Style::default().fg(Color::Gray),
-        )));
-    } else {
-        for (idx, source_line) in state.allowlist_preview_source.lines().enumerate() {
-            lines.push(Line::from(Span::styled(
-                format!("  {:>2}: {}", idx + 1, source_line),
-                Style::default().fg(Color::Yellow),
-            )));
-        }
-    }
-    lines.push(Line::from(""));
-
-    if !analysis.invalid_allowlist.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "Invalid allowlist IDs: {}",
-                analysis.invalid_allowlist.join(", ")
-            ),
-            Style::default().fg(Color::Red),
-        )));
-    } else {
-        lines.push(Line::from(Span::styled(
-            if analysis.blocked_ops.is_empty() {
-                "Verdict: ALLOW".to_string()
-            } else {
-                "Verdict: BLOCK".to_string()
-            },
-            Style::default().fg(if analysis.blocked_ops.is_empty() {
-                Color::Green
-            } else {
-                Color::Red
-            }),
-        )));
-    }
-    lines.push(Line::from(""));
-
-    lines.push(Line::from(Span::styled(
-        "Referenced Ops:",
-        Style::default().fg(Color::Cyan),
-    )));
-    if analysis.referenced_ops.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  (none detected)",
-            Style::default().fg(Color::Gray),
-        )));
-    } else {
-        for op in &analysis.referenced_ops {
-            lines.push(Line::from(Span::styled(
-                format!("  - {op}"),
-                Style::default().fg(Color::White),
-            )));
-        }
-    }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Blocked Ops:",
-        Style::default().fg(Color::Cyan),
-    )));
-    if analysis.blocked_ops.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  (none)",
-            Style::default().fg(Color::Green),
-        )));
-    } else {
-        for op in &analysis.blocked_ops {
-            lines.push(Line::from(Span::styled(
-                format!("  - {op}"),
-                Style::default().fg(Color::Red),
-            )));
-        }
-    }
-
-    let panel = Paragraph::new(Text::from(lines))
-        .block(
-            Block::default()
-                .title(" Allowlist Preview ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(ui_accent_primary()))
-                .style(Style::default().bg(ui_modal_bg())),
-        )
-        .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(panel, popup);
+    command_preview_ui::render_allowlist_preview_overlay(frame, state)
 }
 
 fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
-    let area = frame.area();
-    let popup = centered_rect(area, 76, 62);
-    frame.render_widget(Clear, popup);
-
-    let mut lines: Vec<Line> = Vec::new();
-    let has_pending_changes = state.settings_draft != state.settings;
-    let validation_errors = settings_validation_errors(&state.settings_draft);
-    let validation_line = if validation_errors.is_empty() {
-        " Validation: OK (draft can be applied) ".to_string()
-    } else {
-        format!(
-            " Validation: {} issue(s) - press Validate Draft for details ",
-            validation_errors.len()
-        )
-    };
-    lines.push(Line::from(Span::styled(
-        if has_pending_changes {
-            " Draft has unapplied changes "
-        } else {
-            " Draft matches applied settings "
-        },
-        Style::default().fg(if has_pending_changes {
-            Color::Yellow
-        } else {
-            Color::Green
-        }),
-    )));
-    lines.push(Line::from(Span::styled(
-        format!(" Secret backend: {} ", api_key_storage_backend_label()),
-        Style::default().fg(Color::Cyan),
-    )));
-    lines.push(Line::from(Span::styled(
-        validation_line,
-        Style::default().fg(if validation_errors.is_empty() {
-            Color::Green
-        } else {
-            Color::Red
-        }),
-    )));
-    lines.push(Line::from(Span::styled(
-        " Up/Down: select  Enter: edit/action  Space/Left/Right: quick toggle  +/-: adjust number  Ctrl+,/Esc: cancel ",
-        Style::default().fg(Color::DarkGray),
-    )));
-    lines.push(Line::from(""));
-
-    let rows = vec![
-        format!("Backend: {}  [toggle]", state.settings_draft.backend),
-        format!("Provider: {}  [edit]", state.settings_draft.provider),
-        format!("Model: {}  [edit]", state.settings_draft.model),
-        format!(
-            "Base URL: {}  [edit]",
-            if state.settings_draft.base_url.is_empty() {
-                "(auto)".to_string()
-            } else {
-                state.settings_draft.base_url.clone()
-            }
-        ),
-        format!(
-            "API Key: {}  [edit, secret]",
-            mask_secret_value(&state.settings_draft.api_key)
-        ),
-        format!(
-            "Allowed Grapheme Modules: {}  [edit]",
-            if state.settings_draft.allowed_modules.trim().is_empty() {
-                "(all)".to_string()
-            } else {
-                state.settings_draft.allowed_modules.clone()
-            }
-        ),
-        format!("Tool Call Mode: {}  [toggle]", state.settings_draft.tool_call_mode),
-        format!("Max Tool Rounds: {}  [number]", state.settings_draft.max_tool_rounds),
-        format!("Thinking Capture: {}  [toggle]", state.settings_draft.thinking_capture),
-        format!("Thinking Max Lines: {}  [number]", state.settings_draft.thinking_max_lines),
-        "Validate Draft  [action]".to_string(),
-        "Clear API Key (Draft)  [action]".to_string(),
-        "Rotate API Key (Persist Draft)  [action]".to_string(),
-        "Revert to Last Applied  [action]".to_string(),
-        "Apply and Save  [action]".to_string(),
-        "Cancel (Discard Draft)  [action]".to_string(),
-    ];
-
-    for (idx, row) in rows.iter().enumerate() {
-        let marker = if idx == state.settings_selected { ">" } else { " " };
-        let mut style = if idx == state.settings_selected {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::White)
-        };
-
-        if idx == state.settings_selected && state.settings_editing && idx <= 9 {
-            style = style.add_modifier(Modifier::UNDERLINED);
-        }
-
-        lines.push(Line::from(Span::styled(format!("{marker} {row}"), style)));
-    }
-
-    let panel = Paragraph::new(Text::from(lines))
-        .block(
-            Block::default()
-                .title(" Settings ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(ui_accent_primary()))
-                .style(Style::default().bg(ui_modal_bg())),
-        )
-        .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(panel, popup);
+    settings_ui::render_settings_overlay(frame, state)
 }
 
 fn ui_bg() -> Color {
@@ -2811,93 +2118,12 @@ fn api_key_storage_backend_label() -> &'static str {
     }
 }
 
-fn resolve_backend_name(value: Option<&str>) -> String {
-    match value.unwrap_or("surreal-mem").trim() {
-        "in-memory" => "in-memory".to_string(),
-        "surreal-mem" => "surreal-mem".to_string(),
-        _ => "surreal-mem".to_string(),
-    }
-}
-
-fn cycle_backend(current: &str, forward: bool) -> String {
-    let choices = ["surreal-mem", "in-memory"];
-    cycle_choice(current, &choices, forward)
-}
-
-fn resolve_tool_call_mode_name(value: Option<&str>) -> String {
-    match value.unwrap_or("auto").trim().to_ascii_lowercase().as_str() {
-        "strict" => "strict".to_string(),
-        _ => "auto".to_string(),
-    }
-}
-
-fn cycle_tool_call_mode(current: &str, forward: bool) -> String {
-    let choices = ["auto", "strict"];
-    cycle_choice(current, &choices, forward)
-}
-
-fn cycle_choice(current: &str, choices: &[&str], forward: bool) -> String {
-    if choices.is_empty() {
-        return current.to_string();
-    }
-
-    let idx = choices
-        .iter()
-        .position(|v| v.eq_ignore_ascii_case(current))
-        .unwrap_or(0);
-
-    let next_idx = if forward {
-        (idx + 1) % choices.len()
-    } else if idx == 0 {
-        choices.len().saturating_sub(1)
-    } else {
-        idx - 1
-    };
-
-    choices[next_idx].to_string()
-}
-
 fn parse_tool_call_mode(value: &str) -> ToolCallMode {
     if value.trim().eq_ignore_ascii_case("strict") {
         ToolCallMode::Strict
     } else {
         ToolCallMode::Auto
     }
-}
-
-fn resolve_bool_arg(value: Option<&str>, default_value: bool) -> bool {
-    value
-        .and_then(|raw| match raw.trim().to_ascii_lowercase().as_str() {
-            "true" | "1" | "yes" | "on" => Some(true),
-            "false" | "0" | "no" | "off" => Some(false),
-            _ => None,
-        })
-        .unwrap_or(default_value)
-}
-
-fn parse_bool_with_default(value: &str, default_value: bool) -> bool {
-    resolve_bool_arg(Some(value), default_value)
-}
-
-fn resolve_usize_arg(
-    value: Option<&str>,
-    default_value: usize,
-    min_value: usize,
-    max_value: usize,
-) -> usize {
-    value
-        .and_then(|raw| raw.trim().parse::<usize>().ok())
-        .unwrap_or(default_value)
-        .clamp(min_value, max_value)
-}
-
-fn parse_usize_with_bounds(
-    value: &str,
-    default_value: usize,
-    min_value: usize,
-    max_value: usize,
-) -> usize {
-    resolve_usize_arg(Some(value), default_value, min_value, max_value)
 }
 
 fn print_help() {

@@ -101,3 +101,6 @@ Acceptance criteria:
 - 2026-05-19: Implemented transactional settings UX in TUI (draft vs applied, validation summary, revert-to-last-applied).
 - 2026-05-19: Implemented secret backend hardening (OS keychain adapter with file fallback, key rotation action, observability redaction-mode indicator).
 - 2026-05-19: Expanded allowlist preview panel with multiline source editing and one-key actions to replace/append detected ops into draft module allowlist.
+- 2026-05-19: Added concrete editor sprint plan at docs/design/medousa-grapheme-editor-sprint-plan.md and started Sprint 1 (first extraction: allowlist preview analysis moved into medousa/src/tui module).
+- 2026-05-19: Sprint 1 continued with settings concern extraction (RuntimeSettings + normalization/validation helpers moved into medousa/src/tui/settings.rs; TUI rewired, behavior unchanged).
+- 2026-05-19: Sprint 1 continued with UI concern extraction (settings menu handlers/render moved to medousa/src/bin/medousa_tui/settings_ui.rs; command palette + allowlist preview handlers/render moved to medousa/src/bin/medousa_tui/command_preview_ui.rs).

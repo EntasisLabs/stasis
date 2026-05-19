@@ -1,0 +1,145 @@
+use crate::settings_guard::{invalid_module_ids, parse_allowed_modules};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeSettings {
+    pub backend: String,
+    pub provider: String,
+    pub model: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub allowed_modules: String,
+    pub tool_call_mode: String,
+    pub max_tool_rounds: String,
+    pub thinking_capture: String,
+    pub thinking_max_lines: String,
+}
+
+pub fn settings_validation_errors(settings: &RuntimeSettings) -> Vec<String> {
+    let mut errors = Vec::new();
+    let allowed_modules = parse_allowed_modules(&settings.allowed_modules);
+    let invalid_modules = invalid_module_ids(&allowed_modules);
+    if !invalid_modules.is_empty() {
+        errors.push(format!(
+            "invalid allowed module ids: {}",
+            invalid_modules.join(", ")
+        ));
+    }
+    errors
+}
+
+pub fn resolve_backend_name(value: Option<&str>) -> String {
+    match value.unwrap_or("surreal-mem").trim() {
+        "in-memory" => "in-memory".to_string(),
+        "surreal-mem" => "surreal-mem".to_string(),
+        _ => "surreal-mem".to_string(),
+    }
+}
+
+pub fn cycle_backend(current: &str, forward: bool) -> String {
+    let choices = ["surreal-mem", "in-memory"];
+    cycle_choice(current, &choices, forward)
+}
+
+pub fn resolve_tool_call_mode_name(value: Option<&str>) -> String {
+    match value.unwrap_or("auto").trim().to_ascii_lowercase().as_str() {
+        "strict" => "strict".to_string(),
+        _ => "auto".to_string(),
+    }
+}
+
+pub fn cycle_tool_call_mode(current: &str, forward: bool) -> String {
+    let choices = ["auto", "strict"];
+    cycle_choice(current, &choices, forward)
+}
+
+fn cycle_choice(current: &str, choices: &[&str], forward: bool) -> String {
+    if choices.is_empty() {
+        return current.to_string();
+    }
+
+    let idx = choices
+        .iter()
+        .position(|choice| choice.eq_ignore_ascii_case(current))
+        .unwrap_or(0);
+
+    let next = if forward {
+        (idx + 1) % choices.len()
+    } else if idx == 0 {
+        choices.len() - 1
+    } else {
+        idx - 1
+    };
+
+    choices[next].to_string()
+}
+
+pub fn resolve_bool_arg(value: Option<&str>, default_value: bool) -> bool {
+    value
+        .and_then(|raw| match raw.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Some(true),
+            "false" | "0" | "no" | "off" => Some(false),
+            _ => None,
+        })
+        .unwrap_or(default_value)
+}
+
+pub fn parse_bool_with_default(value: &str, default_value: bool) -> bool {
+    resolve_bool_arg(Some(value), default_value)
+}
+
+pub fn resolve_usize_arg(
+    value: Option<&str>,
+    default_value: usize,
+    min_value: usize,
+    max_value: usize,
+) -> usize {
+    value
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(default_value)
+        .clamp(min_value, max_value)
+}
+
+pub fn parse_usize_with_bounds(
+    value: &str,
+    default_value: usize,
+    min_value: usize,
+    max_value: usize,
+) -> usize {
+    resolve_usize_arg(Some(value), default_value, min_value, max_value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cycle_backend, resolve_backend_name, settings_validation_errors, RuntimeSettings};
+
+    #[test]
+    fn resolves_backend_with_safe_default() {
+        assert_eq!(resolve_backend_name(Some("surreal-mem")), "surreal-mem");
+        assert_eq!(resolve_backend_name(Some("unknown")), "surreal-mem");
+    }
+
+    #[test]
+    fn cycles_backend_choices() {
+        assert_eq!(cycle_backend("surreal-mem", true), "in-memory");
+        assert_eq!(cycle_backend("in-memory", true), "surreal-mem");
+    }
+
+    #[test]
+    fn validates_allowed_module_format() {
+        let settings = RuntimeSettings {
+            backend: "surreal-mem".to_string(),
+            provider: "openai".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            base_url: String::new(),
+            api_key: String::new(),
+            allowed_modules: "bad id".to_string(),
+            tool_call_mode: "auto".to_string(),
+            max_tool_rounds: "10".to_string(),
+            thinking_capture: "true".to_string(),
+            thinking_max_lines: "300".to_string(),
+        };
+
+        let errors = settings_validation_errors(&settings);
+        assert!(!errors.is_empty());
+    }
+}
