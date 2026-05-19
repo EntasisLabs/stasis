@@ -94,3 +94,10 @@ Acceptance criteria:
 - 2026-05-16: Phase 3 started with slash commands (/new, /history, /settings, /model).
 - 2026-05-16: Phase 3 expanded with stop/regenerate controls and transcript export (/stop, /regen, /export).
 - 2026-05-16: Phase 3 expanded with Ctrl+K command palette (search + Enter-to-run actions).
+- 2026-05-19: Settings safety design plan created at docs/design/medousa-tui-settings-safety-plan.md.
+- 2026-05-19: Settings safety slice 1 started (masked API key field, module allowlist validation, payload redaction, atomic persistence).
+- 2026-05-19: Settings safety slice 2 implemented (runtime allowlist enforcement for Grapheme execution/promote/enqueue tool paths).
+- 2026-05-19: Added explicit clear-key action in settings overlay and command palette (/clear-key).
+- 2026-05-19: Implemented transactional settings UX in TUI (draft vs applied, validation summary, revert-to-last-applied).
+- 2026-05-19: Implemented secret backend hardening (OS keychain adapter with file fallback, key rotation action, observability redaction-mode indicator).
+- 2026-05-19: Expanded allowlist preview panel with multiline source editing and one-key actions to replace/append detected ops into draft module allowlist.

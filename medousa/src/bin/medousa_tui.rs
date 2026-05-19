@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -25,6 +25,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use medousa::{
+    tools::extract_module_ops_from_source,
     build_tui_runtime,
     EnqueueAskRequest,
     EnqueueResponse,
@@ -35,9 +36,12 @@ use medousa::{
     parse_backend,
     resolve_daemon_url,
     resolve_llm_base_url, resolve_llm_model, resolve_llm_provider, TuiRuntime,
+    settings_guard::{invalid_module_ids, parse_allowed_modules, redact_json_value},
     session::{
-        append_turn, list_history_sessions, load_history, load_tui_defaults, save_last_session_id,
-        save_tui_defaults, ConversationTurn, SessionHistorySummary, TuiDefaults,
+        append_turn, detect_tui_api_key_storage_backend, list_history_sessions, load_history,
+        load_tui_api_key, load_tui_defaults, save_last_session_id, save_tui_api_key,
+        save_tui_defaults, ApiKeyStorageBackend, ConversationTurn, SessionHistorySummary,
+        TuiDefaults,
     },
 };
 use stasis::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolLoopExecutionRequest};
@@ -119,6 +123,8 @@ struct TuiState {
     command_query: String,
     command_selected: usize,
     settings: RuntimeSettings,
+    settings_draft: RuntimeSettings,
+    allowlist_preview_source: String,
     settings_selected: usize,
     settings_editing: bool,
     provider_model: String,
@@ -140,16 +146,19 @@ enum UiMode {
     CommandPalette,
     Settings,
     ObservabilityPanel,
+    AllowlistPreview,
     ThinkingPeek,
     ThinkingPanel,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeSettings {
     backend: String,
     provider: String,
     model: String,
     base_url: String,
+    api_key: String,
+    allowed_modules: String,
     tool_call_mode: String,
     max_tool_rounds: String,
     thinking_capture: String,
@@ -204,6 +213,12 @@ async fn main() -> Result<()> {
         Some(&resolved_provider),
         base_url.or(defaults.base_url.as_deref()),
     );
+    let resolved_api_key = load_tui_api_key().unwrap_or_default();
+    let resolved_allowed_modules = defaults
+        .allowed_modules
+        .clone()
+        .unwrap_or_default()
+        .join(",");
     let provider_model = format!("{resolved_provider}:{resolved_model}");
     let resolved_daemon_url = resolve_daemon_url(daemon_url);
 
@@ -223,6 +238,7 @@ async fn main() -> Result<()> {
         Some(&resolved_provider),
         Some(&resolved_model),
         resolved_base_url.as_deref(),
+        parse_allowed_modules(&resolved_allowed_modules),
         &session_id,
         event_tx.clone(),
     )
@@ -235,6 +251,19 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
+
+    let initial_settings = RuntimeSettings {
+        backend: resolved_backend.clone(),
+        provider: resolved_provider.clone(),
+        model: resolved_model.clone(),
+        base_url: resolved_base_url.clone().unwrap_or_default(),
+        api_key: resolved_api_key.clone(),
+        allowed_modules: resolved_allowed_modules.clone(),
+        tool_call_mode: resolved_tool_call_mode.clone(),
+        max_tool_rounds: resolved_max_tool_rounds.to_string(),
+        thinking_capture: resolved_thinking_capture.to_string(),
+        thinking_max_lines: resolved_thinking_max_lines.to_string(),
+    };
 
     let mut state = TuiState {
         conversation: history,
@@ -252,16 +281,9 @@ async fn main() -> Result<()> {
         history_selected: 0,
         command_query: String::new(),
         command_selected: 0,
-        settings: RuntimeSettings {
-            backend: resolved_backend,
-            provider: resolved_provider.clone(),
-            model: resolved_model.clone(),
-            base_url: resolved_base_url.unwrap_or_default(),
-            tool_call_mode: resolved_tool_call_mode,
-            max_tool_rounds: resolved_max_tool_rounds.to_string(),
-            thinking_capture: resolved_thinking_capture.to_string(),
-            thinking_max_lines: resolved_thinking_max_lines.to_string(),
-        },
+        settings: initial_settings.clone(),
+        settings_draft: initial_settings,
+        allowlist_preview_source: String::new(),
         settings_selected: 0,
         settings_editing: false,
         provider_model,
@@ -336,6 +358,9 @@ async fn handle_key_event(
     };
 
     if key.code == KeyCode::Esc {
+        if state.mode == UiMode::Settings {
+            state.settings_draft = state.settings.clone();
+        }
         state.settings_editing = false;
         state.mode = UiMode::Chat;
         return EventOutcome::Continue;
@@ -387,10 +412,12 @@ async fn handle_key_event(
         if state.mode == UiMode::Settings {
             state.mode = UiMode::Chat;
             state.settings_editing = false;
+            state.settings_draft = state.settings.clone();
         } else {
             state.mode = UiMode::Settings;
             state.settings_selected = 0;
             state.settings_editing = false;
+            state.settings_draft = state.settings.clone();
         }
         return EventOutcome::Continue;
     }
@@ -414,6 +441,10 @@ async fn handle_key_event(
 
     if state.mode == UiMode::Settings {
         return handle_settings_key_event(key.code, state, tui_rt, event_tx).await;
+    }
+
+    if state.mode == UiMode::AllowlistPreview {
+        return handle_allowlist_preview_key_event(key.code, state);
     }
 
     if state.mode == UiMode::ThinkingPeek || state.mode == UiMode::ThinkingPanel {
@@ -576,6 +607,152 @@ fn handle_observability_key_event(code: KeyCode, state: &mut TuiState) -> EventO
     }
 
     EventOutcome::Continue
+}
+
+fn handle_allowlist_preview_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
+    let analysis = analyze_allowlist_preview(
+        &state.allowlist_preview_source,
+        &state.settings_draft.allowed_modules,
+    );
+
+    match code {
+        KeyCode::Backspace => {
+            state.allowlist_preview_source.pop();
+        }
+        KeyCode::Char(c) => {
+            state.allowlist_preview_source.push(c);
+        }
+        KeyCode::Enter => {
+            state.allowlist_preview_source.push('\n');
+        }
+        KeyCode::Tab => {
+            if !analysis.invalid_allowlist.is_empty() {
+                push_obs(
+                    state,
+                    format!(
+                        "⚠ allowlist preview invalid allowlist ids: {}",
+                        analysis.invalid_allowlist.join(", ")
+                    ),
+                );
+                return EventOutcome::Continue;
+            }
+            if analysis.referenced_ops.is_empty() {
+                push_obs(
+                    state,
+                    "allowlist preview: no module operation calls found in source".to_string(),
+                );
+                return EventOutcome::Continue;
+            }
+            if analysis.blocked_ops.is_empty() {
+                push_obs(
+                    state,
+                    format!(
+                        "✓ allowlist preview: all referenced ops allowed ({})",
+                        analysis.referenced_ops.join(", ")
+                    ),
+                );
+            } else {
+                push_obs(
+                    state,
+                    format!(
+                        "⚠ allowlist preview: blocked ops {}",
+                        analysis.blocked_ops.join(", ")
+                    ),
+                );
+            }
+        }
+        KeyCode::F(5) => {
+            if analysis.referenced_ops.is_empty() {
+                push_obs(
+                    state,
+                    "⚠ allowlist preview replace skipped: no referenced ops detected"
+                        .to_string(),
+                );
+            } else {
+                state.settings_draft.allowed_modules = analysis.referenced_ops.join(",");
+                push_obs(
+                    state,
+                    format!(
+                        "✓ allowlist preview replaced draft allowlist with {} op(s)",
+                        analysis.referenced_ops.len()
+                    ),
+                );
+            }
+        }
+        KeyCode::F(6) => {
+            if analysis.referenced_ops.is_empty() {
+                push_obs(
+                    state,
+                    "⚠ allowlist preview append skipped: no referenced ops detected".to_string(),
+                );
+            } else {
+                let mut merged = parse_allowed_modules(&state.settings_draft.allowed_modules);
+                let mut seen = merged
+                    .iter()
+                    .cloned()
+                    .collect::<HashSet<String>>();
+
+                let mut appended = 0usize;
+                for op in &analysis.referenced_ops {
+                    if seen.insert(op.clone()) {
+                        merged.push(op.clone());
+                        appended += 1;
+                    }
+                }
+
+                state.settings_draft.allowed_modules = merged.join(",");
+                push_obs(
+                    state,
+                    format!(
+                        "✓ allowlist preview appended {appended} op(s) to draft allowlist"
+                    ),
+                );
+            }
+        }
+        _ => {}
+    }
+    EventOutcome::Continue
+}
+
+struct AllowlistPreviewAnalysis {
+    referenced_ops: Vec<String>,
+    blocked_ops: Vec<String>,
+    invalid_allowlist: Vec<String>,
+}
+
+fn analyze_allowlist_preview(source: &str, allowed_modules_csv: &str) -> AllowlistPreviewAnalysis {
+    let referenced_ops = extract_module_ops_from_source(source);
+    let allowed_modules = parse_allowed_modules(allowed_modules_csv);
+    let invalid_allowlist = invalid_module_ids(&allowed_modules);
+
+    if !invalid_allowlist.is_empty() {
+        return AllowlistPreviewAnalysis {
+            referenced_ops,
+            blocked_ops: Vec::new(),
+            invalid_allowlist,
+        };
+    }
+
+    if allowed_modules.is_empty() {
+        return AllowlistPreviewAnalysis {
+            referenced_ops,
+            blocked_ops: Vec::new(),
+            invalid_allowlist,
+        };
+    }
+
+    let allowed_set = allowed_modules.into_iter().collect::<HashSet<_>>();
+    let blocked_ops = referenced_ops
+        .iter()
+        .filter(|op| !allowed_set.contains(op.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    AllowlistPreviewAnalysis {
+        referenced_ops,
+        blocked_ops,
+        invalid_allowlist,
+    }
 }
 
 fn start_prompt_run(
@@ -764,6 +941,7 @@ async fn handle_slash_command(
                 } else {
                     Some(state.settings.base_url.as_str())
                 },
+                parse_allowed_modules(&state.settings.allowed_modules),
                 &state.session_id,
                 event_tx.clone(),
             )
@@ -783,6 +961,36 @@ async fn handle_slash_command(
             state.mode = UiMode::Settings;
             state.settings_selected = 0;
             state.settings_editing = false;
+            state.settings_draft = state.settings.clone();
+        }
+        "/allowlist-preview" => {
+            state.mode = UiMode::AllowlistPreview;
+            state.allowlist_preview_source = parts.collect::<Vec<_>>().join(" ");
+            if state.allowlist_preview_source.trim().is_empty() {
+                state.allowlist_preview_source =
+                    "query Run { websearch.search(query: \"\") { ok } }".to_string();
+            }
+        }
+        "/clear-key" => {
+            state.settings.api_key.clear();
+            state.settings_draft.api_key.clear();
+            save_tui_api_key(None);
+            push_obs(state, "✓ api key cleared from secure storage".to_string());
+        }
+        "/rotate-key" => {
+            let key = state.settings_draft.api_key.trim().to_string();
+            if key.is_empty() {
+                push_obs(
+                    state,
+                    "⚠ key rotation requires a non-empty draft API key".to_string(),
+                );
+                return EventOutcome::Continue;
+            }
+
+            save_tui_api_key(Some(&key));
+            state.settings.api_key = key.clone();
+            state.settings_draft.api_key = key;
+            push_obs(state, "✓ api key rotated in secure storage".to_string());
         }
         "/model" => {
             let args = parts.collect::<Vec<_>>();
@@ -808,6 +1016,8 @@ async fn handle_slash_command(
                 state.settings.provider = args[0].trim().to_string();
                 state.settings.model = args[1].trim().to_string();
             }
+
+            state.settings_draft = state.settings.clone();
 
             apply_settings(state, tui_rt, event_tx).await;
         }
@@ -940,7 +1150,7 @@ async fn handle_slash_command(
         _ => {
             push_obs(
                 state,
-                "⚠ unknown command. try /new /history /settings /model /stop /regen /export /daemon /watch"
+                "⚠ unknown command. try /new /history /settings /allowlist-preview /clear-key /rotate-key /model /stop /regen /export /daemon /watch"
                     .to_string(),
             );
         }
@@ -1015,7 +1225,7 @@ struct PaletteAction {
     command: &'static str,
 }
 
-const PALETTE_ACTIONS: [PaletteAction; 11] = [
+const PALETTE_ACTIONS: [PaletteAction; 14] = [
     PaletteAction {
         title: "New Session",
         command: "/new",
@@ -1027,6 +1237,18 @@ const PALETTE_ACTIONS: [PaletteAction; 11] = [
     PaletteAction {
         title: "Open Settings",
         command: "/settings",
+    },
+    PaletteAction {
+        title: "Allowlist Preview",
+        command: "/allowlist-preview",
+    },
+    PaletteAction {
+        title: "Clear API Key",
+        command: "/clear-key",
+    },
+    PaletteAction {
+        title: "Rotate API Key",
+        command: "/rotate-key",
     },
     PaletteAction {
         title: "Show Current Model",
@@ -1237,10 +1459,12 @@ fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
             tool_input,
             tool_output,
         } => {
-            let input = serde_json::to_string_pretty(&tool_input)
-                .unwrap_or_else(|_| tool_input.to_string());
-            let output = serde_json::to_string_pretty(&tool_output)
-                .unwrap_or_else(|_| tool_output.to_string());
+            let safe_input = redact_json_value(&tool_input);
+            let safe_output = redact_json_value(&tool_output);
+            let input = serde_json::to_string_pretty(&safe_input)
+                .unwrap_or_else(|_| safe_input.to_string());
+            let output = serde_json::to_string_pretty(&safe_output)
+                .unwrap_or_else(|_| safe_output.to_string());
             push_obs(
                 state,
                 format!(
@@ -1319,12 +1543,12 @@ async fn handle_settings_key_event(
             quick_adjust_setting(state, false);
         }
         KeyCode::Char('+') | KeyCode::Char('=') => {
-            if state.settings_selected == 5 || state.settings_selected == 7 {
+            if state.settings_selected == 7 || state.settings_selected == 9 {
                 quick_adjust_setting(state, true);
             }
         }
         KeyCode::Char('-') => {
-            if state.settings_selected == 5 || state.settings_selected == 7 {
+            if state.settings_selected == 7 || state.settings_selected == 9 {
                 quick_adjust_setting(state, false);
             }
         }
@@ -1332,20 +1556,47 @@ async fn handle_settings_key_event(
             state.settings_selected = state.settings_selected.saturating_sub(1);
         }
         KeyCode::Down => {
-            state.settings_selected = (state.settings_selected + 1).min(9);
+            state.settings_selected = (state.settings_selected + 1).min(15);
         }
         KeyCode::Enter => match state.settings_selected {
-            1..=3 => {
+            1..=5 => {
                 state.settings_editing = true;
             }
-            0 | 4 | 5 | 6 | 7 => {
+            0 | 6 | 7 | 8 | 9 => {
                 quick_adjust_setting(state, true);
             }
-            8 => {
+            10 => {
+                emit_settings_validation_summary(state);
+            }
+            11 => {
+                state.settings_draft.api_key.clear();
+                push_obs(state, "✓ settings draft: api key marked for clear".to_string());
+            }
+            12 => {
+                let key = state.settings_draft.api_key.trim().to_string();
+                if key.is_empty() {
+                    push_obs(
+                        state,
+                        "⚠ key rotation requires a non-empty draft API key".to_string(),
+                    );
+                } else {
+                    save_tui_api_key(Some(&key));
+                    state.settings.api_key = key.clone();
+                    state.settings_draft.api_key = key;
+                    push_obs(state, "✓ api key rotated in secure storage".to_string());
+                }
+            }
+            13 => {
+                state.settings_draft = state.settings.clone();
+                state.settings_editing = false;
+                push_obs(state, "✓ settings draft reverted to last applied".to_string());
+            }
+            14 => {
                 apply_settings(state, tui_rt, event_tx).await;
                 state.mode = UiMode::Chat;
             }
-            9 => {
+            15 => {
+                state.settings_draft = state.settings.clone();
                 state.mode = UiMode::Chat;
             }
             _ => {}
@@ -1359,14 +1610,14 @@ async fn handle_settings_key_event(
 fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
     match state.settings_selected {
         0 => {
-            state.settings.backend = cycle_backend(&state.settings.backend, forward);
+            state.settings_draft.backend = cycle_backend(&state.settings_draft.backend, forward);
         }
-        4 => {
-            state.settings.tool_call_mode =
-                cycle_tool_call_mode(&state.settings.tool_call_mode, forward);
+        6 => {
+            state.settings_draft.tool_call_mode =
+                cycle_tool_call_mode(&state.settings_draft.tool_call_mode, forward);
         }
-        5 => {
-            let current = parse_usize_with_bounds(&state.settings.max_tool_rounds, 10, 1, 50);
+        7 => {
+            let current = parse_usize_with_bounds(&state.settings_draft.max_tool_rounds, 10, 1, 50);
             let step = if current < 20 { 1 } else { 5 };
             let next = if forward {
                 current.saturating_add(step)
@@ -1374,14 +1625,14 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
                 current.saturating_sub(step)
             }
             .clamp(1, 50);
-            state.settings.max_tool_rounds = next.to_string();
+            state.settings_draft.max_tool_rounds = next.to_string();
         }
-        6 => {
-            let value = parse_bool_with_default(&state.settings.thinking_capture, true);
-            state.settings.thinking_capture = (!value).to_string();
+        8 => {
+            let value = parse_bool_with_default(&state.settings_draft.thinking_capture, true);
+            state.settings_draft.thinking_capture = (!value).to_string();
         }
-        7 => {
-            let current = parse_usize_with_bounds(&state.settings.thinking_max_lines, 300, 50, 5000);
+        9 => {
+            let current = parse_usize_with_bounds(&state.settings_draft.thinking_max_lines, 300, 50, 5000);
             let step = if current < 500 { 50 } else { 100 };
             let next = if forward {
                 current.saturating_add(step)
@@ -1389,7 +1640,7 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
                 current.saturating_sub(step)
             }
             .clamp(50, 5000);
-            state.settings.thinking_max_lines = next.to_string();
+            state.settings_draft.thinking_max_lines = next.to_string();
         }
         _ => {}
     }
@@ -1397,15 +1648,46 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
 
 fn selected_settings_field_mut(state: &mut TuiState) -> &mut String {
     match state.settings_selected {
-        0 => &mut state.settings.backend,
-        1 => &mut state.settings.provider,
-        2 => &mut state.settings.model,
-        3 => &mut state.settings.base_url,
-        4 => &mut state.settings.tool_call_mode,
-        5 => &mut state.settings.max_tool_rounds,
-        6 => &mut state.settings.thinking_capture,
-        7 => &mut state.settings.thinking_max_lines,
-        _ => &mut state.settings.base_url,
+        0 => &mut state.settings_draft.backend,
+        1 => &mut state.settings_draft.provider,
+        2 => &mut state.settings_draft.model,
+        3 => &mut state.settings_draft.base_url,
+        4 => &mut state.settings_draft.api_key,
+        5 => &mut state.settings_draft.allowed_modules,
+        6 => &mut state.settings_draft.tool_call_mode,
+        7 => &mut state.settings_draft.max_tool_rounds,
+        8 => &mut state.settings_draft.thinking_capture,
+        9 => &mut state.settings_draft.thinking_max_lines,
+        _ => &mut state.settings_draft.base_url,
+    }
+}
+
+fn settings_validation_errors(settings: &RuntimeSettings) -> Vec<String> {
+    let mut errors = Vec::new();
+    let allowed_modules = parse_allowed_modules(&settings.allowed_modules);
+    let invalid_modules = invalid_module_ids(&allowed_modules);
+    if !invalid_modules.is_empty() {
+        errors.push(format!(
+            "invalid allowed module ids: {}",
+            invalid_modules.join(", ")
+        ));
+    }
+    errors
+}
+
+fn emit_settings_validation_summary(state: &mut TuiState) -> bool {
+    let errors = settings_validation_errors(&state.settings_draft);
+    if errors.is_empty() {
+        push_obs(
+            state,
+            "✓ settings validation passed (draft ready to apply)".to_string(),
+        );
+        true
+    } else {
+        for error in errors {
+            push_obs(state, format!("⚠ settings validation: {error}"));
+        }
+        false
     }
 }
 
@@ -1414,30 +1696,47 @@ async fn apply_settings(
     tui_rt: &mut TuiRuntime,
     event_tx: &mpsc::Sender<TuiEvent>,
 ) {
-    let backend = resolve_backend_name(Some(state.settings.backend.trim()));
-    let tool_call_mode = resolve_tool_call_mode_name(Some(state.settings.tool_call_mode.trim()));
-    let max_tool_rounds = parse_usize_with_bounds(&state.settings.max_tool_rounds, 10, 1, 50);
-    let thinking_capture = parse_bool_with_default(&state.settings.thinking_capture, true);
+    if !emit_settings_validation_summary(state) {
+        return;
+    }
+
+    let allowed_modules = parse_allowed_modules(&state.settings_draft.allowed_modules);
+    let invalid_modules = invalid_module_ids(&allowed_modules);
+    if !invalid_modules.is_empty() {
+        let invalid_list = invalid_modules.join(", ");
+        push_obs(
+            state,
+            format!(
+                "⚠ settings rejected: invalid allowed module ids ({invalid_list}). use dotted ids like websearch.search"
+            ),
+        );
+        return;
+    }
+
+    let backend = resolve_backend_name(Some(state.settings_draft.backend.trim()));
+    let tool_call_mode = resolve_tool_call_mode_name(Some(state.settings_draft.tool_call_mode.trim()));
+    let max_tool_rounds = parse_usize_with_bounds(&state.settings_draft.max_tool_rounds, 10, 1, 50);
+    let thinking_capture = parse_bool_with_default(&state.settings_draft.thinking_capture, true);
     let thinking_max_lines = parse_usize_with_bounds(
-        &state.settings.thinking_max_lines,
+        &state.settings_draft.thinking_max_lines,
         300,
         50,
         5000,
     );
-    let provider = if state.settings.provider.trim().is_empty() {
+    let provider = if state.settings_draft.provider.trim().is_empty() {
         resolve_llm_provider(None)
     } else {
-        resolve_llm_provider(Some(state.settings.provider.trim()))
+        resolve_llm_provider(Some(state.settings_draft.provider.trim()))
     };
-    let model = if state.settings.model.trim().is_empty() {
+    let model = if state.settings_draft.model.trim().is_empty() {
         resolve_llm_model(None)
     } else {
-        resolve_llm_model(Some(state.settings.model.trim()))
+        resolve_llm_model(Some(state.settings_draft.model.trim()))
     };
-    let base_url = if state.settings.base_url.trim().is_empty() {
+    let base_url = if state.settings_draft.base_url.trim().is_empty() {
         None
     } else {
-        Some(state.settings.base_url.trim().to_string())
+        Some(state.settings_draft.base_url.trim().to_string())
     };
 
     match build_tui_runtime(
@@ -1445,6 +1744,7 @@ async fn apply_settings(
         Some(&provider),
         Some(&model),
         base_url.as_deref(),
+        allowed_modules.clone(),
         &state.session_id,
         event_tx.clone(),
     )
@@ -1456,22 +1756,39 @@ async fn apply_settings(
             state.settings.provider = provider.clone();
             state.settings.model = model.clone();
             state.settings.base_url = base_url.clone().unwrap_or_default();
+            state.settings.allowed_modules = allowed_modules.join(",");
             state.settings.tool_call_mode = tool_call_mode.clone();
             state.settings.max_tool_rounds = max_tool_rounds.to_string();
             state.settings.thinking_capture = thinking_capture.to_string();
             state.settings.thinking_max_lines = thinking_max_lines.to_string();
             state.provider_model = format!("{provider}:{model}");
+
+            let api_key = state.settings_draft.api_key.trim().to_string();
+            state.settings.api_key = api_key.clone();
+            if api_key.is_empty() {
+                save_tui_api_key(None);
+            } else {
+                save_tui_api_key(Some(&api_key));
+            }
+
+            state.settings_draft = state.settings.clone();
+
             save_tui_defaults(&TuiDefaults {
                 backend: Some(backend),
                 provider: Some(provider),
                 model: Some(model),
                 base_url,
+                allowed_modules: if allowed_modules.is_empty() {
+                    None
+                } else {
+                    Some(allowed_modules)
+                },
                 tool_call_mode: Some(tool_call_mode),
                 max_tool_rounds: Some(max_tool_rounds),
                 thinking_capture: Some(thinking_capture),
                 thinking_max_lines: Some(thinking_max_lines),
             });
-            push_obs(state, "✓ settings applied".to_string());
+            push_obs(state, "✓ settings applied (sensitive values redacted)".to_string());
         }
         Err(err) => {
             push_obs(state, format!("⚠ settings apply failed: {err}"));
@@ -1797,6 +2114,8 @@ fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
         render_history_overlay(frame, state);
     } else if state.mode == UiMode::CommandPalette {
         render_command_palette_overlay(frame, state);
+    } else if state.mode == UiMode::AllowlistPreview {
+        render_allowlist_preview_overlay(frame, state);
     } else if state.mode == UiMode::Settings {
         render_settings_overlay(frame, state);
     } else if state.mode == UiMode::ObservabilityPanel {
@@ -1810,6 +2129,15 @@ fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
 
 fn build_observability_text(state: &TuiState, expanded: bool, width: u16) -> Text<'static> {
     let mut lines: Vec<Line<'static>> = Vec::new();
+
+    lines.push(Line::from(Span::styled(
+        format!(
+            " Redaction mode: strict (payload secrets scrubbed) | Secret backend: {} ",
+            api_key_storage_backend_label()
+        ),
+        Style::default().fg(Color::Cyan),
+    )));
+    lines.push(Line::from(""));
 
     if expanded {
         lines.push(Line::from(Span::styled(
@@ -2062,36 +2390,207 @@ fn render_command_palette_overlay(frame: &mut ratatui::Frame, state: &TuiState) 
     frame.render_widget(panel, popup);
 }
 
+fn render_allowlist_preview_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
+    let area = frame.area();
+    let popup = centered_rect(area, 86, 70);
+    frame.render_widget(Clear, popup);
+
+    let analysis = analyze_allowlist_preview(
+        &state.allowlist_preview_source,
+        &state.settings_draft.allowed_modules,
+    );
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        " Type source, Enter: newline, Tab: emit verdict, F5: replace allowlist, F6: append allowlist, Esc: close ",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(Span::styled(
+        " Uses same parser/policy shape as runtime module enforcement ",
+        Style::default().fg(Color::Cyan),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!(
+            "Draft allowlist: {}",
+            if state.settings_draft.allowed_modules.trim().is_empty() {
+                "(all operations allowed)".to_string()
+            } else {
+                state.settings_draft.allowed_modules.clone()
+            }
+        ),
+        Style::default().fg(Color::White),
+    )));
+    lines.push(Line::from(Span::styled("Source (editable):", Style::default().fg(Color::Yellow))));
+    if state.allowlist_preview_source.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (empty)",
+            Style::default().fg(Color::Gray),
+        )));
+    } else {
+        for (idx, source_line) in state.allowlist_preview_source.lines().enumerate() {
+            lines.push(Line::from(Span::styled(
+                format!("  {:>2}: {}", idx + 1, source_line),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
+    }
+    lines.push(Line::from(""));
+
+    if !analysis.invalid_allowlist.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "Invalid allowlist IDs: {}",
+                analysis.invalid_allowlist.join(", ")
+            ),
+            Style::default().fg(Color::Red),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            if analysis.blocked_ops.is_empty() {
+                "Verdict: ALLOW".to_string()
+            } else {
+                "Verdict: BLOCK".to_string()
+            },
+            Style::default().fg(if analysis.blocked_ops.is_empty() {
+                Color::Green
+            } else {
+                Color::Red
+            }),
+        )));
+    }
+    lines.push(Line::from(""));
+
+    lines.push(Line::from(Span::styled(
+        "Referenced Ops:",
+        Style::default().fg(Color::Cyan),
+    )));
+    if analysis.referenced_ops.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (none detected)",
+            Style::default().fg(Color::Gray),
+        )));
+    } else {
+        for op in &analysis.referenced_ops {
+            lines.push(Line::from(Span::styled(
+                format!("  - {op}"),
+                Style::default().fg(Color::White),
+            )));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Blocked Ops:",
+        Style::default().fg(Color::Cyan),
+    )));
+    if analysis.blocked_ops.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (none)",
+            Style::default().fg(Color::Green),
+        )));
+    } else {
+        for op in &analysis.blocked_ops {
+            lines.push(Line::from(Span::styled(
+                format!("  - {op}"),
+                Style::default().fg(Color::Red),
+            )));
+        }
+    }
+
+    let panel = Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title(" Allowlist Preview ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(ui_accent_primary()))
+                .style(Style::default().bg(ui_modal_bg())),
+        )
+        .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(panel, popup);
+}
+
 fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
     let area = frame.area();
     let popup = centered_rect(area, 76, 62);
     frame.render_widget(Clear, popup);
 
     let mut lines: Vec<Line> = Vec::new();
+    let has_pending_changes = state.settings_draft != state.settings;
+    let validation_errors = settings_validation_errors(&state.settings_draft);
+    let validation_line = if validation_errors.is_empty() {
+        " Validation: OK (draft can be applied) ".to_string()
+    } else {
+        format!(
+            " Validation: {} issue(s) - press Validate Draft for details ",
+            validation_errors.len()
+        )
+    };
     lines.push(Line::from(Span::styled(
-        " Up/Down: select  Enter: toggle/edit/apply  Space/Left/Right: quick toggle  +/-: adjust number  Ctrl+,/Esc: close ",
+        if has_pending_changes {
+            " Draft has unapplied changes "
+        } else {
+            " Draft matches applied settings "
+        },
+        Style::default().fg(if has_pending_changes {
+            Color::Yellow
+        } else {
+            Color::Green
+        }),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(" Secret backend: {} ", api_key_storage_backend_label()),
+        Style::default().fg(Color::Cyan),
+    )));
+    lines.push(Line::from(Span::styled(
+        validation_line,
+        Style::default().fg(if validation_errors.is_empty() {
+            Color::Green
+        } else {
+            Color::Red
+        }),
+    )));
+    lines.push(Line::from(Span::styled(
+        " Up/Down: select  Enter: edit/action  Space/Left/Right: quick toggle  +/-: adjust number  Ctrl+,/Esc: cancel ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
 
     let rows = vec![
-        format!("Backend: {}  [toggle]", state.settings.backend),
-        format!("Provider: {}  [edit]", state.settings.provider),
-        format!("Model: {}  [edit]", state.settings.model),
+        format!("Backend: {}  [toggle]", state.settings_draft.backend),
+        format!("Provider: {}  [edit]", state.settings_draft.provider),
+        format!("Model: {}  [edit]", state.settings_draft.model),
         format!(
             "Base URL: {}  [edit]",
-            if state.settings.base_url.is_empty() {
+            if state.settings_draft.base_url.is_empty() {
                 "(auto)".to_string()
             } else {
-                state.settings.base_url.clone()
+                state.settings_draft.base_url.clone()
             }
         ),
-        format!("Tool Call Mode: {}  [toggle]", state.settings.tool_call_mode),
-        format!("Max Tool Rounds: {}  [number]", state.settings.max_tool_rounds),
-        format!("Thinking Capture: {}  [toggle]", state.settings.thinking_capture),
-        format!("Thinking Max Lines: {}  [number]", state.settings.thinking_max_lines),
+        format!(
+            "API Key: {}  [edit, secret]",
+            mask_secret_value(&state.settings_draft.api_key)
+        ),
+        format!(
+            "Allowed Grapheme Modules: {}  [edit]",
+            if state.settings_draft.allowed_modules.trim().is_empty() {
+                "(all)".to_string()
+            } else {
+                state.settings_draft.allowed_modules.clone()
+            }
+        ),
+        format!("Tool Call Mode: {}  [toggle]", state.settings_draft.tool_call_mode),
+        format!("Max Tool Rounds: {}  [number]", state.settings_draft.max_tool_rounds),
+        format!("Thinking Capture: {}  [toggle]", state.settings_draft.thinking_capture),
+        format!("Thinking Max Lines: {}  [number]", state.settings_draft.thinking_max_lines),
+        "Validate Draft  [action]".to_string(),
+        "Clear API Key (Draft)  [action]".to_string(),
+        "Rotate API Key (Persist Draft)  [action]".to_string(),
+        "Revert to Last Applied  [action]".to_string(),
         "Apply and Save  [action]".to_string(),
-        "Cancel  [action]".to_string(),
+        "Cancel (Discard Draft)  [action]".to_string(),
     ];
 
     for (idx, row) in rows.iter().enumerate() {
@@ -2102,7 +2601,7 @@ fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
             Style::default().fg(Color::White)
         };
 
-        if idx == state.settings_selected && state.settings_editing && idx <= 7 {
+        if idx == state.settings_selected && state.settings_editing && idx <= 9 {
             style = style.add_modifier(Modifier::UNDERLINED);
         }
 
@@ -2285,6 +2784,33 @@ fn find_arg_value<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
     args.get(idx + 1).map(|s| s.as_str())
 }
 
+fn mask_secret_value(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "(not set)".to_string();
+    }
+
+    let visible_suffix_len = trimmed.chars().count().min(4);
+    let suffix: String = trimmed
+        .chars()
+        .rev()
+        .take(visible_suffix_len)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("********{suffix}")
+}
+
+fn api_key_storage_backend_label() -> &'static str {
+    match detect_tui_api_key_storage_backend() {
+        ApiKeyStorageBackend::KeychainActive => "keychain(active)",
+        ApiKeyStorageBackend::KeychainReady => "keychain(ready)",
+        ApiKeyStorageBackend::FileFallbackActive => "file-fallback(active)",
+        ApiKeyStorageBackend::FileFallbackReady => "file-fallback(ready)",
+    }
+}
+
 fn resolve_backend_name(value: Option<&str>) -> String {
     match value.unwrap_or("surreal-mem").trim() {
         "in-memory" => "in-memory".to_string(),
@@ -2416,6 +2942,9 @@ fn print_help() {
     println!("  /new                    Start fresh session");
     println!("  /history                Open session history menu");
     println!("  /settings               Open settings menu");
+    println!("  /allowlist-preview      Open allowlist preview panel");
+    println!("  /clear-key              Clear stored API key");
+    println!("  /rotate-key             Rotate stored API key from draft value");
     println!("  /model                  Show current provider:model");
     println!("  /model <model>          Set model, keep provider");
     println!("  /model <provider:model> Set provider and model");

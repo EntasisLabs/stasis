@@ -2,6 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const API_KEY_SERVICE: &str = "medousa.tui";
+const API_KEY_ACCOUNT: &str = "api_key";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationTurn {
@@ -17,6 +21,7 @@ pub struct TuiDefaults {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
+    pub allowed_modules: Option<Vec<String>>,
     pub tool_call_mode: Option<String>,
     pub max_tool_rounds: Option<usize>,
     pub thinking_capture: Option<bool>,
@@ -29,6 +34,14 @@ pub struct SessionHistorySummary {
     pub turns: usize,
     pub last_timestamp: Option<DateTime<Utc>>,
     pub preview: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApiKeyStorageBackend {
+    KeychainActive,
+    KeychainReady,
+    FileFallbackActive,
+    FileFallbackReady,
 }
 
 fn medousa_data_dir() -> PathBuf {
@@ -47,6 +60,68 @@ fn last_session_path() -> PathBuf {
 
 fn tui_defaults_path() -> PathBuf {
     medousa_data_dir().join("tui_defaults.json")
+}
+
+fn api_key_secret_path() -> PathBuf {
+    medousa_data_dir().join("secrets").join("api_key")
+}
+
+fn api_key_keyring_entry() -> Result<keyring::Entry, keyring::Error> {
+    keyring::Entry::new(API_KEY_SERVICE, API_KEY_ACCOUNT)
+}
+
+fn file_api_key() -> Option<String> {
+    std::fs::read_to_string(api_key_secret_path())
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+pub fn detect_tui_api_key_storage_backend() -> ApiKeyStorageBackend {
+    if let Ok(entry) = api_key_keyring_entry() {
+        if entry
+            .get_password()
+            .ok()
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+        {
+            return ApiKeyStorageBackend::KeychainActive;
+        }
+        if file_api_key().is_some() {
+            return ApiKeyStorageBackend::FileFallbackActive;
+        }
+        return ApiKeyStorageBackend::KeychainReady;
+    }
+
+    if file_api_key().is_some() {
+        ApiKeyStorageBackend::FileFallbackActive
+    } else {
+        ApiKeyStorageBackend::FileFallbackReady
+    }
+}
+
+fn atomic_write(path: &PathBuf, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temp_path = path.with_extension(format!("tmp-{ts}"));
+    std::fs::write(&temp_path, bytes)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if path.ends_with("api_key") {
+            let _ = std::fs::set_permissions(&temp_path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+
+    std::fs::rename(temp_path, path)?;
+    Ok(())
 }
 
 pub fn load_last_session_id() -> Option<String> {
@@ -74,12 +149,46 @@ pub fn load_tui_defaults() -> TuiDefaults {
 
 pub fn save_tui_defaults(defaults: &TuiDefaults) {
     let path = tui_defaults_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if let Ok(json) = serde_json::to_string_pretty(defaults) {
+        let _ = atomic_write(&path, json.as_bytes());
+    }
+}
+
+pub fn load_tui_api_key() -> Option<String> {
+    if let Ok(entry) = api_key_keyring_entry() {
+        if let Ok(value) = entry.get_password() {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
     }
 
-    if let Ok(json) = serde_json::to_string_pretty(defaults) {
-        let _ = std::fs::write(path, json);
+    file_api_key()
+}
+
+pub fn save_tui_api_key(api_key: Option<&str>) {
+    let path = api_key_secret_path();
+
+    match api_key.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(value) => {
+            let mut persisted = false;
+            if let Ok(entry) = api_key_keyring_entry() {
+                persisted = entry.set_password(value).is_ok();
+            }
+
+            if persisted {
+                let _ = std::fs::remove_file(path);
+            } else {
+                let _ = atomic_write(&path, value.as_bytes());
+            }
+        }
+        None => {
+            if let Ok(entry) = api_key_keyring_entry() {
+                let _ = entry.delete_password();
+            }
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 

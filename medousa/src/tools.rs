@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
 use std::process::Command;
 
@@ -14,6 +15,7 @@ use stasis::prelude::{
     RuntimeBackend, RuntimeComposition, StasisError, StasisRuntimeBuilder, StasisTool,
 };
 use stasis::application::orchestration::tool_loop_pipeline::ToolLoopPipeline;
+use stasis::application::orchestration::tool_registry::ToolRegistry;
 use stasis::domain::runtime::recurring::RecurringDefinition;
 
 use crate::events::TuiEvent;
@@ -1655,6 +1657,184 @@ impl StasisTool for CognitionRuntimeJobStatusTool {
     }
 }
 
+#[derive(Clone)]
+struct PolicyAwareToolRegistry {
+    inner: Arc<dyn ToolRegistry>,
+    allowed_module_ops: HashSet<String>,
+}
+
+impl PolicyAwareToolRegistry {
+    fn new(inner: Arc<dyn ToolRegistry>, allowed_module_ops: Vec<String>) -> Self {
+        let allowed_module_ops = allowed_module_ops
+            .into_iter()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .collect::<HashSet<_>>();
+
+        Self {
+            inner,
+            allowed_module_ops,
+        }
+    }
+
+    fn enforce_allowed_modules(&self, tool_name: &str, input: &Value) -> stasis::prelude::Result<()> {
+        if self.allowed_module_ops.is_empty() {
+            return Ok(());
+        }
+
+        let referenced_ops = referenced_module_ops_for_tool_call(tool_name, input)?;
+        if referenced_ops.is_empty() {
+            return Ok(());
+        }
+
+        let mut blocked = referenced_ops
+            .into_iter()
+            .filter(|op| !self.allowed_module_ops.contains(&op.to_ascii_lowercase()))
+            .collect::<Vec<_>>();
+        blocked.sort();
+        blocked.dedup();
+
+        if blocked.is_empty() {
+            return Ok(());
+        }
+
+        let blocked_list = blocked.join(", ");
+        let allowed_list = self
+            .allowed_module_ops
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        Err(StasisError::PortFailure(format!(
+            "policy violation: blocked Grapheme module operation(s): {blocked_list}. allowed operations: {allowed_list}"
+        )))
+    }
+}
+
+#[async_trait]
+impl ToolRegistry for PolicyAwareToolRegistry {
+    async fn list_tools(&self) -> stasis::prelude::Result<Vec<genai::chat::Tool>> {
+        self.inner.list_tools().await
+    }
+
+    async fn invoke_tool(&self, tool_name: &str, input: Value) -> stasis::prelude::Result<Value> {
+        self.enforce_allowed_modules(tool_name, &input)?;
+        self.inner.invoke_tool(tool_name, input).await
+    }
+}
+
+fn referenced_module_ops_for_tool_call(
+    tool_name: &str,
+    input: &Value,
+) -> stasis::prelude::Result<Vec<String>> {
+    match tool_name {
+        "cognition_grapheme_run"
+        | "cognition_grapheme_cli_run"
+        | "cognition_grapheme_promote_to_job"
+        | "cognition_grapheme_promote_to_recurring" => {
+            let source = input
+                .get("source")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    StasisError::PortFailure(format!(
+                        "policy violation: {tool_name} requires source for module allowlist enforcement"
+                    ))
+                })?;
+            Ok(extract_module_ops_from_source(source))
+        }
+        "cognition_grapheme_promote_last_run_to_recurring" => {
+            let source = input
+                .get("source")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    StasisError::PortFailure(
+                        "policy violation: source is required for promote_last_run_to_recurring when module allowlist is enabled"
+                            .to_string(),
+                    )
+                })?;
+            Ok(extract_module_ops_from_source(source))
+        }
+        "cognition.job.enqueue" => {
+            let job_type = input
+                .get("job_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if job_type != "workflow.grapheme.run" {
+                return Ok(Vec::new());
+            }
+
+            let payload_ref = input
+                .get("payload_ref")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    StasisError::PortFailure(
+                        "policy violation: payload_ref is required for workflow.grapheme.run"
+                            .to_string(),
+                    )
+                })?;
+
+            let source = grapheme_inline_payload_source(payload_ref).ok_or_else(|| {
+                StasisError::PortFailure(
+                    "policy violation: workflow.grapheme.run payload_ref must use grapheme:inline:<source>"
+                        .to_string(),
+                )
+            })?;
+            Ok(extract_module_ops_from_source(source))
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+pub fn extract_module_ops_from_source(source: &str) -> Vec<String> {
+    let mut ops = Vec::new();
+    let chars = source.chars().collect::<Vec<_>>();
+    let mut idx = 0usize;
+
+    while idx < chars.len() {
+        if !chars[idx].is_ascii_alphabetic() && chars[idx] != '_' {
+            idx += 1;
+            continue;
+        }
+
+        let start = idx;
+        idx += 1;
+        while idx < chars.len() && (chars[idx].is_ascii_alphanumeric() || chars[idx] == '_') {
+            idx += 1;
+        }
+        let left = chars[start..idx].iter().collect::<String>();
+
+        if idx >= chars.len() || chars[idx] != '.' {
+            continue;
+        }
+        idx += 1;
+
+        if idx >= chars.len() || (!chars[idx].is_ascii_alphabetic() && chars[idx] != '_') {
+            continue;
+        }
+
+        let right_start = idx;
+        idx += 1;
+        while idx < chars.len() && (chars[idx].is_ascii_alphanumeric() || chars[idx] == '_') {
+            idx += 1;
+        }
+        let right = chars[right_start..idx].iter().collect::<String>();
+
+        let mut lookahead = idx;
+        while lookahead < chars.len() && chars[lookahead].is_ascii_whitespace() {
+            lookahead += 1;
+        }
+
+        if lookahead < chars.len() && chars[lookahead] == '(' {
+            ops.push(format!("{left}.{right}"));
+        }
+    }
+
+    ops.sort();
+    ops.dedup();
+    ops
+}
+
 // ── Registry builder ─────────────────────────────────────────────────────────
 
 pub struct TuiRuntime {
@@ -1669,6 +1849,7 @@ pub async fn build_tui_runtime(
     provider: Option<&str>,
     model: Option<&str>,
     base_url: Option<&str>,
+    allowed_grapheme_modules: Vec<String>,
     session_id: &str,
     event_tx: mpsc::Sender<TuiEvent>,
 ) -> anyhow::Result<TuiRuntime> {
@@ -1746,8 +1927,12 @@ pub async fn build_tui_runtime(
     tool_registry.register_tool(CognitionRuntimeRecurringPreviewTool::new(event_tx.clone()))?;
 
     let prompt_pipeline = PromptExecutionPipeline::new(chat_client);
-    let tool_loop_pipeline =
-        ToolLoopPipeline::new(prompt_pipeline, Arc::new(tool_registry));
+    let base_registry: Arc<dyn ToolRegistry> = Arc::new(tool_registry);
+    let guarded_registry: Arc<dyn ToolRegistry> = Arc::new(PolicyAwareToolRegistry::new(
+        base_registry,
+        allowed_grapheme_modules,
+    ));
+    let tool_loop_pipeline = ToolLoopPipeline::new(prompt_pipeline, guarded_registry);
 
     Ok(TuiRuntime {
         runtime,
@@ -1755,4 +1940,51 @@ pub async fn build_tui_runtime(
         memory_reader,
         memory_writer,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{extract_module_ops_from_source, referenced_module_ops_for_tool_call};
+
+    #[test]
+    fn extracts_dotted_module_ops_from_source_calls() {
+        let source = r#"
+            query Run {
+                websearch.search(query: "rust") { items { title } }
+                http.fetch(url: "https://example.com") { status }
+                // not a call token
+                helper.value
+            }
+        "#;
+
+        let ops = extract_module_ops_from_source(source);
+        assert_eq!(ops, vec!["http.fetch", "websearch.search"]);
+    }
+
+    #[test]
+    fn detects_module_ops_for_grapheme_run_tool() {
+        let input = json!({
+            "source": "query Run { websearch.search(query: \"x\") { ok } }"
+        });
+
+        let ops = referenced_module_ops_for_tool_call("cognition_grapheme_run", &input)
+            .expect("ops should parse");
+
+        assert_eq!(ops, vec!["websearch.search"]);
+    }
+
+    #[test]
+    fn requires_source_for_promote_last_run_when_policy_active() {
+        let input = json!({
+            "cron_expr": "*/5 * * * *"
+        });
+
+        let result = referenced_module_ops_for_tool_call(
+            "cognition_grapheme_promote_last_run_to_recurring",
+            &input,
+        );
+        assert!(result.is_err());
+    }
 }
