@@ -76,10 +76,12 @@ pub struct DashboardDto {
 #[derive(Clone, Debug)]
 pub struct JobRowDto {
     pub id: String,
+    pub job_type: String,
     pub queue: String,
     pub status: String,
     pub priority: i32,
     pub attempts: u32,
+    pub lease_owner: Option<String>,
     pub trace_id: String,
     pub updated_at: DateTime<Utc>,
 }
@@ -95,6 +97,33 @@ pub struct OutboxEventRowDto {
 }
 
 #[derive(Clone, Debug)]
+pub struct EndpointRowDto {
+    pub endpoint_id: String,
+    pub endpoint_name: String,
+    pub protocol: String,
+    pub target: String,
+    pub enabled: bool,
+    pub success_count: u64,
+    pub failure_count: u64,
+    pub failure_rate: f64,
+    pub failure_rate_percent: f64,
+    pub unhealthy: bool,
+    pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RecurringDefinitionRowDto {
+    pub id: String,
+    pub queue: String,
+    pub job_type: String,
+    pub cron_expr: String,
+    pub timezone: String,
+    pub enabled: bool,
+    pub next_run_at: DateTime<Utc>,
+    pub last_run_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ClusterMapDto {
     pub nodes: Vec<ClusterNodeCardDto>,
 }
@@ -102,9 +131,11 @@ pub struct ClusterMapDto {
 #[derive(Clone, Debug)]
 pub struct ClusterNodeCardDto {
     pub node_id: String,
+    pub role: String,
     pub region: String,
     pub health: String,
     pub queue_ownership_count: usize,
+    pub capability_count: usize,
     pub lease_expires_at: DateTime<Utc>,
 }
 

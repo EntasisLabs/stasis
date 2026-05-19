@@ -1,0 +1,108 @@
+<div class="view-stack">
+  <section class="lineage-summary-grid columns is-multiline">
+    <article class="summary-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Total Endpoints</p>
+      <p class="kpi-value">{{ total }}</p>
+    </article>
+    <article class="summary-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Total Deliveries</p>
+      <p class="kpi-value">{{ total_deliveries }}</p>
+    </article>
+    <article class="summary-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Unhealthy</p>
+      <p class="kpi-value">{{ unhealthy_count }}</p>
+    </article>
+    <article class="summary-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Disabled</p>
+      <p class="kpi-value">{{ disabled_count }}</p>
+    </article>
+  </section>
+
+  <section class="panel-card box">
+    <header class="panel-head">
+      <h3 class="title is-5">Endpoint Registry</h3>
+      <p>Delivery diagnostics and failure trends</p>
+    </header>
+    <div class="table-wrap table-container">
+      <table class="data-table table is-fullwidth is-striped is-hoverable">
+        <thead>
+          <tr>
+            <th>Endpoint</th>
+            <th>Protocol</th>
+            <th>Target</th>
+            <th>Status</th>
+            <th>Success</th>
+            <th>Failures</th>
+            <th>Failure Rate</th>
+            <th>Trend</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for endpoint in endpoints %}
+          <tr hx-get="/inspect/endpoint/{{ endpoint.endpoint_id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
+            <td>
+              <p class="row-title">{{ endpoint.endpoint_name }}</p>
+              <p class="row-sub mono">{{ endpoint.endpoint_id }}</p>
+            </td>
+            <td>
+              <span class="proto-pill">{{ endpoint.protocol }}</span>
+            </td>
+            <td class="mono truncate">{{ endpoint.target }}</td>
+            <td>
+              {% if endpoint.enabled && !endpoint.unhealthy %}
+              <span class="status-pill ok">healthy</span>
+              {% else if endpoint.enabled && endpoint.unhealthy %}
+              <span class="status-pill bad">unhealthy</span>
+              {% else %}
+              <span class="status-pill">disabled</span>
+              {% endif %}
+            </td>
+            <td>{{ endpoint.success_count }}</td>
+            <td>{{ endpoint.failure_count }}</td>
+            <td>
+              <div class="rate-cell">
+                <span>{{ endpoint.failure_rate_label }}</span>
+                <div class="mini-track">
+                  <div class="mini-fill" style="width: {{ endpoint.failure_rate_percent }}%"></div>
+                </div>
+              </div>
+            </td>
+            <td>
+              {% if endpoint.trend == "Worsening" %}
+              <span class="status-pill bad"><span class="mini-icon">!</span> ↓ {{ endpoint.trend }}</span>
+              {% else if endpoint.trend == "Improving" %}
+              <span class="status-pill ok"><span class="mini-icon">+</span> ↑ {{ endpoint.trend }}</span>
+              {% else %}
+              <span class="status-pill run"><span class="mini-icon">~</span> → {{ endpoint.trend }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {% if unhealthy.len() > 0 %}
+  <section class="panel-card unhealthy-panel box">
+    <header class="panel-head">
+      <h3 class="title is-5">Unhealthy Endpoints</h3>
+      <p>Endpoints requiring immediate attention</p>
+    </header>
+    <div class="unhealthy-list">
+      {% for endpoint in unhealthy %}
+      <article class="unhealthy-item message is-danger is-light">
+        <div>
+          <p class="row-title">{{ endpoint.endpoint_name }}</p>
+          <p class="row-sub">{{ endpoint.target }}</p>
+        </div>
+        <span class="status-pill bad">{{ endpoint.failure_rate_label }}</span>
+        {% if let Some(error) = endpoint.last_error %}
+        <p class="unhealthy-error mono">{{ error }}</p>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+</div>

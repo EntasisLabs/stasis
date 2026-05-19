@@ -4,131 +4,105 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Stasis Command Center</title>
+    <link rel="stylesheet" href="/assets/bulma.min.css" />
     <link rel="stylesheet" href="/assets/dashboard.css" />
   </head>
   <body>
-    <div class="cockpit" id="cockpit">
-      <aside class="cc-sidebar" id="command-center-nav">
-        <div class="cc-sidebar-top">
-          <h1 class="cc-sidebar-logo"><span class="cc-sidebar-logo-text">Command Center</span></h1>
-          <div class="cc-sidebar-controls">
-            <button id="sidebar-pin" class="cc-sidebar-pin" type="button" aria-label="Pin command center" aria-pressed="false">Pin</button>
-            <button id="sidebar-toggle" class="cc-sidebar-toggle" type="button" aria-label="Collapse command center" aria-expanded="true">
-              <span aria-hidden="true">&lsaquo;</span>
-            </button>
+    <div class="dashboard-shell columns is-gapless" id="dashboard-shell">
+      <aside class="dash-sidebar column is-3-desktop is-4-tablet">
+        <div class="brand-row is-flex is-align-items-center is-justify-content-space-between">
+          <h1>Stasis Runtime</h1>
+          <div class="sidebar-actions buttons are-small">
+            <button id="sidebar-pin" class="icon-btn button is-light" type="button" aria-label="Pin sidebar" aria-pressed="false">Pin</button>
+            <button id="sidebar-toggle" class="icon-btn button is-light" type="button" aria-label="Collapse sidebar" aria-expanded="true">Hide</button>
           </div>
         </div>
+        <p class="brand-subtitle is-size-7">Distributed Command Center</p>
 
-        <div class="cc-section">
-          <span class="cc-section-label"><span>Execution</span></span>
-          <a class="cc-nav-item active" href="#" data-initial="J" data-nav-action="stream" data-panel-id="job-stream"><span>Jobs</span></a>
-          <a class="cc-nav-item" href="#" data-initial="A" data-nav-action="placeholder" data-placeholder-title="Attempts" data-placeholder-detail="Attempt timeline drill-down is next in the control-surface phase."><span>Attempts</span></a>
-          <a class="cc-nav-item" href="#" data-initial="S" data-nav-action="placeholder" data-placeholder-title="Scheduler" data-placeholder-detail="Scheduler controls will land with recurring-job operations."><span>Scheduler</span></a>
-        </div>
-
-        <div class="cc-section">
-          <span class="cc-section-label"><span>Delivery</span></span>
-          <a class="cc-nav-item" href="#" data-initial="O" data-nav-action="stream" data-panel-id="outbox-stream"><span>Outbox</span></a>
-          <a class="cc-nav-item" href="#" data-initial="E" data-nav-action="inspect" data-inspect-url="/inspect/endpoint/endpoint.webhook.ops"><span>Endpoints</span></a>
-          <a class="cc-nav-item" href="#" data-initial="R" data-nav-action="placeholder" data-placeholder-title="Routing" data-placeholder-detail="Routing map view will be attached to endpoint fan-out metrics."><span>Routing</span></a>
-        </div>
-
-        <div class="cc-section">
-          <span class="cc-section-label"><span>Distributed</span></span>
-          <a class="cc-nav-item" href="#" data-initial="C" data-nav-action="stream" data-panel-id="node-stream"><span>Cluster</span></a>
-          <a class="cc-nav-item" href="#" data-initial="F" data-nav-action="placeholder" data-placeholder-title="Forwarding" data-placeholder-detail="Cross-node forwarding controls will be surfaced with action routes."><span>Forwarding</span></a>
-          <a class="cc-nav-item" href="#" data-initial="N" data-nav-action="stream" data-panel-id="node-stream"><span>Node Health</span></a>
-        </div>
-
-        <div class="cc-section">
-          <span class="cc-section-label"><span>Debugging</span></span>
-          <a class="cc-nav-item" href="#" data-initial="L" data-nav-action="placeholder" data-placeholder-title="Lineage" data-placeholder-detail="Lineage graph exploration is queued after action controls."><span>Lineage</span></a>
-          <a class="cc-nav-item" href="#" data-initial="T" data-nav-action="placeholder" data-placeholder-title="Threads" data-placeholder-detail="Thread and trace explorer will use timeline/event joins."><span>Threads</span></a>
-          <a class="cc-nav-item" href="#" data-initial="R" data-nav-action="placeholder" data-placeholder-title="Replay" data-placeholder-detail="Replay commands are planned with POST control routes."><span>Replay</span></a>
-        </div>
+        <nav class="nav-groups menu" id="command-center-nav">
+          <div class="nav-group menu-block">
+            <h2 class="menu-label">Runtime</h2>
+            <ul class="menu-list">
+              <li><a href="#" class="nav-item active" data-view="jobs" data-title="Job Runtime" data-subtitle="Active execution throughput and lease behavior">Job Runtime</a></li>
+              <li><a href="#" class="nav-item" data-view="deadletter" data-title="Dead Letter" data-subtitle="Failed workload requiring intervention">Dead Letter</a></li>
+              <li><a href="#" class="nav-item" data-view="scheduler" data-title="Scheduler" data-subtitle="Recurring workloads and timing policies">Scheduler</a></li>
+            </ul>
+          </div>
+          <div class="nav-group menu-block">
+            <h2 class="menu-label">Delivery</h2>
+            <ul class="menu-list">
+              <li><a href="#" class="nav-item" data-view="endpoints" data-title="Endpoint Health" data-subtitle="Diagnostics, reliability and failure rates">Endpoint Health</a></li>
+              <li><a href="#" class="nav-item" data-view="outbox" data-title="Outbox" data-subtitle="Event publication state and retries">Outbox</a></li>
+            </ul>
+          </div>
+          <div class="nav-group menu-block">
+            <h2 class="menu-label">System</h2>
+            <ul class="menu-list">
+              <li><a href="#" class="nav-item" data-view="cluster" data-title="Cluster Topology" data-subtitle="Node ownership and health posture">Cluster Topology</a></li>
+              <li><a href="#" class="nav-item" data-view="workflows" data-title="Workflow Builder" data-subtitle="Authoring orchestration flow controls">Workflow Builder</a></li>
+              <li><a href="#" class="nav-item" data-view="lineage" data-title="Lineage Explorer" data-subtitle="Causality and trace chain exploration">Lineage Explorer</a></li>
+            </ul>
+          </div>
+        </nav>
       </aside>
 
-      <main class="cc-main">
-        <header class="cc-topbar">
+      <main class="dash-main column">
+        <header class="dash-header">
           <div>
-            <div class="cc-topbar-title">Control Plane Cockpit</div>
-            <div class="cc-topbar-ts">Refreshed {{ refreshed_at }}</div>
+            <h2 id="view-title" class="title is-3">Job Runtime</h2>
+            <p id="view-subtitle">Active execution throughput and lease behavior</p>
           </div>
-          <div class="cc-topbar-right">Everything is inspectable</div>
+          <div class="header-right">
+            <button id="theme-toggle" class="icon-btn theme-toggle button is-light is-small" type="button" aria-label="Switch theme">Dark</button>
+            <span class="status-chip tag is-light">Refreshed {{ refreshed_at }}</span>
+          </div>
         </header>
 
-        <section class="cc-metrics">
-          <article class="cc-metric"><div class="cc-metric-label">Job Throughput</div><div class="cc-metric-value">{{ dto.kpis.job_throughput }}</div></article>
-          <article class="cc-metric"><div class="cc-metric-label">Queue Pressure</div><div class="cc-metric-value">{{ dto.kpis.queue_pressure }}</div></article>
-          <article class="cc-metric"><div class="cc-metric-label">Outbox Lag</div><div class="cc-metric-value">{{ dto.kpis.outbox_lag }}</div></article>
-          <article class="cc-metric"><div class="cc-metric-label">Cluster Health</div><div class="cc-metric-value">{{ dto.kpis.cluster_health }}</div></article>
-          <article class="cc-metric"><div class="cc-metric-label">Endpoint Failure Trend</div><div class="cc-metric-value">{{ dto.kpis.endpoint_failure_rate }}</div></article>
-        </section>
+        <section id="dashboard-view" class="view-host"></section>
 
-        <section class="cc-panels">
-          <article class="cc-panel">
-            <header class="cc-panel-header">
-              Job Runtime Stream
-              <span class="live-badge"><span class="live-dot"></span>live</span>
-            </header>
-            <div class="cc-panel-body" id="job-stream" hx-get="/stream/jobs" hx-trigger="load, every 3s" hx-swap="innerHTML">
-              <p class="loading">Loading jobs...</p>
-            </div>
-          </article>
-
-          <article class="cc-panel">
-            <header class="cc-panel-header">
-              Outbox Event Stream
-              <span class="live-badge"><span class="live-dot"></span>live</span>
-            </header>
-            <div class="cc-panel-body" id="outbox-stream" hx-get="/stream/outbox" hx-trigger="load, every 3s" hx-swap="innerHTML">
-              <p class="loading">Loading outbox events...</p>
-            </div>
-          </article>
-
-          <article class="cc-panel">
-            <header class="cc-panel-header">Cluster Node Grid</header>
-            <div class="cc-panel-body" id="node-stream" hx-get="/stream/nodes" hx-trigger="load, every 5s" hx-swap="innerHTML">
-              <p class="loading">Loading cluster nodes...</p>
-            </div>
-          </article>
+        <section class="panel-card inspector-panel box" id="inspector-panel">
+          <div class="inspector-card content">
+            <h3 class="title is-5">Inspector</h3>
+            <p>Select a job, event, node, or endpoint to inspect details.</p>
+          </div>
         </section>
       </main>
-
-      <aside class="cc-inspect">
-        <div class="cc-inspect-header">Inspector</div>
-        <div class="cc-inspect-body" id="inspector-body">
-          <div class="cc-inspect-empty">Select a row to inspect details</div>
-        </div>
-      </aside>
     </div>
 
     <script>
       (function () {
-        var cockpit = document.getElementById("cockpit");
+        var shell = document.getElementById("dashboard-shell");
+        var host = document.getElementById("dashboard-view");
+        var title = document.getElementById("view-title");
+        var subtitle = document.getElementById("view-subtitle");
+        var themeToggle = document.getElementById("theme-toggle");
         var toggle = document.getElementById("sidebar-toggle");
         var pin = document.getElementById("sidebar-pin");
-        if (!cockpit || !toggle || !pin) {
+        if (!shell || !host || !toggle || !pin || !themeToggle) {
           return;
         }
 
         var collapseStorageKey = "stasis.dashboard.sidebar.collapsed";
         var pinStorageKey = "stasis.dashboard.sidebar.pinned";
+        var themeStorageKey = "stasis.dashboard.theme";
+        var currentView = "jobs";
+        var liveViews = { jobs: true, endpoints: true, cluster: true, outbox: true, deadletter: true };
 
         function applyCollapsed(collapsed) {
-          cockpit.classList.toggle("sidebar-collapsed", collapsed);
+          shell.classList.toggle("sidebar-collapsed", collapsed);
           toggle.setAttribute("aria-expanded", String(!collapsed));
           toggle.setAttribute(
             "aria-label",
-            collapsed ? "Expand command center" : "Collapse command center"
+            collapsed ? "Expand sidebar" : "Collapse sidebar"
           );
+          toggle.textContent = collapsed ? "Show" : "Hide";
         }
 
         function applyPinned(pinned) {
-          cockpit.classList.toggle("sidebar-pinned", pinned);
+          shell.classList.toggle("sidebar-pinned", pinned);
           pin.setAttribute("aria-pressed", String(pinned));
           pin.textContent = pinned ? "Pinned" : "Pin";
-          pin.setAttribute("aria-label", pinned ? "Unpin command center" : "Pin command center");
+          pin.setAttribute("aria-label", pinned ? "Unpin sidebar" : "Pin sidebar");
         }
 
         function readStorageBoolean(key) {
@@ -147,6 +121,14 @@
 
         var userCollapsed = readStorageBoolean(collapseStorageKey);
         var pinned = readStorageBoolean(pinStorageKey);
+        var theme = "light";
+
+        function applyTheme(nextTheme) {
+          theme = nextTheme === "dark" ? "dark" : "light";
+          document.body.classList.toggle("theme-dark", theme === "dark");
+          themeToggle.textContent = theme === "dark" ? "Light" : "Dark";
+          themeToggle.setAttribute("aria-label", theme === "dark" ? "Switch to light theme" : "Switch to dark theme");
+        }
 
         function applyLayout() {
           var forcedMobileCollapse = window.innerWidth <= 1100 && !pinned;
@@ -155,6 +137,13 @@
         }
 
         applyLayout();
+
+        try {
+          var storedTheme = window.localStorage.getItem(themeStorageKey) || "light";
+          applyTheme(storedTheme);
+        } catch (e) {
+          applyTheme("light");
+        }
 
         toggle.addEventListener("click", function () {
           userCollapsed = !userCollapsed;
@@ -168,21 +157,21 @@
           applyLayout();
         });
 
+        themeToggle.addEventListener("click", function () {
+          applyTheme(theme === "dark" ? "light" : "dark");
+          try {
+            window.localStorage.setItem(themeStorageKey, theme);
+          } catch (e) {}
+        });
+
         window.addEventListener("resize", applyLayout);
 
-        function requestInto(element) {
-          var url = element.getAttribute("hx-get");
-          if (!url) {
-            return;
-          }
-
-          var targetSelector = element.getAttribute("hx-target");
-          var swap = element.getAttribute("hx-swap") || "innerHTML";
-          var target = targetSelector ? document.querySelector(targetSelector) : element;
+        function request(url, target, swap) {
           if (!target) {
             return;
           }
 
+          var mode = swap || "innerHTML";
           fetch(url, {
             method: "GET",
             headers: {
@@ -196,15 +185,103 @@
               return response.text();
             })
             .then(function (html) {
-              if (swap === "outerHTML") {
+              if (mode === "outerHTML") {
                 target.outerHTML = html;
               } else {
                 target.innerHTML = html;
               }
             })
             .catch(function (error) {
-              target.innerHTML = '<div class="cc-request-error">Request error: ' + error.message + "</div>";
+              target.innerHTML = '<div class="request-error">Request error: ' + error.message + "</div>";
             });
+        }
+
+        function postAction(url, body, target, trigger) {
+          if (!target) {
+            return;
+          }
+
+          var previousLabel = null;
+          if (trigger) {
+            previousLabel = trigger.textContent;
+            trigger.disabled = true;
+            trigger.classList.add("is-busy");
+            trigger.textContent = "Working...";
+          }
+
+          fetch(url, {
+            method: "POST",
+            headers: {
+              "HX-Request": "true",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body || {}),
+          })
+            .then(function (response) {
+              if (!response.ok) {
+                throw new Error("Request failed: " + response.status);
+              }
+              return response.text();
+            })
+            .then(function (html) {
+              target.innerHTML = html;
+              loadView(currentView);
+            })
+            .catch(function (error) {
+              target.innerHTML = '<div class="request-error">Request error: ' + error.message + "</div>";
+            })
+            .finally(function () {
+              if (!trigger) {
+                return;
+              }
+              trigger.disabled = false;
+              trigger.classList.remove("is-busy");
+              if (previousLabel !== null) {
+                trigger.textContent = previousLabel;
+              }
+            });
+        }
+
+        function requestInto(element) {
+          var url = element.getAttribute("hx-get");
+          if (!url) {
+            return;
+          }
+
+          var targetSelector = element.getAttribute("hx-target");
+          var swap = element.getAttribute("hx-swap") || "innerHTML";
+          var target = targetSelector ? document.querySelector(targetSelector) : element;
+          request(url, target, swap);
+        }
+
+        function requestFromForm(form) {
+          var url = form.getAttribute("data-hx-get") || form.getAttribute("action") || "";
+          if (!url) {
+            return;
+          }
+
+          var targetSelector = form.getAttribute("hx-target") || "#dashboard-view";
+          var swap = form.getAttribute("hx-swap") || "innerHTML";
+          var target = document.querySelector(targetSelector);
+          if (!target) {
+            return;
+          }
+
+          var formData = new window.FormData(form);
+          var params = new URLSearchParams();
+          formData.forEach(function (value, key) {
+            if (typeof value === "string") {
+              params.append(key, value);
+            }
+          });
+
+          var finalUrl = url;
+          var query = params.toString();
+          if (query.length > 0) {
+            finalUrl += (url.indexOf("?") >= 0 ? "&" : "?") + query;
+          }
+
+          request(finalUrl, target, swap);
         }
 
         function parseInterval(triggerPart) {
@@ -247,68 +324,55 @@
           });
         }
 
-        function setInspectorPlaceholder(title, detail) {
-          var target = document.getElementById("inspector-body");
-          if (!target) {
-            return;
-          }
-          target.innerHTML =
-            '<div class="inspector-card"><h3>' +
-            title +
-            '</h3><p class="cc-inspector-note">' +
-            detail +
-            "</p></div>";
-        }
-
         function activateNavItem(item) {
-          var navItems = document.querySelectorAll(".cc-nav-item");
+          var navItems = document.querySelectorAll(".nav-item");
           navItems.forEach(function (navItem) {
             navItem.classList.toggle("active", navItem === item);
           });
         }
 
-        document.querySelectorAll(".cc-nav-item").forEach(function (item) {
+        function loadView(viewName) {
+          currentView = viewName;
+          request("/view/" + viewName, host, "innerHTML");
+        }
+
+        document.querySelectorAll(".nav-item").forEach(function (item) {
           item.addEventListener("click", function (event) {
             event.preventDefault();
             activateNavItem(item);
-
-            var action = item.getAttribute("data-nav-action");
-            if (action === "stream") {
-              var panelId = item.getAttribute("data-panel-id");
-              if (!panelId) {
-                return;
-              }
-              var panel = document.getElementById(panelId);
-              if (!panel) {
-                return;
-              }
-              requestInto(panel);
-              panel.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-              return;
-            }
-
-            if (action === "inspect") {
-              var inspectUrl = item.getAttribute("data-inspect-url");
-              if (!inspectUrl) {
-                return;
-              }
-              var proxy = document.createElement("div");
-              proxy.setAttribute("hx-get", inspectUrl);
-              proxy.setAttribute("hx-target", "#inspector-body");
-              proxy.setAttribute("hx-swap", "innerHTML");
-              requestInto(proxy);
-              return;
-            }
-
-            if (action === "placeholder") {
-              var title = item.getAttribute("data-placeholder-title") || "Panel";
-              var detail = item.getAttribute("data-placeholder-detail") || "This section is coming soon.";
-              setInspectorPlaceholder(title, detail);
-            }
+            var viewName = item.getAttribute("data-view") || "jobs";
+            loadView(viewName);
+            title.textContent = item.getAttribute("data-title") || "Command Center";
+            subtitle.textContent = item.getAttribute("data-subtitle") || "Runtime system visibility";
           });
         });
 
         document.addEventListener("click", function (event) {
+          var actionTrigger = event.target.closest("[data-action-post]");
+          if (actionTrigger) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            var url = actionTrigger.getAttribute("data-action-post");
+            if (!url) {
+              return;
+            }
+
+            var body = {};
+            var bodyRaw = actionTrigger.getAttribute("data-action-body");
+            if (bodyRaw) {
+              try {
+                body = JSON.parse(bodyRaw);
+              } catch (e) {
+                body = {};
+              }
+            }
+
+            var inspector = document.getElementById("inspector-panel");
+            postAction(url, body, inspector, actionTrigger);
+            return;
+          }
+
           var trigger = event.target.closest("[hx-get]");
           if (!trigger) {
             return;
@@ -320,6 +384,23 @@
           requestInto(trigger);
         });
 
+        document.addEventListener("submit", function (event) {
+          var form = event.target.closest("form[data-hx-get]");
+          if (!form) {
+            return;
+          }
+          event.preventDefault();
+          requestFromForm(form);
+        });
+
+        window.setInterval(function () {
+          if (!liveViews[currentView]) {
+            return;
+          }
+          loadView(currentView);
+        }, 5000);
+
+        loadView("jobs");
         initHxLite();
       })();
     </script>

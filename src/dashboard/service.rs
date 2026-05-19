@@ -9,13 +9,13 @@ use crate::application::dto::{
 };
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
 use crate::dashboard::dto::{
-    AttemptInspectorDto, ClusterMapDto, DashboardDto, EventInspectorDto, InspectorView,
-    JobInspectorDto, JobRowDto, OutboxEventRowDto, SystemKpiDto,
-    UiListPanel,
+    AttemptInspectorDto, ClusterMapDto, DashboardDto, EndpointRowDto, EventInspectorDto,
+    InspectorView, JobInspectorDto, JobRowDto, OutboxEventRowDto, RecurringDefinitionRowDto,
+    SystemKpiDto, UiListPanel,
 };
 use crate::dashboard::mappers::{
-    map_cluster_health_row, map_endpoint_inspector, map_job_to_row, map_node_inspector,
-    map_outbox_to_row,
+    map_cluster_health_row, map_endpoint_inspector, map_endpoint_row, map_job_to_row,
+    map_node_inspector, map_outbox_to_row, map_recurring_definition_row,
 };
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::JobState;
@@ -24,6 +24,7 @@ use crate::infrastructure::runtime::composite_control_plane_store::CompositeCont
 use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
 use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
+use crate::ports::outbound::runtime::recurring_store::RecurringStore;
 use crate::sdk::control_plane_sdk::ControlPlaneSdk;
 
 type DashboardControlStore =
@@ -44,7 +45,17 @@ pub trait DashboardQueryService: Send + Sync {
     async fn dashboard(&self, inspect: Option<InspectEntity>) -> Result<DashboardDto>;
     async fn jobs_stream(&self) -> Result<UiListPanel<JobRowDto>>;
     async fn outbox_stream(&self) -> Result<UiListPanel<OutboxEventRowDto>>;
+    async fn endpoint_stream(&self) -> Result<UiListPanel<EndpointRowDto>>;
+    async fn recurring_stream(&self) -> Result<UiListPanel<RecurringDefinitionRowDto>>;
     async fn cluster_stream(&self) -> Result<ClusterMapDto>;
+    async fn scheduler_materialize_now(&self, scheduler_id: &str) -> Result<usize>;
+    async fn scheduler_process_queue_once(
+        &self,
+        queue: &str,
+        worker_id: &str,
+    ) -> Result<Option<String>>;
+    async fn scheduler_publish_pending_now(&self, limit: usize) -> Result<usize>;
+    async fn scheduler_replay_dead_letter_now(&self, job_id: &str) -> Result<bool>;
     async fn inspect(&self, entity: InspectEntity) -> Result<InspectorView>;
 }
 
@@ -216,6 +227,50 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
         })
     }
 
+    async fn endpoint_stream(&self) -> Result<UiListPanel<EndpointRowDto>> {
+        let rows = self
+            .control_plane
+            .list_endpoint_diagnostics_read_model(ListEndpointDiagnosticsReadModelRequest {
+                endpoint_ids: None,
+                protocol: None,
+                min_failure_count: None,
+                stale_after_seconds: None,
+                unhealthy_only: false,
+                include_disabled: true,
+                offset: 0,
+                limit: Some(200),
+            })
+            .await?;
+
+        let mapped = rows.iter().map(map_endpoint_row).collect::<Vec<_>>();
+
+        Ok(UiListPanel {
+            items: mapped.clone(),
+            total: Some(mapped.len() as u64),
+            cursor: None,
+        })
+    }
+
+    async fn recurring_stream(&self) -> Result<UiListPanel<RecurringDefinitionRowDto>> {
+        let definitions = self.runtime.recurring_store.list().await?;
+        let mut rows = definitions
+            .iter()
+            .map(map_recurring_definition_row)
+            .collect::<Vec<_>>();
+
+        rows.sort_by(|left, right| {
+            left.next_run_at
+                .cmp(&right.next_run_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+
+        Ok(UiListPanel {
+            items: rows.clone(),
+            total: Some(rows.len() as u64),
+            cursor: None,
+        })
+    }
+
     async fn cluster_stream(&self) -> Result<ClusterMapDto> {
         let rows = self
             .control_plane
@@ -233,6 +288,26 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
         let nodes = rows.iter().map(map_cluster_health_row).collect();
 
         Ok(ClusterMapDto { nodes })
+    }
+
+    async fn scheduler_materialize_now(&self, scheduler_id: &str) -> Result<usize> {
+        self.runtime.materialize_recurring_now(scheduler_id).await
+    }
+
+    async fn scheduler_process_queue_once(
+        &self,
+        queue: &str,
+        worker_id: &str,
+    ) -> Result<Option<String>> {
+        self.runtime.process_once_now(queue, worker_id).await
+    }
+
+    async fn scheduler_publish_pending_now(&self, limit: usize) -> Result<usize> {
+        self.runtime.publish_pending_events_now(limit).await
+    }
+
+    async fn scheduler_replay_dead_letter_now(&self, job_id: &str) -> Result<bool> {
+        self.runtime.replay_dead_letter_now(job_id).await
     }
 
     async fn inspect(&self, entity: InspectEntity) -> Result<InspectorView> {

@@ -1,0 +1,78 @@
+<div class="view-stack">
+  <section class="kpi-grid columns is-multiline">
+    <article class="kpi-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Job Throughput</p>
+      <p class="kpi-value">{{ dto.kpis.job_throughput }}</p>
+    </article>
+    <article class="kpi-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Queue Pressure</p>
+      <p class="kpi-value">{{ dto.kpis.queue_pressure }}</p>
+    </article>
+    <article class="kpi-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Outbox Lag</p>
+      <p class="kpi-value">{{ dto.kpis.outbox_lag }}</p>
+    </article>
+    <article class="kpi-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Cluster Health</p>
+      <p class="kpi-value">{{ dto.kpis.cluster_health }}</p>
+    </article>
+  </section>
+
+  <section class="panel-card box">
+    <header class="panel-head">
+      <h3 class="title is-5">Active Jobs</h3>
+      <p>Real-time execution monitoring</p>
+    </header>
+    <div class="table-wrap table-container">
+      <table class="data-table table is-fullwidth is-striped is-hoverable">
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Type</th>
+            <th>Queue</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Attempts</th>
+            <th>Updated</th>
+            <th>Owner</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in dto.job_stream.items %}
+          <tr hx-get="/inspect/job/{{ job.id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
+            <td>
+              <p class="row-title mono truncate">{{ job.id }}</p>
+              <p class="row-sub">trace {{ job.trace_id }}</p>
+            </td>
+            <td>
+              <span class="job-type-pill">{{ job.job_type }}</span>
+            </td>
+            <td><span class="proto-pill">{{ job.queue }}</span></td>
+            <td>
+              {% if job.status == "succeeded" %}
+              <span class="status-pill ok">{{ job.status }}</span>
+              {% else if job.status == "running" || job.status == "leased" %}
+              <span class="status-pill run">{{ job.status }}</span>
+              {% else if job.status == "failed" || job.status == "dead_letter" %}
+              <span class="status-pill bad">{{ job.status }}</span>
+              {% else %}
+              <span class="status-pill">{{ job.status }}</span>
+              {% endif %}
+            </td>
+            <td>{{ job.priority }}</td>
+            <td>{{ job.attempts }}</td>
+            <td>{{ job.updated_at }}</td>
+            <td>
+              {% if let Some(owner) = job.lease_owner %}
+              <span class="proto-pill">{{ owner }}</span>
+              {% else %}
+              <span class="row-sub">-</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

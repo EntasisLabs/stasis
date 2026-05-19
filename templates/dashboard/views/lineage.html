@@ -1,0 +1,95 @@
+<div class="view-stack">
+  <section class="lineage-layout columns is-variable is-4">
+    <aside class="lineage-rail column is-4-desktop">
+      <section class="panel-card box">
+        <header class="panel-head">
+          <h3 class="title is-5">Search Lineage</h3>
+        </header>
+        <form class="filter-form lineage-filter" data-hx-get="/view/lineage" hx-target="#dashboard-view" hx-swap="innerHTML">
+          <input class="filter-input input" type="text" name="q" value="{{ query_text }}" placeholder="job id, event type, correlation" />
+          <input class="filter-input input" type="text" name="thread" value="" placeholder="thread-001" />
+          <select class="filter-select select" name="state">
+            <option value="all"{% if selected_state == "all" %} selected{% endif %}>All States</option>
+            <option value="pending"{% if selected_state == "pending" %} selected{% endif %}>Pending</option>
+            <option value="published"{% if selected_state == "published" %} selected{% endif %}>Published</option>
+            <option value="failed"{% if selected_state == "failed" %} selected{% endif %}>Failed</option>
+          </select>
+          <button class="action-btn button is-link" type="submit">Apply Filters</button>
+        </form>
+      </section>
+
+      <section class="panel-card box">
+        <header class="panel-head compact"><h3 class="title is-6">Lineage Stats</h3></header>
+        <p class="row-sub">Filtered Events <span class="mono">{{ event_count }}</span></p>
+        <p class="row-sub">Active Jobs <span class="mono">{{ active_job_count }}</span></p>
+        <p class="row-sub">Total Nodes <span class="mono">{{ graph_node_count }}</span></p>
+        <p class="row-sub">Connections <span class="mono">{{ connection_count }}</span></p>
+        <p class="row-sub">Depth <span class="mono">{{ depth_label }}</span></p>
+      </section>
+    </aside>
+
+    <section class="panel-card lineage-canvas box column">
+      <header class="panel-head">
+        <h3 class="title is-5">Lineage Graph</h3>
+        <p>Job execution flow and dependencies</p>
+      </header>
+      <div class="lineage-lane">
+        {% for node in graph_nodes %}
+        <article class="lineage-node {{ node.lane }}">
+          <p class="lineage-node-type"><span class="lane-badge">{{ node.lane }}</span></p>
+          <p class="lineage-node-title">{{ node.title }}</p>
+          <p class="lineage-node-sub mono">{{ node.node_id }}</p>
+          <span class="status-pill{% if node.state == "published" %} ok{% else if node.state == "failed" %} bad{% else %} run{% endif %}">
+            {{ node.state }}
+          </span>
+          <p class="lineage-node-sub">{{ node.occurred_at }}</p>
+        </article>
+        {% if !loop.last %}
+        <div class="lineage-connector">→</div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </section>
+  </section>
+
+  <section class="panel-card box">
+    <header class="panel-head">
+      <h3 class="title is-5">Lineage Event Feed</h3>
+      <p>Inspectable chain of event delivery states and correlation keys</p>
+    </header>
+    <div class="table-wrap table-container">
+      <table class="data-table table is-fullwidth is-striped is-hoverable">
+        <thead>
+          <tr>
+            <th>Event</th>
+            <th>Type</th>
+            <th>Correlation</th>
+            <th>State</th>
+            <th>Retries</th>
+            <th>Occurred</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in events %}
+          <tr hx-get="/inspect/event/{{ event.event_id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
+            <td class="mono">{{ event.event_id }}</td>
+            <td>{{ event.event_type }}</td>
+            <td class="mono">{{ event.correlation_id }}</td>
+            <td>
+              {% if event.delivery_state == "published" %}
+              <span class="status-pill ok">{{ event.delivery_state }}</span>
+              {% else if event.delivery_state == "failed" %}
+              <span class="status-pill bad">{{ event.delivery_state }}</span>
+              {% else %}
+              <span class="status-pill run">{{ event.delivery_state }}</span>
+              {% endif %}
+            </td>
+            <td>{{ event.retry_attempts }}</td>
+            <td>{{ event.occurred_at }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

@@ -1,0 +1,128 @@
+<div class="view-stack">
+  <section class="panel-card box">
+    <header class="panel-head">
+      <h3 class="title is-5">Scheduler Actions</h3>
+      <p>Execute scheduler operations directly from control plane</p>
+    </header>
+    <div class="action-row buttons">
+      <button class="action-btn button is-link" type="button" data-action-post="/action/scheduler/materialize">Run Recurring Tick</button>
+      <button class="action-btn button is-info is-light" type="button" data-action-post="/action/scheduler/publish" data-action-body='{"limit":100}'>Publish Pending Events</button>
+    </div>
+  </section>
+
+  <section class="kpi-grid columns is-multiline">
+    <article class="kpi-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Job Throughput</p>
+      <p class="kpi-value">{{ kpis.job_throughput }}</p>
+    </article>
+    <article class="kpi-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Queue Pressure</p>
+      <p class="kpi-value">{{ kpis.queue_pressure }}</p>
+    </article>
+    <article class="kpi-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Outbox Lag</p>
+      <p class="kpi-value">{{ kpis.outbox_lag }}</p>
+    </article>
+    <article class="kpi-card column is-6-tablet is-3-desktop box">
+      <p class="kpi-label">Endpoint Failures</p>
+      <p class="kpi-value">{{ kpis.endpoint_failure_rate }}</p>
+    </article>
+  </section>
+
+  <section class="panel-card box">
+    <header class="panel-head">
+      <h3 class="title is-5">Queue Scheduling Pressure</h3>
+      <p>Derived from active runtime job states by queue</p>
+    </header>
+    <div class="table-wrap table-container">
+      <table class="data-table table is-fullwidth is-striped is-hoverable">
+        <thead>
+          <tr>
+            <th>Queue</th>
+            <th>Enqueued</th>
+            <th>Running</th>
+            <th>Blocked</th>
+            <th>Completed</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for queue in queues %}
+          <tr>
+            <td class="mono">{{ queue.queue }}</td>
+            <td>{{ queue.enqueued_jobs }}</td>
+            <td>{{ queue.running_jobs }}</td>
+            <td>
+              {% if queue.blocked_jobs > 0 %}
+              <span class="status-pill bad">{{ queue.blocked_jobs }}</span>
+              {% else %}
+              <span class="status-pill ok">0</span>
+              {% endif %}
+            </td>
+            <td>{{ queue.completed_jobs }}</td>
+            <td>
+              <button
+                class="action-btn ghost"
+                type="button"
+                data-action-post="/action/scheduler/process"
+                data-action-body='{"queue":"{{ queue.queue }}"}'
+              >
+                Process One
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel-card box">
+    <header class="panel-head">
+      <h3 class="title is-5">Recurring Definitions</h3>
+      <p>Live recurrence registry tracked by scheduler</p>
+    </header>
+    <div class="table-wrap table-container">
+      <table class="data-table table is-fullwidth is-striped is-hoverable">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Queue</th>
+            <th>Type</th>
+            <th>Cron</th>
+            <th>TZ</th>
+            <th>Enabled</th>
+            <th>Next Run</th>
+            <th>Last Run</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in recurring %}
+          <tr>
+            <td class="mono">{{ item.id }}</td>
+            <td>{{ item.queue }}</td>
+            <td class="mono">{{ item.job_type }}</td>
+            <td class="mono">{{ item.cron_expr }}</td>
+            <td>{{ item.timezone }}</td>
+            <td>
+              {% if item.enabled %}
+              <span class="status-pill ok">enabled</span>
+              {% else %}
+              <span class="status-pill">disabled</span>
+              {% endif %}
+            </td>
+            <td>{{ item.next_run_at }}</td>
+            <td>
+              {% if let Some(last) = item.last_run_at %}
+              {{ last }}
+              {% else %}
+              never
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

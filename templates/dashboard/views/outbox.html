@@ -1,0 +1,40 @@
+<div class="view-stack">
+  <section class="panel-card box">
+    <header class="panel-head">
+      <h3 class="title is-5">Outbox Event Stream</h3>
+      <p>Pending and published event flow</p>
+    </header>
+    <div class="table-wrap table-container">
+      <table class="data-table table is-fullwidth is-striped is-hoverable">
+        <thead>
+          <tr>
+            <th>Event</th>
+            <th>Type</th>
+            <th>State</th>
+            <th>Retries</th>
+            <th>Occurred</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in events %}
+          <tr hx-get="/inspect/event/{{ event.event_id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
+            <td class="mono">{{ event.event_id }}</td>
+            <td>{{ event.event_type }}</td>
+            <td>
+              {% if event.delivery_state == "published" %}
+              <span class="status-pill ok">{{ event.delivery_state }}</span>
+              {% else if event.delivery_state == "failed" %}
+              <span class="status-pill bad">{{ event.delivery_state }}</span>
+              {% else %}
+              <span class="status-pill run">{{ event.delivery_state }}</span>
+              {% endif %}
+            </td>
+            <td>{{ event.retry_attempts }}</td>
+            <td>{{ event.occurred_at }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

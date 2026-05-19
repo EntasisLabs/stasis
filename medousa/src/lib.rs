@@ -1,4 +1,5 @@
 pub mod events;
+pub mod daemon_api;
 pub mod session;
 pub mod tools;
 
@@ -13,6 +14,11 @@ use stasis::prelude::{
 };
 
 pub use tools::{TuiRuntime, build_tui_runtime};
+pub use daemon_api::{
+    DaemonStatsResponse, EnqueueAskRequest, EnqueuePromptRequest, EnqueueResponse,
+    HealthResponse, RegisterRecurringPromptRequest, RegisterRecurringResponse,
+    resolve_daemon_url,
+};
 
 const DEFAULT_LLM_MODEL: &str = "gpt-4o-mini";
 const DEFAULT_LLM_PROVIDER: &str = "openai";

@@ -1,0 +1,43 @@
+<div class="view-stack">
+  <section class="panel-card box">
+    <header class="panel-head">
+      <h3 class="title is-5">Dead Letter Queue</h3>
+      <p>Failed jobs awaiting replay or intervention</p>
+    </header>
+    <div class="table-wrap table-container">
+      <table class="data-table table is-fullwidth is-striped is-hoverable">
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Queue</th>
+            <th>Status</th>
+            <th>Attempts</th>
+            <th>Updated</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+          <tr hx-get="/inspect/job/{{ job.id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
+            <td class="mono">{{ job.id }}</td>
+            <td>{{ job.queue }}</td>
+            <td><span class="status-pill bad">{{ job.status }}</span></td>
+            <td>{{ job.attempts }}</td>
+            <td>{{ job.updated_at }}</td>
+            <td>
+              <button
+                class="action-btn ghost"
+                type="button"
+                data-action-post="/action/scheduler/replay"
+                data-action-body='{"job_id":"{{ job.id }}"}'
+              >
+                Replay
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

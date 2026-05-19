@@ -1,0 +1,100 @@
+<div class="view-stack">
+  <section class="workflow-layout columns is-variable is-4">
+    <article class="panel-card workflow-sidebar box column is-4-desktop">
+      <header class="panel-head">
+        <h3 class="title is-5">Node Types</h3>
+        <p>Builder primitives</p>
+      </header>
+      <div class="node-type-list">
+        <div class="node-type source">Data Input</div>
+        <div class="node-type process">Transform</div>
+        <div class="node-type process">Filter</div>
+        <div class="node-type process">Merge</div>
+        <div class="node-type sink">Data Output</div>
+      </div>
+
+      <header class="panel-head compact">
+        <h3 class="title is-6">Saved Workflows</h3>
+      </header>
+      <div class="lane-list">
+        {% for lane in lanes %}
+        <a
+          href="#"
+          class="lane-link{% if lane.selected %} active{% endif %}"
+          hx-get="/view/workflows?queue={{ lane.lane }}"
+          hx-target="#dashboard-view"
+          hx-swap="innerHTML"
+        >
+          <p class="lane-link-title">{{ lane.workflow_name }}</p>
+          <p class="lane-link-sub">{{ lane.total_jobs }} jobs • {{ lane.lane }}</p>
+        </a>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="panel-card workflow-canvas box column">
+      <header class="panel-head">
+        <h3 class="title is-5">{{ selected_workflow_name }}</h3>
+        <p>Workflow ID: <span class="mono">{{ selected_workflow_id }}</span></p>
+      </header>
+
+      <div class="action-row workflow-actions buttons">
+        <button
+          class="action-btn ghost button is-light"
+          type="button"
+          data-action-post="/action/workflows/save"
+          data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'
+        >
+          [save] Save Workflow
+        </button>
+        <button
+          class="action-btn button is-link"
+          type="button"
+          data-action-post="/action/workflows/execute"
+          data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'
+        >
+          [run] Execute Workflow
+        </button>
+      </div>
+
+      <div class="stage-flow">
+        {% for stage in stages %}
+        <div class="stage-node {{ stage.node_type }}">
+          <p class="stage-name">{{ stage.name }}</p>
+          <p class="stage-count">{{ stage.count }}</p>
+        </div>
+        {% if !loop.last %}
+        <div class="stage-arrow">→</div>
+        {% endif %}
+        {% endfor %}
+      </div>
+
+      <div class="lane-grid">
+        {% for lane in lanes %}
+        <article class="lane-card{% if lane.selected %} selected{% endif %}">
+          <h4 class="mono">{{ lane.lane }}</h4>
+          <p class="lane-total">{{ lane.total_jobs }} total jobs</p>
+          <div class="lane-stats">
+            <span class="status-pill run">running {{ lane.running_jobs }}</span>
+            <span class="status-pill ok">succeeded {{ lane.succeeded_jobs }}</span>
+            <span class="status-pill bad">failed {{ lane.failed_jobs }}</span>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="panel-card box">
+    <header class="panel-head">
+      <h3 class="title is-5">DSL Preview</h3>
+      <p>Server-rendered preview from the selected workflow lane</p>
+    </header>
+    <pre class="dsl-preview">{{ dsl_preview }}</pre>
+  </section>
+
+  <section class="panel-card empty-state box content" aria-live="polite">
+    <h3 class="title is-5">Authoring Mode Next</h3>
+    <p>Node editing, drag-linking, and persisted workflow graph mutations are the next parity slice.</p>
+  </section>
+</div>

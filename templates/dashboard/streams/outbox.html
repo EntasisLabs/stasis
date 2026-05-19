@@ -1,6 +1,6 @@
-<div class="cc-stream-list">
+<div class="cc-stream-list panel">
   {% for event in events %}
-  <button class="cc-stream-row" type="button" hx-get="/inspect/event/{{ event.event_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
+  <button class="cc-stream-row panel-block" type="button" hx-get="/inspect/event/{{ event.event_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
     {% if event.delivery_state == "published" %}
     <span class="status-dot dot-ok"></span>
     {% else if event.delivery_state == "pending" %}
@@ -9,7 +9,7 @@
     <span class="status-dot dot-fail"></span>
     {% endif %}
 
-    <span>
+    <span class="content">
       <span class="cc-stream-main">
         <span class="cc-stream-id">{{ event.event_id }}</span>
         <span class="cc-stream-ts">{{ event.occurred_at }}</span>

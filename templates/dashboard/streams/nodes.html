@@ -1,11 +1,11 @@
 <div class="cc-node-grid">
   {% for node in nodes %}
   {% if node.health == "Healthy" %}
-  <a class="cc-node healthy" href="#" hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
+  <a class="cc-node healthy box" href="#" hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
   {% else if node.health == "Degraded" %}
-  <a class="cc-node degraded" href="#" hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
+  <a class="cc-node degraded box" href="#" hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
   {% else %}
-  <a class="cc-node offline" href="#" hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
+  <a class="cc-node offline box" href="#" hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
   {% endif %}
     <div class="cc-node-name">{{ node.node_id }}</div>
     <div class="cc-node-stat">{{ node.region }}</div>

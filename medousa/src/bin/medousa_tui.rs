@@ -19,14 +19,21 @@ use ratatui::{
     Terminal,
 };
 use ratatui_markdown::{markdown::MarkdownRenderer, DefaultTheme};
+use reqwest::Client;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use medousa::{
     build_tui_runtime,
+    EnqueueAskRequest,
+    EnqueueResponse,
+    HealthResponse,
+    RegisterRecurringPromptRequest,
+    RegisterRecurringResponse,
     events::TuiEvent,
     parse_backend,
+    resolve_daemon_url,
     resolve_llm_base_url, resolve_llm_model, resolve_llm_provider, TuiRuntime,
     session::{
         append_turn, list_history_sessions, load_history, load_tui_defaults, save_last_session_id,
@@ -123,6 +130,7 @@ struct TuiState {
     obs_max_scroll: u16,
     in_thinking_tag: bool,
     stream_tag_tail: String,
+    daemon_url: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +170,7 @@ async fn main() -> Result<()> {
     let max_tool_rounds = find_arg_value(&args, "--max-tool-rounds");
     let thinking_capture = find_arg_value(&args, "--thinking-capture");
     let thinking_max_lines = find_arg_value(&args, "--thinking-max-lines");
+    let daemon_url = find_arg_value(&args, "--daemon-url");
     let explicit_session = find_arg_value(&args, "--session");
     let defaults = load_tui_defaults();
 
@@ -196,6 +205,7 @@ async fn main() -> Result<()> {
         base_url.or(defaults.base_url.as_deref()),
     );
     let provider_model = format!("{resolved_provider}:{resolved_model}");
+    let resolved_daemon_url = resolve_daemon_url(daemon_url);
 
     let session_id = if let Some(sid) = explicit_session {
         sid.to_string()
@@ -263,6 +273,7 @@ async fn main() -> Result<()> {
         obs_max_scroll: 0,
         in_thinking_tag: false,
         stream_tag_tail: String::new(),
+        daemon_url: resolved_daemon_url,
     };
 
     // ── Keyboard reader (spawn_blocking to keep async event loop clean) ───────
@@ -833,10 +844,103 @@ async fn handle_slash_command(
                 Err(err) => push_obs(state, format!("⚠ export failed: {err}")),
             }
         }
+        "/daemon" => {
+            let sub = parts.next().unwrap_or("");
+            match sub {
+                "" => {
+                    push_obs(
+                        state,
+                        format!(
+                            "daemon url={} | commands: /daemon health | /daemon ask <prompt> | /daemon url <url>",
+                            state.daemon_url
+                        ),
+                    );
+                }
+                "url" => {
+                    let next = parts.collect::<Vec<_>>().join(" ");
+                    if next.trim().is_empty() {
+                        push_obs(state, format!("daemon url={}", state.daemon_url));
+                    } else {
+                        state.daemon_url = next.trim().to_string();
+                        push_obs(state, format!("✓ daemon url set to {}", state.daemon_url));
+                    }
+                }
+                "health" => {
+                    match daemon_health(&state.daemon_url).await {
+                        Ok(payload) => push_obs(
+                            state,
+                            format!(
+                                "✓ daemon {} backend={} worker={}",
+                                payload.status, payload.backend, payload.worker_id
+                            ),
+                        ),
+                        Err(err) => push_obs(state, format!("⚠ daemon health failed: {err}")),
+                    }
+                }
+                "ask" => {
+                    let prompt = parts.collect::<Vec<_>>().join(" ");
+                    if prompt.trim().is_empty() {
+                        push_obs(state, "⚠ usage: /daemon ask <prompt>".to_string());
+                    } else {
+                        match daemon_enqueue_ask(&state.daemon_url, &prompt).await {
+                            Ok(payload) => push_obs(
+                                state,
+                                format!("✓ daemon job enqueued {}", payload.job_id),
+                            ),
+                            Err(err) => {
+                                push_obs(state, format!("⚠ daemon ask failed: {err}"));
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    push_obs(
+                        state,
+                        "⚠ unknown /daemon command. try /daemon health | /daemon ask <prompt> | /daemon url <url>"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        "/watch" => {
+            let sub = parts.next().unwrap_or("");
+            if sub != "add" {
+                push_obs(
+                    state,
+                    "⚠ usage: /watch add <cron_expr> <prompt...>".to_string(),
+                );
+                return EventOutcome::Continue;
+            }
+
+            let cron_expr = match parts.next() {
+                Some(value) => value,
+                None => {
+                    push_obs(state, "⚠ usage: /watch add <cron_expr> <prompt...>".to_string());
+                    return EventOutcome::Continue;
+                }
+            };
+
+            let prompt = parts.collect::<Vec<_>>().join(" ");
+            if prompt.trim().is_empty() {
+                push_obs(state, "⚠ usage: /watch add <cron_expr> <prompt...>".to_string());
+                return EventOutcome::Continue;
+            }
+
+            match daemon_register_recurring_prompt(&state.daemon_url, cron_expr, &prompt).await {
+                Ok(payload) => push_obs(
+                    state,
+                    format!(
+                        "✓ watch {} next={}",
+                        payload.recurring_id, payload.next_run_at_utc
+                    ),
+                ),
+                Err(err) => push_obs(state, format!("⚠ watch add failed: {err}")),
+            }
+        }
         _ => {
             push_obs(
                 state,
-                "⚠ unknown command. try /new /history /settings /model /stop /regen /export"
+                "⚠ unknown command. try /new /history /settings /model /stop /regen /export /daemon /watch"
                     .to_string(),
             );
         }
@@ -845,13 +949,73 @@ async fn handle_slash_command(
     EventOutcome::Continue
 }
 
+async fn daemon_health(daemon_url: &str) -> Result<HealthResponse> {
+    let client = Client::new();
+    let response = client
+        .get(format!("{daemon_url}/health"))
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(response.json::<HealthResponse>().await?)
+}
+
+async fn daemon_enqueue_ask(daemon_url: &str, prompt: &str) -> Result<EnqueueResponse> {
+    let client = Client::new();
+    let request = EnqueueAskRequest {
+        prompt: prompt.to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        max_turns: Some(1),
+    };
+
+    let response = client
+        .post(format!("{daemon_url}/v1/jobs/ask"))
+        .json(&request)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(response.json::<EnqueueResponse>().await?)
+}
+
+async fn daemon_register_recurring_prompt(
+    daemon_url: &str,
+    cron_expr: &str,
+    prompt: &str,
+) -> Result<RegisterRecurringResponse> {
+    let client = Client::new();
+    let request = RegisterRecurringPromptRequest {
+        id: None,
+        queue: Some("default".to_string()),
+        prompt: prompt.to_string(),
+        system_prompt: Some(
+            "You are Medousa, a practical research assistant. Be concise and evidence-driven."
+                .to_string(),
+        ),
+        cron_expr: cron_expr.to_string(),
+        timezone: Some("UTC".to_string()),
+        jitter_seconds: Some(0),
+        enabled: Some(true),
+        max_attempts: Some(1),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+    };
+
+    let response = client
+        .post(format!("{daemon_url}/v1/recurring/prompt"))
+        .json(&request)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(response.json::<RegisterRecurringResponse>().await?)
+}
+
 #[derive(Clone, Copy)]
 struct PaletteAction {
     title: &'static str,
     command: &'static str,
 }
 
-const PALETTE_ACTIONS: [PaletteAction; 9] = [
+const PALETTE_ACTIONS: [PaletteAction; 11] = [
     PaletteAction {
         title: "New Session",
         command: "/new",
@@ -887,6 +1051,14 @@ const PALETTE_ACTIONS: [PaletteAction; 9] = [
     PaletteAction {
         title: "Set Model (Open Settings)",
         command: "/settings",
+    },
+    PaletteAction {
+        title: "Daemon Health",
+        command: "/daemon health",
+    },
+    PaletteAction {
+        title: "Daemon Command Help",
+        command: "/daemon",
     },
 ];
 
@@ -2217,6 +2389,7 @@ fn print_help() {
     println!("  --max-tool-rounds <n> Max model tool-call rounds (1-50, default 10)");
     println!("  --thinking-capture <b> Capture thinking chunks: true | false");
     println!("  --thinking-max-lines <n> Retained thinking lines (50-5000)");
+    println!("  --daemon-url <url>    Medousa daemon base URL (env: MEDOUSA_DAEMON_URL)");
     println!("  --session <id>        Resume a specific session by ID");
     println!("  --help, -h            Print this help");
     println!();
@@ -2249,4 +2422,8 @@ fn print_help() {
     println!("  /stop                   Stop active generation");
     println!("  /regen                  Regenerate last user prompt");
     println!("  /export [md|jsonl]      Export current transcript");
+    println!("  /daemon                 Show daemon URL and command help");
+    println!("  /daemon health          Probe central daemon status");
+    println!("  /daemon ask <prompt>    Submit prompt to central daemon");
+    println!("  /watch add <cron> <p>   Schedule recurring prompt on daemon");
 }
