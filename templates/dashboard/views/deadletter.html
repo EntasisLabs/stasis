@@ -1,11 +1,11 @@
-<div class="view-stack">
-  <section class="panel-card box">
-    <header class="panel-head">
-      <h3 class="title is-5">Dead Letter Queue</h3>
-      <p>Failed jobs awaiting replay or intervention</p>
-    </header>
-    <div class="table-wrap table-container">
-      <table class="data-table table is-fullwidth is-striped is-hoverable">
+<div class="flex flex-col gap-6">
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Dead Letter Queue</h3>
+      <p class="card-description">Failed jobs awaiting replay or intervention</p>
+    </div>
+    <div class="card-content overflow-x-auto">
+      <table class="table">
         <thead>
           <tr>
             <th>Job</th>
@@ -19,14 +19,22 @@
         <tbody>
           {% for job in jobs %}
           <tr hx-get="/inspect/job/{{ job.id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
-            <td class="mono">{{ job.id }}</td>
-            <td>{{ job.queue }}</td>
-            <td><span class="status-pill bad">{{ job.status }}</span></td>
-            <td>{{ job.attempts }}</td>
-            <td>{{ job.updated_at }}</td>
+            <td class="font-mono text-sm">{{ job.id }}</td>
+            <td>
+              <span class="inline-flex px-2 py-1 rounded text-xs font-mono border" style="border-color: var(--border);">{{ job.queue }}</span>
+            </td>
+            <td>
+              {% if job.status == "dead_letter" %}
+              <span class="inline-flex justify-center px-3 py-1 rounded text-xs font-medium bg-orange-600 text-white min-w-[90px]">Dead Letter</span>
+              {% else %}
+              <span class="inline-flex justify-center px-3 py-1 rounded text-xs font-medium bg-red-600 text-white min-w-[90px]">{{ job.status }}</span>
+              {% endif %}
+            </td>
+            <td class="text-sm" style="color: var(--muted-foreground);">{{ job.attempts }}</td>
+            <td class="text-sm font-mono" style="color: var(--muted-foreground);">{{ job.updated_at }}</td>
             <td>
               <button
-                class="action-btn ghost"
+                class="btn btn-sm btn-outline"
                 type="button"
                 data-action-post="/action/scheduler/replay"
                 data-action-body='{"job_id":"{{ job.id }}"}'
@@ -39,5 +47,5 @@
         </tbody>
       </table>
     </div>
-  </section>
+  </div>
 </div>

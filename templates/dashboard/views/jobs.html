@@ -1,30 +1,56 @@
-<div class="view-stack">
-  <section class="kpi-grid columns is-multiline">
-    <article class="kpi-card column is-6-tablet is-3-desktop box">
-      <p class="kpi-label">Job Throughput</p>
-      <p class="kpi-value">{{ dto.kpis.job_throughput }}</p>
-    </article>
-    <article class="kpi-card column is-6-tablet is-3-desktop box">
-      <p class="kpi-label">Queue Pressure</p>
-      <p class="kpi-value">{{ dto.kpis.queue_pressure }}</p>
-    </article>
-    <article class="kpi-card column is-6-tablet is-3-desktop box">
-      <p class="kpi-label">Outbox Lag</p>
-      <p class="kpi-value">{{ dto.kpis.outbox_lag }}</p>
-    </article>
-    <article class="kpi-card column is-6-tablet is-3-desktop box">
-      <p class="kpi-label">Cluster Health</p>
-      <p class="kpi-value">{{ dto.kpis.cluster_health }}</p>
-    </article>
-  </section>
+<div class="flex flex-col gap-6">
+  <!-- KPI Stats -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Job Throughput</p>
+        <h3 class="stat-value">{{ dto.kpis.succeeded_jobs }}</h3>
+        <p class="text-xs mt-2" style="color: var(--muted-foreground);">{{ dto.kpis.failed_jobs }} failed</p>
+      </div>
+      <div class="card-content">
+        <div class="stat-indicator bg-info"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Queue Pressure</p>
+        <h3 class="stat-value">{{ dto.kpis.enqueued_jobs }}</h3>
+        <p class="text-xs mt-2" style="color: var(--muted-foreground);">{{ dto.kpis.running_jobs }} running</p>
+      </div>
+      <div class="card-content">
+        <div class="stat-indicator bg-warning"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Outbox Lag</p>
+        <h3 class="stat-value">{{ dto.kpis.pending_outbox }}</h3>
+        <p class="text-xs mt-2" style="color: var(--muted-foreground);">{{ dto.kpis.failed_outbox }} failed</p>
+      </div>
+      <div class="card-content">
+        <div class="stat-indicator bg-pending"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Cluster Health</p>
+        <h3 class="stat-value">{{ dto.kpis.healthy_nodes }}</h3>
+        <p class="text-xs mt-2" style="color: var(--muted-foreground);">{{ dto.kpis.degraded_nodes }} degraded · {{ dto.kpis.offline_nodes }} offline</p>
+      </div>
+      <div class="card-content">
+        <div class="stat-indicator bg-success"></div>
+      </div>
+    </div>
+  </div>
 
-  <section class="panel-card box">
-    <header class="panel-head">
-      <h3 class="title is-5">Active Jobs</h3>
-      <p>Real-time execution monitoring</p>
-    </header>
-    <div class="table-wrap table-container">
-      <table class="data-table table is-fullwidth is-striped is-hoverable">
+  <!-- Active Jobs Table -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Active Jobs</h3>
+      <p class="card-description">Real-time execution monitoring</p>
+    </div>
+    <div class="card-content overflow-x-auto">
+      <table class="table">
         <thead>
           <tr>
             <th>Job</th>
@@ -41,32 +67,53 @@
           {% for job in dto.job_stream.items %}
           <tr hx-get="/inspect/job/{{ job.id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
             <td>
-              <p class="row-title mono truncate">{{ job.id }}</p>
-              <p class="row-sub">trace {{ job.trace_id }}</p>
+              <p class="font-mono text-sm font-medium" style="color: var(--foreground);">{{ job.id }}</p>
+              <p class="text-xs mt-0.5" style="color: var(--muted-foreground);">trace {{ job.trace_id }}</p>
             </td>
             <td>
-              <span class="job-type-pill">{{ job.job_type }}</span>
+              <div class="flex items-center gap-2">
+                {% if job.status == "running" || job.status == "leased" %}
+                <svg class="w-4 h-4 text-blue-500 animate-spin-slow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                {% else if job.status == "succeeded" %}
+                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                {% else if job.status == "failed" || job.status == "dead_letter" %}
+                <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                {% else %}
+                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                {% endif %}
+                <span class="text-sm">{{ job.job_type }}</span>
+              </div>
             </td>
-            <td><span class="proto-pill">{{ job.queue }}</span></td>
+            <td><span class="inline-flex px-2 py-1 rounded text-xs font-mono border" style="border-color: var(--border);">{{ job.queue }}</span></td>
             <td>
               {% if job.status == "succeeded" %}
-              <span class="status-pill ok">{{ job.status }}</span>
+              <span class="inline-flex justify-center px-3 py-1 rounded text-xs font-medium border border-green-600 text-green-600 min-w-[90px]">Succeeded</span>
               {% else if job.status == "running" || job.status == "leased" %}
-              <span class="status-pill run">{{ job.status }}</span>
-              {% else if job.status == "failed" || job.status == "dead_letter" %}
-              <span class="status-pill bad">{{ job.status }}</span>
+              <span class="inline-flex justify-center px-3 py-1 rounded text-xs font-medium bg-gray-900 text-white min-w-[90px]">Running</span>
+              {% else if job.status == "dead_letter" %}
+              <span class="inline-flex justify-center px-3 py-1 rounded text-xs font-medium bg-orange-600 text-white min-w-[90px]">Dead Letter</span>
+              {% else if job.status == "failed" %}
+              <span class="inline-flex justify-center px-3 py-1 rounded text-xs font-medium bg-red-600 text-white min-w-[90px]">Failed</span>
               {% else %}
-              <span class="status-pill">{{ job.status }}</span>
+              <span class="inline-flex justify-center px-3 py-1 rounded text-xs font-medium bg-gray-200 text-gray-700 min-w-[90px]">{{ job.status }}</span>
               {% endif %}
             </td>
-            <td>{{ job.priority }}</td>
-            <td>{{ job.attempts }}</td>
-            <td>{{ job.updated_at }}</td>
+            <td class="text-sm" style="color: var(--muted-foreground);">{{ job.priority }}</td>
+            <td class="text-sm" style="color: var(--muted-foreground);">{{ job.attempts }}</td>
+            <td class="text-sm font-mono" style="color: var(--muted-foreground);">{{ job.updated_at }}</td>
             <td>
               {% if let Some(owner) = job.lease_owner %}
-              <span class="proto-pill">{{ owner }}</span>
+              <span class="inline-flex px-2 py-1 rounded text-xs font-mono bg-gray-100 text-gray-700">{{ owner }}</span>
               {% else %}
-              <span class="row-sub">-</span>
+              <span style="color: var(--muted-foreground);">—</span>
               {% endif %}
             </td>
           </tr>
@@ -74,5 +121,5 @@
         </tbody>
       </table>
     </div>
-  </section>
+  </div>
 </div>

@@ -1,0 +1,30 @@
+{
+  "name": "stasis",
+  "version": "1.0.0",
+  "description": "Stasis is an agentic framework SDK scaffold using DDD + Hexagonal architecture.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "build:css": "tailwindcss -i dashboard_assets/styles/input.css -o dashboard_assets/static/dashboard.css --minify",
+    "watch:css": "tailwindcss -i dashboard_assets/styles/input.css -o dashboard_assets/static/dashboard.css --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EntasisLabs/stasis.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/EntasisLabs/stasis/issues"
+  },
+  "homepage": "https://github.com/EntasisLabs/stasis#readme",
+  "dependencies": {
+    "@tailwindcss/cli": "^4.3.0",
+    "tailwindcss": "^4.3.0"
+  }
+}

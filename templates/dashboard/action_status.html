@@ -1,6 +1,16 @@
-<div class="inspector-card action-status message {{ kind }}">
-  <div class="message-body content">
-    <h3 class="title is-6">{{ title }}</h3>
-    <p>{{ detail }}</p>
-  </div>
+{% if kind == "is-success" %}
+<div class="inspector-action-status p-3 rounded-lg bg-green-50 border border-green-200">
+  <h3 class="text-sm font-semibold mb-1 text-green-800">{{ title }}</h3>
+  <p class="text-sm text-green-700">{{ detail }}</p>
 </div>
+{% else if kind == "is-danger" %}
+<div class="inspector-action-status p-3 rounded-lg bg-red-50 border border-red-200">
+  <h3 class="text-sm font-semibold mb-1 text-red-800">{{ title }}</h3>
+  <p class="text-sm text-red-700">{{ detail }}</p>
+</div>
+{% else %}
+<div class="inspector-action-status p-3 rounded-lg" style="background: var(--accent); border: 1px solid var(--border);">
+  <h3 class="text-sm font-semibold mb-1" style="color: var(--foreground);">{{ title }}</h3>
+  <p class="text-sm" style="color: var(--muted-foreground);">{{ detail }}</p>
+</div>
+{% endif %}

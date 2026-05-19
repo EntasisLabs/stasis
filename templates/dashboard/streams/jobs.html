@@ -1,20 +1,23 @@
-<div class="cc-stream-list panel">
+<div class="flex flex-col divide-y" style="--tw-divide-opacity: 1; border-color: var(--border);">
   {% for job in jobs %}
-  <button class="cc-stream-row panel-block" type="button" hx-get="/inspect/job/{{ job.id }}" hx-target="#inspector-body" hx-swap="innerHTML">
+  <button class="flex items-center gap-3 px-4 py-3 text-left w-full transition-colors hover:bg-[var(--accent)]"
+    type="button"
+    hx-get="/inspect/job/{{ job.id }}"
+    hx-target="#inspector-panel"
+    hx-swap="innerHTML">
     {% if job.status == "succeeded" %}
-    <span class="status-dot dot-ok"></span>
+    <span class="status-dot status-healthy flex-shrink-0"></span>
     {% else if job.status == "running" || job.status == "leased" || job.status == "enqueued" %}
-    <span class="status-dot dot-run"></span>
+    <span class="status-dot status-running flex-shrink-0"></span>
     {% else %}
-    <span class="status-dot dot-fail"></span>
+    <span class="status-dot status-offline flex-shrink-0"></span>
     {% endif %}
-
-    <span class="content">
-      <span class="cc-stream-main">
-        <span class="cc-stream-id">{{ job.id }}</span>
-        <span class="cc-stream-ts">{{ job.updated_at }}</span>
+    <span class="flex flex-col min-w-0">
+      <span class="flex items-center justify-between gap-4">
+        <span class="font-mono text-sm font-medium truncate" style="color: var(--foreground);">{{ job.id }}</span>
+        <span class="text-xs flex-shrink-0" style="color: var(--muted-foreground);">{{ job.updated_at }}</span>
       </span>
-      <span class="cc-stream-sub">{{ job.status }} | queue {{ job.queue }} | attempts {{ job.attempts }}</span>
+      <span class="text-xs mt-0.5" style="color: var(--muted-foreground);">{{ job.status }} &bull; queue {{ job.queue }} &bull; {{ job.attempts }} attempts</span>
     </span>
   </button>
   {% endfor %}

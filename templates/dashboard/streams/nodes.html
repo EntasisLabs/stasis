@@ -1,16 +1,23 @@
-<div class="cc-node-grid">
+<div class="grid grid-cols-2 gap-3 p-4">
   {% for node in nodes %}
-  {% if node.health == "Healthy" %}
-  <a class="cc-node healthy box" href="#" hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
-  {% else if node.health == "Degraded" %}
-  <a class="cc-node degraded box" href="#" hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
-  {% else %}
-  <a class="cc-node offline box" href="#" hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-body" hx-swap="innerHTML">
-  {% endif %}
-    <div class="cc-node-name">{{ node.node_id }}</div>
-    <div class="cc-node-stat">{{ node.region }}</div>
-    <div class="cc-node-stat">{{ node.queue_ownership_count }} queues | {{ node.health }}</div>
-    <div class="cc-node-stat">lease {{ node.lease_expires_at }}</div>
+  <a class="flex flex-col gap-2 p-3 rounded-lg transition-shadow hover:shadow-md cursor-pointer"
+    style="background: var(--card); box-shadow: var(--shadow-sm);"
+    href="#"
+    hx-get="/inspect/node/{{ node.node_id }}"
+    hx-target="#inspector-panel"
+    hx-swap="innerHTML">
+    <div class="flex items-center justify-between">
+      <span class="font-mono text-xs font-medium truncate" style="color: var(--foreground);">{{ node.node_id }}</span>
+      {% if node.health == "Healthy" %}
+      <span class="status-dot status-healthy flex-shrink-0"></span>
+      {% else if node.health == "Degraded" %}
+      <span class="status-dot status-degraded flex-shrink-0"></span>
+      {% else %}
+      <span class="status-dot status-offline flex-shrink-0"></span>
+      {% endif %}
+    </div>
+    <span class="text-xs" style="color: var(--muted-foreground);">{{ node.region }}</span>
+    <span class="text-xs" style="color: var(--muted-foreground);">{{ node.queue_ownership_count }} queues &bull; lease {{ node.lease_expires_at }}</span>
   </a>
   {% endfor %}
 </div>

@@ -1,66 +1,120 @@
-<div class="view-stack">
-  <section class="cluster-summary-grid columns is-multiline">
-    <article class="summary-card column is-12-mobile is-4-desktop box">
-      <p class="kpi-label">Total Nodes</p>
-      <p class="kpi-value">{{ total_nodes }}</p>
-      <p class="row-sub">{{ healthy_nodes }} healthy{% if degraded_nodes > 0 %} • {{ degraded_nodes }} degraded{% endif %}</p>
-    </article>
-    <article class="summary-card column is-12-mobile is-4-desktop box">
-      <p class="kpi-label">Workers</p>
-      <p class="kpi-value">{{ worker_nodes }}</p>
-      <p class="row-sub">{{ active_jobs_estimate }} active jobs (est)</p>
-    </article>
-    <article class="summary-card column is-12-mobile is-4-desktop box">
-      <p class="kpi-label">Avg CPU Usage</p>
-      <p class="kpi-value">{{ avg_load_index }}%</p>
-      <div class="meter-track"><div class="meter-fill" style="width: {{ avg_load_index }}%"></div></div>
-    </article>
-  </section>
-
-  <section class="panel-card box">
-    <header class="panel-head">
-      <h3 class="title is-5">Cluster Topology</h3>
-      <p>Node health, ownership, and operational load</p>
-    </header>
-    <div class="node-grid">
-      {% for node in nodes %}
-      <a class="node-card box" href="#" hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
-        <div class="node-top">
-          <strong class="mono">{{ node.node_id }}</strong>
-          {% if node.health == "Healthy" %}
-          <span class="status-pill ok">{{ node.health }}</span>
-          {% else if node.health == "Degraded" %}
-          <span class="status-pill run">{{ node.health }}</span>
-          {% else %}
-          <span class="status-pill bad">{{ node.health }}</span>
-          {% endif %}
-        </div>
-        <p>{{ node.role }} <span class="row-sub">{{ node.region }}</span></p>
-        <div class="meter-row">
-          <span class="meter-label">CPU Usage</span>
-          <span class="meter-value">{{ node.load_index }}%</span>
-        </div>
-        <div class="meter-track">
-          <div class="meter-fill" style="width: {{ node.load_index }}%"></div>
-        </div>
-        <div class="meter-row">
-          <span class="meter-label">Memory Usage</span>
-          <span class="meter-value">{{ node.memory_index }}%</span>
-        </div>
-        <div class="meter-track">
-          <div class="meter-fill" style="width: {{ node.memory_index }}%"></div>
-        </div>
-        <p class="row-sub">{{ node.queue_ownership_count }} queues • {{ node.capability_count }} capabilities</p>
-        <p class="small">lease until {{ node.lease_expires_at }}</p>
-      </a>
-      {% endfor %}
+<div class="flex flex-col gap-6">
+  <!-- Summary Stats -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Total Nodes</p>
+        <h3 class="stat-value">{{ total_nodes }}</h3>
+      </div>
+      <div class="card-content">
+        <p class="text-sm" style="color: var(--muted-foreground);">{{ healthy_nodes }} healthy{% if degraded_nodes > 0 %} &bull; {{ degraded_nodes }} degraded{% endif %}</p>
+      </div>
     </div>
-  </section>
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Workers</p>
+        <h3 class="stat-value">{{ worker_nodes }}</h3>
+      </div>
+      <div class="card-content">
+        <p class="text-sm" style="color: var(--muted-foreground);">{{ active_jobs_estimate }} active jobs (est)</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Avg CPU Usage</p>
+        <h3 class="stat-value">{{ avg_load_index }}%</h3>
+      </div>
+      <div class="card-content">
+        <div class="progress progress-thin progress-info">
+          <div class="progress-fill" style="width: {{ avg_load_index }}%"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  <section class="panel-card box">
-    <header class="panel-head">
-      <h3 class="title is-5">Ownership Snapshot</h3>
-      <p>Total queue assignments across nodes: {{ total_queues }}</p>
-    </header>
-  </section>
+  <!-- Node Cards -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Cluster Topology</h3>
+      <p class="card-description">Node health, ownership, and operational load</p>
+    </div>
+    <div class="card-content">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {% for node in nodes %}
+        <a href="#" class="block p-5 rounded-lg transition-shadow hover:shadow-md cursor-pointer"
+          style="background: var(--card); box-shadow: var(--shadow-sm);"
+          hx-get="/inspect/node/{{ node.node_id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
+          <div class="flex items-start justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <div class="p-2 rounded-lg {% if node.health == "Healthy" %}bg-green-100{% else if node.health == "Degraded" %}bg-yellow-100{% else %}bg-red-100{% endif %}">
+                <svg class="w-5 h-5 {% if node.health == "Healthy" %}text-green-500{% else if node.health == "Degraded" %}text-yellow-500{% else %}text-red-500{% endif %}"
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14"/>
+                </svg>
+              </div>
+              <div>
+                <h4 class="text-sm font-medium font-mono" style="color: var(--foreground);">{{ node.node_id }}</h4>
+                <div class="flex items-center gap-2 mt-1">
+                  <span class="inline-flex px-2 py-0.5 rounded text-xs border" style="border-color: var(--border); color: var(--muted-foreground);">{{ node.role }}</span>
+                  <span class="text-xs" style="color: var(--muted-foreground);">{{ node.region }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              {% if node.health == "Healthy" %}
+              <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span class="text-sm font-medium text-green-500">Healthy</span>
+              {% else if node.health == "Degraded" %}
+              <svg class="w-4 h-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <span class="text-sm font-medium text-yellow-500">Degraded</span>
+              {% else %}
+              <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span class="text-sm font-medium text-red-500">{{ node.health }}</span>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <div>
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span style="color: var(--muted-foreground);">CPU</span>
+                <span class="font-medium">{{ node.load_index }}%</span>
+              </div>
+              <div class="progress progress-thin {% if node.load_index > 85 %}progress-warning{% else %}progress-info{% endif %}">
+                <div class="progress-fill" style="width: {{ node.load_index }}%"></div>
+              </div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span style="color: var(--muted-foreground);">Memory</span>
+                <span class="font-medium">{{ node.memory_index }}%</span>
+              </div>
+              <div class="progress progress-thin {% if node.memory_index > 85 %}progress-warning{% else %}progress-info{% endif %}">
+                <div class="progress-fill" style="width: {{ node.memory_index }}%"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 pt-3 mt-3 text-xs" style="border-top: 1px solid var(--border); color: var(--muted-foreground);">
+            {{ node.queue_ownership_count }} queues &bull; {{ node.capability_count }} capabilities
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Ownership Snapshot -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Ownership Snapshot</h3>
+      <p class="card-description">Total queue assignments across nodes: {{ total_queues }}</p>
+    </div>
+  </div>
 </div>

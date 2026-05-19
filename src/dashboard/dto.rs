@@ -57,10 +57,15 @@ pub struct TimePoint {
 
 #[derive(Clone, Debug)]
 pub struct SystemKpiDto {
-    pub job_throughput: String,
-    pub queue_pressure: String,
-    pub outbox_lag: String,
-    pub cluster_health: String,
+    pub succeeded_jobs: usize,
+    pub failed_jobs: usize,
+    pub enqueued_jobs: usize,
+    pub running_jobs: usize,
+    pub pending_outbox: usize,
+    pub failed_outbox: usize,
+    pub healthy_nodes: usize,
+    pub degraded_nodes: usize,
+    pub offline_nodes: usize,
     pub endpoint_failure_rate: String,
 }
 

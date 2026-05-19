@@ -1,128 +1,150 @@
-<div class="view-stack">
-  <section class="panel-card box">
-    <header class="panel-head">
-      <h3 class="title is-5">Scheduler Actions</h3>
-      <p>Execute scheduler operations directly from control plane</p>
-    </header>
-    <div class="action-row buttons">
-      <button class="action-btn button is-link" type="button" data-action-post="/action/scheduler/materialize">Run Recurring Tick</button>
-      <button class="action-btn button is-info is-light" type="button" data-action-post="/action/scheduler/publish" data-action-body='{"limit":100}'>Publish Pending Events</button>
+<div class="flex flex-col gap-6">
+  <!-- Actions Panel -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Scheduler Actions</h3>
+      <p class="card-description">Execute scheduler operations directly from control plane</p>
     </div>
-  </section>
-
-  <section class="kpi-grid columns is-multiline">
-    <article class="kpi-card column is-6-tablet is-3-desktop box">
-      <p class="kpi-label">Job Throughput</p>
-      <p class="kpi-value">{{ kpis.job_throughput }}</p>
-    </article>
-    <article class="kpi-card column is-6-tablet is-3-desktop box">
-      <p class="kpi-label">Queue Pressure</p>
-      <p class="kpi-value">{{ kpis.queue_pressure }}</p>
-    </article>
-    <article class="kpi-card column is-6-tablet is-3-desktop box">
-      <p class="kpi-label">Outbox Lag</p>
-      <p class="kpi-value">{{ kpis.outbox_lag }}</p>
-    </article>
-    <article class="kpi-card column is-6-tablet is-3-desktop box">
-      <p class="kpi-label">Endpoint Failures</p>
-      <p class="kpi-value">{{ kpis.endpoint_failure_rate }}</p>
-    </article>
-  </section>
-
-  <section class="panel-card box">
-    <header class="panel-head">
-      <h3 class="title is-5">Queue Scheduling Pressure</h3>
-      <p>Derived from active runtime job states by queue</p>
-    </header>
-    <div class="table-wrap table-container">
-      <table class="data-table table is-fullwidth is-striped is-hoverable">
-        <thead>
-          <tr>
-            <th>Queue</th>
-            <th>Enqueued</th>
-            <th>Running</th>
-            <th>Blocked</th>
-            <th>Completed</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for queue in queues %}
-          <tr>
-            <td class="mono">{{ queue.queue }}</td>
-            <td>{{ queue.enqueued_jobs }}</td>
-            <td>{{ queue.running_jobs }}</td>
-            <td>
-              {% if queue.blocked_jobs > 0 %}
-              <span class="status-pill bad">{{ queue.blocked_jobs }}</span>
-              {% else %}
-              <span class="status-pill ok">0</span>
-              {% endif %}
-            </td>
-            <td>{{ queue.completed_jobs }}</td>
-            <td>
-              <button
-                class="action-btn ghost"
-                type="button"
-                data-action-post="/action/scheduler/process"
-                data-action-body='{"queue":"{{ queue.queue }}"}'
-              >
-                Process One
-              </button>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="card-content flex flex-wrap gap-3">
+      <button class="btn btn-primary btn-sm" type="button" data-action-post="/action/scheduler/materialize">
+        <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        Run Recurring Tick
+      </button>
+      <button class="btn btn-outline btn-sm" type="button" data-action-post="/action/scheduler/publish" data-action-body='{"limit":100}'>
+        <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+        Publish Pending Events
+      </button>
     </div>
-  </section>
+  </div>
 
-  <section class="panel-card box">
-    <header class="panel-head">
-      <h3 class="title is-5">Recurring Definitions</h3>
-      <p>Live recurrence registry tracked by scheduler</p>
-    </header>
-    <div class="table-wrap table-container">
-      <table class="data-table table is-fullwidth is-striped is-hoverable">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Queue</th>
-            <th>Type</th>
-            <th>Cron</th>
-            <th>TZ</th>
-            <th>Enabled</th>
-            <th>Next Run</th>
-            <th>Last Run</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in recurring %}
-          <tr>
-            <td class="mono">{{ item.id }}</td>
-            <td>{{ item.queue }}</td>
-            <td class="mono">{{ item.job_type }}</td>
-            <td class="mono">{{ item.cron_expr }}</td>
-            <td>{{ item.timezone }}</td>
-            <td>
-              {% if item.enabled %}
-              <span class="status-pill ok">enabled</span>
-              {% else %}
-              <span class="status-pill">disabled</span>
-              {% endif %}
-            </td>
-            <td>{{ item.next_run_at }}</td>
-            <td>
-              {% if let Some(last) = item.last_run_at %}
-              {{ last }}
-              {% else %}
-              never
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <!-- KPI Grid -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Job Throughput</p>
+        <h3 class="stat-value">{{ kpis.succeeded_jobs }}</h3>
+        <p class="text-xs mt-2" style="color: var(--muted-foreground);">{{ kpis.failed_jobs }} failed</p>
+      </div>
+      <div class="card-content"><div class="h-1 rounded-full bg-blue-500"></div></div>
     </div>
-  </section>
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Queue Pressure</p>
+        <h3 class="stat-value">{{ kpis.enqueued_jobs }}</h3>
+        <p class="text-xs mt-2" style="color: var(--muted-foreground);">{{ kpis.running_jobs }} running</p>
+      </div>
+      <div class="card-content"><div class="h-1 rounded-full bg-yellow-500"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Outbox Lag</p>
+        <h3 class="stat-value">{{ kpis.pending_outbox }}</h3>
+        <p class="text-xs mt-2" style="color: var(--muted-foreground);">{{ kpis.failed_outbox }} failed</p>
+      </div>
+      <div class="card-content"><div class="h-1 rounded-full bg-orange-500"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <p class="stat-label">Endpoint Failures</p>
+        <h3 class="stat-value">{{ kpis.endpoint_failure_rate }}</h3>
+      </div>
+      <div class="card-content"><div class="h-1 rounded-full bg-red-500"></div></div>
+    </div>
+  </div>
+
+  <!-- Queue Pressure Table -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Queue Scheduling Pressure</h3>
+      <p class="card-description">Derived from active runtime job states by queue</p>
+    </div>
+    <div class="card-content">
+      <div class="overflow-x-auto">
+        <table class="table w-full">
+          <thead>
+            <tr>
+              <th>Queue</th>
+              <th>Enqueued</th>
+              <th>Running</th>
+              <th>Blocked</th>
+              <th>Completed</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for queue in queues %}
+            <tr>
+              <td class="font-mono text-sm">{{ queue.queue }}</td>
+              <td class="text-sm">{{ queue.enqueued_jobs }}</td>
+              <td class="text-sm">{{ queue.running_jobs }}</td>
+              <td>
+                {% if queue.blocked_jobs > 0 %}
+                <span class="inline-flex justify-center px-2.5 py-1 rounded text-xs font-medium min-w-[56px] bg-red-600 text-white">{{ queue.blocked_jobs }}</span>
+                {% else %}
+                <span class="inline-flex justify-center px-2.5 py-1 rounded text-xs font-medium min-w-[56px] border border-green-600 text-green-600">0</span>
+                {% endif %}
+              </td>
+              <td class="text-sm">{{ queue.completed_jobs }}</td>
+              <td>
+                <button class="btn btn-xs btn-outline" type="button"
+                  data-action-post="/action/scheduler/process"
+                  data-action-body='{"queue":"{{ queue.queue }}"}'>
+                  Process One
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recurring Definitions Table -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Recurring Definitions</h3>
+      <p class="card-description">Live recurrence registry tracked by scheduler</p>
+    </div>
+    <div class="card-content">
+      <div class="overflow-x-auto">
+        <table class="table w-full">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Queue</th>
+              <th>Type</th>
+              <th>Cron</th>
+              <th>TZ</th>
+              <th>Enabled</th>
+              <th>Next Run</th>
+              <th>Last Run</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in recurring %}
+            <tr>
+              <td class="font-mono text-sm">{{ item.id }}</td>
+              <td class="text-sm">{{ item.queue }}</td>
+              <td class="font-mono text-sm">{{ item.job_type }}</td>
+              <td class="font-mono text-sm">{{ item.cron_expr }}</td>
+              <td class="text-sm" style="color: var(--muted-foreground);">{{ item.timezone }}</td>
+              <td>
+                {% if item.enabled %}
+                <span class="inline-flex px-2.5 py-1 rounded text-xs font-medium border border-green-600 text-green-600">enabled</span>
+                {% else %}
+                <span class="inline-flex px-2.5 py-1 rounded text-xs font-medium bg-gray-200 text-gray-600">disabled</span>
+                {% endif %}
+              </td>
+              <td class="text-sm" style="color: var(--muted-foreground);">{{ item.next_run_at }}</td>
+              <td class="text-sm" style="color: var(--muted-foreground);">
+                {% if let Some(last) = item.last_run_at %}{{ last }}{% else %}never{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>

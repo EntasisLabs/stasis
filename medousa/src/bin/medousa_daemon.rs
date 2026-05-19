@@ -22,7 +22,10 @@ use stasis::ports::outbound::runtime::recurring_store::RecurringStore;
 use stasis::prelude::{
     AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode, JobState,
     PromptJobPayload, RecurringDefinition, RuntimeComposition, StasisWorkflowJobBuilder,
+    CompositeControlPlaneStore, ControlPlaneSdk, InMemoryClusterNodeStore,
+    InMemoryDeliveryEndpointStore,
 };
+use stasis::dashboard::{DashboardState, InMemoryDashboardQueryService, router as dashboard_router};
 
 #[derive(Clone)]
 struct AppState {
@@ -85,6 +88,20 @@ async fn main() -> Result<()> {
         .route("/v1/recurring/prompt", post(register_recurring_prompt))
         .with_state(state.clone());
 
+    let app = if let RuntimeComposition::InMemory(ref inner) = *runtime {
+        let inner_arc = Arc::new(inner.clone());
+        let endpoint_store = InMemoryDeliveryEndpointStore::default();
+        let cluster_store = InMemoryClusterNodeStore::default();
+        let control_store = CompositeControlPlaneStore::new(endpoint_store, cluster_store);
+        let control_plane = ControlPlaneSdk::new(control_store);
+        let dashboard_service = Arc::new(InMemoryDashboardQueryService::new(inner_arc, control_plane));
+        let dashboard = dashboard_router(DashboardState::new(dashboard_service));
+        app.merge(dashboard)
+    } else {
+        println!("medousa-daemon dashboard skipped (only supported for in-memory backend)");
+        app
+    };
+
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let scheduler_state = state.clone();
     let scheduler_worker_id = worker_id.clone();
@@ -106,6 +123,7 @@ async fn main() -> Result<()> {
         .with_context(|| format!("failed to bind medousa daemon on {addr}"))?;
 
     println!("medousa-daemon listening on http://{addr}");
+    println!("medousa-daemon dashboard at http://{addr}/dashboard");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {

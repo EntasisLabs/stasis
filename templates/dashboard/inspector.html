@@ -1,74 +1,91 @@
 {% if let Some(job) = self.as_job() %}
-<div class="inspector-card content">
-  <h3 class="title is-5">Job {{ job.id }}</h3>
-  <ul class="meta-list">
-    <li>Status: {{ job.status }}</li>
-    <li>Queue: {{ job.queue }}</li>
-    <li>Trace: {{ job.trace_id }}</li>
-    <li>Correlation: {{ job.correlation_id }}</li>
-    <li>Causation: {{ job.causation_id }}</li>
+<div class="inspector-panel-content">
+  <h3 class="inspector-section-title">Job</h3>
+  <div class="inspector-meta-grid">
+    <div class="inspector-meta-row"><span class="inspector-meta-key">ID</span><span class="inspector-meta-val font-mono">{{ job.id }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Status</span><span class="inspector-meta-val">{{ job.status }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Queue</span><span class="inspector-meta-val font-mono">{{ job.queue }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Trace</span><span class="inspector-meta-val font-mono">{{ job.trace_id }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Correlation</span><span class="inspector-meta-val font-mono">{{ job.correlation_id }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Causation</span><span class="inspector-meta-val font-mono">{{ job.causation_id }}</span></div>
     {% if let Some(err) = job.last_error %}
-    <li>Last Error: {{ err }}</li>
+    <div class="inspector-meta-row inspector-meta-full"><span class="inspector-meta-key">Last Error</span><span class="inspector-meta-val inspector-meta-err font-mono text-red-600">{{ err }}</span></div>
     {% endif %}
-  </ul>
+  </div>
 </div>
 {% else if let Some(attempt) = self.as_attempt() %}
-<div class="inspector-card content">
-  <h3 class="title is-5">Attempt {{ attempt.attempt_id }}</h3>
-  <ul class="meta-list">
-    <li>Job: {{ attempt.job_id }}</li>
-    <li>Outcome: {{ attempt.outcome }}</li>
-    <li>Worker: {{ attempt.worker_id }}</li>
+<div class="inspector-panel-content">
+  <h3 class="inspector-section-title">Attempt</h3>
+  <div class="inspector-meta-grid">
+    <div class="inspector-meta-row"><span class="inspector-meta-key">ID</span><span class="inspector-meta-val font-mono">{{ attempt.attempt_id }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Job</span><span class="inspector-meta-val font-mono">{{ attempt.job_id }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Outcome</span><span class="inspector-meta-val">{{ attempt.outcome }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Worker</span><span class="inspector-meta-val font-mono">{{ attempt.worker_id }}</span></div>
     {% if let Some(ms) = attempt.duration_ms %}
-    <li>Duration: {{ ms }} ms</li>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Duration</span><span class="inspector-meta-val">{{ ms }} ms</span></div>
     {% endif %}
     {% if let Some(code) = attempt.guardrail_code %}
-    <li>Guardrail: {{ code }}</li>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Guardrail</span><span class="inspector-meta-val font-mono">{{ code }}</span></div>
     {% endif %}
     {% if let Some(reason) = attempt.policy_reason %}
-    <li>Policy: {{ reason }}</li>
+    <div class="inspector-meta-row inspector-meta-full"><span class="inspector-meta-key">Policy</span><span class="inspector-meta-val">{{ reason }}</span></div>
     {% endif %}
-  </ul>
+  </div>
 </div>
 {% else if let Some(node) = self.as_node() %}
-<div class="inspector-card content">
-  <h3 class="title is-5">Node {{ node.node_id }}</h3>
-  <ul class="meta-list">
-    <li>Role: {{ node.role }}</li>
-    <li>Region: {{ node.region }}</li>
-    <li>Health: {{ node.health }}</li>
-    <li>Capabilities: {{ node.capability_tags|join(", ") }}</li>
-    <li>Queues: {{ node.queue_ownership|join(", ") }}</li>
-  </ul>
+<div class="inspector-panel-content">
+  <h3 class="inspector-section-title">Node</h3>
+  <div class="inspector-meta-grid">
+    <div class="inspector-meta-row"><span class="inspector-meta-key">ID</span><span class="inspector-meta-val font-mono">{{ node.node_id }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Role</span><span class="inspector-meta-val">{{ node.role }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Region</span><span class="inspector-meta-val">{{ node.region }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Health</span><span class="inspector-meta-val">{{ node.health }}</span></div>
+    <div class="inspector-meta-row inspector-meta-full"><span class="inspector-meta-key">Capabilities</span><span class="inspector-meta-val font-mono">{{ node.capability_tags|join(", ") }}</span></div>
+    <div class="inspector-meta-row inspector-meta-full"><span class="inspector-meta-key">Queues</span><span class="inspector-meta-val font-mono">{{ node.queue_ownership|join(", ") }}</span></div>
+  </div>
 </div>
 {% else if let Some(endpoint) = self.as_endpoint() %}
-<div class="inspector-card content">
-  <h3 class="title is-5">Endpoint {{ endpoint.endpoint_id }}</h3>
-  <ul class="meta-list">
-    <li>Protocol: {{ endpoint.protocol }}</li>
-    <li>Target: {{ endpoint.target }}</li>
-    <li>Enabled: {{ endpoint.enabled }}</li>
-    <li>Success Count: {{ endpoint.success_count }}</li>
-    <li>Failure Count: {{ endpoint.failure_count }}</li>
+<div class="inspector-panel-content">
+  <h3 class="inspector-section-title">Endpoint</h3>
+  <div class="inspector-meta-grid">
+    <div class="inspector-meta-row"><span class="inspector-meta-key">ID</span><span class="inspector-meta-val font-mono">{{ endpoint.endpoint_id }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Protocol</span><span class="inspector-meta-val">{{ endpoint.protocol }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Enabled</span><span class="inspector-meta-val">{{ endpoint.enabled }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Success</span><span class="inspector-meta-val">{{ endpoint.success_count }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Failures</span><span class="inspector-meta-val">{{ endpoint.failure_count }}</span></div>
+    <div class="inspector-meta-row inspector-meta-full"><span class="inspector-meta-key">Target</span><span class="inspector-meta-val font-mono">{{ endpoint.target }}</span></div>
     {% if let Some(err) = endpoint.last_error %}
-    <li>Last Error: {{ err }}</li>
+    <div class="inspector-meta-row inspector-meta-full"><span class="inspector-meta-key">Last Error</span><span class="inspector-meta-val inspector-meta-err font-mono text-red-600">{{ err }}</span></div>
     {% endif %}
-  </ul>
+  </div>
 </div>
 {% else if let Some(event) = self.as_event() %}
-<div class="inspector-card content">
-  <h3 class="title is-5">Event {{ event.event_id }}</h3>
-  <ul class="meta-list">
-    <li>Type: {{ event.event_type }}</li>
-    <li>Job: {{ event.job_id }}</li>
-    <li>Correlation: {{ event.correlation_id }}</li>
-    <li>Trace: {{ event.trace_id }}</li>
-    <li>Status: {{ event.status }}</li>
-  </ul>
+<div class="inspector-panel-content">
+  <h3 class="inspector-section-title">Event</h3>
+  <div class="inspector-meta-grid">
+    <div class="inspector-meta-row"><span class="inspector-meta-key">ID</span><span class="inspector-meta-val font-mono">{{ event.event_id }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Type</span><span class="inspector-meta-val">{{ event.event_type }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Status</span><span class="inspector-meta-val">{{ event.status }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Job</span><span class="inspector-meta-val font-mono">{{ event.job_id }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Correlation</span><span class="inspector-meta-val font-mono">{{ event.correlation_id }}</span></div>
+    <div class="inspector-meta-row"><span class="inspector-meta-key">Trace</span><span class="inspector-meta-val font-mono">{{ event.trace_id }}</span></div>
+  </div>
 </div>
 {% else %}
-<div class="inspector-card content">
-  <h3 class="title is-5">Inspector</h3>
-  <p>Select a job, event, node, endpoint, or attempt to inspect details.</p>
+<div class="inspector-empty">
+  <div class="inspector-empty-mark" aria-hidden="true">
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <circle cx="16" cy="16" r="3" fill="currentColor" opacity="0.4"/>
+      <circle cx="4" cy="9" r="2" fill="currentColor" opacity="0.2"/>
+      <circle cx="28" cy="9" r="2" fill="currentColor" opacity="0.2"/>
+      <circle cx="4" cy="23" r="2" fill="currentColor" opacity="0.2"/>
+      <circle cx="28" cy="23" r="2" fill="currentColor" opacity="0.2"/>
+      <line x1="16" y1="16" x2="4" y2="9" stroke="currentColor" stroke-width="1" opacity="0.12"/>
+      <line x1="16" y1="16" x2="28" y2="9" stroke="currentColor" stroke-width="1" opacity="0.12"/>
+      <line x1="16" y1="16" x2="4" y2="23" stroke="currentColor" stroke-width="1" opacity="0.12"/>
+      <line x1="16" y1="16" x2="28" y2="23" stroke="currentColor" stroke-width="1" opacity="0.12"/>
+    </svg>
+  </div>
+  <p class="inspector-empty-label">Select a job, event, node, or endpoint to inspect</p>
 </div>
 {% endif %}

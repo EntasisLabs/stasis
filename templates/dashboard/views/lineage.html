@@ -1,95 +1,160 @@
-<div class="view-stack">
-  <section class="lineage-layout columns is-variable is-4">
-    <aside class="lineage-rail column is-4-desktop">
-      <section class="panel-card box">
-        <header class="panel-head">
-          <h3 class="title is-5">Search Lineage</h3>
-        </header>
-        <form class="filter-form lineage-filter" data-hx-get="/view/lineage" hx-target="#dashboard-view" hx-swap="innerHTML">
-          <input class="filter-input input" type="text" name="q" value="{{ query_text }}" placeholder="job id, event type, correlation" />
-          <input class="filter-input input" type="text" name="thread" value="" placeholder="thread-001" />
-          <select class="filter-select select" name="state">
-            <option value="all"{% if selected_state == "all" %} selected{% endif %}>All States</option>
-            <option value="pending"{% if selected_state == "pending" %} selected{% endif %}>Pending</option>
-            <option value="published"{% if selected_state == "published" %} selected{% endif %}>Published</option>
-            <option value="failed"{% if selected_state == "failed" %} selected{% endif %}>Failed</option>
-          </select>
-          <button class="action-btn button is-link" type="submit">Apply Filters</button>
-        </form>
-      </section>
-
-      <section class="panel-card box">
-        <header class="panel-head compact"><h3 class="title is-6">Lineage Stats</h3></header>
-        <p class="row-sub">Filtered Events <span class="mono">{{ event_count }}</span></p>
-        <p class="row-sub">Active Jobs <span class="mono">{{ active_job_count }}</span></p>
-        <p class="row-sub">Total Nodes <span class="mono">{{ graph_node_count }}</span></p>
-        <p class="row-sub">Connections <span class="mono">{{ connection_count }}</span></p>
-        <p class="row-sub">Depth <span class="mono">{{ depth_label }}</span></p>
-      </section>
-    </aside>
-
-    <section class="panel-card lineage-canvas box column">
-      <header class="panel-head">
-        <h3 class="title is-5">Lineage Graph</h3>
-        <p>Job execution flow and dependencies</p>
-      </header>
-      <div class="lineage-lane">
-        {% for node in graph_nodes %}
-        <article class="lineage-node {{ node.lane }}">
-          <p class="lineage-node-type"><span class="lane-badge">{{ node.lane }}</span></p>
-          <p class="lineage-node-title">{{ node.title }}</p>
-          <p class="lineage-node-sub mono">{{ node.node_id }}</p>
-          <span class="status-pill{% if node.state == "published" %} ok{% else if node.state == "failed" %} bad{% else %} run{% endif %}">
-            {{ node.state }}
-          </span>
-          <p class="lineage-node-sub">{{ node.occurred_at }}</p>
-        </article>
-        {% if !loop.last %}
-        <div class="lineage-connector">→</div>
-        {% endif %}
-        {% endfor %}
-      </div>
-    </section>
-  </section>
-
-  <section class="panel-card box">
-    <header class="panel-head">
-      <h3 class="title is-5">Lineage Event Feed</h3>
-      <p>Inspectable chain of event delivery states and correlation keys</p>
-    </header>
-    <div class="table-wrap table-container">
-      <table class="data-table table is-fullwidth is-striped is-hoverable">
-        <thead>
-          <tr>
-            <th>Event</th>
-            <th>Type</th>
-            <th>Correlation</th>
-            <th>State</th>
-            <th>Retries</th>
-            <th>Occurred</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for event in events %}
-          <tr hx-get="/inspect/event/{{ event.event_id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
-            <td class="mono">{{ event.event_id }}</td>
-            <td>{{ event.event_type }}</td>
-            <td class="mono">{{ event.correlation_id }}</td>
-            <td>
-              {% if event.delivery_state == "published" %}
-              <span class="status-pill ok">{{ event.delivery_state }}</span>
-              {% else if event.delivery_state == "failed" %}
-              <span class="status-pill bad">{{ event.delivery_state }}</span>
-              {% else %}
-              <span class="status-pill run">{{ event.delivery_state }}</span>
-              {% endif %}
-            </td>
-            <td>{{ event.retry_attempts }}</td>
-            <td>{{ event.occurred_at }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+<div class="flex flex-col gap-6">
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h2 class="text-2xl font-semibold tracking-tight" style="color: var(--foreground);">Lineage Explorer</h2>
+      <p class="text-sm mt-1" style="color: var(--muted-foreground);">Trace job ancestry and execution threads</p>
     </div>
-  </section>
+  </div>
+
+  <!-- Split Layout -->
+  <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+    <!-- Sidebar -->
+    <div class="lg:col-span-1 flex flex-col gap-4">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Search Lineage</h3>
+        </div>
+        <div class="card-content">
+          <form class="flex flex-col gap-3" data-hx-get="/view/lineage" hx-target="#dashboard-view" hx-swap="innerHTML">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-xs" style="color: var(--muted-foreground);">Job ID / Correlation</label>
+              <div class="relative">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style="color: var(--muted-foreground);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <input class="w-full pl-9 pr-3 py-2 text-sm rounded-lg" style="background: var(--card); border: 1px solid var(--border); color: var(--foreground);" type="text" name="q" value="{{ query_text }}" placeholder="job-001, corr-..." />
+              </div>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-xs" style="color: var(--muted-foreground);">Thread ID</label>
+              <div class="relative">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style="color: var(--muted-foreground);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <input class="w-full pl-9 pr-3 py-2 text-sm rounded-lg" style="background: var(--card); border: 1px solid var(--border); color: var(--foreground);" type="text" name="thread" placeholder="thread-001" />
+              </div>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-xs" style="color: var(--muted-foreground);">Filter by State</label>
+              <select class="w-full px-3 py-2 text-sm rounded-lg" style="background: var(--card); border: 1px solid var(--border); color: var(--foreground);" name="state">
+                <option value="all"{% if selected_state == "all" %} selected{% endif %}>All States</option>
+                <option value="pending"{% if selected_state == "pending" %} selected{% endif %}>Pending</option>
+                <option value="published"{% if selected_state == "published" %} selected{% endif %}>Published</option>
+                <option value="failed"{% if selected_state == "failed" %} selected{% endif %}>Failed</option>
+              </select>
+            </div>
+            <button class="btn btn-primary btn-sm w-full" type="submit">
+              <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+              Apply Filters
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Lineage Stats</h3>
+        </div>
+        <div class="card-content flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <span class="text-sm" style="color: var(--muted-foreground);">Filtered Events</span>
+            <span class="text-sm font-medium font-mono">{{ event_count }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm" style="color: var(--muted-foreground);">Active Jobs</span>
+            <span class="text-sm font-medium font-mono">{{ active_job_count }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm" style="color: var(--muted-foreground);">Total Nodes</span>
+            <span class="text-sm font-medium font-mono">{{ graph_node_count }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm" style="color: var(--muted-foreground);">Connections</span>
+            <span class="text-sm font-medium font-mono">{{ connection_count }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm" style="color: var(--muted-foreground);">Depth</span>
+            <span class="text-sm font-medium font-mono">{{ depth_label }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Graph Canvas -->
+    <div class="lg:col-span-3">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+            Lineage Graph
+          </h3>
+          <p class="card-description">Job execution flow and dependencies</p>
+        </div>
+        <div class="card-content">
+          <div class="rounded-lg p-8 min-h-[400px] flex flex-col items-center" style="background: color-mix(in srgb, var(--accent) 20%, transparent);">
+            {% for node in graph_nodes %}
+            <div class="flex flex-col items-center w-full max-w-xs">
+              <div class="w-full rounded-lg p-4 shadow-md cursor-pointer hover:shadow-lg transition-shadow"
+                style="background: var(--card); border-width: 2px; border-style: solid; border-color: {% if node.lane == "job" %}#3b82f6{% else if node.lane == "execution" %}#a855f7{% else if node.lane == "thread" %}#22c55e{% else %}#f97316{% endif %};">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="inline-flex px-2 py-0.5 rounded text-xs capitalize" style="border: 1px solid var(--border); color: var(--muted-foreground);">{{ node.lane }}</span>
+                  <div class="h-2 w-2 rounded-full {% if node.state == "success" || node.state == "published" %}bg-green-500{% else if node.state == "failure" || node.state == "failed" %}bg-red-500{% else if node.state == "running" %}bg-blue-500{% else %}bg-gray-400{% endif %}"></div>
+                </div>
+                <p class="font-medium text-sm">{{ node.title }}</p>
+                <p class="text-xs font-mono mt-0.5" style="color: var(--muted-foreground);">{{ node.node_id }}</p>
+                <p class="text-xs mt-1" style="color: var(--muted-foreground);">{{ node.occurred_at }}</p>
+              </div>
+              {% if !loop.last %}
+              <div class="flex items-center justify-center py-4">
+                <svg class="w-5 h-5 rotate-90" style="color: var(--muted-foreground);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Event Feed Table -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Lineage Event Feed</h3>
+      <p class="card-description">Inspectable chain of event delivery states and correlation keys</p>
+    </div>
+    <div class="card-content">
+      <div class="overflow-x-auto">
+        <table class="table w-full">
+          <thead>
+            <tr>
+              <th>Event</th>
+              <th>Type</th>
+              <th>Correlation</th>
+              <th>State</th>
+              <th>Retries</th>
+              <th>Occurred</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for event in events %}
+            <tr class="cursor-pointer" hx-get="/inspect/event/{{ event.event_id }}" hx-target="#inspector-panel" hx-swap="innerHTML">
+              <td class="font-mono text-sm">{{ event.event_id }}</td>
+              <td class="text-sm">{{ event.event_type }}</td>
+              <td class="font-mono text-sm" style="color: var(--muted-foreground);">{{ event.correlation_id }}</td>
+              <td>
+                {% if event.delivery_state == "published" %}
+                <span class="inline-flex justify-center px-3 py-1 rounded text-xs font-medium min-w-[90px] border border-green-600 text-green-600">published</span>
+                {% else if event.delivery_state == "failed" %}
+                <span class="inline-flex justify-center px-3 py-1 rounded text-xs font-medium min-w-[90px] bg-red-600 text-white">failed</span>
+                {% else %}
+                <span class="inline-flex justify-center px-3 py-1 rounded text-xs font-medium min-w-[90px] bg-gray-900 text-white">{{ event.delivery_state }}</span>
+                {% endif %}
+              </td>
+              <td class="text-sm">{{ event.retry_attempts }}</td>
+              <td class="text-sm" style="color: var(--muted-foreground);">{{ event.occurred_at }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>

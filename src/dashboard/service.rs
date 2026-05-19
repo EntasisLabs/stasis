@@ -189,14 +189,16 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
 
         Ok(DashboardDto {
             kpis: SystemKpiDto {
-                job_throughput: format!("{} succeeded • {} failed", succeeded_jobs, failed_jobs),
-                queue_pressure: format!("enqueued/running = {}/{}", enqueued_jobs, running_jobs),
-                outbox_lag: format!("{} pending • {} failed", pending_outbox, failed_outbox),
-                cluster_health: format!(
-                    "{} healthy • {} degraded • {} offline",
-                    healthy_nodes, degraded_nodes, offline_nodes
-                ),
-                endpoint_failure_rate: format!("avg {:.1}%", avg_failure_rate * 100.0),
+                succeeded_jobs,
+                failed_jobs,
+                enqueued_jobs,
+                running_jobs,
+                pending_outbox,
+                failed_outbox,
+                healthy_nodes,
+                degraded_nodes,
+                offline_nodes,
+                endpoint_failure_rate: format!("{:.1}%", avg_failure_rate * 100.0),
             },
             job_stream: jobs,
             outbox_stream: outbox,
