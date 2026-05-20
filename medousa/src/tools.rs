@@ -1,6 +1,6 @@
 use std::collections::HashSet;
-use std::sync::{Arc, OnceLock};
 use std::process::Command;
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Utc};
@@ -8,15 +8,15 @@ use serde_json::{Value, json};
 use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;
 
+use stasis::application::orchestration::tool_loop_pipeline::ToolLoopPipeline;
+use stasis::application::orchestration::tool_registry::ToolRegistry;
+use stasis::domain::runtime::recurring::RecurringDefinition;
 use stasis::prelude::{
     AiChatClient, BackoffPolicy, InMemoryToolRegistry, JobAttemptOutcome, JobAttemptStore,
     LocusContextReader, LocusContextWriter, LocusNodeStoreFactory, MemoryContextReader,
     MemoryContextWriter, MemoryRecallRequest, MemoryStoreRequest, NewJob, PromptExecutionPipeline,
     RuntimeBackend, RuntimeComposition, StasisError, StasisRuntimeBuilder, StasisTool,
 };
-use stasis::application::orchestration::tool_loop_pipeline::ToolLoopPipeline;
-use stasis::application::orchestration::tool_registry::ToolRegistry;
-use stasis::domain::runtime::recurring::RecurringDefinition;
 
 use crate::events::TuiEvent;
 use crate::process_once;
@@ -134,8 +134,7 @@ async fn validate_grapheme_source_for_schedule(
         .cloned()
         .unwrap_or_else(|| json!({}));
     let diagnostics_preview = truncate_for_error(
-        &serde_json::to_string_pretty(&diagnostics_value)
-            .unwrap_or_else(|_| "{}".to_string()),
+        &serde_json::to_string_pretty(&diagnostics_value).unwrap_or_else(|_| "{}".to_string()),
         1600,
     );
 
@@ -223,9 +222,7 @@ impl StasisTool for CognitionJobEnqueueTool {
             .get("job_type")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
-                StasisError::PortFailure(
-                    "cognition.job.enqueue: job_type is required".to_string(),
-                )
+                StasisError::PortFailure("cognition.job.enqueue: job_type is required".to_string())
             })?;
         let payload_ref = input
             .get("payload_ref")
@@ -348,12 +345,10 @@ impl StasisTool for CognitionGraphemeRunTool {
             .get("source")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
-                StasisError::PortFailure(
-                    "cognition_grapheme_run: source is required".to_string(),
-                )
+                StasisError::PortFailure("cognition_grapheme_run: source is required".to_string())
             })?;
 
-            remember_last_grapheme_source(source).await;
+        remember_last_grapheme_source(source).await;
 
         let job_id = format!("cognition-gph-{}", Uuid::new_v4().simple());
         let now = Utc::now();
@@ -394,9 +389,7 @@ impl StasisTool for CognitionGraphemeRunTool {
             RuntimeComposition::InMemory(rt) => {
                 rt.job_attempt_store.list_by_job_id(&job_id).await?
             }
-            RuntimeComposition::Surreal(rt) => {
-                rt.job_attempt_store.list_by_job_id(&job_id).await?
-            }
+            RuntimeComposition::Surreal(rt) => rt.job_attempt_store.list_by_job_id(&job_id).await?,
         };
 
         let last = attempts.last();
@@ -404,9 +397,9 @@ impl StasisTool for CognitionGraphemeRunTool {
             .map(|a| a.outcome == JobAttemptOutcome::Succeeded)
             .unwrap_or(false);
         let execution_id = last.and_then(|a| a.execution_id.clone());
-        let diagnostics = last.and_then(|a| a.diagnostics.as_deref()).map(|d| {
-            serde_json::from_str::<Value>(d).unwrap_or_else(|_| json!({ "raw": d }))
-        });
+        let diagnostics = last
+            .and_then(|a| a.diagnostics.as_deref())
+            .map(|d| serde_json::from_str::<Value>(d).unwrap_or_else(|_| json!({ "raw": d })));
 
         let _ = self
             .event_tx
@@ -440,7 +433,11 @@ impl CognitionMemoryStoreTool {
         session_id: String,
         event_tx: mpsc::Sender<TuiEvent>,
     ) -> Self {
-        Self { writer, session_id, event_tx }
+        Self {
+            writer,
+            session_id,
+            event_tx,
+        }
     }
 }
 
@@ -487,9 +484,7 @@ impl StasisTool for CognitionMemoryStoreTool {
             .get("content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
-                StasisError::PortFailure(
-                    "cognition_memory_store: content is required".to_string(),
-                )
+                StasisError::PortFailure("cognition_memory_store: content is required".to_string())
             })?;
         let tier = input
             .get("tier")
@@ -572,14 +567,9 @@ impl StasisTool for CognitionMemoryRecallTool {
     }
 
     async fn invoke(&self, input: Value) -> stasis::prelude::Result<Value> {
-        let query = input
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                StasisError::PortFailure(
-                    "cognition_memory_recall: query is required".to_string(),
-                )
-            })?;
+        let query = input.get("query").and_then(|v| v.as_str()).ok_or_else(|| {
+            StasisError::PortFailure("cognition_memory_recall: query is required".to_string())
+        })?;
         let limit = input
             .get("limit")
             .and_then(|v| v.as_u64())
@@ -698,9 +688,14 @@ impl StasisTool for CognitionGraphemeModulesInfoTool {
     }
 
     async fn invoke(&self, input: Value) -> stasis::prelude::Result<Value> {
-        let module = input.get("module").and_then(|v| v.as_str()).ok_or_else(|| {
-            StasisError::PortFailure("cognition_grapheme_modules_info: module is required".to_string())
-        })?;
+        let module = input
+            .get("module")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                StasisError::PortFailure(
+                    "cognition_grapheme_modules_info: module is required".to_string(),
+                )
+            })?;
 
         let _ = self
             .event_tx
@@ -752,7 +747,9 @@ impl StasisTool for CognitionGraphemeModulesOpsTool {
 
     async fn invoke(&self, input: Value) -> stasis::prelude::Result<Value> {
         let query = input.get("query").and_then(|v| v.as_str()).ok_or_else(|| {
-            StasisError::PortFailure("cognition_grapheme_modules_ops: query is required".to_string())
+            StasisError::PortFailure(
+                "cognition_grapheme_modules_ops: query is required".to_string(),
+            )
         })?;
 
         let _ = self
@@ -812,7 +809,10 @@ impl StasisTool for CognitionGraphemeExamplesTool {
     }
 
     async fn invoke(&self, input: Value) -> stasis::prelude::Result<Value> {
-        let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+        let action = input
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("list");
         let args = match action {
             "show" => {
                 let name = input.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
@@ -874,9 +874,14 @@ impl StasisTool for CognitionGraphemeCliRunTool {
     }
 
     async fn invoke(&self, input: Value) -> stasis::prelude::Result<Value> {
-        let source = input.get("source").and_then(|v| v.as_str()).ok_or_else(|| {
-            StasisError::PortFailure("cognition_grapheme_cli_run: source is required".to_string())
-        })?;
+        let source = input
+            .get("source")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                StasisError::PortFailure(
+                    "cognition_grapheme_cli_run: source is required".to_string(),
+                )
+            })?;
 
         remember_last_grapheme_source(source).await;
         let use_json = input.get("json").and_then(|v| v.as_bool()).unwrap_or(true);
@@ -897,7 +902,8 @@ impl StasisTool for CognitionGraphemeCliRunTool {
             })
             .await;
 
-        let mut result = run_grapheme_via_runtime(&self.runtime, source, "cognition_tui.cli_run").await?;
+        let mut result =
+            run_grapheme_via_runtime(&self.runtime, source, "cognition_tui.cli_run").await?;
         result["requested_flags"] = json!({
             "json": use_json,
             "stream_steps": stream_steps,
@@ -930,9 +936,7 @@ impl StasisTool for CognitionGraphemePromoteToJobTool {
     }
 
     fn description(&self) -> Option<&'static str> {
-        Some(
-            "Promote Grapheme source to a durable one-off runtime job (workflow.grapheme.run).",
-        )
+        Some("Promote Grapheme source to a durable one-off runtime job (workflow.grapheme.run).")
     }
 
     fn input_schema(&self) -> Option<Value> {
@@ -949,11 +953,14 @@ impl StasisTool for CognitionGraphemePromoteToJobTool {
     }
 
     async fn invoke(&self, input: Value) -> stasis::prelude::Result<Value> {
-        let source = input.get("source").and_then(|v| v.as_str()).ok_or_else(|| {
-            StasisError::PortFailure(
-                "cognition_grapheme_promote_to_job: source is required".to_string(),
-            )
-        })?;
+        let source = input
+            .get("source")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                StasisError::PortFailure(
+                    "cognition_grapheme_promote_to_job: source is required".to_string(),
+                )
+            })?;
 
         remember_last_grapheme_source(source).await;
         let validation = validate_grapheme_source_for_schedule(&self.runtime, source).await?;
@@ -1044,9 +1051,7 @@ impl StasisTool for CognitionGraphemePromoteToRecurringTool {
     }
 
     fn description(&self) -> Option<&'static str> {
-        Some(
-            "Promote Grapheme source to a durable recurring schedule (register_recurring).",
-        )
+        Some("Promote Grapheme source to a durable recurring schedule (register_recurring).")
     }
 
     fn input_schema(&self) -> Option<Value> {
@@ -1068,11 +1073,14 @@ impl StasisTool for CognitionGraphemePromoteToRecurringTool {
     }
 
     async fn invoke(&self, input: Value) -> stasis::prelude::Result<Value> {
-        let source = input.get("source").and_then(|v| v.as_str()).ok_or_else(|| {
-            StasisError::PortFailure(
-                "cognition_grapheme_promote_to_recurring: source is required".to_string(),
-            )
-        })?;
+        let source = input
+            .get("source")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                StasisError::PortFailure(
+                    "cognition_grapheme_promote_to_recurring: source is required".to_string(),
+                )
+            })?;
         let cron_expr = input
             .get("cron_expr")
             .and_then(|v| v.as_str())
@@ -1443,7 +1451,10 @@ impl StasisTool for CognitionUtilityUuidTool {
 
     async fn invoke(&self, input: Value) -> stasis::prelude::Result<Value> {
         let id = Uuid::new_v4();
-        let prefix = input.get("prefix").and_then(|v| v.as_str()).unwrap_or("cognition");
+        let prefix = input
+            .get("prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or("cognition");
 
         Ok(json!({
             "uuid": id.to_string(),
@@ -1476,9 +1487,7 @@ impl StasisTool for CognitionRuntimeRecurringPreviewTool {
     }
 
     fn description(&self) -> Option<&'static str> {
-        Some(
-            "Validate cron/timezone configuration and preview upcoming recurring run times.",
-        )
+        Some("Validate cron/timezone configuration and preview upcoming recurring run times.")
     }
 
     fn input_schema(&self) -> Option<Value> {
@@ -1618,9 +1627,14 @@ impl StasisTool for CognitionRuntimeJobStatusTool {
     }
 
     async fn invoke(&self, input: Value) -> stasis::prelude::Result<Value> {
-        let job_id = input.get("job_id").and_then(|v| v.as_str()).ok_or_else(|| {
-            StasisError::PortFailure("cognition_runtime_job_status job_id is required".to_string())
-        })?;
+        let job_id = input
+            .get("job_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                StasisError::PortFailure(
+                    "cognition_runtime_job_status job_id is required".to_string(),
+                )
+            })?;
 
         let attempts = match &*self.runtime {
             RuntimeComposition::InMemory(rt) => rt.job_attempt_store.list_by_job_id(job_id).await?,
@@ -1628,7 +1642,9 @@ impl StasisTool for CognitionRuntimeJobStatusTool {
         };
 
         let last = attempts.last();
-        let latest_outcome = last.map(|a| format!("{:?}", a.outcome)).unwrap_or_else(|| "Unknown".to_string());
+        let latest_outcome = last
+            .map(|a| format!("{:?}", a.outcome))
+            .unwrap_or_else(|| "Unknown".to_string());
         let execution_id = last.and_then(|a| a.execution_id.clone());
         let diagnostics = last.and_then(|a| a.diagnostics.clone());
 
@@ -1677,7 +1693,11 @@ impl PolicyAwareToolRegistry {
         }
     }
 
-    fn enforce_allowed_modules(&self, tool_name: &str, input: &Value) -> stasis::prelude::Result<()> {
+    fn enforce_allowed_modules(
+        &self,
+        tool_name: &str,
+        input: &Value,
+    ) -> stasis::prelude::Result<()> {
         if self.allowed_module_ops.is_empty() {
             return Ok(());
         }

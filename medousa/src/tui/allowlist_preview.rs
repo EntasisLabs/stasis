@@ -12,7 +12,10 @@ pub struct AllowlistPreviewAnalysis {
     pub invalid_allowlist: Vec<String>,
 }
 
-pub fn analyze_allowlist_preview(source: &str, allowed_modules_csv: &str) -> AllowlistPreviewAnalysis {
+pub fn analyze_allowlist_preview(
+    source: &str,
+    allowed_modules_csv: &str,
+) -> AllowlistPreviewAnalysis {
     let referenced_ops = extract_module_ops_from_source(source);
     let allowed_modules = parse_allowed_modules(allowed_modules_csv);
     let invalid_allowlist = invalid_module_ids(&allowed_modules);
@@ -53,10 +56,8 @@ mod tests {
 
     #[test]
     fn allows_all_when_allowlist_is_empty() {
-        let analysis = analyze_allowlist_preview(
-            "query Run { websearch.search(query: \"x\") { ok } }",
-            "",
-        );
+        let analysis =
+            analyze_allowlist_preview("query Run { websearch.search(query: \"x\") { ok } }", "");
 
         assert_eq!(analysis.referenced_ops, vec!["websearch.search"]);
         assert!(analysis.blocked_ops.is_empty());

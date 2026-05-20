@@ -13,10 +13,7 @@ pub enum TuiEvent {
         tool_output: serde_json::Value,
     },
     /// A job was enqueued into the Stasis runtime.
-    JobEnqueued {
-        job_id: String,
-        job_type: String,
-    },
+    JobEnqueued { job_id: String, job_type: String },
     /// A job was processed (synchronously executed inside a tool invocation).
     JobProcessed {
         job_id: String,
@@ -29,9 +26,7 @@ pub enum TuiEvent {
         tool_names: Vec<String>,
     },
     /// Partial assistant output chunk streamed from the model.
-    AgentChunk {
-        delta: String,
-    },
+    AgentChunk { delta: String },
     /// The tool loop failed with an error.
     AgentError(String),
 }

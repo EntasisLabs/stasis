@@ -3,17 +3,16 @@ use chrono::Utc;
 use medousa::{
     DaemonStatsResponse, EnqueueAskRequest, EnqueueResponse, HealthResponse,
     RegisterRecurringPromptRequest, RegisterRecurringResponse, build_runtime, parse_backend,
-    process_once, publish_pending, resolve_daemon_url, resolve_llm_base_url,
-    resolve_llm_provider, resolve_llm_target,
+    process_once, publish_pending, resolve_daemon_url, resolve_llm_base_url, resolve_llm_provider,
+    resolve_llm_target,
 };
 use reqwest::Client;
 use serde_json::json;
+use stasis::prelude::AgentToolCallMode;
 use stasis::prelude::{
     AgentSessionJobPayload, AgentSessionParticipantPayload, JobAttemptStore, PromptJobPayload,
-    RuntimeComposition,
-    StasisWorkflowJobBuilder,
+    RuntimeComposition, StasisWorkflowJobBuilder,
 };
-use stasis::prelude::AgentToolCallMode;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -67,7 +66,12 @@ async fn main() -> Result<()> {
             let cron_expr = args
                 .get(1)
                 .ok_or_else(|| anyhow!("missing cron expression: medousa-cli daemon-watch-add <cron_expr> <prompt> [--tz UTC]"))?;
-            let prompt_parts = args.iter().skip(2).take_while(|arg| !arg.starts_with("--")).cloned().collect::<Vec<_>>();
+            let prompt_parts = args
+                .iter()
+                .skip(2)
+                .take_while(|arg| !arg.starts_with("--"))
+                .cloned()
+                .collect::<Vec<_>>();
             if prompt_parts.is_empty() {
                 return Err(anyhow!(
                     "missing prompt: medousa-cli daemon-watch-add <cron_expr> <prompt> [--tz UTC]"
@@ -91,7 +95,10 @@ async fn run_daemon_health(daemon_url: &str) -> Result<()> {
         .await?
         .error_for_status()?;
     let payload: HealthResponse = response.json().await?;
-    println!("status={} backend={} worker={} now={}", payload.status, payload.backend, payload.worker_id, payload.now_utc);
+    println!(
+        "status={} backend={} worker={} now={}",
+        payload.status, payload.backend, payload.worker_id, payload.now_utc
+    );
     Ok(())
 }
 
@@ -113,9 +120,7 @@ async fn run_daemon_stats(daemon_url: &str) -> Result<()> {
     );
     println!(
         "outbox_pending={} recurring_definitions={} last_tick={:?}",
-        payload.pending_outbox_events,
-        payload.recurring_definitions,
-        payload.last_tick_at_utc
+        payload.pending_outbox_events, payload.recurring_definitions, payload.last_tick_at_utc
     );
     Ok(())
 }
@@ -266,10 +271,10 @@ async fn run_ask(runtime: &RuntimeComposition, prompt: &str) -> Result<()> {
     };
 
     let new_job = StasisWorkflowJobBuilder::for_agent_session(job_id.clone(), &payload)?
-    .with_causation_id("medousa-cli")
-    .with_sttp_input_node_id("sttp:in:medousa:ask")
-    .with_scheduled_at(now)
-    .build();
+        .with_causation_id("medousa-cli")
+        .with_sttp_input_node_id("sttp:in:medousa:ask")
+        .with_scheduled_at(now)
+        .build();
 
     match runtime {
         RuntimeComposition::InMemory(rt) => rt.enqueue(new_job).await?,
@@ -295,11 +300,17 @@ fn find_arg_value<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
 
 fn print_usage() {
     println!("medousa-cli usage:");
-    println!("  medousa-cli ask <prompt> [--backend in-memory|surreal-mem] [--provider <provider>] [--model <model_name>] [--base-url <url>]");
-    println!("  medousa-cli llm <prompt> [--provider <provider>] [--model <model_name>] [--base-url <url>] [--backend in-memory|surreal-mem]");
+    println!(
+        "  medousa-cli ask <prompt> [--backend in-memory|surreal-mem] [--provider <provider>] [--model <model_name>] [--base-url <url>]"
+    );
+    println!(
+        "  medousa-cli llm <prompt> [--provider <provider>] [--model <model_name>] [--base-url <url>] [--backend in-memory|surreal-mem]"
+    );
     println!("  medousa-cli daemon-health [--daemon-url <url>]");
     println!("  medousa-cli daemon-stats [--daemon-url <url>]");
     println!("  medousa-cli daemon-ask <prompt> [--daemon-url <url>]");
-    println!("  medousa-cli daemon-watch-add <cron_expr> <prompt> [--tz <timezone>] [--daemon-url <url>]");
+    println!(
+        "  medousa-cli daemon-watch-add <cron_expr> <prompt> [--tz <timezone>] [--daemon-url <url>]"
+    );
     println!("  note: ask uses workflow.stasis.agent_session through Stasis runtime orchestration");
 }

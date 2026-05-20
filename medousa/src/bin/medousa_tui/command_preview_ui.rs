@@ -6,7 +6,7 @@ struct PaletteAction {
     command: &'static str,
 }
 
-const PALETTE_ACTIONS: [PaletteAction; 14] = [
+const PALETTE_ACTIONS: [PaletteAction; 17] = [
     PaletteAction {
         title: "New Session",
         command: "/new",
@@ -18,6 +18,18 @@ const PALETTE_ACTIONS: [PaletteAction; 14] = [
     PaletteAction {
         title: "Open Settings",
         command: "/settings",
+    },
+    PaletteAction {
+        title: "Open Embedded Editor",
+        command: "/edit",
+    },
+    PaletteAction {
+        title: "Run Current .gr (Editor)",
+        command: "/run",
+    },
+    PaletteAction {
+        title: "Run Current File Path (.gr)",
+        command: "/run-current",
     },
     PaletteAction {
         title: "Allowlist Preview",
@@ -179,8 +191,7 @@ pub(crate) fn handle_allowlist_preview_key_event(
             if analysis.referenced_ops.is_empty() {
                 push_obs(
                     state,
-                    "⚠ allowlist preview replace skipped: no referenced ops detected"
-                        .to_string(),
+                    "⚠ allowlist preview replace skipped: no referenced ops detected".to_string(),
                 );
             } else {
                 state.settings_draft.allowed_modules = analysis.referenced_ops.join(",");
@@ -247,9 +258,15 @@ pub(crate) fn render_command_palette_overlay(frame: &mut ratatui::Frame, state: 
         )));
     } else {
         for (idx, action) in actions.iter().enumerate() {
-            let marker = if idx == state.command_selected { ">" } else { " " };
+            let marker = if idx == state.command_selected {
+                ">"
+            } else {
+                " "
+            };
             let style = if idx == state.command_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };

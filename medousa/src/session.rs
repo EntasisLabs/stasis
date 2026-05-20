@@ -51,7 +51,9 @@ fn medousa_data_dir() -> PathBuf {
 }
 
 pub fn history_path(session_id: &str) -> PathBuf {
-    medousa_data_dir().join("history").join(format!("{session_id}.jsonl"))
+    medousa_data_dir()
+        .join("history")
+        .join(format!("{session_id}.jsonl"))
 }
 
 fn last_session_path() -> PathBuf {

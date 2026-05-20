@@ -59,7 +59,10 @@ pub(crate) async fn handle_settings_key_event(
             }
             11 => {
                 state.settings_draft.api_key.clear();
-                push_obs(state, "✓ settings draft: api key marked for clear".to_string());
+                push_obs(
+                    state,
+                    "✓ settings draft: api key marked for clear".to_string(),
+                );
             }
             12 => {
                 let key = state.settings_draft.api_key.trim().to_string();
@@ -78,7 +81,10 @@ pub(crate) async fn handle_settings_key_event(
             13 => {
                 state.settings_draft = state.settings.clone();
                 state.settings_editing = false;
-                push_obs(state, "✓ settings draft reverted to last applied".to_string());
+                push_obs(
+                    state,
+                    "✓ settings draft reverted to last applied".to_string(),
+                );
             }
             14 => {
                 super::apply_settings(state, tui_rt, event_tx).await;
@@ -166,10 +172,22 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
                 state.settings_draft.allowed_modules.clone()
             }
         ),
-        format!("Tool Call Mode: {}  [toggle]", state.settings_draft.tool_call_mode),
-        format!("Max Tool Rounds: {}  [number]", state.settings_draft.max_tool_rounds),
-        format!("Thinking Capture: {}  [toggle]", state.settings_draft.thinking_capture),
-        format!("Thinking Max Lines: {}  [number]", state.settings_draft.thinking_max_lines),
+        format!(
+            "Tool Call Mode: {}  [toggle]",
+            state.settings_draft.tool_call_mode
+        ),
+        format!(
+            "Max Tool Rounds: {}  [number]",
+            state.settings_draft.max_tool_rounds
+        ),
+        format!(
+            "Thinking Capture: {}  [toggle]",
+            state.settings_draft.thinking_capture
+        ),
+        format!(
+            "Thinking Max Lines: {}  [number]",
+            state.settings_draft.thinking_max_lines
+        ),
         "Validate Draft  [action]".to_string(),
         "Clear API Key (Draft)  [action]".to_string(),
         "Rotate API Key (Persist Draft)  [action]".to_string(),
@@ -179,9 +197,15 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
     ];
 
     for (idx, row) in rows.iter().enumerate() {
-        let marker = if idx == state.settings_selected { ">" } else { " " };
+        let marker = if idx == state.settings_selected {
+            ">"
+        } else {
+            " "
+        };
         let mut style = if idx == state.settings_selected {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
@@ -247,7 +271,8 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
             state.settings_draft.thinking_capture = (!value).to_string();
         }
         9 => {
-            let current = parse_usize_with_bounds(&state.settings_draft.thinking_max_lines, 300, 50, 5000);
+            let current =
+                parse_usize_with_bounds(&state.settings_draft.thinking_max_lines, 300, 50, 5000);
             let step = if current < 500 { 50 } else { 100 };
             let next = if forward {
                 current.saturating_add(step)

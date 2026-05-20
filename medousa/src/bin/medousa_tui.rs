@@ -1,56 +1,56 @@
 use std::collections::{HashSet, VecDeque};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
 use crossterm::{
-    event::{Event, KeyCode, KeyModifiers},
+    event::{Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
-    Terminal,
 };
-use ratatui_markdown::{markdown::MarkdownRenderer, DefaultTheme};
+use ratatui_markdown::{DefaultTheme, markdown::MarkdownRenderer};
 use reqwest::Client;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use medousa::{
-    build_tui_runtime,
-    EnqueueAskRequest,
-    EnqueueResponse,
-    HealthResponse,
-    RegisterRecurringPromptRequest,
-    RegisterRecurringResponse,
+    EnqueueAskRequest, EnqueueResponse, HealthResponse, RegisterRecurringPromptRequest,
+    RegisterRecurringResponse, TuiRuntime, build_tui_runtime,
     events::TuiEvent,
-    parse_backend,
-    resolve_daemon_url,
-    resolve_llm_base_url, resolve_llm_model, resolve_llm_provider, TuiRuntime,
-    settings_guard::{invalid_module_ids, parse_allowed_modules, redact_json_value},
+    parse_backend, process_once, resolve_daemon_url, resolve_llm_base_url, resolve_llm_model,
+    resolve_llm_provider,
     session::{
-        append_turn, detect_tui_api_key_storage_backend, list_history_sessions, load_history,
-        load_tui_api_key, load_tui_defaults, save_last_session_id, save_tui_api_key,
-        save_tui_defaults, ApiKeyStorageBackend, ConversationTurn, SessionHistorySummary,
-        TuiDefaults,
+        ApiKeyStorageBackend, ConversationTurn, SessionHistorySummary, TuiDefaults, append_turn,
+        detect_tui_api_key_storage_backend, list_history_sessions, load_history, load_tui_api_key,
+        load_tui_defaults, save_last_session_id, save_tui_api_key, save_tui_defaults,
     },
+    settings_guard::{invalid_module_ids, parse_allowed_modules, redact_json_value},
     tui::allowlist_preview::analyze_allowlist_preview,
+    tui::editor_buffer::TextBuffer,
     tui::settings::{
         RuntimeSettings, cycle_backend, cycle_tool_call_mode, parse_bool_with_default,
         parse_usize_with_bounds, resolve_backend_name, resolve_bool_arg,
         resolve_tool_call_mode_name, resolve_usize_arg, settings_validation_errors,
     },
 };
-use stasis::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolLoopExecutionRequest};
-use stasis::prelude::{ChatMessage, PromptExecutionContext};
+use stasis::application::orchestration::tool_loop_pipeline::{
+    ToolCallMode, ToolLoopExecutionRequest,
+};
+use stasis::prelude::{
+    BackoffPolicy, ChatMessage, JobAttemptOutcome, JobAttemptStore, NewJob, PromptExecutionContext,
+    RuntimeComposition,
+};
 
 #[path = "medousa_tui/command_preview_ui.rs"]
 mod command_preview_ui;
@@ -100,8 +100,6 @@ Read it as policy memory, then follow it strictly during this conversation.
 } ⟩
 ⍉⟨ ⏣0{ rho: 0.97, kappa: 0.96, psi: 2.91, compression_avec: { stability: 0.89, friction: 0.25, logic: 0.94, autonomy: 0.82, psi: 2.90 } } ⟩"#;
 
-
-
 // ── Domain types ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -135,6 +133,12 @@ struct TuiState {
     settings: RuntimeSettings,
     settings_draft: RuntimeSettings,
     allowlist_preview_source: String,
+    editor_buffer: TextBuffer,
+    editor_file_path: Option<PathBuf>,
+    editor_status: String,
+    editor_dirty: bool,
+    editor_preferred_col: Option<usize>,
+    editor_scroll: u16,
     settings_selected: usize,
     settings_editing: bool,
     provider_model: String,
@@ -144,6 +148,8 @@ struct TuiState {
     thinking_max_scroll: u16,
     obs_scroll: u16,
     obs_max_scroll: u16,
+    job_scroll: u16,
+    job_max_scroll: u16,
     in_thinking_tag: bool,
     stream_tag_tail: String,
     daemon_url: String,
@@ -157,6 +163,7 @@ enum UiMode {
     Settings,
     ObservabilityPanel,
     AllowlistPreview,
+    Editor,
     ThinkingPeek,
     ThinkingPanel,
 }
@@ -195,10 +202,8 @@ async fn main() -> Result<()> {
         1,
         50,
     );
-    let resolved_thinking_capture = resolve_bool_arg(
-        thinking_capture,
-        defaults.thinking_capture.unwrap_or(true),
-    );
+    let resolved_thinking_capture =
+        resolve_bool_arg(thinking_capture, defaults.thinking_capture.unwrap_or(true));
     let resolved_thinking_max_lines = resolve_usize_arg(
         thinking_max_lines,
         defaults.thinking_max_lines.unwrap_or(300),
@@ -280,6 +285,12 @@ async fn main() -> Result<()> {
         settings: initial_settings.clone(),
         settings_draft: initial_settings,
         allowlist_preview_source: String::new(),
+        editor_buffer: TextBuffer::default(),
+        editor_file_path: None,
+        editor_status: "No file loaded".to_string(),
+        editor_dirty: false,
+        editor_preferred_col: None,
+        editor_scroll: 0,
         settings_selected: 0,
         settings_editing: false,
         provider_model,
@@ -289,6 +300,8 @@ async fn main() -> Result<()> {
         thinking_max_scroll: 0,
         obs_scroll: 0,
         obs_max_scroll: 0,
+        job_scroll: 0,
+        job_max_scroll: 0,
         in_thinking_tag: false,
         stream_tag_tail: String::new(),
         daemon_url: resolved_daemon_url,
@@ -296,15 +309,17 @@ async fn main() -> Result<()> {
 
     // ── Keyboard reader (spawn_blocking to keep async event loop clean) ───────
     let (key_tx, mut key_rx) = mpsc::channel::<Event>(64);
-    tokio::task::spawn_blocking(move || loop {
-        if crossterm::event::poll(Duration::from_millis(50)).unwrap_or(false) {
-            match crossterm::event::read() {
-                Ok(event) => {
-                    if key_tx.blocking_send(event).is_err() {
-                        break;
+    tokio::task::spawn_blocking(move || {
+        loop {
+            if crossterm::event::poll(Duration::from_millis(50)).unwrap_or(false) {
+                match crossterm::event::read() {
+                    Ok(event) => {
+                        if key_tx.blocking_send(event).is_err() {
+                            break;
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
         }
     });
@@ -443,12 +458,58 @@ async fn handle_key_event(
         return handle_allowlist_preview_key_event(key.code, state);
     }
 
+    if state.mode == UiMode::Editor {
+        return handle_editor_key_event(key, state);
+    }
+
     if state.mode == UiMode::ThinkingPeek || state.mode == UiMode::ThinkingPanel {
         return handle_thinking_key_event(key.code, state);
     }
 
     if state.mode == UiMode::ObservabilityPanel {
         return handle_observability_key_event(key.code, state);
+    }
+
+    if state.mode == UiMode::Chat && key.modifiers.contains(KeyModifiers::SHIFT) {
+        match key.code {
+            KeyCode::Up => {
+                state.obs_scroll = state.obs_scroll.saturating_sub(1);
+                state.job_scroll = state.job_scroll.saturating_sub(1);
+                return EventOutcome::Continue;
+            }
+            KeyCode::Down => {
+                state.obs_scroll = state.obs_scroll.saturating_add(1).min(state.obs_max_scroll);
+                state.job_scroll = state.job_scroll.saturating_add(1).min(state.job_max_scroll);
+                return EventOutcome::Continue;
+            }
+            KeyCode::PageUp => {
+                state.obs_scroll = state.obs_scroll.saturating_sub(10);
+                state.job_scroll = state.job_scroll.saturating_sub(10);
+                return EventOutcome::Continue;
+            }
+            KeyCode::PageDown => {
+                state.obs_scroll = state
+                    .obs_scroll
+                    .saturating_add(10)
+                    .min(state.obs_max_scroll);
+                state.job_scroll = state
+                    .job_scroll
+                    .saturating_add(10)
+                    .min(state.job_max_scroll);
+                return EventOutcome::Continue;
+            }
+            KeyCode::Home => {
+                state.obs_scroll = 0;
+                state.job_scroll = 0;
+                return EventOutcome::Continue;
+            }
+            KeyCode::End => {
+                state.obs_scroll = state.obs_max_scroll;
+                state.job_scroll = state.job_max_scroll;
+                return EventOutcome::Continue;
+            }
+            _ => {}
+        }
     }
 
     match (key.code, key.modifiers) {
@@ -520,9 +581,7 @@ async fn handle_key_event(
         }
 
         // Submit
-        (KeyCode::Enter, _)
-            if !state.is_processing && !state.input_buffer.trim().is_empty() =>
-        {
+        (KeyCode::Enter, _) if !state.is_processing && !state.input_buffer.trim().is_empty() => {
             let prompt = state.input_buffer.trim().to_string();
 
             if prompt.starts_with('/') {
@@ -591,7 +650,10 @@ fn handle_observability_key_event(code: KeyCode, state: &mut TuiState) -> EventO
             state.obs_scroll = state.obs_scroll.saturating_sub(10);
         }
         KeyCode::PageDown => {
-            state.obs_scroll = state.obs_scroll.saturating_add(10).min(state.obs_max_scroll);
+            state.obs_scroll = state
+                .obs_scroll
+                .saturating_add(10)
+                .min(state.obs_max_scroll);
         }
         KeyCode::Home => {
             state.obs_scroll = 0;
@@ -607,6 +669,331 @@ fn handle_observability_key_event(code: KeyCode, state: &mut TuiState) -> EventO
 
 fn handle_allowlist_preview_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
     command_preview_ui::handle_allowlist_preview_key_event(code, state)
+}
+
+fn handle_editor_key_event(key: KeyEvent, state: &mut TuiState) -> EventOutcome {
+    if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        save_editor_buffer(state, None);
+        return EventOutcome::Continue;
+    }
+
+    let mut edited = false;
+    let mut vertical_nav = false;
+
+    match key.code {
+        KeyCode::Left => {
+            state.editor_buffer.move_left();
+            state.editor_preferred_col = None;
+        }
+        KeyCode::Right => {
+            state.editor_buffer.move_right();
+            state.editor_preferred_col = None;
+        }
+        KeyCode::Up => {
+            let (_, col) = state.editor_buffer.line_col();
+            let preferred_col = state.editor_preferred_col.unwrap_or(col);
+            state.editor_buffer.move_up(preferred_col);
+            state.editor_preferred_col = Some(preferred_col);
+            vertical_nav = true;
+        }
+        KeyCode::Down => {
+            let (_, col) = state.editor_buffer.line_col();
+            let preferred_col = state.editor_preferred_col.unwrap_or(col);
+            state.editor_buffer.move_down(preferred_col);
+            state.editor_preferred_col = Some(preferred_col);
+            vertical_nav = true;
+        }
+        KeyCode::Home => {
+            state.editor_buffer.move_line_start();
+            state.editor_preferred_col = Some(1);
+        }
+        KeyCode::End => {
+            state.editor_buffer.move_line_end();
+            let (_, col) = state.editor_buffer.line_col();
+            state.editor_preferred_col = Some(col);
+        }
+        KeyCode::Enter => {
+            state.editor_buffer.insert_newline();
+            state.editor_preferred_col = None;
+            edited = true;
+        }
+        KeyCode::Backspace => {
+            state.editor_buffer.backspace();
+            state.editor_preferred_col = None;
+            edited = true;
+        }
+        KeyCode::Tab => {
+            state.editor_buffer.insert_str("    ");
+            state.editor_preferred_col = None;
+            edited = true;
+        }
+        KeyCode::Char(c) => {
+            if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
+                state.editor_buffer.insert_char(c);
+                state.editor_preferred_col = None;
+                edited = true;
+            }
+        }
+        _ => {}
+    }
+
+    if edited {
+        state.editor_dirty = true;
+        state.editor_status = "Unsaved changes".to_string();
+    }
+
+    if edited || vertical_nav {
+        keep_editor_cursor_visible(state, 12);
+    }
+
+    EventOutcome::Continue
+}
+
+fn keep_editor_cursor_visible(state: &mut TuiState, viewport_lines: usize) {
+    let viewport = viewport_lines.max(3) as u16;
+    let cursor_line = state.editor_buffer.line_col().0.saturating_sub(1) as u16;
+
+    if cursor_line < state.editor_scroll {
+        state.editor_scroll = cursor_line;
+        return;
+    }
+
+    let max_visible = state
+        .editor_scroll
+        .saturating_add(viewport.saturating_sub(1));
+    if cursor_line > max_visible {
+        state.editor_scroll = cursor_line.saturating_sub(viewport.saturating_sub(1));
+    }
+}
+
+fn save_editor_buffer(state: &mut TuiState, path_override: Option<&str>) {
+    if let Some(path_raw) = path_override {
+        if !path_raw.trim().is_empty() {
+            state.editor_file_path = Some(PathBuf::from(path_raw.trim()));
+        }
+    }
+
+    let Some(path) = state.editor_file_path.clone() else {
+        state.editor_status = "Save failed: no path. Use /save <path>".to_string();
+        push_obs(
+            state,
+            "⚠ save failed: no target path. use /save <path>".to_string(),
+        );
+        return;
+    };
+
+    match write_editor_file(&path, state.editor_buffer.as_text()) {
+        Ok(_) => {
+            state.editor_dirty = false;
+            state.editor_status = format!("Saved {}", path.display());
+            push_obs(state, format!("✓ saved {}", path.display()));
+        }
+        Err(err) => {
+            state.editor_status = format!("Save failed: {err}");
+            push_obs(state, format!("⚠ save failed: {err}"));
+        }
+    }
+}
+
+fn load_editor_file(path: &Path) -> std::io::Result<Option<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+fn write_editor_file(path: &Path, content: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, content)
+}
+
+fn resolve_editor_run_source(
+    path_override: Option<&str>,
+    editor_file_path: Option<&Path>,
+    editor_text: &str,
+) -> std::result::Result<(String, String), String> {
+    let source_target = path_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+
+    if let Some(path) = source_target {
+        return match load_editor_file(&path) {
+            Ok(Some(content)) => Ok((content, format!("file:{}", path.display()))),
+            Ok(None) => Err(format!("run failed: file not found {}", path.display())),
+            Err(err) => Err(format!("run failed: {err}")),
+        };
+    }
+
+    let label = editor_file_path
+        .map(|path| format!("editor:{}", path.display()))
+        .unwrap_or_else(|| "editor:buffer".to_string());
+    Ok((editor_text.to_string(), label))
+}
+
+fn validate_editor_run_allowlist(
+    source: &str,
+    allowed_modules_csv: &str,
+) -> std::result::Result<Vec<String>, String> {
+    let analysis = analyze_allowlist_preview(source, allowed_modules_csv);
+    if !analysis.invalid_allowlist.is_empty() {
+        return Err(format!(
+            "run blocked: invalid allowlist entries: {}",
+            analysis.invalid_allowlist.join(", ")
+        ));
+    }
+
+    if !analysis.blocked_ops.is_empty() {
+        return Err(format!(
+            "run blocked by allowlist: {}",
+            analysis.blocked_ops.join(", ")
+        ));
+    }
+
+    Ok(analysis.referenced_ops)
+}
+
+async fn run_editor_source_via_runtime(
+    state: &mut TuiState,
+    tui_rt: &TuiRuntime,
+    event_tx: &mpsc::Sender<TuiEvent>,
+    path_override: Option<&str>,
+) {
+    let (source, source_label) = match resolve_editor_run_source(
+        path_override,
+        state.editor_file_path.as_deref(),
+        state.editor_buffer.as_text(),
+    ) {
+        Ok(values) => values,
+        Err(message) => {
+            push_obs(state, format!("⚠ {message}"));
+            return;
+        }
+    };
+
+    if source.trim().is_empty() {
+        push_obs(state, "⚠ run failed: source is empty".to_string());
+        return;
+    }
+
+    let referenced_ops =
+        match validate_editor_run_allowlist(&source, &state.settings.allowed_modules) {
+            Ok(ops) => ops,
+            Err(message) => {
+                push_obs(state, format!("⚠ {message}"));
+                return;
+            }
+        };
+
+    let _ = event_tx
+        .send(TuiEvent::ToolInvoked {
+            tool_name: "editor.gr.run".to_string(),
+            input_summary: format!("{source_label}  {} byte(s)", source.len()),
+        })
+        .await;
+
+    let job_id = format!("editor-gr-run-{}", Uuid::new_v4().simple());
+    let now = Utc::now();
+    let job = NewJob {
+        id: job_id.clone(),
+        queue: "default".to_string(),
+        job_type: "workflow.grapheme.run".to_string(),
+        payload_ref: format!("grapheme:inline:{source}"),
+        priority: 100,
+        max_attempts: 1,
+        idempotency_key: format!("idem-{job_id}"),
+        correlation_id: job_id.clone(),
+        causation_id: "medousa_tui.editor_run".to_string(),
+        trace_id: job_id.clone(),
+        sttp_input_node_id: "sttp:in:cognition:grapheme:editor-run".to_string(),
+        scheduled_at: now,
+        backoff_policy: BackoffPolicy::default(),
+    };
+
+    let enqueue_result = match &*tui_rt.runtime {
+        RuntimeComposition::InMemory(rt) => rt.enqueue(job).await,
+        RuntimeComposition::Surreal(rt) => rt.enqueue(job).await,
+    };
+
+    if let Err(err) = enqueue_result {
+        push_obs(state, format!("⚠ run enqueue failed: {err}"));
+        return;
+    }
+
+    let _ = event_tx
+        .send(TuiEvent::JobEnqueued {
+            job_id: job_id.clone(),
+            job_type: "workflow.grapheme.run".to_string(),
+        })
+        .await;
+
+    if let Err(err) = process_once(&tui_rt.runtime, "medousa_tui.editor_run").await {
+        push_obs(state, format!("⚠ run processing failed: {err}"));
+        return;
+    }
+
+    let attempts_result = match &*tui_rt.runtime {
+        RuntimeComposition::InMemory(rt) => rt.job_attempt_store.list_by_job_id(&job_id).await,
+        RuntimeComposition::Surreal(rt) => rt.job_attempt_store.list_by_job_id(&job_id).await,
+    };
+
+    let attempts = match attempts_result {
+        Ok(list) => list,
+        Err(err) => {
+            push_obs(state, format!("⚠ run diagnostics failed: {err}"));
+            return;
+        }
+    };
+
+    let Some(last_attempt) = attempts.last() else {
+        push_obs(state, "⚠ run failed: no attempt recorded".to_string());
+        return;
+    };
+
+    let succeeded = last_attempt.outcome == JobAttemptOutcome::Succeeded;
+    let _ = event_tx
+        .send(TuiEvent::JobProcessed {
+            job_id: job_id.clone(),
+            succeeded,
+            execution_id: last_attempt.execution_id.clone(),
+        })
+        .await;
+
+    let diagnostics_json = last_attempt
+        .diagnostics
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .unwrap_or_else(|| {
+            Value::String(
+                last_attempt
+                    .diagnostics
+                    .clone()
+                    .unwrap_or_else(|| "".to_string()),
+            )
+        });
+
+    let output = serde_json::json!({
+        "source": source_label,
+        "job_id": job_id,
+        "succeeded": succeeded,
+        "attempt_outcome": format!("{:?}", last_attempt.outcome),
+        "execution_id": last_attempt.execution_id,
+        "diagnostics": diagnostics_json,
+    });
+    let _ = event_tx
+        .send(TuiEvent::ToolPayload {
+            tool_name: "editor.gr.run".to_string(),
+            tool_input: serde_json::json!({
+                "source_bytes": source.len(),
+                "referenced_ops": referenced_ops,
+                "allowed_modules": parse_allowed_modules(&state.settings.allowed_modules),
+            }),
+            tool_output: output,
+        })
+        .await;
 }
 
 fn start_prompt_run(
@@ -825,6 +1212,73 @@ async fn handle_slash_command(
                     "query Run { websearch.search(query: \"\") { ok } }".to_string();
             }
         }
+        "/edit" | "/open" => {
+            let path_raw = parts.collect::<Vec<_>>().join(" ");
+            if path_raw.trim().is_empty() {
+                state.mode = UiMode::Editor;
+                state.editor_status =
+                    "Editor opened. Use /open <path> or /save <path> to persist.".to_string();
+                state.editor_preferred_col = None;
+                keep_editor_cursor_visible(state, 12);
+            } else {
+                let path = PathBuf::from(path_raw.trim());
+                match load_editor_file(&path) {
+                    Ok(Some(content)) => {
+                        state.editor_buffer = TextBuffer::from_text(content);
+                        state.editor_file_path = Some(path.clone());
+                        state.editor_status = format!("Opened {}", path.display());
+                        state.editor_dirty = false;
+                        state.editor_preferred_col = None;
+                        state.editor_scroll = 0;
+                        keep_editor_cursor_visible(state, 12);
+                        state.mode = UiMode::Editor;
+                    }
+                    Ok(None) => {
+                        state.editor_buffer = TextBuffer::default();
+                        state.editor_file_path = Some(path.clone());
+                        state.editor_status =
+                            format!("New file {} (not saved yet)", path.display());
+                        state.editor_dirty = false;
+                        state.editor_preferred_col = None;
+                        state.editor_scroll = 0;
+                        state.mode = UiMode::Editor;
+                    }
+                    Err(err) => {
+                        push_obs(state, format!("⚠ open failed: {err}"));
+                    }
+                }
+            }
+        }
+        "/save" => {
+            let path_raw = parts.collect::<Vec<_>>().join(" ");
+            save_editor_buffer(state, Some(path_raw.as_str()));
+        }
+        "/run" => {
+            let path_raw = parts.collect::<Vec<_>>().join(" ");
+            let override_path = if path_raw.trim().is_empty() {
+                None
+            } else {
+                Some(path_raw.as_str())
+            };
+            run_editor_source_via_runtime(state, tui_rt, event_tx, override_path).await;
+        }
+        "/run-current" => {
+            let Some(path) = state.editor_file_path.clone() else {
+                push_obs(
+                    state,
+                    "⚠ run-current failed: no editor file path set. use /open <path> or /run <path>"
+                        .to_string(),
+                );
+                return EventOutcome::Continue;
+            };
+
+            let path_value = path.display().to_string();
+            run_editor_source_via_runtime(state, tui_rt, event_tx, Some(path_value.as_str())).await;
+        }
+        "/close" => {
+            push_obs(state, "✓ closing medousa_tui".to_string());
+            return EventOutcome::Break;
+        }
         "/clear-key" => {
             state.settings.api_key.clear();
             state.settings_draft.api_key.clear();
@@ -851,10 +1305,7 @@ async fn handle_slash_command(
             if args.is_empty() {
                 push_obs(
                     state,
-                    format!(
-                        "model {}:{}",
-                        state.settings.provider, state.settings.model
-                    ),
+                    format!("model {}:{}", state.settings.provider, state.settings.model),
                 );
                 return EventOutcome::Continue;
             }
@@ -898,7 +1349,10 @@ async fn handle_slash_command(
                 push_obs(state, "↻ regenerate last response".to_string());
                 start_prompt_run(state, tui_rt, event_tx, prompt, false);
             } else {
-                push_obs(state, "⚠ no user prompt available to regenerate".to_string());
+                push_obs(
+                    state,
+                    "⚠ no user prompt available to regenerate".to_string(),
+                );
             }
         }
         "/export" => {
@@ -929,28 +1383,25 @@ async fn handle_slash_command(
                         push_obs(state, format!("✓ daemon url set to {}", state.daemon_url));
                     }
                 }
-                "health" => {
-                    match daemon_health(&state.daemon_url).await {
-                        Ok(payload) => push_obs(
-                            state,
-                            format!(
-                                "✓ daemon {} backend={} worker={}",
-                                payload.status, payload.backend, payload.worker_id
-                            ),
+                "health" => match daemon_health(&state.daemon_url).await {
+                    Ok(payload) => push_obs(
+                        state,
+                        format!(
+                            "✓ daemon {} backend={} worker={}",
+                            payload.status, payload.backend, payload.worker_id
                         ),
-                        Err(err) => push_obs(state, format!("⚠ daemon health failed: {err}")),
-                    }
-                }
+                    ),
+                    Err(err) => push_obs(state, format!("⚠ daemon health failed: {err}")),
+                },
                 "ask" => {
                     let prompt = parts.collect::<Vec<_>>().join(" ");
                     if prompt.trim().is_empty() {
                         push_obs(state, "⚠ usage: /daemon ask <prompt>".to_string());
                     } else {
                         match daemon_enqueue_ask(&state.daemon_url, &prompt).await {
-                            Ok(payload) => push_obs(
-                                state,
-                                format!("✓ daemon job enqueued {}", payload.job_id),
-                            ),
+                            Ok(payload) => {
+                                push_obs(state, format!("✓ daemon job enqueued {}", payload.job_id))
+                            }
                             Err(err) => {
                                 push_obs(state, format!("⚠ daemon ask failed: {err}"));
                             }
@@ -979,14 +1430,20 @@ async fn handle_slash_command(
             let cron_expr = match parts.next() {
                 Some(value) => value,
                 None => {
-                    push_obs(state, "⚠ usage: /watch add <cron_expr> <prompt...>".to_string());
+                    push_obs(
+                        state,
+                        "⚠ usage: /watch add <cron_expr> <prompt...>".to_string(),
+                    );
                     return EventOutcome::Continue;
                 }
             };
 
             let prompt = parts.collect::<Vec<_>>().join(" ");
             if prompt.trim().is_empty() {
-                push_obs(state, "⚠ usage: /watch add <cron_expr> <prompt...>".to_string());
+                push_obs(
+                    state,
+                    "⚠ usage: /watch add <cron_expr> <prompt...>".to_string(),
+                );
                 return EventOutcome::Continue;
             }
 
@@ -1004,7 +1461,7 @@ async fn handle_slash_command(
         _ => {
             push_obs(
                 state,
-                "⚠ unknown command. try /new /history /settings /allowlist-preview /clear-key /rotate-key /model /stop /regen /export /daemon /watch"
+                "⚠ unknown command. try /new /history /settings /edit /open /save /run /run-current /close /allowlist-preview /clear-key /rotate-key /model /stop /regen /export /daemon /watch"
                     .to_string(),
             );
         }
@@ -1183,7 +1640,11 @@ fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
                 state.job_history.pop_back();
             }
         }
-        TuiEvent::JobProcessed { job_id, succeeded, execution_id } => {
+        TuiEvent::JobProcessed {
+            job_id,
+            succeeded,
+            execution_id,
+        } => {
             let symbol = if succeeded { "✓" } else { "✗" };
             let exec_hint = execution_id.as_deref().unwrap_or("—");
             push_obs(state, format!("{symbol} [{exec_hint:.12}]"));
@@ -1194,7 +1655,10 @@ fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
                 }
             }
         }
-        TuiEvent::ToolInvoked { tool_name, input_summary } => {
+        TuiEvent::ToolInvoked {
+            tool_name,
+            input_summary,
+        } => {
             push_obs(state, format!("◆ {tool_name}  {input_summary}"));
         }
         TuiEvent::ToolPayload {
@@ -1210,9 +1674,7 @@ fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
                 .unwrap_or_else(|_| safe_output.to_string());
             push_obs(
                 state,
-                format!(
-                    "◆ {tool_name}\ninput:\n{input}\noutput:\n{output}\n────────────────"
-                ),
+                format!("◆ {tool_name}\ninput:\n{input}\noutput:\n{output}\n────────────────"),
             );
         }
     }
@@ -1225,8 +1687,8 @@ fn handle_history_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome
         }
         KeyCode::Down => {
             if !state.history_items.is_empty() {
-                state.history_selected = (state.history_selected + 1)
-                    .min(state.history_items.len().saturating_sub(1));
+                state.history_selected =
+                    (state.history_selected + 1).min(state.history_items.len().saturating_sub(1));
             }
         }
         KeyCode::Enter => {
@@ -1290,15 +1752,12 @@ async fn apply_settings(
     }
 
     let backend = resolve_backend_name(Some(state.settings_draft.backend.trim()));
-    let tool_call_mode = resolve_tool_call_mode_name(Some(state.settings_draft.tool_call_mode.trim()));
+    let tool_call_mode =
+        resolve_tool_call_mode_name(Some(state.settings_draft.tool_call_mode.trim()));
     let max_tool_rounds = parse_usize_with_bounds(&state.settings_draft.max_tool_rounds, 10, 1, 50);
     let thinking_capture = parse_bool_with_default(&state.settings_draft.thinking_capture, true);
-    let thinking_max_lines = parse_usize_with_bounds(
-        &state.settings_draft.thinking_max_lines,
-        300,
-        50,
-        5000,
-    );
+    let thinking_max_lines =
+        parse_usize_with_bounds(&state.settings_draft.thinking_max_lines, 300, 50, 5000);
     let provider = if state.settings_draft.provider.trim().is_empty() {
         resolve_llm_provider(None)
     } else {
@@ -1364,7 +1823,10 @@ async fn apply_settings(
                 thinking_capture: Some(thinking_capture),
                 thinking_max_lines: Some(thinking_max_lines),
             });
-            push_obs(state, "✓ settings applied (sensitive values redacted)".to_string());
+            push_obs(
+                state,
+                "✓ settings applied (sensitive values redacted)".to_string(),
+            );
         }
         Err(err) => {
             push_obs(state, format!("⚠ settings apply failed: {err}"));
@@ -1419,7 +1881,9 @@ fn extract_thinking_from_stream(
 
     loop {
         if *in_thinking {
-            if let Some((idx, marker_len)) = find_earliest_marker(&buffer, &["</think>", "</thinking>"]) {
+            if let Some((idx, marker_len)) =
+                find_earliest_marker(&buffer, &["</think>", "</thinking>"])
+            {
                 let chunk = &buffer[..idx];
                 if !chunk.is_empty() {
                     thinking.push(chunk.to_string());
@@ -1475,7 +1939,9 @@ fn strip_thinking_tags(text: &str) -> (String, Vec<String>) {
         }
 
         if in_thinking {
-            if let Some((idx, marker_len)) = find_earliest_marker(&remaining, &["</think>", "</thinking>"]) {
+            if let Some((idx, marker_len)) =
+                find_earliest_marker(&remaining, &["</think>", "</thinking>"])
+            {
                 let chunk = &remaining[..idx];
                 if !chunk.is_empty() {
                     thinking.push(chunk.to_string());
@@ -1486,7 +1952,9 @@ fn strip_thinking_tags(text: &str) -> (String, Vec<String>) {
                 thinking.push(remaining);
                 break;
             }
-        } else if let Some((idx, marker_len)) = find_earliest_marker(&remaining, &["<think>", "<thinking>"]) {
+        } else if let Some((idx, marker_len)) =
+            find_earliest_marker(&remaining, &["<think>", "<thinking>"])
+        {
             visible.push_str(&remaining[..idx]);
             remaining = remaining[idx + marker_len..].to_string();
             in_thinking = true;
@@ -1611,7 +2079,7 @@ fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
     let obs_widget = Paragraph::new(obs_text)
         .block(
             Block::default()
-                .title(" Observability  (Ctrl+O expand) ")
+                .title(" Observability  (Ctrl+O expand, Shift+Arrows scroll side panes) ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ui_border()))
                 .style(Style::default().bg(ui_subtle_panel_bg())),
@@ -1622,37 +2090,24 @@ fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
     frame.render_widget(obs_widget, obs_area);
 
     // ── Job History ───────────────────────────────────────────────────────────
-    let job_lines: Vec<Line> = state
-        .job_history
-        .iter()
-        .map(|j| {
-            let (symbol, color) = match j.status.as_str() {
-                "succeeded" => ("✓", Color::Green),
-                "failed" => ("✗", Color::Red),
-                _ => ("·", Color::DarkGray),
-            };
-            let type_label = j.job_type.split('.').last().unwrap_or(&j.job_type);
-            let id_short: String = j.job_id.chars().take(10).collect();
-            Line::from(vec![
-                Span::styled(format!("{symbol} "), Style::default().fg(color)),
-                Span::styled(
-                    format!("{type_label} {id_short}"),
-                    Style::default().fg(Color::White),
-                ),
-            ])
-        })
-        .collect();
+    let jobs_inner_width = jobs_area.width.saturating_sub(2);
+    let jobs_text = build_job_history_text(state, jobs_inner_width);
+    let jobs_visible_height = jobs_area.height.saturating_sub(2);
+    let jobs_visual_lines = visual_line_count(&jobs_text, jobs_inner_width);
+    state.job_max_scroll = jobs_visual_lines.saturating_sub(jobs_visible_height);
+    state.job_scroll = state.job_scroll.min(state.job_max_scroll);
 
-    let jobs_widget = Paragraph::new(Text::from(job_lines))
+    let jobs_widget = Paragraph::new(jobs_text)
         .block(
             Block::default()
-                .title(" Job History ")
+                .title(" Job History  (Shift+Arrows scroll side panes) ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ui_border()))
                 .style(Style::default().bg(ui_subtle_panel_bg())),
         )
         .style(Style::default().fg(Color::White).bg(ui_subtle_panel_bg()))
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((state.job_scroll, 0));
     frame.render_widget(jobs_widget, jobs_area);
 
     // ── Input bar ─────────────────────────────────────────────────────────────
@@ -1692,6 +2147,8 @@ fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
         render_command_palette_overlay(frame, state);
     } else if state.mode == UiMode::AllowlistPreview {
         render_allowlist_preview_overlay(frame, state);
+    } else if state.mode == UiMode::Editor {
+        render_editor_overlay(frame, state);
     } else if state.mode == UiMode::Settings {
         render_settings_overlay(frame, state);
     } else if state.mode == UiMode::ObservabilityPanel {
@@ -1741,6 +2198,36 @@ fn build_observability_text(state: &TuiState, expanded: bool, width: u16) -> Tex
         for line in render_markdown_lines(&ev.text, width) {
             lines.push(line);
         }
+    }
+
+    Text::from(lines)
+}
+
+fn build_job_history_text(state: &TuiState, width: u16) -> Text<'static> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    if state.job_history.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No jobs yet.",
+            Style::default().fg(Color::Gray),
+        )));
+        return Text::from(lines);
+    }
+
+    for (idx, j) in state.job_history.iter().enumerate() {
+        if idx > 0 {
+            lines.push(Line::from(""));
+        }
+
+        let symbol = match j.status.as_str() {
+            "succeeded" => "✓",
+            "failed" => "✗",
+            _ => "·",
+        };
+        let type_label = j.job_type.split('.').last().unwrap_or(&j.job_type);
+        let id_short: String = j.job_id.chars().take(12).collect();
+        let summary = format!("{symbol} {type_label}  {id_short}  [{}]", j.status);
+        lines.extend(render_markdown_lines(&summary, width));
     }
 
     Text::from(lines)
@@ -1883,7 +2370,11 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
         )));
     } else {
         for (idx, item) in state.history_items.iter().enumerate() {
-            let marker = if idx == state.history_selected { ">" } else { " " };
+            let marker = if idx == state.history_selected {
+                ">"
+            } else {
+                " "
+            };
             let ts = item
                 .last_timestamp
                 .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
@@ -1895,7 +2386,9 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
             );
 
             let style = if idx == state.history_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -1928,6 +2421,101 @@ fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
     settings_ui::render_settings_overlay(frame, state)
 }
 
+fn render_editor_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
+    let area = frame.area();
+    let popup = centered_rect(area, 90, 80);
+    frame.render_widget(Clear, popup);
+
+    let mut lines: Vec<Line> = Vec::new();
+    let (line, col) = state.editor_buffer.line_col();
+    let dirty_marker = if state.editor_dirty { "*" } else { "" };
+    lines.push(Line::from(Span::styled(
+        " Type to edit  Enter: newline  Up/Down: keep column  Ctrl+S: save  /save [path]: save  /run [path]: execute  Esc: close ",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(
+            " File{dirty_marker}: {} | Cursor: {line}:{col} | {} ",
+            state
+                .editor_file_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "(unspecified)".to_string()),
+            state.editor_status
+        ),
+        Style::default().fg(Color::Cyan),
+    )));
+    lines.push(Line::from(""));
+
+    let content_height = popup.height.saturating_sub(5) as usize;
+    let total_lines = state.editor_buffer.line_count();
+    let start = state.editor_scroll as usize;
+    let end = start.saturating_add(content_height).min(total_lines.max(1));
+
+    for idx in start..end {
+        let src_line = state.editor_buffer.line_at(idx).unwrap_or("");
+        if idx + 1 == line {
+            let cursor_index = col.saturating_sub(1);
+            let mut spans: Vec<Span> = Vec::new();
+            spans.push(Span::styled(
+                format!("{:>4}  ", idx + 1),
+                Style::default().fg(Color::DarkGray),
+            ));
+
+            let mut chars = src_line.chars().collect::<Vec<_>>();
+            if chars.is_empty() {
+                spans.push(Span::styled(
+                    " ",
+                    Style::default().bg(Color::White).fg(Color::Black),
+                ));
+            } else if cursor_index >= chars.len() {
+                let body = chars.drain(..).collect::<String>();
+                spans.push(Span::styled(body, Style::default().fg(Color::White)));
+                spans.push(Span::styled(
+                    " ",
+                    Style::default().bg(Color::White).fg(Color::Black),
+                ));
+            } else {
+                let before = chars.iter().take(cursor_index).collect::<String>();
+                let current = chars[cursor_index].to_string();
+                let after = chars.iter().skip(cursor_index + 1).collect::<String>();
+                spans.push(Span::styled(before, Style::default().fg(Color::White)));
+                spans.push(Span::styled(
+                    current,
+                    Style::default().bg(Color::White).fg(Color::Black),
+                ));
+                spans.push(Span::styled(after, Style::default().fg(Color::White)));
+            }
+
+            lines.push(Line::from(spans));
+        } else {
+            lines.push(Line::from(Span::styled(
+                format!("{:>4}  {}", idx + 1, src_line),
+                Style::default().fg(Color::White),
+            )));
+        }
+    }
+
+    if lines.len() <= 3 {
+        lines.push(Line::from(Span::styled(
+            "(empty buffer)",
+            Style::default().fg(Color::Gray),
+        )));
+    }
+
+    let panel = Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title(" Editor ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(ui_accent_primary()))
+                .style(Style::default().bg(ui_modal_bg())),
+        )
+        .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(panel, popup);
+}
+
 fn ui_bg() -> Color {
     Color::Rgb(18, 22, 29)
 }
@@ -1956,7 +2544,11 @@ fn ui_accent_warn() -> Color {
     Color::Rgb(245, 189, 99)
 }
 
-fn centered_rect(area: ratatui::layout::Rect, percent_x: u16, percent_y: u16) -> ratatui::layout::Rect {
+fn centered_rect(
+    area: ratatui::layout::Rect,
+    percent_x: u16,
+    percent_y: u16,
+) -> ratatui::layout::Rect {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -2001,7 +2593,11 @@ fn export_current_session(state: &TuiState, format: &str) -> std::result::Result
             let path = exports_dir.join(format!("{}-{ts}.md", state.session_id));
             let mut out = format!("# Medousa Session {}\n\n", state.session_id);
             for turn in &state.conversation {
-                let title = if turn.role == "user" { "User" } else { "Assistant" };
+                let title = if turn.role == "user" {
+                    "User"
+                } else {
+                    "Assistant"
+                };
                 out.push_str(&format!("## {title} ({})\n\n", turn.timestamp.to_rfc3339()));
                 out.push_str(&turn.content);
                 out.push_str("\n\n");
@@ -2063,7 +2659,7 @@ fn build_conversation_text(turns: &[ConversationTurn], width: u16) -> Text<'stat
 }
 
 fn render_markdown_lines(content: &str, width: u16) -> Vec<Line<'static>> {
-    let max_width = width.saturating_sub(2).max(20) as usize;
+    let max_width = width.max(20) as usize;
     let renderer = MarkdownRenderer::new(max_width);
     let blocks = renderer.parse(content);
     renderer.render(&blocks, &DefaultTheme)
@@ -2155,6 +2751,7 @@ fn print_help() {
     println!("  Ctrl+K       Open/close command palette");
     println!("  Ctrl+,       Open/close settings menu");
     println!("  Ctrl+O       Open/close observability detail panel");
+    println!("  Shift+Arrows Scroll observability + job panes");
     println!("  F2           Toggle thinking peek overlay");
     println!("  Ctrl+T       Toggle thinking detail panel");
     println!("  Ctrl+G       Stop active generation");
@@ -2168,6 +2765,12 @@ fn print_help() {
     println!("  /new                    Start fresh session");
     println!("  /history                Open session history menu");
     println!("  /settings               Open settings menu");
+    println!("  /edit [path]            Open embedded editor (optional file)");
+    println!("  /open <path>            Open file in embedded editor");
+    println!("  /save [path]            Save editor buffer to file");
+    println!("  /run [path]             Execute .gr source via runtime (allowlist-enforced)");
+    println!("  /run-current            Execute current editor file path via runtime");
+    println!("  /close                  Exit medousa_tui gracefully");
     println!("  /allowlist-preview      Open allowlist preview panel");
     println!("  /clear-key              Clear stored API key");
     println!("  /rotate-key             Rotate stored API key from draft value");
@@ -2181,4 +2784,165 @@ fn print_help() {
     println!("  /daemon health          Probe central daemon status");
     println!("  /daemon ask <prompt>    Submit prompt to central daemon");
     println!("  /watch add <cron> <p>   Schedule recurring prompt on daemon");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        JobHistoryEntry, RuntimeSettings, TextBuffer, TuiState, UiMode, build_tui_runtime,
+        load_editor_file, parse_allowed_modules, parse_backend, resolve_editor_run_source,
+        run_editor_source_via_runtime, validate_editor_run_allowlist, write_editor_file,
+    };
+    use medousa::events::TuiEvent;
+    use medousa::session::{ConversationTurn, SessionHistorySummary};
+    use std::collections::VecDeque;
+    use std::path::PathBuf;
+    use tokio::sync::mpsc;
+    use tokio::sync::mpsc::error::TryRecvError;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "medousa_tui_editor_{name}_{}",
+            uuid::Uuid::new_v4()
+        ));
+        path
+    }
+
+    #[test]
+    fn load_editor_file_returns_none_for_missing_path() {
+        let path = temp_path("missing");
+        let loaded = load_editor_file(&path).expect("load should not fail for missing path");
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn write_editor_file_creates_parent_dirs_and_roundtrips() {
+        let dir = temp_path("roundtrip");
+        let path = dir.join("nested").join("script.gr");
+
+        write_editor_file(&path, "run {\n  ok: true\n}\n").expect("write should succeed");
+
+        let loaded = load_editor_file(&path)
+            .expect("read should succeed")
+            .expect("file should exist");
+        assert_eq!(loaded, "run {\n  ok: true\n}\n");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn resolve_editor_run_source_fails_for_missing_override_path() {
+        let missing = temp_path("missing_run").join("script.gr");
+        let result = resolve_editor_run_source(Some(missing.to_string_lossy().as_ref()), None, "");
+        assert!(result.is_err());
+        let err = result.err().unwrap_or_default();
+        assert!(err.contains("file not found"));
+    }
+
+    #[test]
+    fn validate_editor_run_allowlist_rejects_blocked_ops() {
+        let source = "query Run { websearch.search(query: \"x\") { ok } }";
+        let result = validate_editor_run_allowlist(source, "http.fetch");
+        assert!(result.is_err());
+        let err = result.err().unwrap_or_default();
+        assert!(err.contains("run blocked by allowlist"));
+        assert!(err.contains("websearch.search"));
+    }
+
+    fn test_settings() -> RuntimeSettings {
+        RuntimeSettings {
+            backend: "in-memory".to_string(),
+            provider: "openai".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            base_url: String::new(),
+            api_key: String::new(),
+            allowed_modules: "http.fetch".to_string(),
+            tool_call_mode: "auto".to_string(),
+            max_tool_rounds: "10".to_string(),
+            thinking_capture: "true".to_string(),
+            thinking_max_lines: "300".to_string(),
+        }
+    }
+
+    fn test_state(settings: RuntimeSettings) -> TuiState {
+        TuiState {
+            conversation: Vec::<ConversationTurn>::new(),
+            observability: VecDeque::new(),
+            job_history: VecDeque::<JobHistoryEntry>::new(),
+            input_buffer: String::new(),
+            conv_scroll: 0,
+            conv_max_scroll: 0,
+            is_processing: false,
+            active_request_task: None,
+            auto_scroll: true,
+            active_agent_stream_turn: None,
+            mode: UiMode::Chat,
+            history_items: Vec::<SessionHistorySummary>::new(),
+            history_selected: 0,
+            command_query: String::new(),
+            command_selected: 0,
+            settings: settings.clone(),
+            settings_draft: settings,
+            allowlist_preview_source: String::new(),
+            editor_buffer: TextBuffer::from_text(
+                "query Run { websearch.search(query: \"x\") { ok } }".to_string(),
+            ),
+            editor_file_path: None,
+            editor_status: String::new(),
+            editor_dirty: false,
+            editor_preferred_col: None,
+            editor_scroll: 0,
+            settings_selected: 0,
+            settings_editing: false,
+            provider_model: "openai:gpt-4o-mini".to_string(),
+            session_id: "test-session".to_string(),
+            thinking_trace: VecDeque::new(),
+            thinking_scroll: 0,
+            thinking_max_scroll: 0,
+            obs_scroll: 0,
+            obs_max_scroll: 0,
+            job_scroll: 0,
+            job_max_scroll: 0,
+            in_thinking_tag: false,
+            stream_tag_tail: String::new(),
+            daemon_url: "http://127.0.0.1:8787".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn blocked_run_does_not_emit_runtime_events() {
+        let settings = test_settings();
+        let (event_tx, mut event_rx) = mpsc::channel::<TuiEvent>(64);
+
+        let tui_rt = build_tui_runtime(
+            parse_backend(Some(&settings.backend)),
+            Some(&settings.provider),
+            Some(&settings.model),
+            None,
+            parse_allowed_modules(&settings.allowed_modules),
+            "test-session",
+            event_tx.clone(),
+        )
+        .await
+        .expect("runtime should build");
+
+        while event_rx.try_recv().is_ok() {}
+
+        let mut state = test_state(settings);
+        run_editor_source_via_runtime(&mut state, &tui_rt, &event_tx, None).await;
+
+        let obs = state
+            .observability
+            .front()
+            .map(|v| v.text.clone())
+            .unwrap_or_default();
+        assert!(obs.contains("run blocked by allowlist"));
+
+        match event_rx.try_recv() {
+            Err(TryRecvError::Empty) => {}
+            Ok(evt) => panic!("unexpected runtime event emitted: {evt:?}"),
+            Err(err) => panic!("unexpected channel state: {err}"),
+        }
+    }
 }

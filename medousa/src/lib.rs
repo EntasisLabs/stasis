@@ -1,26 +1,25 @@
-pub mod events;
 pub mod daemon_api;
-pub mod settings_guard;
+pub mod events;
 pub mod session;
-pub mod tui;
+pub mod settings_guard;
 pub mod tools;
+pub mod tui;
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::{Value, json};
 use stasis::prelude::{
     GenaiChatClient, RuntimeBackend, RuntimeComposition, StasisRuntimeBuilder, StasisTool,
 };
 
-pub use tools::{TuiRuntime, build_tui_runtime};
 pub use daemon_api::{
-    DaemonStatsResponse, EnqueueAskRequest, EnqueuePromptRequest, EnqueueResponse,
-    HealthResponse, RegisterRecurringPromptRequest, RegisterRecurringResponse,
-    resolve_daemon_url,
+    DaemonStatsResponse, EnqueueAskRequest, EnqueuePromptRequest, EnqueueResponse, HealthResponse,
+    RegisterRecurringPromptRequest, RegisterRecurringResponse, resolve_daemon_url,
 };
+pub use tools::{TuiRuntime, build_tui_runtime};
 
 const DEFAULT_LLM_MODEL: &str = "gpt-4o-mini";
 const DEFAULT_LLM_PROVIDER: &str = "openai";

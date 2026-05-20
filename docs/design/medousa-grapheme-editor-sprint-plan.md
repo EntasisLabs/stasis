@@ -31,7 +31,7 @@ Definition of done:
 
 ## Sprint 2: Minimal Embedded Text Editor
 
-Status: Planned
+Status: In progress
 
 Scope:
 1. Add a simple editor window/mode in TUI.
@@ -45,7 +45,7 @@ Definition of done:
 
 ## Sprint 3: Run `.gr` Files Through Runtime
 
-Status: Planned
+Status: In progress
 
 Scope:
 1. Add command(s) to execute selected/current `.gr` file through runtime.
@@ -86,3 +86,10 @@ Definition of done:
 - 2026-05-19: Sprint 1 slice: extracted runtime settings model and normalization/validation helpers into medousa/src/tui/settings.rs with unit tests.
 - 2026-05-19: Sprint 1 slice: extracted settings menu input/render concern into bin-local module medousa/src/bin/medousa_tui/settings_ui.rs.
 - 2026-05-19: Sprint 1 slice: extracted command palette and allowlist preview input/render concern into bin-local module medousa/src/bin/medousa_tui/command_preview_ui.rs.
+- 2026-05-19: Sprint 2 started with editor foundation: added text buffer primitives (insert/newline/backspace/navigation), embedded editor overlay mode, and /edit /open /save command flow.
+- 2026-05-19: Sprint 2 slice: improved editor ergonomics with up/down preferred-column navigation, in-line cursor rendering, viewport-aware scroll, dirty-state indicator, and Ctrl+S save path.
+- 2026-05-19: Sprint 2 slice: added integration-style editor file I/O coverage by extracting open/save helpers and validating missing/open/save roundtrip filesystem behavior in medousa_tui binary tests.
+- 2026-05-19: Sprint 3 started: added /run [path] command in medousa_tui to execute editor source through runtime with allowlist-preview enforcement and observability/job-history diagnostics.
+- 2026-05-19: Sprint 3 slice: added command palette action for /run and added focused medousa_tui tests for missing-file run path and allowlist-blocked run precheck behavior.
+- 2026-05-19: Sprint 3 slice: added explicit /run-current command (+ palette action) for executing the persisted editor file path and added integration-style guard test proving blocked runs emit no runtime enqueue/process events.
+- 2026-05-19: Sprint 3 slice: added /close command for graceful TUI exit and improved right-side pane UX (observability/job history side-pane scrolling + full-width wrapping to avoid clipped trailing text).

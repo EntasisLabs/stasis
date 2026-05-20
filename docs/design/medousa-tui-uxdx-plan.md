@@ -2,7 +2,7 @@
 
 Status: Active
 Owner: Medousa
-Last updated: 2026-05-16
+Last updated: 2026-05-19
 
 ## Goals
 
@@ -104,3 +104,10 @@ Acceptance criteria:
 - 2026-05-19: Added concrete editor sprint plan at docs/design/medousa-grapheme-editor-sprint-plan.md and started Sprint 1 (first extraction: allowlist preview analysis moved into medousa/src/tui module).
 - 2026-05-19: Sprint 1 continued with settings concern extraction (RuntimeSettings + normalization/validation helpers moved into medousa/src/tui/settings.rs; TUI rewired, behavior unchanged).
 - 2026-05-19: Sprint 1 continued with UI concern extraction (settings menu handlers/render moved to medousa/src/bin/medousa_tui/settings_ui.rs; command palette + allowlist preview handlers/render moved to medousa/src/bin/medousa_tui/command_preview_ui.rs).
+- 2026-05-19: Sprint 2 started with minimal embedded editor foundation (TextBuffer module, editor overlay mode, /edit /open /save commands, command palette integration).
+- 2026-05-19: Sprint 2 continued with editor UX hardening (preferred-column up/down navigation, dirty marker, Ctrl+S save, and cursor-visible viewport rendering).
+- 2026-05-19: Sprint 2 added integration-style editor file open/save coverage (helper extraction plus binary tests covering missing path and nested save/open roundtrip).
+- 2026-05-19: Sprint 3 started with runtime execution from editor: added /run [path] command to execute Grapheme source through workflow.grapheme.run with allowlist checks and observability/job diagnostics.
+- 2026-05-19: Sprint 3 continued with command-palette /run action and targeted run precheck coverage (missing file + allowlist block paths).
+- 2026-05-19: Sprint 3 continued with explicit /run-current flow (current editor file path) and integration guard coverage that blocked runs do not emit runtime job events.
+- 2026-05-19: Sprint 3 UI polish: added /close graceful-exit command and improved observability/job panel ergonomics (Shift+Arrows side-pane scrolling and width wrapping fixes to reduce clipped line endings).

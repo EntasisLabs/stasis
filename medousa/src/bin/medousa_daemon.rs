@@ -16,16 +16,18 @@ use medousa::{build_runtime, parse_backend, process_once, publish_pending};
 use tokio::sync::{RwLock, watch};
 use uuid::Uuid;
 
+use stasis::dashboard::{
+    DashboardState, InMemoryDashboardQueryService, router as dashboard_router,
+};
 use stasis::ports::outbound::runtime::job_store::JobStore;
 use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
 use stasis::ports::outbound::runtime::recurring_store::RecurringStore;
 use stasis::prelude::{
-    AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode, JobState,
-    PromptJobPayload, RecurringDefinition, RuntimeComposition, StasisWorkflowJobBuilder,
+    AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode,
     CompositeControlPlaneStore, ControlPlaneSdk, InMemoryClusterNodeStore,
-    InMemoryDeliveryEndpointStore,
+    InMemoryDeliveryEndpointStore, JobState, PromptJobPayload, RecurringDefinition,
+    RuntimeComposition, StasisWorkflowJobBuilder,
 };
-use stasis::dashboard::{DashboardState, InMemoryDashboardQueryService, router as dashboard_router};
 
 #[derive(Clone)]
 struct AppState {
@@ -94,7 +96,8 @@ async fn main() -> Result<()> {
         let cluster_store = InMemoryClusterNodeStore::default();
         let control_store = CompositeControlPlaneStore::new(endpoint_store, cluster_store);
         let control_plane = ControlPlaneSdk::new(control_store);
-        let dashboard_service = Arc::new(InMemoryDashboardQueryService::new(inner_arc, control_plane));
+        let dashboard_service =
+            Arc::new(InMemoryDashboardQueryService::new(inner_arc, control_plane));
         let dashboard = dashboard_router(DashboardState::new(dashboard_service));
         app.merge(dashboard)
     } else {
@@ -189,7 +192,9 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     })
 }
 
-async fn stats(State(state): State<AppState>) -> Result<Json<DaemonStatsResponse>, (StatusCode, String)> {
+async fn stats(
+    State(state): State<AppState>,
+) -> Result<Json<DaemonStatsResponse>, (StatusCode, String)> {
     let enqueued_jobs = job_count_by_state(state.runtime.as_ref(), JobState::Enqueued)
         .await
         .map_err(internal_error)?;
@@ -289,9 +294,9 @@ async fn enqueue_prompt(
 
     let payload = PromptJobPayload {
         user_prompt: request.prompt,
-        system_prompt: request
-            .system_prompt
-            .or(Some("You are Medousa, a practical assistant. Be concise and structured.".to_string())),
+        system_prompt: request.system_prompt.or(Some(
+            "You are Medousa, a practical assistant. Be concise and structured.".to_string(),
+        )),
         policy_profile: request.policy_profile.or(Some("default".to_string())),
         model_hint: request.model_hint,
         memory_policy: None,
@@ -359,7 +364,9 @@ async fn register_recurring_prompt(
         lease_expires_at: None,
     };
 
-    definition.next_run_at = definition.compute_next_run_at(now).map_err(internal_error)?;
+    definition.next_run_at = definition
+        .compute_next_run_at(now)
+        .map_err(internal_error)?;
 
     match state.runtime.as_ref() {
         RuntimeComposition::InMemory(rt) => rt
@@ -417,7 +424,10 @@ async fn recurring_count(runtime: &RuntimeComposition) -> Result<usize> {
 }
 
 fn internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, format!("medousa daemon error: {err}"))
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("medousa daemon error: {err}"),
+    )
 }
 
 fn find_arg_value<'a>(args: &'a [String], key: &str) -> Option<&'a str> {

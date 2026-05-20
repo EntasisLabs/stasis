@@ -110,7 +110,7 @@ pub fn parse_usize_with_bounds(
 
 #[cfg(test)]
 mod tests {
-    use super::{cycle_backend, resolve_backend_name, settings_validation_errors, RuntimeSettings};
+    use super::{RuntimeSettings, cycle_backend, resolve_backend_name, settings_validation_errors};
 
     #[test]
     fn resolves_backend_with_safe_default() {
