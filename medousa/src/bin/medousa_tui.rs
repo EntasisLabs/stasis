@@ -131,7 +131,7 @@ Read it as policy memory, then follow it strictly during this conversation.
     failure_policy(.99): {
         no_modules_search_as_final(.99): "Never claim modules.search output as final answer to live-data questions.",
         no_skip_execution(.99): "Never skip execution when external data is required.",
-        no_code_without_example(.99): "Never generate workflow/code steps without first retrieving at least one relevant example.",
+        no_code_without_example(.99): "Never generate new workflow/code steps without first retrieving at least one relevant example.",
         example_fallback_required(.98): "Never assume module-local curated examples always exist; follow fallback discovery order when modules.examples is empty.",
         retry_once(.96): "If run fails, report exact failure briefly, adjust once, and retry once."
     },
@@ -169,6 +169,8 @@ struct TuiState {
     startup_selected: usize,
     history_items: Vec<SessionHistorySummary>,
     history_selected: usize,
+    history_scroll: u16,
+    history_max_scroll: u16,
     command_query: String,
     command_tab: usize,
     command_selected: usize,
@@ -388,6 +390,8 @@ async fn main() -> Result<()> {
         startup_selected: 0,
         history_items: Vec::new(),
         history_selected: 0,
+        history_scroll: 0,
+        history_max_scroll: 0,
         command_query: String::new(),
         command_tab: 0,
         command_selected: 0,
@@ -575,6 +579,30 @@ fn handle_history_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome
             if !state.history_items.is_empty() {
                 state.history_selected =
                     (state.history_selected + 1).min(state.history_items.len().saturating_sub(1));
+            }
+        }
+        KeyCode::PageUp => {
+            state.history_scroll = state.history_scroll.saturating_sub(8);
+            state.history_selected = state.history_selected.saturating_sub(8);
+        }
+        KeyCode::PageDown => {
+            state.history_scroll = state
+                .history_scroll
+                .saturating_add(8)
+                .min(state.history_max_scroll);
+            if !state.history_items.is_empty() {
+                state.history_selected =
+                    (state.history_selected + 8).min(state.history_items.len().saturating_sub(1));
+            }
+        }
+        KeyCode::Home => {
+            state.history_scroll = 0;
+            state.history_selected = 0;
+        }
+        KeyCode::End => {
+            state.history_scroll = state.history_max_scroll;
+            if !state.history_items.is_empty() {
+                state.history_selected = state.history_items.len().saturating_sub(1);
             }
         }
         KeyCode::Enter => {
@@ -834,6 +862,8 @@ mod tests {
             startup_selected: 0,
             history_items: Vec::<SessionHistorySummary>::new(),
             history_selected: 0,
+            history_scroll: 0,
+            history_max_scroll: 0,
             command_query: String::new(),
             command_tab: 0,
             command_selected: 0,

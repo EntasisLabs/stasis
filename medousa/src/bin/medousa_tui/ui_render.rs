@@ -489,17 +489,19 @@ fn render_thinking_panel_overlay(frame: &mut ratatui::Frame, state: &mut TuiStat
     frame.render_widget(panel, popup);
 }
 
-fn render_history_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
+fn render_history_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
     let area = frame.area();
     let popup = centered_rect(area, 80, 70);
     frame.render_widget(Clear, popup);
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        " Enter: open session  Esc: close ",
+        " Up/Down: move  PgUp/PgDn/Wheel: scroll  Home/End: jump  Enter: open session  Esc: close ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
+
+    let mut selected_line: Option<usize> = None;
 
     if state.history_items.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -508,6 +510,10 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
         )));
     } else {
         for (idx, item) in state.history_items.iter().enumerate() {
+            if idx == state.history_selected {
+                selected_line = Some(lines.len());
+            }
+
             let marker = if idx == state.history_selected {
                 ">"
             } else {
@@ -534,7 +540,29 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
         }
     }
 
-    let panel = Paragraph::new(Text::from(lines))
+    let text = Text::from(lines);
+    let inner_width = popup.width.saturating_sub(2);
+    let visible_height = popup.height.saturating_sub(2);
+    let visual_lines = visual_line_count(&text, inner_width);
+    state.history_max_scroll = visual_lines.saturating_sub(visible_height);
+    state.history_scroll = state.history_scroll.min(state.history_max_scroll);
+
+    if let Some(line_idx) = selected_line {
+        let visible_rows = visible_height as usize;
+        if visible_rows > 0 {
+            let top = state.history_scroll as usize;
+            let bottom = top.saturating_add(visible_rows.saturating_sub(1));
+            if line_idx < top {
+                state.history_scroll = line_idx as u16;
+            } else if line_idx > bottom {
+                state.history_scroll =
+                    line_idx.saturating_add(1).saturating_sub(visible_rows) as u16;
+            }
+            state.history_scroll = state.history_scroll.min(state.history_max_scroll);
+        }
+    }
+
+    let panel = Paragraph::new(text)
         .block(
             Block::default()
                 .title(" Sessions ")
@@ -543,7 +571,8 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
                 .style(Style::default().bg(ui_modal_bg())),
         )
         .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((state.history_scroll, 0));
     frame.render_widget(panel, popup);
 }
 

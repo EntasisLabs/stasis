@@ -50,6 +50,28 @@ pub(crate) async fn handle_key_event(
                 }
             }
 
+            if state.mode == UiMode::History {
+                match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        state.history_scroll = state.history_scroll.saturating_sub(2);
+                        state.history_selected = state.history_selected.saturating_sub(1);
+                        return EventOutcome::Continue;
+                    }
+                    MouseEventKind::ScrollDown => {
+                        state.history_scroll = state
+                            .history_scroll
+                            .saturating_add(2)
+                            .min(state.history_max_scroll);
+                        if !state.history_items.is_empty() {
+                            state.history_selected = (state.history_selected + 1)
+                                .min(state.history_items.len().saturating_sub(1));
+                        }
+                        return EventOutcome::Continue;
+                    }
+                    _ => {}
+                }
+            }
+
             return EventOutcome::Continue;
         }
         _ => return EventOutcome::Continue,
@@ -129,6 +151,8 @@ pub(crate) async fn handle_key_event(
         } else {
             state.history_items = super::list_history_sessions(200);
             state.history_selected = 0;
+            state.history_scroll = 0;
+            state.history_max_scroll = 0;
             state.mode = UiMode::History;
         }
         return EventOutcome::Continue;

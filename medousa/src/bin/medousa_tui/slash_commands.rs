@@ -51,6 +51,8 @@ pub(crate) async fn handle_slash_command(
         "/history" => {
             state.history_items = list_history_sessions(200);
             state.history_selected = 0;
+            state.history_scroll = 0;
+            state.history_max_scroll = 0;
             state.mode = UiMode::History;
         }
         "/settings" => {
