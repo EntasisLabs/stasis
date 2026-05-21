@@ -73,10 +73,9 @@ impl ThreadStore for InMemoryThreadStore {
             thread.updated_at = event.occurred_at;
         }
 
-        let mut events = self
-            .events
-            .write()
-            .map_err(|_| StasisError::PortFailure("thread event store lock poisoned".to_string()))?;
+        let mut events = self.events.write().map_err(|_| {
+            StasisError::PortFailure("thread event store lock poisoned".to_string())
+        })?;
 
         let record = ThreadEvent {
             event_id: event.event_id,
@@ -94,10 +93,9 @@ impl ThreadStore for InMemoryThreadStore {
     }
 
     async fn list_events(&self, thread_id: &str) -> Result<Vec<ThreadEvent>> {
-        let events = self
-            .events
-            .read()
-            .map_err(|_| StasisError::PortFailure("thread event store lock poisoned".to_string()))?;
+        let events = self.events.read().map_err(|_| {
+            StasisError::PortFailure("thread event store lock poisoned".to_string())
+        })?;
 
         let mut result = events.get(thread_id).cloned().unwrap_or_default();
         result.sort_by(|a, b| a.occurred_at.cmp(&b.occurred_at));

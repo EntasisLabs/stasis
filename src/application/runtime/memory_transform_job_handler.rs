@@ -24,8 +24,9 @@ impl MemoryTransformJobHandler {
     }
 
     fn parse_payload(raw: &str) -> std::result::Result<MemoryTransformJobPayload, String> {
-        serde_json::from_str(raw)
-            .map_err(|err| format!("policy violation: invalid memory-transform payload json: {err}"))
+        serde_json::from_str(raw).map_err(|err| {
+            format!("policy violation: invalid memory-transform payload json: {err}")
+        })
     }
 }
 

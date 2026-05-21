@@ -67,7 +67,10 @@ pub struct InMemoryDashboardQueryService {
 
 impl InMemoryDashboardQueryService {
     pub fn new(runtime: Arc<InMemoryRuntime>, control_plane: DashboardControlPlane) -> Self {
-        Self { runtime, control_plane }
+        Self {
+            runtime,
+            control_plane,
+        }
     }
 
     async fn list_all_jobs(&self) -> Result<Vec<crate::domain::runtime::job::Job>> {
@@ -141,9 +144,21 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
             .filter(|node| node.health == "Offline")
             .count();
 
-        let running_jobs = jobs.items.iter().filter(|job| job.status == "running").count();
-        let enqueued_jobs = jobs.items.iter().filter(|job| job.status == "enqueued").count();
-        let succeeded_jobs = jobs.items.iter().filter(|job| job.status == "succeeded").count();
+        let running_jobs = jobs
+            .items
+            .iter()
+            .filter(|job| job.status == "running")
+            .count();
+        let enqueued_jobs = jobs
+            .items
+            .iter()
+            .filter(|job| job.status == "enqueued")
+            .count();
+        let succeeded_jobs = jobs
+            .items
+            .iter()
+            .filter(|job| job.status == "succeeded")
+            .count();
         let failed_jobs = jobs
             .items
             .iter()
@@ -220,7 +235,11 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
 
     async fn outbox_stream(&self) -> Result<UiListPanel<OutboxEventRowDto>> {
         let events = self.list_all_outbox_events().await?;
-        let mapped = events.iter().take(200).map(map_outbox_to_row).collect::<Vec<_>>();
+        let mapped = events
+            .iter()
+            .take(200)
+            .map(map_outbox_to_row)
+            .collect::<Vec<_>>();
 
         Ok(UiListPanel {
             items: mapped.clone(),

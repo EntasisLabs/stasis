@@ -47,13 +47,17 @@ impl From<&OutboxEvent> for TcpRuntimeEvent {
 fn parse_tcp_target(target: &str) -> Result<String> {
     if let Some(rest) = target.strip_prefix("tcp://") {
         if rest.trim().is_empty() {
-            return Err(StasisError::PortFailure("tcp target must include host:port".to_string()));
+            return Err(StasisError::PortFailure(
+                "tcp target must include host:port".to_string(),
+            ));
         }
         return Ok(rest.to_string());
     }
 
     if target.trim().is_empty() {
-        return Err(StasisError::PortFailure("tcp target must not be empty".to_string()));
+        return Err(StasisError::PortFailure(
+            "tcp target must not be empty".to_string(),
+        ));
     }
 
     Ok(target.to_string())
@@ -71,25 +75,34 @@ impl EndpointTransportPublisher for TcpSocketTransportPublisher {
         event: &OutboxEvent,
     ) -> Result<()> {
         let addr = parse_tcp_target(&endpoint.target)?;
-        let mut stream = TcpStream::connect(&addr)
-            .await
-            .map_err(|e| StasisError::PortFailure(format!("tcp connect failed endpoint_id={} error={e}", endpoint.endpoint_id)))?;
+        let mut stream = TcpStream::connect(&addr).await.map_err(|e| {
+            StasisError::PortFailure(format!(
+                "tcp connect failed endpoint_id={} error={e}",
+                endpoint.endpoint_id
+            ))
+        })?;
 
         let payload = serde_json::to_vec(&TcpRuntimeEvent::from(event))
             .map_err(|e| StasisError::PortFailure(format!("tcp payload encode failed: {e}")))?;
 
-        stream
-            .write_all(&payload)
-            .await
-            .map_err(|e| StasisError::PortFailure(format!("tcp publish write failed endpoint_id={} error={e}", endpoint.endpoint_id)))?;
-        stream
-            .write_all(b"\n")
-            .await
-            .map_err(|e| StasisError::PortFailure(format!("tcp publish newline failed endpoint_id={} error={e}", endpoint.endpoint_id)))?;
-        stream
-            .shutdown()
-            .await
-            .map_err(|e| StasisError::PortFailure(format!("tcp shutdown failed endpoint_id={} error={e}", endpoint.endpoint_id)))?;
+        stream.write_all(&payload).await.map_err(|e| {
+            StasisError::PortFailure(format!(
+                "tcp publish write failed endpoint_id={} error={e}",
+                endpoint.endpoint_id
+            ))
+        })?;
+        stream.write_all(b"\n").await.map_err(|e| {
+            StasisError::PortFailure(format!(
+                "tcp publish newline failed endpoint_id={} error={e}",
+                endpoint.endpoint_id
+            ))
+        })?;
+        stream.shutdown().await.map_err(|e| {
+            StasisError::PortFailure(format!(
+                "tcp shutdown failed endpoint_id={} error={e}",
+                endpoint.endpoint_id
+            ))
+        })?;
 
         Ok(())
     }
@@ -102,7 +115,9 @@ mod tests {
     use tokio::net::TcpListener;
 
     use crate::domain::runtime::delivery_endpoint::{DeliveryEndpoint, DeliveryProtocol};
-    use crate::domain::runtime::outbox::{OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType};
+    use crate::domain::runtime::outbox::{
+        OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType,
+    };
     use crate::ports::outbound::runtime::endpoint_transport_publisher::EndpointTransportPublisher;
 
     use super::TcpSocketTransportPublisher;
@@ -137,7 +152,9 @@ mod tests {
 
     #[tokio::test]
     async fn publishes_json_line_to_tcp_target() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind should succeed");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind should succeed");
         let addr = listener.local_addr().expect("addr should be available");
 
         let handle = tokio::spawn(async move {

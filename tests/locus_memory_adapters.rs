@@ -50,7 +50,10 @@ async fn locus_memory_operations_schema_aggregate_rollup_work_on_empty_store() {
         .expect("in-memory node store should initialize");
     let operations = LocusMemoryOperations::new(store, None);
 
-    let schema = operations.schema().await.expect("schema should be available");
+    let schema = operations
+        .schema()
+        .await
+        .expect("schema should be available");
     assert!(
         !schema.schema_version.trim().is_empty(),
         "schema version should be non-empty"

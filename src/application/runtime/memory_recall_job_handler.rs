@@ -29,7 +29,10 @@ impl MemoryRecallJobHandler {
             .map_err(|err| format!("policy violation: invalid memory-recall payload json: {err}"))
     }
 
-    fn build_request(correlation_id: &str, policy: Option<&MemoryPolicyPayload>) -> MemoryRecallRequest {
+    fn build_request(
+        correlation_id: &str,
+        policy: Option<&MemoryPolicyPayload>,
+    ) -> MemoryRecallRequest {
         let mut request = MemoryRecallRequest::default();
         request.scope = MemoryScope {
             session_ids: policy
@@ -40,8 +43,12 @@ impl MemoryRecallJobHandler {
             to_utc: policy.and_then(|value| value.to_utc),
         };
         request.query_text = policy.and_then(|value| value.query_text.clone());
-        request.limit = policy.and_then(|value| value.limit).unwrap_or(request.limit);
-        request.alpha = policy.and_then(|value| value.alpha).unwrap_or(request.alpha);
+        request.limit = policy
+            .and_then(|value| value.limit)
+            .unwrap_or(request.limit);
+        request.alpha = policy
+            .and_then(|value| value.alpha)
+            .unwrap_or(request.alpha);
         request.beta = policy.and_then(|value| value.beta).unwrap_or(request.beta);
         request.include_explain = policy
             .and_then(|value| value.include_explain)
@@ -86,7 +93,8 @@ impl JobHandler for MemoryRecallJobHandler {
             }
         };
 
-        let recall_request = Self::build_request(&job.correlation_id, payload.memory_policy.as_ref());
+        let recall_request =
+            Self::build_request(&job.correlation_id, payload.memory_policy.as_ref());
         match self.reader.recall(&recall_request).await {
             Ok(response) => Ok(JobExecutionOutcome::Success {
                 sttp_output_node_id: format!("sttp:memory-recall:{}", job.id),

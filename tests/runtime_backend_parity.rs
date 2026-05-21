@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex as StdMutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
@@ -13,47 +13,48 @@ use surrealdb::Surreal;
 use surrealdb::engine::local::Mem;
 use tokio::sync::Mutex;
 
-use stasis::application::orchestration::tool_registry::{InMemoryToolRegistry, StasisTool};
+use stasis::application::orchestration::agent_session_payload::{
+    AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode, AgentTurnJobPayload,
+    ConcurrentBranchJobPayload, ConcurrentPatternJobPayload, HandoffPatternJobPayload,
+    HandoffTurnJobPayload, MemoryAggregateJobPayload, MemoryRecallJobPayload,
+    MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
+    OrchestratorPatternJobPayload, OrchestratorRouteJobPayload, PromptJobPayload,
+    SequentialPatternJobPayload, SequentialStageJobPayload, ToolLoopJobPayload,
+};
 use stasis::application::orchestration::agent_session_pipeline::{
     AgentParticipant, AgentSessionCoordinator, AgentSessionPipeline, AgentSessionRunRequest,
     AgentTurnExecutionPolicy, MaxTurnsTerminationStrategy, RoundRobinSelectionStrategy,
-};
-use stasis::application::orchestration::agent_session_payload::{
-    AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode,
-    AgentTurnJobPayload, MemoryAggregateJobPayload, MemoryRecallJobPayload,
-    MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
-    PromptJobPayload, ConcurrentBranchJobPayload, ConcurrentPatternJobPayload,
-    HandoffPatternJobPayload, HandoffTurnJobPayload, SequentialPatternJobPayload,
-    SequentialStageJobPayload, OrchestratorPatternJobPayload,
-    OrchestratorRouteJobPayload, ToolLoopJobPayload,
 };
 use stasis::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline,
 };
 use stasis::application::orchestration::stasis_workflow_job_builder::StasisWorkflowJobBuilder;
 use stasis::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolLoopPipeline};
+use stasis::application::orchestration::tool_registry::{InMemoryToolRegistry, StasisTool};
 use stasis::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
 use stasis::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
 use stasis::application::runtime::default_chat_middlewares::{
     CHAT_CACHE_HIT_TOTAL, CHAT_CACHE_MISS_TOTAL, CHAT_REQUESTS_TOTAL, CHAT_TOOL_CALLS_TOTAL,
     CacheChatMiddleware, ToolCallInterceptionChatMiddleware,
 };
-use stasis::application::runtime::in_memory_runtime::{InMemoryRuntime, JobExecutionOutcome, JobHandler};
+use stasis::application::runtime::grapheme_echo_job_handler::GraphemeEchoJobHandler;
+use stasis::application::runtime::grapheme_healthcheck_job_handler::GraphemeHealthcheckJobHandler;
+use stasis::application::runtime::grapheme_job_handler::GraphemeJobHandler;
+use stasis::application::runtime::grapheme_textops_job_handler::GraphemeTextOpsJobHandler;
+use stasis::application::runtime::in_memory_runtime::{
+    InMemoryRuntime, JobExecutionOutcome, JobHandler,
+};
 use stasis::application::runtime::memory_aggregate_job_handler::MemoryAggregateJobHandler;
 use stasis::application::runtime::memory_recall_job_handler::MemoryRecallJobHandler;
 use stasis::application::runtime::memory_rollup_job_handler::MemoryRollupJobHandler;
 use stasis::application::runtime::memory_schema_job_handler::MemorySchemaJobHandler;
 use stasis::application::runtime::memory_transform_job_handler::MemoryTransformJobHandler;
 use stasis::application::runtime::prompt_chat_job_handler::PromptChatJobHandler;
+use stasis::application::runtime::retention::RetentionPolicy;
 use stasis::application::runtime::runtime_factory::{RuntimeBackend, RuntimeComposition};
 use stasis::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
-use stasis::application::runtime::grapheme_echo_job_handler::GraphemeEchoJobHandler;
-use stasis::application::runtime::grapheme_healthcheck_job_handler::GraphemeHealthcheckJobHandler;
-use stasis::application::runtime::grapheme_job_handler::GraphemeJobHandler;
-use stasis::application::runtime::grapheme_textops_job_handler::GraphemeTextOpsJobHandler;
 use stasis::application::runtime::surreal_runtime::SurrealRuntime;
 use stasis::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
-use stasis::application::runtime::retention::RetentionPolicy;
 use stasis::application::use_cases::investigate_runtime_lineage::RuntimeLineageQuery;
 use stasis::domain::errors::Result;
 use stasis::domain::runtime::job::{BackoffPolicy, Job, JobState, NewJob};
@@ -64,20 +65,14 @@ use stasis::domain::runtime::thread::{NewThread, NewThreadEvent};
 use stasis::infrastructure::runtime::grapheme_sdk_workflow_engine::{
     GraphemeSdkWorkflowEngine, GraphemeWorkflowGuardrails,
 };
-use stasis::infrastructure::runtime::in_memory_thread_store::InMemoryThreadStore;
 use stasis::infrastructure::runtime::in_memory_runtime_metrics::InMemoryRuntimeMetrics;
+use stasis::infrastructure::runtime::in_memory_thread_store::InMemoryThreadStore;
 use stasis::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
 use stasis::infrastructure::runtime::tokio_channel_event_publisher::TokioChannelEventPublisher;
-use stasis::ports::outbound::runtime::event_publisher::EventPublisher;
-use stasis::ports::outbound::runtime::clock::Clock;
-use stasis::ports::outbound::runtime::id_generator::IdGenerator;
-use stasis::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
-use stasis::ports::outbound::runtime::job_store::JobStore;
-use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
-use stasis::ports::outbound::runtime::thread_store::ThreadStore;
-use stasis::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 use stasis::ports::outbound::ai_chat_client::AiChatClient;
-use stasis::ports::outbound::ai_chat_tool_interceptor::{AiChatToolInterceptor, AiToolCallEnvelope};
+use stasis::ports::outbound::ai_chat_tool_interceptor::{
+    AiChatToolInterceptor, AiToolCallEnvelope,
+};
 use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use stasis::ports::outbound::memory::memory_models::{
@@ -86,6 +81,14 @@ use stasis::ports::outbound::memory::memory_models::{
     MemoryStoreResponse, MemoryTransformRequest, MemoryTransformResponse,
 };
 use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
+use stasis::ports::outbound::runtime::clock::Clock;
+use stasis::ports::outbound::runtime::event_publisher::EventPublisher;
+use stasis::ports::outbound::runtime::id_generator::IdGenerator;
+use stasis::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
+use stasis::ports::outbound::runtime::job_store::JobStore;
+use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
+use stasis::ports::outbound::runtime::thread_store::ThreadStore;
+use stasis::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 
 struct FixedClock {
     now: DateTime<Utc>,
@@ -244,7 +247,11 @@ impl ScriptedChatClient {
 
 #[async_trait]
 impl AiChatClient for ScriptedChatClient {
-    async fn complete(&self, request: ChatRequest, _options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        _options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         let index = self.call_count.fetch_add(1, Ordering::SeqCst);
         if index == 1 {
             let includes_tool_output = request
@@ -292,7 +299,11 @@ impl PlainScriptedChatClient {
 
 #[async_trait]
 impl AiChatClient for PlainScriptedChatClient {
-    async fn complete(&self, _request: ChatRequest, _options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        _request: ChatRequest,
+        _options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         let index = self.call_count.fetch_add(1, Ordering::SeqCst);
         let text = self
             .responses
@@ -316,7 +327,11 @@ struct EchoPromptChatClient;
 
 #[async_trait]
 impl AiChatClient for EchoPromptChatClient {
-    async fn complete(&self, request: ChatRequest, _options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        _options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         let echoed_text = request
             .messages
             .iter()
@@ -351,7 +366,11 @@ impl ModelToolCallScriptedClient {
 
 #[async_trait]
 impl AiChatClient for ModelToolCallScriptedClient {
-    async fn complete(&self, request: ChatRequest, _options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        _options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         let index = self.call_count.fetch_add(1, Ordering::SeqCst);
 
         if index == 0 {
@@ -397,7 +416,10 @@ struct RecordingToolCallInterceptor {
 
 impl RecordingToolCallInterceptor {
     fn snapshot(&self) -> Vec<AiToolCallEnvelope> {
-        self.envelopes.lock().map(|state| state.clone()).unwrap_or_default()
+        self.envelopes
+            .lock()
+            .map(|state| state.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -438,14 +460,20 @@ struct MockMemoryOperations;
 
 #[async_trait]
 impl MemoryOperations for MockMemoryOperations {
-    async fn aggregate(&self, _request: &MemoryAggregateRequest) -> Result<MemoryAggregateResponse> {
+    async fn aggregate(
+        &self,
+        _request: &MemoryAggregateRequest,
+    ) -> Result<MemoryAggregateResponse> {
         Ok(MemoryAggregateResponse {
             total_groups: 3,
             scanned_nodes: 42,
         })
     }
 
-    async fn transform(&self, _request: &MemoryTransformRequest) -> Result<MemoryTransformResponse> {
+    async fn transform(
+        &self,
+        _request: &MemoryTransformRequest,
+    ) -> Result<MemoryTransformResponse> {
         Ok(MemoryTransformResponse {
             scanned: 50,
             selected: 20,
@@ -766,11 +794,16 @@ fn assert_orchestration_success_diagnostics(
     assert_eq!(diagnostics.get("provider"), Some(&json!(expected_provider)));
     assert_eq!(diagnostics.get("status"), Some(&json!("success")));
     assert_eq!(diagnostics.get("pattern"), Some(&json!(expected_pattern)));
-    assert_eq!(diagnostics.get("thread_id"), Some(&json!(expected_thread_id)));
-    assert!(diagnostics
-        .get("termination_reason")
-        .and_then(|value| value.as_str())
-        .is_some());
+    assert_eq!(
+        diagnostics.get("thread_id"),
+        Some(&json!(expected_thread_id))
+    );
+    assert!(
+        diagnostics
+            .get("termination_reason")
+            .and_then(|value| value.as_str())
+            .is_some()
+    );
 }
 
 fn assert_orchestration_policy_violation_diagnostics(
@@ -785,10 +818,12 @@ fn assert_orchestration_policy_violation_diagnostics(
         diagnostics.get("guardrail_code"),
         Some(&json!("POLICY_VIOLATION"))
     );
-    assert!(diagnostics
-        .get("policy_reason")
-        .and_then(|value| value.as_str())
-        .is_some());
+    assert!(
+        diagnostics
+            .get("policy_reason")
+            .and_then(|value| value.as_str())
+            .is_some()
+    );
 }
 
 fn build_memory_aggregate_job(
@@ -1006,7 +1041,10 @@ async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_di
         .expect("job get should succeed")
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
-    assert_eq!(job.sttp_output_node_id.as_deref(), Some("sttp:memory:prompt:1"));
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:memory:prompt:1")
+    );
 
     let attempts = runtime
         .job_attempt_store
@@ -1025,7 +1063,10 @@ async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_di
     .expect("diagnostics should be valid json");
     assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-pipeline")));
     assert_eq!(diagnostics.get("status"), Some(&json!("success")));
-    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.pointer("/memory_recall/retrieved"),
+        Some(&json!(2))
+    );
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:prompt:1"))
@@ -1172,7 +1213,10 @@ async fn surreal_prompt_job_handler_with_memory_persists_memory_node_id_and_diag
     )
     .expect("diagnostics should be valid json");
     assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-pipeline")));
-    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(1)));
+    assert_eq!(
+        diagnostics.pointer("/memory_recall/retrieved"),
+        Some(&json!(1))
+    );
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:prompt:surreal:1"))
@@ -1300,7 +1344,10 @@ async fn in_memory_tool_loop_job_handler_with_memory_persists_memory_node_id_and
         .expect("job get should succeed")
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
-    assert_eq!(job.sttp_output_node_id.as_deref(), Some("sttp:memory:tool-loop:1"));
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:memory:tool-loop:1")
+    );
 
     let attempts = runtime
         .job_attempt_store
@@ -1317,7 +1364,10 @@ async fn in_memory_tool_loop_job_handler_with_memory_persists_memory_node_id_and
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(3)));
+    assert_eq!(
+        diagnostics.pointer("/memory_recall/retrieved"),
+        Some(&json!(3))
+    );
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:tool-loop:1"))
@@ -1466,7 +1516,10 @@ async fn surreal_tool_loop_job_handler_with_memory_persists_memory_node_id_and_d
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.pointer("/memory_recall/retrieved"),
+        Some(&json!(2))
+    );
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:tool-loop:surreal:1"))
@@ -1590,7 +1643,10 @@ async fn in_memory_agent_turn_job_handler_with_memory_persists_memory_node_id_an
         .expect("job get should succeed")
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
-    assert_eq!(job.sttp_output_node_id.as_deref(), Some("sttp:memory:agent-turn:1"));
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:memory:agent-turn:1")
+    );
 
     let attempts = runtime
         .job_attempt_store
@@ -1607,7 +1663,10 @@ async fn in_memory_agent_turn_job_handler_with_memory_persists_memory_node_id_an
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(4)));
+    assert_eq!(
+        diagnostics.pointer("/memory_recall/retrieved"),
+        Some(&json!(4))
+    );
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:agent-turn:1"))
@@ -1759,7 +1818,10 @@ async fn surreal_agent_turn_job_handler_with_memory_persists_memory_node_id_and_
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.pointer("/memory_recall/retrieved"),
+        Some(&json!(2))
+    );
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:agent-turn:surreal:1"))
@@ -1815,7 +1877,10 @@ async fn in_memory_tool_loop_job_handler_executes_and_persists_diagnostics() {
         .expect("tool should register");
 
     runtime
-        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .register_handler(ToolLoopJobHandler::new(
+            chat_client,
+            Arc::new(tool_registry),
+        ))
         .expect("tool loop handler should register");
 
     let now = Utc::now();
@@ -1857,7 +1922,10 @@ async fn in_memory_tool_loop_job_handler_executes_and_persists_diagnostics() {
         .expect("job get should succeed")
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
-    assert_eq!(job.sttp_output_node_id.as_deref(), Some("sttp:tool-loop:job-tool-loop-1"));
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:tool-loop:job-tool-loop-1")
+    );
 
     let attempts = runtime
         .job_attempt_store
@@ -1873,9 +1941,15 @@ async fn in_memory_tool_loop_job_handler_executes_and_persists_diagnostics() {
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-tool-loop")));
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-tool-loop"))
+    );
     assert_eq!(diagnostics.get("status"), Some(&json!("success")));
-    assert_eq!(diagnostics.get("tool_name"), Some(&json!("stasis.web.search.mock")));
+    assert_eq!(
+        diagnostics.get("tool_name"),
+        Some(&json!("stasis.web.search.mock"))
+    );
     assert_eq!(diagnostics.get("tool_rounds"), Some(&json!(1)));
     assert_eq!(
         diagnostics.get("termination_reason"),
@@ -1916,7 +1990,10 @@ async fn in_memory_tool_loop_model_emitted_tool_call_roundtrip() {
         .expect("tool should register");
 
     runtime
-        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .register_handler(ToolLoopJobHandler::new(
+            chat_client,
+            Arc::new(tool_registry),
+        ))
         .expect("tool loop handler should register");
 
     let now = Utc::now();
@@ -2006,7 +2083,10 @@ async fn in_memory_agent_turn_job_handler_executes_single_agent_turn() {
         .expect("tool should register");
 
     runtime
-        .register_handler(AgentTurnJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .register_handler(AgentTurnJobHandler::new(
+            chat_client,
+            Arc::new(tool_registry),
+        ))
         .expect("agent-turn handler should register");
 
     let now = Utc::now();
@@ -2050,7 +2130,10 @@ async fn in_memory_agent_turn_job_handler_executes_single_agent_turn() {
         .expect("job get should succeed")
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
-    assert_eq!(job.sttp_output_node_id.as_deref(), Some("sttp:agent-turn:job-agent-turn-1"));
+    assert_eq!(
+        job.sttp_output_node_id.as_deref(),
+        Some("sttp:agent-turn:job-agent-turn-1")
+    );
 
     let attempts = runtime
         .job_attempt_store
@@ -2067,9 +2150,15 @@ async fn in_memory_agent_turn_job_handler_executes_single_agent_turn() {
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-agent-turn")));
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-agent-turn"))
+    );
     assert_eq!(diagnostics.get("status"), Some(&json!("success")));
-    assert_eq!(diagnostics.get("agent_id"), Some(&json!("agent.researcher")));
+    assert_eq!(
+        diagnostics.get("agent_id"),
+        Some(&json!("agent.researcher"))
+    );
     assert_eq!(diagnostics.get("thread_id"), Some(&json!("thread-42")));
     assert_eq!(
         diagnostics.pointer("/invoked_tools/0"),
@@ -2104,7 +2193,10 @@ async fn in_memory_agent_session_job_handler_executes_session() {
         .expect("tool should register");
 
     runtime
-        .register_handler(AgentSessionJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .register_handler(AgentSessionJobHandler::new(
+            chat_client,
+            Arc::new(tool_registry),
+        ))
         .expect("agent-session handler should register");
 
     let now = Utc::now();
@@ -2179,7 +2271,10 @@ async fn in_memory_agent_session_job_handler_executes_session() {
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-agent-session")));
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-agent-session"))
+    );
     assert_eq!(diagnostics.get("status"), Some(&json!("success")));
     assert_eq!(diagnostics.get("turn_count"), Some(&json!(2)));
     assert_eq!(diagnostics.get("terminated"), Some(&json!(true)));
@@ -2212,7 +2307,10 @@ async fn surreal_agent_session_job_handler_executes_session() {
         .expect("tool should register");
 
     runtime
-        .register_handler(AgentSessionJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .register_handler(AgentSessionJobHandler::new(
+            chat_client,
+            Arc::new(tool_registry),
+        ))
         .expect("agent-session handler should register");
 
     let now = Utc::now();
@@ -2287,7 +2385,10 @@ async fn surreal_agent_session_job_handler_executes_session() {
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-agent-session")));
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-agent-session"))
+    );
     assert_eq!(diagnostics.get("turn_count"), Some(&json!(2)));
     assert_eq!(diagnostics.get("terminated"), Some(&json!(true)));
 }
@@ -2405,7 +2506,10 @@ async fn in_memory_agent_session_job_handler_with_memory_persists_memory_node_id
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(2)));
+    assert_eq!(
+        diagnostics.pointer("/memory_recall/retrieved"),
+        Some(&json!(2))
+    );
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:agent-session:1"))
@@ -2533,7 +2637,10 @@ async fn surreal_agent_session_job_handler_with_memory_persists_memory_node_id_a
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.pointer("/memory_recall/retrieved"), Some(&json!(1)));
+    assert_eq!(
+        diagnostics.pointer("/memory_recall/retrieved"),
+        Some(&json!(1))
+    );
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:agent-session:surreal:1"))
@@ -2694,7 +2801,10 @@ async fn in_memory_memory_workflow_handlers_execute_and_emit_diagnostics() {
             .expect("recall diagnostics should exist"),
     )
     .expect("recall diagnostics should be json");
-    assert_eq!(recall_diagnostics.get("provider"), Some(&json!("stasis-memory-recall")));
+    assert_eq!(
+        recall_diagnostics.get("provider"),
+        Some(&json!("stasis-memory-recall"))
+    );
     assert_eq!(recall_diagnostics.get("retrieved"), Some(&json!(5)));
 
     let aggregate_attempts = runtime
@@ -2745,7 +2855,10 @@ async fn in_memory_memory_workflow_handlers_execute_and_emit_diagnostics() {
             .expect("rollup diagnostics should exist"),
     )
     .expect("rollup diagnostics should be json");
-    assert_eq!(rollup_diagnostics.get("provider"), Some(&json!("stasis-memory-rollup")));
+    assert_eq!(
+        rollup_diagnostics.get("provider"),
+        Some(&json!("stasis-memory-rollup"))
+    );
     assert_eq!(rollup_diagnostics.get("total_groups"), Some(&json!(4)));
 
     let schema_attempts = runtime
@@ -2760,8 +2873,14 @@ async fn in_memory_memory_workflow_handlers_execute_and_emit_diagnostics() {
             .expect("schema diagnostics should exist"),
     )
     .expect("schema diagnostics should be json");
-    assert_eq!(schema_diagnostics.get("provider"), Some(&json!("stasis-memory-schema")));
-    assert_eq!(schema_diagnostics.get("schema_version"), Some(&json!("sttp-v1")));
+    assert_eq!(
+        schema_diagnostics.get("provider"),
+        Some(&json!("stasis-memory-schema"))
+    );
+    assert_eq!(
+        schema_diagnostics.get("schema_version"),
+        Some(&json!("sttp-v1"))
+    );
 }
 
 #[tokio::test]
@@ -2839,7 +2958,10 @@ async fn surreal_memory_recall_job_handler_executes_and_emits_diagnostics() {
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-memory-recall")));
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-memory-recall"))
+    );
     assert_eq!(diagnostics.get("retrieved"), Some(&json!(2)));
 }
 
@@ -3020,7 +3142,10 @@ async fn in_memory_runtime_builder_with_locus_memory_registers_memory_schema_han
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-memory-schema")));
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-memory-schema"))
+    );
     assert_eq!(diagnostics.get("status"), Some(&json!("success")));
 }
 
@@ -3044,7 +3169,9 @@ async fn in_memory_runtime_builder_middleware_chain_enables_cache_telemetry_and_
         .without_prompt_handler()
         .without_agent_handlers()
         .without_memory_operation_handlers();
-    let builder = builder.with_tool(MockWebSearchTool).expect("tool should register");
+    let builder = builder
+        .with_tool(MockWebSearchTool)
+        .expect("tool should register");
 
     let runtime = builder
         .build()
@@ -3108,9 +3235,18 @@ async fn in_memory_runtime_builder_middleware_chain_enables_cache_telemetry_and_
 
     let snapshot = metrics.snapshot();
     assert_eq!(snapshot.counters.get(CHAT_REQUESTS_TOTAL).copied(), Some(4));
-    assert_eq!(snapshot.counters.get(CHAT_CACHE_MISS_TOTAL).copied(), Some(2));
-    assert_eq!(snapshot.counters.get(CHAT_CACHE_HIT_TOTAL).copied(), Some(2));
-    assert_eq!(snapshot.counters.get(CHAT_TOOL_CALLS_TOTAL).copied(), Some(2));
+    assert_eq!(
+        snapshot.counters.get(CHAT_CACHE_MISS_TOTAL).copied(),
+        Some(2)
+    );
+    assert_eq!(
+        snapshot.counters.get(CHAT_CACHE_HIT_TOTAL).copied(),
+        Some(2)
+    );
+    assert_eq!(
+        snapshot.counters.get(CHAT_TOOL_CALLS_TOTAL).copied(),
+        Some(2)
+    );
 }
 
 #[tokio::test]
@@ -3135,7 +3271,9 @@ async fn surreal_runtime_builder_middleware_chain_enables_cache_telemetry_and_in
     .without_prompt_handler()
     .without_agent_handlers()
     .without_memory_operation_handlers();
-    let builder = builder.with_tool(MockWebSearchTool).expect("tool should register");
+    let builder = builder
+        .with_tool(MockWebSearchTool)
+        .expect("tool should register");
 
     let runtime = builder
         .build()
@@ -3199,9 +3337,18 @@ async fn surreal_runtime_builder_middleware_chain_enables_cache_telemetry_and_in
 
     let snapshot = metrics.snapshot();
     assert_eq!(snapshot.counters.get(CHAT_REQUESTS_TOTAL).copied(), Some(4));
-    assert_eq!(snapshot.counters.get(CHAT_CACHE_MISS_TOTAL).copied(), Some(2));
-    assert_eq!(snapshot.counters.get(CHAT_CACHE_HIT_TOTAL).copied(), Some(2));
-    assert_eq!(snapshot.counters.get(CHAT_TOOL_CALLS_TOTAL).copied(), Some(2));
+    assert_eq!(
+        snapshot.counters.get(CHAT_CACHE_MISS_TOTAL).copied(),
+        Some(2)
+    );
+    assert_eq!(
+        snapshot.counters.get(CHAT_CACHE_HIT_TOTAL).copied(),
+        Some(2)
+    );
+    assert_eq!(
+        snapshot.counters.get(CHAT_TOOL_CALLS_TOTAL).copied(),
+        Some(2)
+    );
 }
 
 #[tokio::test]
@@ -3310,7 +3457,9 @@ async fn surreal_orchestration_sequential_pattern_policy_violation_dead_letters_
         namespace: "test".to_string(),
         database: "runtime_backend_parity_orchestration_sequential_failure".to_string(),
     })
-    .with_chat_client(Arc::new(PlainScriptedChatClient::new(vec!["unused".to_string()])))
+    .with_chat_client(Arc::new(PlainScriptedChatClient::new(vec![
+        "unused".to_string(),
+    ])))
     .without_grapheme_handlers()
     .without_prompt_handler()
     .without_tool_loop_handler()
@@ -3371,7 +3520,10 @@ async fn surreal_orchestration_sequential_pattern_policy_violation_dead_letters_
         .await
         .expect("attempt list should succeed");
     assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
-    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
     assert!(
         attempts[0]
             .policy_reason
@@ -3548,7 +3700,10 @@ async fn in_memory_orchestration_concurrent_pattern_policy_violation_dead_letter
         .await
         .expect("attempt list should succeed");
     assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
-    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
     assert!(
         attempts[0]
             .policy_reason
@@ -3628,14 +3783,20 @@ async fn in_memory_orchestration_concurrent_pattern_persists_branch_thread_linea
         .expect("lineage should load");
     assert_eq!(lineage.len(), 2);
     assert_eq!(lineage[0].thread_id, root_thread_id);
-    assert_eq!(lineage[1].thread_id, "thread.concurrent.lineage.1::branch::alpha");
+    assert_eq!(
+        lineage[1].thread_id,
+        "thread.concurrent.lineage.1::branch::alpha"
+    );
 
     let events = thread_store
         .list_events("thread.concurrent.lineage.1::branch::alpha")
         .await
         .expect("branch events should load");
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].event_kind, "orchestration.concurrent.branch.completed");
+    assert_eq!(
+        events[0].event_kind,
+        "orchestration.concurrent.branch.completed"
+    );
 }
 
 #[tokio::test]
@@ -3816,7 +3977,10 @@ async fn surreal_orchestration_handoff_pattern_policy_violation_dead_letters_job
         .await
         .expect("attempt list should succeed");
     assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
-    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
     assert!(
         attempts[0]
             .policy_reason
@@ -3999,7 +4163,10 @@ async fn surreal_orchestration_orchestrator_pattern_policy_violation_dead_letter
         .await
         .expect("attempt list should succeed");
     assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
-    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
     assert!(
         attempts[0]
             .policy_reason
@@ -4079,14 +4246,19 @@ async fn agent_session_coordinator_runs_multi_turn_with_round_robin_and_max_turn
 #[tokio::test]
 async fn in_memory_tool_loop_strict_mode_requires_model_tool_call() {
     let runtime = InMemoryRuntime::new();
-    let chat_client = Arc::new(ScriptedChatClient::new(vec!["plain model text".to_string()]));
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "plain model text".to_string(),
+    ]));
     let tool_registry = InMemoryToolRegistry::default();
     tool_registry
         .register_tool(MockWebSearchTool)
         .expect("tool should register");
 
     runtime
-        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .register_handler(ToolLoopJobHandler::new(
+            chat_client,
+            Arc::new(tool_registry),
+        ))
         .expect("tool loop handler should register");
 
     let now = Utc::now();
@@ -4136,7 +4308,10 @@ async fn in_memory_tool_loop_strict_mode_requires_model_tool_call() {
         .expect("attempt list should succeed");
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
-    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
     assert!(
         attempts[0]
             .policy_reason
@@ -4153,7 +4328,10 @@ async fn in_memory_tool_loop_job_handler_policy_violation_dead_letters_job() {
     let tool_registry = InMemoryToolRegistry::default();
 
     runtime
-        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .register_handler(ToolLoopJobHandler::new(
+            chat_client,
+            Arc::new(tool_registry),
+        ))
         .expect("tool loop handler should register");
 
     let now = Utc::now();
@@ -4203,7 +4381,10 @@ async fn in_memory_tool_loop_job_handler_policy_violation_dead_letters_job() {
         .expect("attempt list should succeed");
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
-    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
     assert!(
         attempts[0]
             .policy_reason
@@ -4219,9 +4400,15 @@ async fn in_memory_tool_loop_job_handler_policy_violation_dead_letters_job() {
             .expect("diagnostics should be present"),
     )
     .expect("diagnostics should be valid json");
-    assert_eq!(diagnostics.get("provider"), Some(&json!("stasis-tool-loop")));
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-tool-loop"))
+    );
     assert_eq!(diagnostics.get("status"), Some(&json!("failure")));
-    assert_eq!(diagnostics.get("guardrail_code"), Some(&json!("POLICY_VIOLATION")));
+    assert_eq!(
+        diagnostics.get("guardrail_code"),
+        Some(&json!("POLICY_VIOLATION"))
+    );
     assert!(
         diagnostics
             .get("policy_reason")
@@ -4235,7 +4422,10 @@ async fn in_memory_tool_loop_job_handler_policy_violation_dead_letters_job() {
         .await
         .expect("lineage should load");
     assert_eq!(lineage.len(), 1);
-    assert_eq!(lineage[0].event.event_type, RuntimeEventType::JobDeadLettered);
+    assert_eq!(
+        lineage[0].event.event_type,
+        RuntimeEventType::JobDeadLettered
+    );
     assert_eq!(lineage[0].event.correlation_id, "corr-tool-loop-invalid-1");
     assert_eq!(lineage[0].event.trace_id, "trace-tool-loop-invalid-1");
 }
@@ -4250,7 +4440,10 @@ async fn in_memory_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
         .expect("tool should register");
 
     runtime
-        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .register_handler(ToolLoopJobHandler::new(
+            chat_client,
+            Arc::new(tool_registry),
+        ))
         .expect("tool loop handler should register");
 
     let now = Utc::now();
@@ -4300,7 +4493,10 @@ async fn in_memory_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
         .expect("attempt list should succeed");
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
-    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
     assert!(
         attempts[0]
             .policy_reason
@@ -4317,7 +4513,10 @@ async fn in_memory_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
     )
     .expect("diagnostics should be valid json");
     assert_eq!(diagnostics.get("status"), Some(&json!("failure")));
-    assert_eq!(diagnostics.get("guardrail_code"), Some(&json!("POLICY_VIOLATION")));
+    assert_eq!(
+        diagnostics.get("guardrail_code"),
+        Some(&json!("POLICY_VIOLATION"))
+    );
     assert!(
         diagnostics
             .get("policy_reason")
@@ -4345,7 +4544,10 @@ async fn surreal_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
         .expect("tool should register");
 
     runtime
-        .register_handler(ToolLoopJobHandler::new(chat_client, Arc::new(tool_registry)))
+        .register_handler(ToolLoopJobHandler::new(
+            chat_client,
+            Arc::new(tool_registry),
+        ))
         .expect("tool loop handler should register");
 
     let now = Utc::now();
@@ -4395,7 +4597,10 @@ async fn surreal_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
         .expect("attempt list should succeed");
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].outcome, JobAttemptOutcome::FatalFailure);
-    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
     assert!(
         attempts[0]
             .policy_reason
@@ -4806,8 +5011,14 @@ async fn surreal_runtime_replays_dead_letter_and_retries_outbox_publish() {
         .expect("replay report should load");
     assert_eq!(replay_report.job_id, "job-test.fatal_then_success");
     assert_eq!(replay_report.attempts.len(), 2);
-    assert_eq!(replay_report.attempts[0].outcome, JobAttemptOutcome::FatalFailure);
-    assert_eq!(replay_report.attempts[1].outcome, JobAttemptOutcome::Succeeded);
+    assert_eq!(
+        replay_report.attempts[0].outcome,
+        JobAttemptOutcome::FatalFailure
+    );
+    assert_eq!(
+        replay_report.attempts[1].outcome,
+        JobAttemptOutcome::Succeeded
+    );
     assert!(replay_report.attempts[0].error_message.is_some());
     assert!(replay_report.attempts[1].sttp_output_node_id.is_some());
 
@@ -4816,9 +5027,11 @@ async fn surreal_runtime_replays_dead_letter_and_retries_outbox_publish() {
         .await
         .expect("lineage events should load");
     assert_eq!(lineage.len(), 2);
-    assert!(lineage
-        .iter()
-        .all(|evt| evt.event.correlation_id == "corr-1"));
+    assert!(
+        lineage
+            .iter()
+            .all(|evt| evt.event.correlation_id == "corr-1")
+    );
     assert!(lineage.iter().all(|evt| evt.event.trace_id == "trace-1"));
 
     let succeeded = runtime
@@ -4911,7 +5124,10 @@ async fn surreal_job_leasing_allows_only_one_winner_under_contention() {
     let leased_a = a.expect("lease call a should succeed");
     let leased_b = b.expect("lease call b should succeed");
 
-    let winners = [leased_a, leased_b].iter().filter(|job| job.is_some()).count();
+    let winners = [leased_a, leased_b]
+        .iter()
+        .filter(|job| job.is_some())
+        .count();
     assert_eq!(winners, 1);
 }
 
@@ -5444,12 +5660,17 @@ async fn in_memory_grapheme_echo_rejects_invalid_payload_schema() {
         .await
         .expect("attempt list should succeed");
     assert_eq!(attempts.len(), 1);
-    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
-    assert!(attempts[0]
-        .policy_reason
-        .as_deref()
-        .unwrap_or_default()
-        .contains("invalid echo payload json"));
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("invalid echo payload json")
+    );
 }
 
 #[tokio::test]
@@ -5604,12 +5825,17 @@ async fn in_memory_grapheme_textops_rejects_invalid_payload_schema() {
         .await
         .expect("attempt list should succeed");
     assert_eq!(attempts.len(), 1);
-    assert_eq!(attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
-    assert!(attempts[0]
-        .policy_reason
-        .as_deref()
-        .unwrap_or_default()
-        .contains("must be non-empty"));
+    assert_eq!(
+        attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
+    assert!(
+        attempts[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("must be non-empty")
+    );
 }
 
 #[tokio::test]
@@ -5671,7 +5897,7 @@ async fn in_memory_grapheme_policy_failure_records_guardrail_diagnostics() {
         .register_handler(GraphemeJobHandler::new(workflow_engine))
         .expect("grapheme handler should register");
 
-        let source = r#"import sql from "acme/sql"
+    let source = r#"import sql from "acme/sql"
 
 query Run {
   sql.query(connection: "local", sql: "select 1") {
@@ -5742,7 +5968,11 @@ query Run {
         .list_attempts_by_guardrail_code("IMPORT_NOT_ALLOWLISTED")
         .await
         .expect("guardrail attempts query should succeed");
-    assert!(guardrail_attempts.iter().any(|attempt| attempt.job_id == job_id));
+    assert!(
+        guardrail_attempts
+            .iter()
+            .any(|attempt| attempt.job_id == job_id)
+    );
 
     let diagnostics = attempts[0]
         .diagnostics
@@ -5811,7 +6041,9 @@ async fn in_memory_runtime_retention_prunes_terminal_records() {
         .expect("publish should succeed");
 
     runtime
-        .configure_retention_policy(RetentionPolicy { terminal_ttl_days: 1 })
+        .configure_retention_policy(RetentionPolicy {
+            terminal_ttl_days: 1,
+        })
         .expect("retention policy should configure");
 
     let report = runtime
@@ -5867,7 +6099,9 @@ async fn surreal_runtime_retention_prunes_terminal_records() {
         .expect("publish should succeed");
 
     runtime
-        .configure_retention_policy(RetentionPolicy { terminal_ttl_days: 1 })
+        .configure_retention_policy(RetentionPolicy {
+            terminal_ttl_days: 1,
+        })
         .expect("retention policy should configure");
 
     let report = runtime
@@ -6052,7 +6286,10 @@ async fn lineage_investigator_includes_memory_lineage_metadata() {
             .contains("alpha=")
     );
     assert_eq!(
-        report.lineage_events[0].event.output_memory_node_id.as_deref(),
+        report.lineage_events[0]
+            .event
+            .output_memory_node_id
+            .as_deref(),
         Some("sttp:memory:lineage-investigator:1")
     );
     assert_eq!(
@@ -6117,15 +6354,24 @@ query Run {
         .await
         .expect("lineage investigation should succeed");
 
-    assert!(report.attempts.iter().any(|attempt| attempt.job_id == job_id));
-    assert!(report
-        .attempts
-        .iter()
-        .any(|attempt| attempt.guardrail_code.as_deref() == Some("IMPORT_NOT_ALLOWLISTED")));
-    assert!(report
-        .lineage_events
-        .iter()
-        .any(|event| event.event.job_id == job_id));
+    assert!(
+        report
+            .attempts
+            .iter()
+            .any(|attempt| attempt.job_id == job_id)
+    );
+    assert!(
+        report
+            .attempts
+            .iter()
+            .any(|attempt| attempt.guardrail_code.as_deref() == Some("IMPORT_NOT_ALLOWLISTED"))
+    );
+    assert!(
+        report
+            .lineage_events
+            .iter()
+            .any(|event| event.event.job_id == job_id)
+    );
 }
 
 #[tokio::test]
@@ -6136,9 +6382,7 @@ async fn lineage_investigator_requires_selector() {
         .await
         .expect_err("empty selector should fail");
 
-    assert!(err
-        .to_string()
-        .contains("requires at least one selector"));
+    assert!(err.to_string().contains("requires at least one selector"));
 }
 
 #[tokio::test]
@@ -6342,20 +6586,24 @@ async fn lineage_investigator_root_thread_selector_expands_descendants_in_memory
 
     assert_eq!(report.attempts.len(), 2);
     assert_eq!(report.lineage_events.len(), 2);
-    assert!(report
-        .lineage_events
-        .iter()
-        .any(|event| event.event.thread_id.as_deref() == Some(root_thread_id)));
-    assert!(report
-        .lineage_events
-        .iter()
-        .any(|event| event.event.thread_id.as_deref() == Some(branch_thread_id)));
-    assert!(report
-        .thread_ancestry
-        .contains(&root_thread_id.to_string()));
-    assert!(report
-        .thread_ancestry
-        .contains(&branch_thread_id.to_string()));
+    assert!(
+        report
+            .lineage_events
+            .iter()
+            .any(|event| event.event.thread_id.as_deref() == Some(root_thread_id))
+    );
+    assert!(
+        report
+            .lineage_events
+            .iter()
+            .any(|event| event.event.thread_id.as_deref() == Some(branch_thread_id))
+    );
+    assert!(report.thread_ancestry.contains(&root_thread_id.to_string()));
+    assert!(
+        report
+            .thread_ancestry
+            .contains(&branch_thread_id.to_string())
+    );
 }
 
 #[tokio::test]
@@ -6458,20 +6706,24 @@ async fn lineage_investigator_root_thread_selector_expands_descendants_surreal()
 
     assert_eq!(report.attempts.len(), 2);
     assert_eq!(report.lineage_events.len(), 2);
-    assert!(report
-        .lineage_events
-        .iter()
-        .any(|event| event.event.thread_id.as_deref() == Some(root_thread_id)));
-    assert!(report
-        .lineage_events
-        .iter()
-        .any(|event| event.event.thread_id.as_deref() == Some(branch_thread_id)));
-    assert!(report
-        .thread_ancestry
-        .contains(&root_thread_id.to_string()));
-    assert!(report
-        .thread_ancestry
-        .contains(&branch_thread_id.to_string()));
+    assert!(
+        report
+            .lineage_events
+            .iter()
+            .any(|event| event.event.thread_id.as_deref() == Some(root_thread_id))
+    );
+    assert!(
+        report
+            .lineage_events
+            .iter()
+            .any(|event| event.event.thread_id.as_deref() == Some(branch_thread_id))
+    );
+    assert!(report.thread_ancestry.contains(&root_thread_id.to_string()));
+    assert!(
+        report
+            .thread_ancestry
+            .contains(&branch_thread_id.to_string())
+    );
 }
 
 #[tokio::test]
@@ -6781,9 +7033,18 @@ async fn in_memory_orchestration_handlers_emit_standard_policy_violation_diagnos
         .await
         .expect("attempt list should succeed");
 
-    assert_eq!(sequential_attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
-    assert_eq!(concurrent_attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
-    assert_eq!(handoff_attempts[0].guardrail_code.as_deref(), Some("POLICY_VIOLATION"));
+    assert_eq!(
+        sequential_attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
+    assert_eq!(
+        concurrent_attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
+    assert_eq!(
+        handoff_attempts[0].guardrail_code.as_deref(),
+        Some("POLICY_VIOLATION")
+    );
     assert_eq!(
         orchestrator_attempts[0].guardrail_code.as_deref(),
         Some("POLICY_VIOLATION")

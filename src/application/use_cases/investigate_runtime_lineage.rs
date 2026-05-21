@@ -63,9 +63,13 @@ where
         let mut attempts = if let Some(job_id) = query.job_id.as_deref() {
             self.attempt_store.list_by_job_id(job_id).await?
         } else if let Some(execution_id) = query.execution_id.as_deref() {
-            self.attempt_store.list_by_execution_id(execution_id).await?
+            self.attempt_store
+                .list_by_execution_id(execution_id)
+                .await?
         } else if let Some(guardrail_code) = query.guardrail_code.as_deref() {
-            self.attempt_store.list_by_guardrail_code(guardrail_code).await?
+            self.attempt_store
+                .list_by_guardrail_code(guardrail_code)
+                .await?
         } else if let Some(thread_id) = query.thread_id.as_deref() {
             let mut out = Vec::new();
             let mut seen_jobs = HashSet::new();
@@ -75,7 +79,11 @@ where
 
             for event in &thread_selected_events {
                 if seen_jobs.insert(event.event.job_id.clone()) {
-                    out.extend(self.attempt_store.list_by_job_id(&event.event.job_id).await?);
+                    out.extend(
+                        self.attempt_store
+                            .list_by_job_id(&event.event.job_id)
+                            .await?,
+                    );
                 }
             }
             out
@@ -125,7 +133,10 @@ where
         } else {
             let mut out = Vec::new();
             let mut seen = HashSet::new();
-            let job_ids: HashSet<String> = attempts.iter().map(|attempt| attempt.job_id.clone()).collect();
+            let job_ids: HashSet<String> = attempts
+                .iter()
+                .map(|attempt| attempt.job_id.clone())
+                .collect();
             for job_id in job_ids {
                 for event in self.outbox_store.list_by_job_id(&job_id).await? {
                     if seen.insert(event.event_id.clone()) {
@@ -143,7 +154,10 @@ where
         if let Some(job_id) = query.job_id.as_deref() {
             lineage_events.retain(|event| event.event.job_id == job_id);
         }
-        let selected_job_ids: HashSet<String> = attempts.iter().map(|attempt| attempt.job_id.clone()).collect();
+        let selected_job_ids: HashSet<String> = attempts
+            .iter()
+            .map(|attempt| attempt.job_id.clone())
+            .collect();
         lineage_events.retain(|event| selected_job_ids.contains(&event.event.job_id));
 
         let thread_ancestry = derive_thread_ancestry(
@@ -174,11 +188,18 @@ where
         selector_thread_id: &str,
         include_thread_ancestry: bool,
     ) -> Result<Vec<OutboxEvent>> {
-        let mut out = self.outbox_store.list_by_thread_id(selector_thread_id).await?;
+        let mut out = self
+            .outbox_store
+            .list_by_thread_id(selector_thread_id)
+            .await?;
 
         if include_thread_ancestry {
             if let Some(parent_thread_id) = parent_thread_id_for_branch(selector_thread_id) {
-                out.extend(self.outbox_store.list_by_thread_id(parent_thread_id).await?);
+                out.extend(
+                    self.outbox_store
+                        .list_by_thread_id(parent_thread_id)
+                        .await?,
+                );
             } else {
                 let branch_prefix = format!("{selector_thread_id}::branch::");
                 out.extend(

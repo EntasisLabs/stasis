@@ -167,7 +167,8 @@ impl ClusterNodeStore for SurrealClusterNodeStore {
 
         let mut node = ClusterNode::try_from(existing)?;
         node.heartbeat_at = heartbeat.heartbeat_at;
-        node.lease_expires_at = heartbeat.heartbeat_at + Duration::seconds(heartbeat.lease_ttl_seconds.max(1));
+        node.lease_expires_at =
+            heartbeat.heartbeat_at + Duration::seconds(heartbeat.lease_ttl_seconds.max(1));
         if let Some(queue_ownership) = heartbeat.queue_ownership {
             node.queue_ownership = queue_ownership;
         }

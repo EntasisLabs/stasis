@@ -20,15 +20,15 @@ use crate::domain::runtime::outbox::{
     OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
 };
 use crate::domain::runtime::recurring::RecurringDefinition;
+use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
+use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
 use crate::infrastructure::runtime::surreal_job_attempt_store::SurrealJobAttemptStore;
 use crate::infrastructure::runtime::surreal_job_store::SurrealJobStore;
 use crate::infrastructure::runtime::surreal_outbox_store::SurrealOutboxStore;
 use crate::infrastructure::runtime::surreal_recurring_store::SurrealRecurringStore;
-use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
-use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
 use crate::infrastructure::runtime::system_clock::SystemClock;
-use crate::ports::outbound::runtime::event_publisher::EventPublisher;
 use crate::ports::outbound::runtime::clock::Clock;
+use crate::ports::outbound::runtime::event_publisher::EventPublisher;
 use crate::ports::outbound::runtime::id_generator::IdGenerator;
 use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
@@ -119,7 +119,10 @@ impl SurrealRuntime {
         Ok(())
     }
 
-    pub fn register_event_publisher<P: EventPublisher + 'static>(&self, publisher: P) -> Result<()> {
+    pub fn register_event_publisher<P: EventPublisher + 'static>(
+        &self,
+        publisher: P,
+    ) -> Result<()> {
         let mut state = self
             .publisher
             .write()
@@ -151,12 +154,22 @@ impl SurrealRuntime {
         self.job_attempt_store.list_by_job_id(job_id).await
     }
 
-    pub async fn list_attempts_by_guardrail_code(&self, guardrail_code: &str) -> Result<Vec<JobAttempt>> {
-        self.job_attempt_store.list_by_guardrail_code(guardrail_code).await
+    pub async fn list_attempts_by_guardrail_code(
+        &self,
+        guardrail_code: &str,
+    ) -> Result<Vec<JobAttempt>> {
+        self.job_attempt_store
+            .list_by_guardrail_code(guardrail_code)
+            .await
     }
 
-    pub async fn list_attempts_by_execution_id(&self, execution_id: &str) -> Result<Vec<JobAttempt>> {
-        self.job_attempt_store.list_by_execution_id(execution_id).await
+    pub async fn list_attempts_by_execution_id(
+        &self,
+        execution_id: &str,
+    ) -> Result<Vec<JobAttempt>> {
+        self.job_attempt_store
+            .list_by_execution_id(execution_id)
+            .await
     }
 
     pub async fn list_lineage_events(&self, job_id: &str) -> Result<Vec<OutboxEvent>> {
@@ -170,11 +183,17 @@ impl SurrealRuntime {
         self.outbox_store.list_by_execution_id(execution_id).await
     }
 
-    pub async fn list_lineage_events_by_thread_id(&self, thread_id: &str) -> Result<Vec<OutboxEvent>> {
+    pub async fn list_lineage_events_by_thread_id(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<OutboxEvent>> {
         self.outbox_store.list_by_thread_id(thread_id).await
     }
 
-    pub async fn investigate_lineage(&self, query: RuntimeLineageQuery) -> Result<RuntimeLineageReport> {
+    pub async fn investigate_lineage(
+        &self,
+        query: RuntimeLineageQuery,
+    ) -> Result<RuntimeLineageReport> {
         InvestigateRuntimeLineage::new(self.job_attempt_store.clone(), self.outbox_store.clone())
             .execute(query)
             .await
@@ -201,10 +220,14 @@ impl SurrealRuntime {
     }
 
     pub async fn materialize_recurring_now(&self, scheduler_id: &str) -> Result<usize> {
-        self.materialize_recurring(self.clock.now(), scheduler_id).await
+        self.materialize_recurring(self.clock.now(), scheduler_id)
+            .await
     }
 
-    pub async fn prune_terminal_records(&self, cutoff: DateTime<Utc>) -> Result<RetentionPruneReport> {
+    pub async fn prune_terminal_records(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> Result<RetentionPruneReport> {
         Ok(RetentionPruneReport {
             jobs_pruned: self.job_store.prune_terminal_before(cutoff).await?,
             attempts_pruned: self.job_attempt_store.prune_finished_before(cutoff).await?,
@@ -243,10 +266,7 @@ impl SurrealRuntime {
                 continue;
             }
 
-            let id = format!(
-                "{}",
-                self.id_generator.next_id(&definition.id)
-            );
+            let id = format!("{}", self.id_generator.next_id(&definition.id));
 
             let scheduled_at = now + Duration::seconds(definition.jitter_seconds.max(0));
 
@@ -339,7 +359,7 @@ impl SurrealRuntime {
                     execution_id.clone(),
                     diagnostics.as_deref(),
                 )
-                    .await?;
+                .await?;
 
                 self.append_job_attempt(
                     &job,
@@ -388,7 +408,7 @@ impl SurrealRuntime {
                         execution_id.clone(),
                         diagnostics.as_deref(),
                     )
-                        .await?;
+                    .await?;
 
                     self.metrics.incr_counter(METRIC_JOB_DEAD_LETTER_TOTAL, 1);
                 } else {
@@ -410,9 +430,10 @@ impl SurrealRuntime {
                         execution_id.clone(),
                         diagnostics.as_deref(),
                     )
-                        .await?;
+                    .await?;
 
-                    self.metrics.incr_counter(METRIC_JOB_RETRY_SCHEDULED_TOTAL, 1);
+                    self.metrics
+                        .incr_counter(METRIC_JOB_RETRY_SCHEDULED_TOTAL, 1);
                 }
 
                 self.job_store.save(job.clone()).await?;
@@ -469,7 +490,7 @@ impl SurrealRuntime {
                     execution_id.clone(),
                     diagnostics.as_deref(),
                 )
-                    .await?;
+                .await?;
 
                 self.append_job_attempt(
                     &job,
@@ -546,7 +567,11 @@ impl SurrealRuntime {
         let mut published = 0usize;
 
         for mut event in pending {
-            if event.next_attempt_at.map(|next| next > now).unwrap_or(false) {
+            if event
+                .next_attempt_at
+                .map(|next| next > now)
+                .unwrap_or(false)
+            {
                 continue;
             }
 
@@ -605,8 +630,7 @@ impl SurrealRuntime {
             input_memory_query_fingerprint,
             output_memory_node_id,
             retrieval_path,
-        ) =
-            Self::extract_memory_lineage_fields(diagnostics);
+        ) = Self::extract_memory_lineage_fields(diagnostics);
         let thread_id = Self::extract_thread_id(diagnostics);
         let event = OutboxEvent {
             event_id: self.id_generator.next_id(&format!("evt-{}", job.id)),
@@ -699,7 +723,12 @@ impl SurrealRuntime {
 
     fn extract_memory_lineage_fields(
         diagnostics: Option<&str>,
-    ) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
         let Some(raw) = diagnostics else {
             return (None, None, None, None);
         };

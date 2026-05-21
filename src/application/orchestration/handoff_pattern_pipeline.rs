@@ -53,7 +53,10 @@ impl HandoffPatternPipeline {
         Self { prompt_pipeline }
     }
 
-    pub async fn execute(&self, request: HandoffPatternExecutionRequest) -> Result<HandoffPatternExecutionResponse> {
+    pub async fn execute(
+        &self,
+        request: HandoffPatternExecutionRequest,
+    ) -> Result<HandoffPatternExecutionResponse> {
         let mut current_input = request.initial_user_prompt;
         let mut turn_results = Vec::with_capacity(request.turns.len());
         let mut handoffs = Vec::new();
@@ -79,11 +82,15 @@ impl HandoffPatternPipeline {
                     .policy_profile
                     .clone()
                     .or_else(|| request.policy_profile.clone()),
-                model_hint: turn.model_hint.clone().or_else(|| request.model_hint.clone()),
+                model_hint: turn
+                    .model_hint
+                    .clone()
+                    .or_else(|| request.model_hint.clone()),
             };
 
             let mut prompt_request =
-                PromptExecutionRequest::from_user_prompt(rendered_prompt.clone()).with_context(context);
+                PromptExecutionRequest::from_user_prompt(rendered_prompt.clone())
+                    .with_context(context);
             if let Some(system_prompt) = turn.system_prompt {
                 prompt_request = prompt_request.with_system_prompt(system_prompt);
             }

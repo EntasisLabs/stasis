@@ -322,5 +322,4 @@ impl OutboxStore for SurrealOutboxStore {
 
         Ok(removed)
     }
-
 }

@@ -3,47 +3,39 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::application::dto::{
-    ClusterForwardOutcomeRow, ClusterNodeHealthRow,
-    ForwardClusterCommandRequest, ForwardClusterCommandResponse,
-    HeartbeatClusterNodeRequest, InitiateCoordinatorHandoffRequest,
-    InitiateCoordinatorHandoffResponse,
-    InitiateCoordinatorFailoverRequest,
-    InitiateCoordinatorFailoverResponse,
-    EndpointDiagnosticsReadModelRow, EndpointFailureRateTrendRow,
-    ListClusterForwardOutcomesRequest,
-    ListEndpointDiagnosticsReadModelRequest, ListEndpointFailureRateTrendsRequest,
-    ListClusterNodeHealthRequest, ListQueueOwnershipHealthRequest,
+    ClusterForwardOutcomeRow, ClusterNodeHealthRow, EndpointDiagnosticsReadModelRow,
+    EndpointFailureRateTrendRow, ForwardClusterCommandRequest, ForwardClusterCommandResponse,
+    HeartbeatClusterNodeRequest, InitiateCoordinatorFailoverRequest,
+    InitiateCoordinatorFailoverResponse, InitiateCoordinatorHandoffRequest,
+    InitiateCoordinatorHandoffResponse, ListClusterForwardOutcomesRequest,
+    ListClusterNodeHealthRequest, ListEndpointDiagnosticsReadModelRequest,
+    ListEndpointFailureRateTrendsRequest, ListQueueOwnershipHealthRequest,
     ListTopUnhealthyEndpointsRequest, PruneEndpointDeliveryStatusesRequest,
-    PruneExpiredClusterNodesRequest, QueueOwnershipHealthRow,
-    RunClusterHeartbeatSweepRequest, RunClusterHeartbeatSweepResponse,
-    RebalanceQueueOwnershipRequest, RebalanceQueueOwnershipResponse,
-    RegisterClusterNodeRequest,
-    RegisterDeliveryEndpointRequest, RegisterDeliveryEndpointResponse,
-    SetDeliveryEndpointEnabledRequest,
+    PruneExpiredClusterNodesRequest, QueueOwnershipHealthRow, RebalanceQueueOwnershipRequest,
+    RebalanceQueueOwnershipResponse, RegisterClusterNodeRequest, RegisterDeliveryEndpointRequest,
+    RegisterDeliveryEndpointResponse, RunClusterHeartbeatSweepRequest,
+    RunClusterHeartbeatSweepResponse, SetDeliveryEndpointEnabledRequest,
 };
 use crate::application::use_cases::manage_cluster_nodes::{
-    ForwardClusterControlCommand, HeartbeatClusterNode,
-    InitiateCoordinatorFailover, InitiateCoordinatorHandoff,
-    ListClusterForwardOutcomes, RebalanceQueueOwnership,
-    ListClusterNodeHealth, ListQueueOwnershipHealth,
-    PruneExpiredClusterNodes, RegisterClusterNode,
-    RunClusterHeartbeatSweep,
+    ForwardClusterControlCommand, HeartbeatClusterNode, InitiateCoordinatorFailover,
+    InitiateCoordinatorHandoff, ListClusterForwardOutcomes, ListClusterNodeHealth,
+    ListQueueOwnershipHealth, PruneExpiredClusterNodes, RebalanceQueueOwnership,
+    RegisterClusterNode, RunClusterHeartbeatSweep,
 };
 use crate::application::use_cases::manage_delivery_endpoints::{
     ListDeliveryEndpoints, RegisterDeliveryEndpoint, SetDeliveryEndpointEnabled,
 };
 use crate::application::use_cases::query_endpoint_delivery_statuses::{
-    GetEndpointDeliveryStatus, ListEndpointDeliveryStatuses,
-    ListEndpointDiagnosticsReadModel, ListEndpointFailureRateTrends,
-    ListTopUnhealthyEndpoints, PruneEndpointDeliveryStatuses,
+    GetEndpointDeliveryStatus, ListEndpointDeliveryStatuses, ListEndpointDiagnosticsReadModel,
+    ListEndpointFailureRateTrends, ListTopUnhealthyEndpoints, PruneEndpointDeliveryStatuses,
 };
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::cluster_node::ClusterNode;
 use crate::domain::runtime::delivery_endpoint::DeliveryEndpoint;
 use crate::domain::runtime::endpoint_delivery_status::EndpointDeliveryStatus;
 use crate::ports::inbound::control_plane_commands::ControlPlaneCommands;
-use crate::ports::outbound::runtime::cluster_control_event_sink::ClusterControlEventSink;
 use crate::ports::outbound::runtime::cluster_command_forwarder::ClusterCommandForwarder;
+use crate::ports::outbound::runtime::cluster_control_event_sink::ClusterControlEventSink;
 use crate::ports::outbound::runtime::cluster_forward_outcome_store::ClusterForwardOutcomeStore;
 use crate::ports::outbound::runtime::cluster_node_store::ClusterNodeStore;
 use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
@@ -57,7 +49,8 @@ where
     register_delivery_endpoint: RegisterDeliveryEndpoint<S>,
     set_delivery_endpoint_enabled: SetDeliveryEndpointEnabled<S>,
     list_delivery_endpoints: ListDeliveryEndpoints<S>,
-    get_endpoint_delivery_status: Option<GetEndpointDeliveryStatus<Arc<dyn EndpointDeliveryStatusStore>>>,
+    get_endpoint_delivery_status:
+        Option<GetEndpointDeliveryStatus<Arc<dyn EndpointDeliveryStatusStore>>>,
     list_endpoint_delivery_statuses:
         Option<ListEndpointDeliveryStatuses<Arc<dyn EndpointDeliveryStatusStore>>>,
     list_endpoint_diagnostics_read_model:
@@ -81,8 +74,7 @@ where
         Option<InitiateCoordinatorHandoff<Arc<dyn ClusterCommandForwarder>>>,
     initiate_coordinator_failover:
         Option<InitiateCoordinatorFailover<Arc<dyn ClusterCommandForwarder>>>,
-    rebalance_queue_ownership:
-        Option<RebalanceQueueOwnership<Arc<dyn ClusterCommandForwarder>>>,
+    rebalance_queue_ownership: Option<RebalanceQueueOwnership<Arc<dyn ClusterCommandForwarder>>>,
     list_cluster_forward_outcomes:
         Option<ListClusterForwardOutcomes<Arc<dyn ClusterForwardOutcomeStore>>>,
 }
@@ -172,8 +164,12 @@ where
             register_delivery_endpoint: RegisterDeliveryEndpoint::new(store.clone()),
             set_delivery_endpoint_enabled: SetDeliveryEndpointEnabled::new(store.clone()),
             list_delivery_endpoints: ListDeliveryEndpoints::new(list_delivery_store),
-            get_endpoint_delivery_status: Some(GetEndpointDeliveryStatus::new(status_store.clone())),
-            list_endpoint_delivery_statuses: Some(ListEndpointDeliveryStatuses::new(status_store.clone())),
+            get_endpoint_delivery_status: Some(GetEndpointDeliveryStatus::new(
+                status_store.clone(),
+            )),
+            list_endpoint_delivery_statuses: Some(ListEndpointDeliveryStatuses::new(
+                status_store.clone(),
+            )),
             list_endpoint_diagnostics_read_model: Some(ListEndpointDiagnosticsReadModel::new(
                 list_store.clone(),
                 status_store.clone(),
@@ -186,7 +182,9 @@ where
                 list_store,
                 status_store.clone(),
             )),
-            prune_endpoint_delivery_statuses: Some(PruneEndpointDeliveryStatuses::new(status_store)),
+            prune_endpoint_delivery_statuses: Some(PruneEndpointDeliveryStatuses::new(
+                status_store,
+            )),
             register_cluster_node: RegisterClusterNode::new(register_cluster_store),
             heartbeat_cluster_node: HeartbeatClusterNode::new(heartbeat_cluster_store),
             list_cluster_node_health: ListClusterNodeHealth::new(list_cluster_health_store),
@@ -217,8 +215,12 @@ where
             register_delivery_endpoint: RegisterDeliveryEndpoint::new(store.clone()),
             set_delivery_endpoint_enabled: SetDeliveryEndpointEnabled::new(store.clone()),
             list_delivery_endpoints: ListDeliveryEndpoints::new(list_delivery_store),
-            get_endpoint_delivery_status: Some(GetEndpointDeliveryStatus::new(status_store.clone())),
-            list_endpoint_delivery_statuses: Some(ListEndpointDeliveryStatuses::new(status_store.clone())),
+            get_endpoint_delivery_status: Some(GetEndpointDeliveryStatus::new(
+                status_store.clone(),
+            )),
+            list_endpoint_delivery_statuses: Some(ListEndpointDeliveryStatuses::new(
+                status_store.clone(),
+            )),
             list_endpoint_diagnostics_read_model: Some(ListEndpointDiagnosticsReadModel::new(
                 list_store.clone(),
                 status_store.clone(),
@@ -231,7 +233,9 @@ where
                 list_store,
                 status_store.clone(),
             )),
-            prune_endpoint_delivery_statuses: Some(PruneEndpointDeliveryStatuses::new(status_store)),
+            prune_endpoint_delivery_statuses: Some(PruneEndpointDeliveryStatuses::new(
+                status_store,
+            )),
             register_cluster_node: RegisterClusterNode::new(register_cluster_store),
             heartbeat_cluster_node: HeartbeatClusterNode::new(heartbeat_cluster_store),
             list_cluster_node_health: ListClusterNodeHealth::new(list_cluster_health_store),
@@ -259,8 +263,7 @@ where
             Some(InitiateCoordinatorHandoff::new(command_forwarder.clone()));
         self.initiate_coordinator_failover =
             Some(InitiateCoordinatorFailover::new(command_forwarder.clone()));
-        self.rebalance_queue_ownership =
-            Some(RebalanceQueueOwnership::new(command_forwarder));
+        self.rebalance_queue_ownership = Some(RebalanceQueueOwnership::new(command_forwarder));
         self
     }
 
@@ -365,11 +368,17 @@ where
         use_case.execute(request.updated_before).await
     }
 
-    pub async fn register_cluster_node(&self, request: RegisterClusterNodeRequest) -> Result<ClusterNode> {
+    pub async fn register_cluster_node(
+        &self,
+        request: RegisterClusterNodeRequest,
+    ) -> Result<ClusterNode> {
         self.register_cluster_node.execute(request).await
     }
 
-    pub async fn heartbeat_cluster_node(&self, request: HeartbeatClusterNodeRequest) -> Result<ClusterNode> {
+    pub async fn heartbeat_cluster_node(
+        &self,
+        request: HeartbeatClusterNodeRequest,
+    ) -> Result<ClusterNode> {
         self.heartbeat_cluster_node.execute(request).await
     }
 
@@ -535,11 +544,17 @@ where
         self.prune_endpoint_delivery_statuses(request).await
     }
 
-    async fn register_cluster_node(&self, request: RegisterClusterNodeRequest) -> Result<ClusterNode> {
+    async fn register_cluster_node(
+        &self,
+        request: RegisterClusterNodeRequest,
+    ) -> Result<ClusterNode> {
         self.register_cluster_node(request).await
     }
 
-    async fn heartbeat_cluster_node(&self, request: HeartbeatClusterNodeRequest) -> Result<ClusterNode> {
+    async fn heartbeat_cluster_node(
+        &self,
+        request: HeartbeatClusterNodeRequest,
+    ) -> Result<ClusterNode> {
         self.heartbeat_cluster_node(request).await
     }
 
@@ -612,22 +627,21 @@ mod tests {
     use crate::application::dto::{
         ForwardClusterCommandRequest, HeartbeatClusterNodeRequest,
         InitiateCoordinatorFailoverRequest, InitiateCoordinatorHandoffRequest,
-        ListClusterForwardOutcomesRequest, RebalanceQueueOwnershipRequest,
-        ListClusterNodeHealthRequest,
-        ListQueueOwnershipHealthRequest,
+        ListClusterForwardOutcomesRequest, ListClusterNodeHealthRequest,
         ListEndpointDiagnosticsReadModelRequest, ListEndpointFailureRateTrendsRequest,
-        ListTopUnhealthyEndpointsRequest, PruneEndpointDeliveryStatusesRequest,
-        PruneExpiredClusterNodesRequest, RegisterClusterNodeRequest,
-        RunClusterHeartbeatSweepRequest,
-        RegisterDeliveryEndpointRequest, SetDeliveryEndpointEnabledRequest,
+        ListQueueOwnershipHealthRequest, ListTopUnhealthyEndpointsRequest,
+        PruneEndpointDeliveryStatusesRequest, PruneExpiredClusterNodesRequest,
+        RebalanceQueueOwnershipRequest, RegisterClusterNodeRequest,
+        RegisterDeliveryEndpointRequest, RunClusterHeartbeatSweepRequest,
+        SetDeliveryEndpointEnabledRequest,
     };
     use crate::domain::runtime::cluster_node::{
         ClusterControlEvent, ClusterNodeHealth, ClusterNodeRole, QueueOwnershipMode,
     };
     use crate::domain::runtime::delivery_endpoint::DeliveryProtocol;
     use crate::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
-    use crate::infrastructure::runtime::in_memory_cluster_control_event_sink::InMemoryClusterControlEventSink;
     use crate::infrastructure::runtime::in_memory_cluster_command_forwarder::InMemoryClusterCommandForwarder;
+    use crate::infrastructure::runtime::in_memory_cluster_control_event_sink::InMemoryClusterControlEventSink;
     use crate::infrastructure::runtime::in_memory_cluster_forward_outcome_store::InMemoryClusterForwardOutcomeStore;
     use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
     use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
@@ -639,7 +653,8 @@ mod tests {
 
     use super::ControlPlaneSdk;
 
-    fn store() -> CompositeControlPlaneStore<InMemoryDeliveryEndpointStore, InMemoryClusterNodeStore> {
+    fn store() -> CompositeControlPlaneStore<InMemoryDeliveryEndpointStore, InMemoryClusterNodeStore>
+    {
         CompositeControlPlaneStore::new(
             InMemoryDeliveryEndpointStore::default(),
             InMemoryClusterNodeStore::default(),
@@ -743,10 +758,7 @@ mod tests {
             .await
             .expect("status record should succeed");
 
-        let sdk = ControlPlaneSdk::new_with_status_store(
-            store(),
-            status_store,
-        );
+        let sdk = ControlPlaneSdk::new_with_status_store(store(), status_store);
 
         let statuses = sdk
             .list_endpoint_delivery_statuses()
@@ -853,7 +865,10 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
-            ClusterControlEvent::ExpiredNodesPruned { pruned_count: 1, .. }
+            ClusterControlEvent::ExpiredNodesPruned {
+                pruned_count: 1,
+                ..
+            }
         ));
     }
 
@@ -935,15 +950,17 @@ mod tests {
     async fn control_plane_sdk_lists_cluster_forward_outcomes_when_configured() {
         let outcomes = Arc::new(InMemoryClusterForwardOutcomeStore::default());
         outcomes
-            .record(crate::domain::runtime::cluster_node::ClusterForwardOutcome {
-                target_region: "eu-west".to_string(),
-                command_name: "coordinator.handoff".to_string(),
-                correlation_id: Some("handoff-2".to_string()),
-                accepted: true,
-                attempts: 2,
-                error: None,
-                completed_at: Utc::now(),
-            })
+            .record(
+                crate::domain::runtime::cluster_node::ClusterForwardOutcome {
+                    target_region: "eu-west".to_string(),
+                    command_name: "coordinator.handoff".to_string(),
+                    correlation_id: Some("handoff-2".to_string()),
+                    accepted: true,
+                    attempts: 2,
+                    error: None,
+                    completed_at: Utc::now(),
+                },
+            )
             .await
             .expect("record should succeed");
 

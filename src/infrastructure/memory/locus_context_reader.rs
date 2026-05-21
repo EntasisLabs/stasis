@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use locus_core_rs::NodeStore;
 use locus_core_rs::domain::models::AvecState;
 use locus_sdk::prelude::{
-    FallbackPolicy, MemoryExplainRequest, MemoryExplainService, MemoryRecallRequest as LocusRecallRequest,
-    MemoryRecallService, MemoryScoring, StrictnessMode,
+    FallbackPolicy, MemoryExplainRequest, MemoryExplainService,
+    MemoryRecallRequest as LocusRecallRequest, MemoryRecallService, MemoryScoring, StrictnessMode,
 };
 
 use crate::domain::errors::{Result, StasisError};

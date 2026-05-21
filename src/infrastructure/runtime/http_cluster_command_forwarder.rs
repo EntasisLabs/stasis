@@ -64,7 +64,8 @@ impl HttpClusterCommandForwarder {
         region: impl Into<String>,
         endpoint_url: impl Into<String>,
     ) -> Self {
-        self.region_targets.insert(region.into(), endpoint_url.into());
+        self.region_targets
+            .insert(region.into(), endpoint_url.into());
         self
     }
 
@@ -220,10 +221,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
             );
             self.record_outcome(&command, false, 0, Some(err_msg.clone()))
                 .await;
-            return Err(StasisError::PortFailure(format!(
-                "{}",
-                err_msg
-            )));
+            return Err(StasisError::PortFailure(format!("{}", err_msg)));
         };
 
         let request_body = ForwardCommandPayload {
@@ -275,10 +273,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                         );
                         self.record_outcome(&command, false, attempt, Some(err_msg.clone()))
                             .await;
-                        return Err(StasisError::PortFailure(format!(
-                            "{}",
-                            err_msg
-                        )));
+                        return Err(StasisError::PortFailure(format!("{}", err_msg)));
                     }
 
                     if let Some(metrics) = &self.metrics {
@@ -302,10 +297,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                     );
                     self.record_outcome(&command, false, attempt, Some(err_msg.clone()))
                         .await;
-                    return Err(StasisError::PortFailure(format!(
-                        "{}",
-                        err_msg
-                    )));
+                    return Err(StasisError::PortFailure(format!("{}", err_msg)));
                 }
                 Err(err) => {
                     if attempt == self.max_attempts {
@@ -318,15 +310,11 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                         }
                         let err_msg = format!(
                             "cluster forward request failed region={} command={} error={err}",
-                            command.target_region,
-                            command.command_name
+                            command.target_region, command.command_name
                         );
                         self.record_outcome(&command, false, attempt, Some(err_msg.clone()))
                             .await;
-                        return Err(StasisError::PortFailure(format!(
-                            "{}",
-                            err_msg
-                        )));
+                        return Err(StasisError::PortFailure(format!("{}", err_msg)));
                     }
 
                     if let Some(metrics) = &self.metrics {
@@ -355,16 +343,15 @@ mod tests {
 
     use chrono::Utc;
 
-    use crate::infrastructure::runtime::in_memory_runtime_metrics::InMemoryRuntimeMetrics;
     use crate::domain::runtime::cluster_node::ClusterForwardCommand;
+    use crate::infrastructure::runtime::in_memory_runtime_metrics::InMemoryRuntimeMetrics;
     use crate::ports::outbound::runtime::cluster_command_forwarder::ClusterCommandForwarder;
 
     use super::HttpClusterCommandForwarder;
     use super::{
         CLUSTER_FORWARD_ATTEMPTS_TOTAL, CLUSTER_FORWARD_FAILURES_TOTAL,
         CLUSTER_FORWARD_IDEMPOTENT_HITS_TOTAL, CLUSTER_FORWARD_NO_ROUTE_TOTAL,
-        CLUSTER_FORWARD_RETRIES_TOTAL,
-        CLUSTER_FORWARD_SUCCESSES_TOTAL,
+        CLUSTER_FORWARD_RETRIES_TOTAL, CLUSTER_FORWARD_SUCCESSES_TOTAL,
     };
 
     async fn start_sequence_server(status_codes: Vec<u16>) -> String {
@@ -415,8 +402,8 @@ mod tests {
 
     #[test]
     fn backoff_scales_exponentially_with_cap() {
-        let forwarder = HttpClusterCommandForwarder::new(BTreeMap::new())
-            .with_retry_policy(5, 100, 250);
+        let forwarder =
+            HttpClusterCommandForwarder::new(BTreeMap::new()).with_retry_policy(5, 100, 250);
 
         assert_eq!(forwarder.compute_backoff_millis(1), 100);
         assert_eq!(forwarder.compute_backoff_millis(2), 200);
@@ -426,8 +413,8 @@ mod tests {
 
     #[test]
     fn retry_policy_normalizes_invalid_inputs() {
-        let forwarder = HttpClusterCommandForwarder::new(BTreeMap::new())
-            .with_retry_policy(0, 0, 0);
+        let forwarder =
+            HttpClusterCommandForwarder::new(BTreeMap::new()).with_retry_policy(0, 0, 0);
 
         assert_eq!(forwarder.max_attempts, 1);
         assert_eq!(forwarder.base_backoff_ms, 1);
@@ -465,15 +452,25 @@ mod tests {
         assert!(accepted);
 
         let snapshot = metrics.snapshot();
-        assert_eq!(snapshot.counters.get(CLUSTER_FORWARD_ATTEMPTS_TOTAL), Some(&2));
-        assert_eq!(snapshot.counters.get(CLUSTER_FORWARD_RETRIES_TOTAL), Some(&1));
-        assert_eq!(snapshot.counters.get(CLUSTER_FORWARD_SUCCESSES_TOTAL), Some(&1));
+        assert_eq!(
+            snapshot.counters.get(CLUSTER_FORWARD_ATTEMPTS_TOTAL),
+            Some(&2)
+        );
+        assert_eq!(
+            snapshot.counters.get(CLUSTER_FORWARD_RETRIES_TOTAL),
+            Some(&1)
+        );
+        assert_eq!(
+            snapshot.counters.get(CLUSTER_FORWARD_SUCCESSES_TOTAL),
+            Some(&1)
+        );
     }
 
     #[tokio::test]
     async fn records_no_route_and_failure_metrics_when_region_is_missing() {
         let metrics = Arc::new(InMemoryRuntimeMetrics::default());
-        let forwarder = HttpClusterCommandForwarder::new(BTreeMap::new()).with_metrics(metrics.clone());
+        let forwarder =
+            HttpClusterCommandForwarder::new(BTreeMap::new()).with_metrics(metrics.clone());
 
         let _ = forwarder
             .forward(sample_command())
@@ -481,8 +478,14 @@ mod tests {
             .expect_err("expected no-route error");
 
         let snapshot = metrics.snapshot();
-        assert_eq!(snapshot.counters.get(CLUSTER_FORWARD_NO_ROUTE_TOTAL), Some(&1));
-        assert_eq!(snapshot.counters.get(CLUSTER_FORWARD_FAILURES_TOTAL), Some(&1));
+        assert_eq!(
+            snapshot.counters.get(CLUSTER_FORWARD_NO_ROUTE_TOTAL),
+            Some(&1)
+        );
+        assert_eq!(
+            snapshot.counters.get(CLUSTER_FORWARD_FAILURES_TOTAL),
+            Some(&1)
+        );
     }
 
     #[tokio::test]
@@ -506,7 +509,10 @@ mod tests {
         assert!(second);
 
         let snapshot = metrics.snapshot();
-        assert_eq!(snapshot.counters.get(CLUSTER_FORWARD_ATTEMPTS_TOTAL), Some(&1));
+        assert_eq!(
+            snapshot.counters.get(CLUSTER_FORWARD_ATTEMPTS_TOTAL),
+            Some(&1)
+        );
         assert_eq!(
             snapshot.counters.get(CLUSTER_FORWARD_IDEMPOTENT_HITS_TOTAL),
             Some(&1)

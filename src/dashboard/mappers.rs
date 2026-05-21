@@ -16,7 +16,10 @@ pub fn map_job_to_row(job: &Job) -> JobRowDto {
         attempts: job.attempts,
         lease_owner: job.lease_owner.clone(),
         trace_id: job.trace_id.clone(),
-        updated_at: job.heartbeat_at.or(job.finished_at).unwrap_or(job.scheduled_at),
+        updated_at: job
+            .heartbeat_at
+            .or(job.finished_at)
+            .unwrap_or(job.scheduled_at),
     }
 }
 

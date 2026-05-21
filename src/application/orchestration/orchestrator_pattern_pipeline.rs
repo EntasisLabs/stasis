@@ -42,8 +42,12 @@ impl OrchestratorPatternPipeline {
         Self { prompt_pipeline }
     }
 
-    pub async fn execute(&self, request: OrchestratorPatternExecutionRequest) -> Result<OrchestratorPatternExecutionResponse> {
-        let (route, selection_reason) = Self::select_route(&request.initial_user_prompt, &request.routes)?;
+    pub async fn execute(
+        &self,
+        request: OrchestratorPatternExecutionRequest,
+    ) -> Result<OrchestratorPatternExecutionResponse> {
+        let (route, selection_reason) =
+            Self::select_route(&request.initial_user_prompt, &request.routes)?;
 
         let rendered_prompt = route
             .user_prompt_template
@@ -94,7 +98,10 @@ impl OrchestratorPatternPipeline {
                 continue;
             }
 
-            if best.map(|(_, best_score)| score > best_score).unwrap_or(true) {
+            if best
+                .map(|(_, best_score)| score > best_score)
+                .unwrap_or(true)
+            {
                 best = Some((route, score));
             }
         }

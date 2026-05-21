@@ -64,12 +64,19 @@ impl GraphemeJobHandler {
         "EXECUTION_ERROR"
     }
 
-    fn build_success_diagnostics(duration_ms: u128, execution_id: &str) -> String {
+    fn build_success_diagnostics(
+        duration_ms: u128,
+        execution_id: &str,
+        execution: &serde_json::Value,
+        final_state: &serde_json::Value,
+    ) -> String {
         json!({
             "provider": "grapheme-sdk",
             "status": "success",
             "duration_ms": duration_ms,
-            "execution_id": execution_id
+            "execution_id": execution_id,
+            "execution": execution,
+            "final_state": final_state
         })
         .to_string()
     }
@@ -121,7 +128,12 @@ impl JobHandler for GraphemeJobHandler {
                 Ok(JobExecutionOutcome::Success {
                     sttp_output_node_id: format!("sttp:{}:{}", output.run_id, job.id),
                     execution_id: Some(output.run_id.clone()),
-                    diagnostics: Some(Self::build_success_diagnostics(duration_ms, &output.run_id)),
+                    diagnostics: Some(Self::build_success_diagnostics(
+                        duration_ms,
+                        &output.run_id,
+                        &output.execution,
+                        &output.final_state,
+                    )),
                 })
             }
             Err(err) => {

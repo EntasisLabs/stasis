@@ -2,6 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
+use stasis::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
 use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
 use stasis::prelude::{
     BackoffPolicy, ControlPlaneSdk, DeliveryEndpoint, DeliveryEndpointStore, DeliveryProtocol,
@@ -10,7 +11,6 @@ use stasis::prelude::{
     RuntimeBackend, RuntimeComposition, StasisRuntimeBuilder, SurrealClusterNodeStore,
     SurrealDeliveryEndpointStore, SurrealEndpointDeliveryStatusStore,
 };
-use stasis::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
 
 #[derive(Clone)]
 struct SuccessHandler;
@@ -21,7 +21,10 @@ impl JobHandler for SuccessHandler {
         "test.success"
     }
 
-    async fn execute(&self, _job: &stasis::domain::runtime::job::Job) -> stasis::prelude::Result<JobExecutionOutcome> {
+    async fn execute(
+        &self,
+        _job: &stasis::domain::runtime::job::Job,
+    ) -> stasis::prelude::Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
             sttp_output_node_id: "sttp:out:surreal-e2e".to_string(),
             execution_id: Some("exec:surreal-e2e".to_string()),
@@ -46,10 +49,9 @@ impl EndpointTransportPublisher for RecordingTransport {
         endpoint: &DeliveryEndpoint,
         _event: &OutboxEvent,
     ) -> stasis::prelude::Result<()> {
-        let mut calls = self
-            .calls
-            .write()
-            .map_err(|_| stasis::prelude::StasisError::PortFailure("calls lock poisoned".to_string()))?;
+        let mut calls = self.calls.write().map_err(|_| {
+            stasis::prelude::StasisError::PortFailure("calls lock poisoned".to_string())
+        })?;
         calls.push(endpoint.endpoint_id.clone());
         Ok(())
     }
@@ -138,7 +140,8 @@ async fn surreal_runtime_persists_endpoint_delivery_status_and_control_plane_que
         .await
         .expect("outbox list should succeed");
     assert_eq!(
-        published, 1,
+        published,
+        1,
         "expected one published event, outbox={:?}",
         outbox_events
             .iter()

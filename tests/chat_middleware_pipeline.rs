@@ -21,7 +21,9 @@ use stasis::domain::runtime::job::JobState;
 use stasis::infrastructure::runtime::in_memory_ai_chat_response_cache::InMemoryAiChatResponseCache;
 use stasis::infrastructure::runtime::in_memory_runtime_metrics::InMemoryRuntimeMetrics;
 use stasis::ports::outbound::ai_chat_client::AiChatClient;
-use stasis::ports::outbound::ai_chat_tool_interceptor::{AiChatToolInterceptor, AiToolCallEnvelope};
+use stasis::ports::outbound::ai_chat_tool_interceptor::{
+    AiChatToolInterceptor, AiToolCallEnvelope,
+};
 use stasis::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use stasis::ports::outbound::runtime::job_store::JobStore;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -34,10 +36,16 @@ struct RecordingChatClient {
 
 #[async_trait]
 impl AiChatClient for RecordingChatClient {
-    async fn complete(&self, _request: ChatRequest, _options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        _request: ChatRequest,
+        _options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         self.events.lock().await.push("base".to_string());
         if self.fail {
-            return Err(StasisError::PortFailure("synthetic middleware failure".to_string()));
+            return Err(StasisError::PortFailure(
+                "synthetic middleware failure".to_string(),
+            ));
         }
 
         Ok(ChatResponse {
@@ -102,7 +110,11 @@ impl ModelToolCallClient {
 
 #[async_trait]
 impl AiChatClient for ModelToolCallClient {
-    async fn complete(&self, _request: ChatRequest, _options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        _request: ChatRequest,
+        _options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         let call_index = self.call_count.fetch_add(1, Ordering::SeqCst);
         if call_index == 0 {
             return Ok(ChatResponse {
@@ -133,7 +145,11 @@ impl AiChatClient for ModelToolCallClient {
 
 #[async_trait]
 impl AiChatClient for RecordingMiddlewareClient {
-    async fn complete(&self, request: ChatRequest, options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         self.events
             .lock()
             .await
@@ -403,8 +419,14 @@ async fn runtime_builder_telemetry_and_cache_middlewares_emit_metrics() {
     let snapshot = metrics.snapshot();
     assert_eq!(snapshot.counters.get(CHAT_REQUESTS_TOTAL).copied(), Some(2));
     assert_eq!(snapshot.counters.get(CHAT_ERRORS_TOTAL).copied(), None);
-    assert_eq!(snapshot.counters.get(CHAT_CACHE_MISS_TOTAL).copied(), Some(1));
-    assert_eq!(snapshot.counters.get(CHAT_CACHE_HIT_TOTAL).copied(), Some(1));
+    assert_eq!(
+        snapshot.counters.get(CHAT_CACHE_MISS_TOTAL).copied(),
+        Some(1)
+    );
+    assert_eq!(
+        snapshot.counters.get(CHAT_CACHE_HIT_TOTAL).copied(),
+        Some(1)
+    );
 
     let durations = snapshot
         .durations_ms
@@ -435,9 +457,15 @@ async fn tool_call_interception_middleware_emits_envelope_and_metrics() {
     let envelopes = interceptor.envelopes.lock().await.clone();
     assert_eq!(envelopes.len(), 1);
     assert_eq!(envelopes[0].tool_call_count, 1);
-    assert_eq!(envelopes[0].tool_names, vec!["stasis.web.search.mock".to_string()]);
+    assert_eq!(
+        envelopes[0].tool_names,
+        vec!["stasis.web.search.mock".to_string()]
+    );
     assert!(!envelopes[0].request_fingerprint.is_empty());
 
     let snapshot = metrics.snapshot();
-    assert_eq!(snapshot.counters.get(CHAT_TOOL_CALLS_TOTAL).copied(), Some(1));
+    assert_eq!(
+        snapshot.counters.get(CHAT_TOOL_CALLS_TOTAL).copied(),
+        Some(1)
+    );
 }

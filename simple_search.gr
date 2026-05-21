@@ -1,0 +1,4 @@
+glyph Some {
+    websearch.search(query: "Rust async")
+    |> core.echo(message: $current.body)
+}

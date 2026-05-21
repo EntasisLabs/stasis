@@ -14,19 +14,17 @@ pub struct InMemoryClusterForwardOutcomeStore {
 #[async_trait]
 impl ClusterForwardOutcomeStore for InMemoryClusterForwardOutcomeStore {
     async fn record(&self, outcome: ClusterForwardOutcome) -> Result<()> {
-        let mut outcomes = self
-            .outcomes
-            .write()
-            .map_err(|_| StasisError::PortFailure("cluster forward outcome lock poisoned".to_string()))?;
+        let mut outcomes = self.outcomes.write().map_err(|_| {
+            StasisError::PortFailure("cluster forward outcome lock poisoned".to_string())
+        })?;
         outcomes.push(outcome);
         Ok(())
     }
 
     async fn list_recent(&self, limit: usize) -> Result<Vec<ClusterForwardOutcome>> {
-        let outcomes = self
-            .outcomes
-            .read()
-            .map_err(|_| StasisError::PortFailure("cluster forward outcome lock poisoned".to_string()))?;
+        let outcomes = self.outcomes.read().map_err(|_| {
+            StasisError::PortFailure("cluster forward outcome lock poisoned".to_string())
+        })?;
 
         let take = limit.min(outcomes.len());
         Ok(outcomes

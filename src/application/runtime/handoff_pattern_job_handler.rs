@@ -43,12 +43,7 @@ impl HandoffPatternJobHandler {
         let Some(store) = &self.thread_store else {
             return;
         };
-        let exists = store
-            .get_thread(thread_id)
-            .await
-            .ok()
-            .flatten()
-            .is_some();
+        let exists = store.get_thread(thread_id).await.ok().flatten().is_some();
         if exists {
             return;
         }
@@ -87,8 +82,9 @@ impl HandoffPatternJobHandler {
     }
 
     fn parse_payload(raw: &str) -> std::result::Result<HandoffPatternJobPayload, String> {
-        let payload: HandoffPatternJobPayload = serde_json::from_str(raw)
-            .map_err(|err| format!("policy violation: invalid handoff-pattern payload json: {err}"))?;
+        let payload: HandoffPatternJobPayload = serde_json::from_str(raw).map_err(|err| {
+            format!("policy violation: invalid handoff-pattern payload json: {err}")
+        })?;
 
         if payload.initial_user_prompt.trim().is_empty() {
             return Err(

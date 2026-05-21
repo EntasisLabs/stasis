@@ -8,8 +8,7 @@ use crate::application::orchestration::agent_session_payload::{
     OrchestratorPatternJobPayload, OrchestratorRouteJobPayload,
 };
 use crate::application::orchestration::orchestrator_pattern_pipeline::{
-    OrchestratorPatternExecutionRequest, OrchestratorPatternPipeline,
-    OrchestratorPatternRoute,
+    OrchestratorPatternExecutionRequest, OrchestratorPatternPipeline, OrchestratorPatternRoute,
 };
 use crate::application::orchestration::prompt_pipeline::PromptExecutionPipeline;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
@@ -44,12 +43,7 @@ impl OrchestratorPatternJobHandler {
         let Some(store) = &self.thread_store else {
             return;
         };
-        let exists = store
-            .get_thread(thread_id)
-            .await
-            .ok()
-            .flatten()
-            .is_some();
+        let exists = store.get_thread(thread_id).await.ok().flatten().is_some();
         if exists {
             return;
         }
@@ -216,7 +210,10 @@ impl JobHandler for OrchestratorPatternJobHandler {
             format!("{}:orchestrator:selected", job.id),
             &thread_id,
             "orchestration.orchestrator.completed",
-            format!("route={} reason={}", response.selected_route_id, response.selection_reason),
+            format!(
+                "route={} reason={}",
+                response.selected_route_id, response.selection_reason
+            ),
             Utc::now(),
         )
         .await;

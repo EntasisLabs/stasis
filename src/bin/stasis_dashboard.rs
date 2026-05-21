@@ -5,11 +5,11 @@ use chrono::{Duration, Utc};
 use stasis::dashboard::{DashboardState, InMemoryDashboardQueryService, router};
 use stasis::domain::runtime::job::Job;
 use stasis::prelude::{
-    BackoffPolicy, ClusterNodeRole, CompositeControlPlaneStore, ControlPlaneSdk,
-    DeliveryProtocol, EndpointDeliveryStatusStore, HeartbeatClusterNodeRequest,
-    InMemoryClusterNodeStore, InMemoryDeliveryEndpointStore,
-    InMemoryEndpointDeliveryStatusStore, InMemoryRuntime, JobExecutionOutcome,
-    JobHandler, NewJob, RegisterClusterNodeRequest, RegisterDeliveryEndpointRequest,
+    BackoffPolicy, ClusterNodeRole, CompositeControlPlaneStore, ControlPlaneSdk, DeliveryProtocol,
+    EndpointDeliveryStatusStore, HeartbeatClusterNodeRequest, InMemoryClusterNodeStore,
+    InMemoryDeliveryEndpointStore, InMemoryEndpointDeliveryStatusStore, InMemoryRuntime,
+    JobExecutionOutcome, JobHandler, NewJob, RegisterClusterNodeRequest,
+    RegisterDeliveryEndpointRequest,
 };
 
 #[derive(Clone)]
@@ -21,10 +21,7 @@ impl JobHandler for DemoSuccessHandler {
         "demo.success"
     }
 
-    async fn execute(
-        &self,
-        _job: &Job,
-    ) -> stasis::prelude::Result<JobExecutionOutcome> {
+    async fn execute(&self, _job: &Job) -> stasis::prelude::Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
             sttp_output_node_id: "sttp:out:demo-success".to_string(),
             execution_id: Some("exec-demo-success".to_string()),
@@ -42,10 +39,7 @@ impl JobHandler for DemoFatalHandler {
         "demo.fatal"
     }
 
-    async fn execute(
-        &self,
-        _job: &Job,
-    ) -> stasis::prelude::Result<JobExecutionOutcome> {
+    async fn execute(&self, _job: &Job) -> stasis::prelude::Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::FatalFailure {
             message: "demo fatal crash".to_string(),
             execution_id: Some("exec-demo-fatal".to_string()),
@@ -136,7 +130,9 @@ async fn seed_runtime_data(runtime: &InMemoryRuntime) {
 }
 
 async fn seed_control_plane_data(
-    control_plane: &ControlPlaneSdk<CompositeControlPlaneStore<InMemoryDeliveryEndpointStore, InMemoryClusterNodeStore>>,
+    control_plane: &ControlPlaneSdk<
+        CompositeControlPlaneStore<InMemoryDeliveryEndpointStore, InMemoryClusterNodeStore>,
+    >,
     endpoint_status_store: Arc<InMemoryEndpointDeliveryStatusStore>,
 ) {
     let now = Utc::now();
@@ -230,10 +226,8 @@ async fn main() {
     let cluster_store = InMemoryClusterNodeStore::default();
     let endpoint_status_store = Arc::new(InMemoryEndpointDeliveryStatusStore::default());
     let control_store = CompositeControlPlaneStore::new(endpoint_store, cluster_store);
-    let control_plane = ControlPlaneSdk::new_with_status_store(
-        control_store,
-        endpoint_status_store.clone(),
-    );
+    let control_plane =
+        ControlPlaneSdk::new_with_status_store(control_store, endpoint_status_store.clone());
 
     seed_control_plane_data(&control_plane, endpoint_status_store).await;
 
@@ -243,7 +237,11 @@ async fn main() {
     let addr: SocketAddr = std::env::var("STASIS_DASHBOARD_ADDR")
         .ok()
         .and_then(|raw| raw.parse().ok())
-        .unwrap_or_else(|| "127.0.0.1:3007".parse().expect("valid dashboard bind address"));
+        .unwrap_or_else(|| {
+            "127.0.0.1:3007"
+                .parse()
+                .expect("valid dashboard bind address")
+        });
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

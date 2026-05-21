@@ -13,10 +13,9 @@ pub struct InMemoryClusterCommandForwarder {
 
 impl InMemoryClusterCommandForwarder {
     pub fn forwarded_commands(&self) -> Result<Vec<ClusterForwardCommand>> {
-        let commands = self
-            .commands
-            .read()
-            .map_err(|_| StasisError::PortFailure("cluster command forwarder lock poisoned".to_string()))?;
+        let commands = self.commands.read().map_err(|_| {
+            StasisError::PortFailure("cluster command forwarder lock poisoned".to_string())
+        })?;
         Ok(commands.clone())
     }
 }
@@ -24,10 +23,9 @@ impl InMemoryClusterCommandForwarder {
 #[async_trait]
 impl ClusterCommandForwarder for InMemoryClusterCommandForwarder {
     async fn forward(&self, command: ClusterForwardCommand) -> Result<bool> {
-        let mut commands = self
-            .commands
-            .write()
-            .map_err(|_| StasisError::PortFailure("cluster command forwarder lock poisoned".to_string()))?;
+        let mut commands = self.commands.write().map_err(|_| {
+            StasisError::PortFailure("cluster command forwarder lock poisoned".to_string())
+        })?;
         commands.push(command);
         Ok(true)
     }

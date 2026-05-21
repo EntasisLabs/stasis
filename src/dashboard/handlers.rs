@@ -2,19 +2,18 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use askama::Template;
+use axum::Router;
 use axum::extract::{Json, Path, Query, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use axum::Router;
 use chrono::Utc;
 use serde::Deserialize;
 
 use crate::dashboard::assets;
 use crate::dashboard::dto::{
     ClusterNodeCardDto, DashboardDto, EndpointInspectorDto, EventInspectorDto, InspectorView,
-    JobInspectorDto, JobRowDto, NodeInspectorDto, OutboxEventRowDto,
-    RecurringDefinitionRowDto,
+    JobInspectorDto, JobRowDto, NodeInspectorDto, OutboxEventRowDto, RecurringDefinitionRowDto,
 };
 use crate::dashboard::service::{DashboardQueryService, InspectEntity};
 
@@ -42,10 +41,22 @@ pub fn router(state: DashboardState) -> Router {
         .route("/inspect/node/{id}", get(inspect_node))
         .route("/inspect/endpoint/{id}", get(inspect_endpoint))
         .route("/inspect/event/{id}", get(inspect_event))
-        .route("/action/scheduler/materialize", post(action_scheduler_materialize))
-        .route("/action/scheduler/process", post(action_scheduler_process_queue))
-        .route("/action/scheduler/publish", post(action_scheduler_publish_pending))
-        .route("/action/scheduler/replay", post(action_scheduler_replay_deadletter))
+        .route(
+            "/action/scheduler/materialize",
+            post(action_scheduler_materialize),
+        )
+        .route(
+            "/action/scheduler/process",
+            post(action_scheduler_process_queue),
+        )
+        .route(
+            "/action/scheduler/publish",
+            post(action_scheduler_publish_pending),
+        )
+        .route(
+            "/action/scheduler/replay",
+            post(action_scheduler_replay_deadletter),
+        )
         .route("/action/workflows/save", post(action_workflow_save))
         .route("/action/workflows/execute", post(action_workflow_execute))
         .route("/assets/{name}", get(asset))
@@ -72,7 +83,11 @@ async fn stream_jobs(
 async fn stream_outbox(
     State(state): State<DashboardState>,
 ) -> Result<Html<String>, (StatusCode, String)> {
-    let panel = state.service.outbox_stream().await.map_err(internal_error)?;
+    let panel = state
+        .service
+        .outbox_stream()
+        .await
+        .map_err(internal_error)?;
     render_template(OutboxStreamTemplate {
         events: panel.items,
     })
@@ -96,14 +111,30 @@ async fn view_section(
 ) -> Result<Html<String>, (StatusCode, String)> {
     match name.as_str() {
         "jobs" => {
-            let dto = state.service.dashboard(None).await.map_err(internal_error)?;
+            let dto = state
+                .service
+                .dashboard(None)
+                .await
+                .map_err(internal_error)?;
             render_template(JobsViewTemplate { dto })
         }
         "endpoints" => {
-            let panel = state.service.endpoint_stream().await.map_err(internal_error)?;
+            let panel = state
+                .service
+                .endpoint_stream()
+                .await
+                .map_err(internal_error)?;
             let total = panel.items.len();
-            let unhealthy_count = panel.items.iter().filter(|endpoint| endpoint.unhealthy).count();
-            let disabled_count = panel.items.iter().filter(|endpoint| !endpoint.enabled).count();
+            let unhealthy_count = panel
+                .items
+                .iter()
+                .filter(|endpoint| endpoint.unhealthy)
+                .count();
+            let disabled_count = panel
+                .items
+                .iter()
+                .filter(|endpoint| !endpoint.enabled)
+                .count();
             let total_deliveries = panel
                 .items
                 .iter()
@@ -155,7 +186,11 @@ async fn view_section(
             })
         }
         "cluster" => {
-            let cluster = state.service.cluster_stream().await.map_err(internal_error)?;
+            let cluster = state
+                .service
+                .cluster_stream()
+                .await
+                .map_err(internal_error)?;
             let total_nodes = cluster.nodes.len();
             let worker_nodes = cluster
                 .nodes
@@ -229,7 +264,11 @@ async fn view_section(
             })
         }
         "outbox" => {
-            let outbox = state.service.outbox_stream().await.map_err(internal_error)?;
+            let outbox = state
+                .service
+                .outbox_stream()
+                .await
+                .map_err(internal_error)?;
             render_template(OutboxViewTemplate {
                 events: outbox.items,
             })
@@ -248,16 +287,18 @@ async fn view_section(
 
             let mut lanes: BTreeMap<String, WorkflowLaneDto> = BTreeMap::new();
             for job in jobs.items {
-                let lane = lanes.entry(job.queue.clone()).or_insert_with(|| WorkflowLaneDto {
-                    workflow_id: format!("wf-{}", job.queue.replace('.', "-")),
-                    workflow_name: format!("{} Pipeline", job.queue),
-                    lane: job.queue.clone(),
-                    total_jobs: 0,
-                    running_jobs: 0,
-                    succeeded_jobs: 0,
-                    failed_jobs: 0,
-                    selected: false,
-                });
+                let lane = lanes
+                    .entry(job.queue.clone())
+                    .or_insert_with(|| WorkflowLaneDto {
+                        workflow_id: format!("wf-{}", job.queue.replace('.', "-")),
+                        workflow_name: format!("{} Pipeline", job.queue),
+                        lane: job.queue.clone(),
+                        total_jobs: 0,
+                        running_jobs: 0,
+                        succeeded_jobs: 0,
+                        failed_jobs: 0,
+                        selected: false,
+                    });
 
                 lane.total_jobs += 1;
                 match job.status.as_str() {
@@ -268,10 +309,7 @@ async fn view_section(
                 }
             }
 
-            let selected_queue = query
-                .queue
-                .clone()
-                .or_else(|| lanes.keys().next().cloned());
+            let selected_queue = query.queue.clone().or_else(|| lanes.keys().next().cloned());
 
             let mut lane_rows = lanes.into_values().collect::<Vec<_>>();
             lane_rows.sort_by(|left, right| left.lane.cmp(&right.lane));
@@ -292,7 +330,9 @@ async fn view_section(
                 .as_ref()
                 .map(|lane| lane.workflow_id.clone())
                 .unwrap_or_else(|| "wf-none".to_string());
-            let selected_queue_name = selected_queue.clone().unwrap_or_else(|| "default".to_string());
+            let selected_queue_name = selected_queue
+                .clone()
+                .unwrap_or_else(|| "default".to_string());
 
             let stages = if let Some(lane) = selected {
                 vec![
@@ -333,13 +373,19 @@ async fn view_section(
                 lanes: lane_rows,
                 selected_workflow_name: selected_name,
                 selected_workflow_id: selected_id,
-                selected_queue: selected_queue.clone().unwrap_or_else(|| "default".to_string()),
+                selected_queue: selected_queue
+                    .clone()
+                    .unwrap_or_else(|| "default".to_string()),
                 stages,
                 dsl_preview,
             })
         }
         "lineage" => {
-            let outbox = state.service.outbox_stream().await.map_err(internal_error)?;
+            let outbox = state
+                .service
+                .outbox_stream()
+                .await
+                .map_err(internal_error)?;
             let jobs = state.service.jobs_stream().await.map_err(internal_error)?;
 
             let mut events = outbox
@@ -362,7 +408,12 @@ async fn view_section(
                 }
             }
 
-            if let Some(text) = query.q.as_ref().map(|value| value.trim()).filter(|v| !v.is_empty()) {
+            if let Some(text) = query
+                .q
+                .as_ref()
+                .map(|value| value.trim())
+                .filter(|v| !v.is_empty())
+            {
                 let needle = text.to_lowercase();
                 events.retain(|event| {
                     event.event_id.to_lowercase().contains(&needle)
@@ -416,20 +467,29 @@ async fn view_section(
             })
         }
         "scheduler" => {
-            let dashboard = state.service.dashboard(None).await.map_err(internal_error)?;
-            let recurring = state.service.recurring_stream().await.map_err(internal_error)?;
+            let dashboard = state
+                .service
+                .dashboard(None)
+                .await
+                .map_err(internal_error)?;
+            let recurring = state
+                .service
+                .recurring_stream()
+                .await
+                .map_err(internal_error)?;
             let mut queue_rows: BTreeMap<String, SchedulerQueueDto> = BTreeMap::new();
 
             for job in dashboard.job_stream.items {
-                let row = queue_rows
-                    .entry(job.queue.clone())
-                    .or_insert_with(|| SchedulerQueueDto {
-                        queue: job.queue.clone(),
-                        enqueued_jobs: 0,
-                        running_jobs: 0,
-                        blocked_jobs: 0,
-                        completed_jobs: 0,
-                    });
+                let row =
+                    queue_rows
+                        .entry(job.queue.clone())
+                        .or_insert_with(|| SchedulerQueueDto {
+                            queue: job.queue.clone(),
+                            enqueued_jobs: 0,
+                            running_jobs: 0,
+                            blocked_jobs: 0,
+                            completed_jobs: 0,
+                        });
 
                 match job.status.as_str() {
                     "enqueued" => row.enqueued_jobs += 1,
@@ -625,8 +685,7 @@ async fn action_workflow_save(
         title: "Workflow Saved".to_string(),
         detail: format!(
             "persisted {} for queue {}",
-            payload.workflow_id,
-            payload.queue
+            payload.workflow_id, payload.queue
         ),
         kind: "ok".to_string(),
     })
@@ -695,7 +754,10 @@ async fn asset(Path(name): Path<String>) -> Response {
 }
 
 fn internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, format!("dashboard error: {err}"))
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("dashboard error: {err}"),
+    )
 }
 
 fn render_template<T: Template>(template: T) -> Result<Html<String>, (StatusCode, String)> {

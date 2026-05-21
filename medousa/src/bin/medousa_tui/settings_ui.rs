@@ -45,7 +45,7 @@ pub(crate) async fn handle_settings_key_event(
             state.settings_selected = state.settings_selected.saturating_sub(1);
         }
         KeyCode::Down => {
-            state.settings_selected = (state.settings_selected + 1).min(15);
+            state.settings_selected = (state.settings_selected + 1).min(16);
         }
         KeyCode::Enter => match state.settings_selected {
             1..=5 => {
@@ -55,16 +55,20 @@ pub(crate) async fn handle_settings_key_event(
                 quick_adjust_setting(state, true);
             }
             10 => {
-                emit_settings_validation_summary(state);
+                state.mode = UiMode::RuntimeEnv;
+                state.runtime_env_editing = true;
             }
             11 => {
+                emit_settings_validation_summary(state);
+            }
+            12 => {
                 state.settings_draft.api_key.clear();
                 push_obs(
                     state,
                     "✓ settings draft: api key marked for clear".to_string(),
                 );
             }
-            12 => {
+            13 => {
                 let key = state.settings_draft.api_key.trim().to_string();
                 if key.is_empty() {
                     push_obs(
@@ -78,7 +82,7 @@ pub(crate) async fn handle_settings_key_event(
                     push_obs(state, "✓ api key rotated in secure storage".to_string());
                 }
             }
-            13 => {
+            14 => {
                 state.settings_draft = state.settings.clone();
                 state.settings_editing = false;
                 push_obs(
@@ -86,11 +90,11 @@ pub(crate) async fn handle_settings_key_event(
                     "✓ settings draft reverted to last applied".to_string(),
                 );
             }
-            14 => {
+            15 => {
                 super::apply_settings(state, tui_rt, event_tx).await;
                 state.mode = UiMode::Chat;
             }
-            15 => {
+            16 => {
                 state.settings_draft = state.settings.clone();
                 state.mode = UiMode::Chat;
             }
@@ -188,6 +192,18 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
             "Thinking Max Lines: {}  [number]",
             state.settings_draft.thinking_max_lines
         ),
+        format!(
+            "Runtime/Env Variables Submenu: {} line(s)  [open]",
+            state
+                .settings_draft
+                .env_overrides
+                .lines()
+                .filter(|line| {
+                    let trimmed = line.trim();
+                    !trimmed.is_empty() && !trimmed.starts_with('#')
+                })
+                .count()
+        ),
         "Validate Draft  [action]".to_string(),
         "Clear API Key (Draft)  [action]".to_string(),
         "Rotate API Key (Persist Draft)  [action]".to_string(),
@@ -221,6 +237,108 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
         .block(
             Block::default()
                 .title(" Settings ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(ui_accent_primary()))
+                .style(Style::default().bg(ui_modal_bg())),
+        )
+        .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(panel, popup);
+}
+
+pub(crate) fn handle_runtime_env_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
+    if !state.runtime_env_editing {
+        state.runtime_env_editing = true;
+    }
+
+    match code {
+        KeyCode::Esc => {
+            state.runtime_env_editing = false;
+            state.mode = UiMode::Settings;
+        }
+        KeyCode::Enter => {
+            state.settings_draft.env_overrides.push('\n');
+        }
+        KeyCode::Backspace => {
+            state.settings_draft.env_overrides.pop();
+        }
+        KeyCode::Tab => {
+            state.settings_draft.env_overrides.push('=');
+        }
+        KeyCode::Char(c) => {
+            state.settings_draft.env_overrides.push(c);
+        }
+        _ => {}
+    }
+
+    EventOutcome::Continue
+}
+
+pub(crate) fn render_runtime_env_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
+    let area = frame.area();
+    let popup = centered_rect(area, 78, 66);
+    frame.render_widget(Clear, popup);
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        " Runtime/Env Variables (Draft) ",
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(Span::styled(
+        " Format: KEY=VALUE (one per line). Empty lines and # comments are ignored. ",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(Span::styled(
+        " Esc: back to Settings  Enter: newline  Tab: '=' shortcut ",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(""));
+
+    let env_errors = env_overrides_validation_errors(&state.settings_draft.env_overrides);
+    if env_errors.is_empty() {
+        lines.push(Line::from(Span::styled(
+            " Validation: OK ",
+            Style::default().fg(Color::Green),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            format!(" Validation: {} issue(s) ", env_errors.len()),
+            Style::default().fg(Color::Red),
+        )));
+        for err in env_errors.iter().take(3) {
+            lines.push(Line::from(Span::styled(
+                format!(" - {err}"),
+                Style::default().fg(Color::Red),
+            )));
+        }
+    }
+    lines.push(Line::from(""));
+
+    if state.settings_draft.env_overrides.trim().is_empty() {
+        lines.push(Line::from(Span::styled(
+            "# Example",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(Span::styled(
+            "MEDOUSA_LLM_PROVIDER=openai",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(Span::styled(
+            "MEDOUSA_LLM_MODEL=gpt-4o-mini",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for line in state.settings_draft.env_overrides.lines() {
+            lines.push(Line::from(line.to_string()));
+        }
+    }
+
+    let panel = Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title(" Runtime/Env Submenu ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ui_accent_primary()))
                 .style(Style::default().bg(ui_modal_bg())),

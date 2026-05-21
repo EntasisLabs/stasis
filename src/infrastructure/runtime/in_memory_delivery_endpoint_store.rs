@@ -16,10 +16,9 @@ pub struct InMemoryDeliveryEndpointStore {
 #[async_trait]
 impl DeliveryEndpointStore for InMemoryDeliveryEndpointStore {
     async fn insert(&self, endpoint: NewDeliveryEndpoint) -> Result<DeliveryEndpoint> {
-        let mut endpoints = self
-            .endpoints
-            .write()
-            .map_err(|_| StasisError::PortFailure("delivery endpoint store lock poisoned".to_string()))?;
+        let mut endpoints = self.endpoints.write().map_err(|_| {
+            StasisError::PortFailure("delivery endpoint store lock poisoned".to_string())
+        })?;
 
         if endpoints.contains_key(&endpoint.endpoint_id) {
             return Err(StasisError::PortFailure(format!(
@@ -34,19 +33,17 @@ impl DeliveryEndpointStore for InMemoryDeliveryEndpointStore {
     }
 
     async fn get(&self, endpoint_id: &str) -> Result<Option<DeliveryEndpoint>> {
-        let endpoints = self
-            .endpoints
-            .read()
-            .map_err(|_| StasisError::PortFailure("delivery endpoint store lock poisoned".to_string()))?;
+        let endpoints = self.endpoints.read().map_err(|_| {
+            StasisError::PortFailure("delivery endpoint store lock poisoned".to_string())
+        })?;
 
         Ok(endpoints.get(endpoint_id).cloned())
     }
 
     async fn list(&self) -> Result<Vec<DeliveryEndpoint>> {
-        let endpoints = self
-            .endpoints
-            .read()
-            .map_err(|_| StasisError::PortFailure("delivery endpoint store lock poisoned".to_string()))?;
+        let endpoints = self.endpoints.read().map_err(|_| {
+            StasisError::PortFailure("delivery endpoint store lock poisoned".to_string())
+        })?;
 
         let mut out = endpoints.values().cloned().collect::<Vec<_>>();
         out.sort_by(|left, right| left.endpoint_id.cmp(&right.endpoint_id));
@@ -54,10 +51,9 @@ impl DeliveryEndpointStore for InMemoryDeliveryEndpointStore {
     }
 
     async fn set_enabled(&self, endpoint_id: &str, enabled: bool) -> Result<bool> {
-        let mut endpoints = self
-            .endpoints
-            .write()
-            .map_err(|_| StasisError::PortFailure("delivery endpoint store lock poisoned".to_string()))?;
+        let mut endpoints = self.endpoints.write().map_err(|_| {
+            StasisError::PortFailure("delivery endpoint store lock poisoned".to_string())
+        })?;
 
         let Some(endpoint) = endpoints.get_mut(endpoint_id) else {
             return Ok(false);

@@ -212,13 +212,13 @@ impl JobStore for SurrealJobStore {
             let mut candidate_response = self
                 .db
                 .query(
-                                        "SELECT job_id, scheduled_at, priority FROM type::table($table) \
+                    "SELECT job_id, scheduled_at, priority FROM type::table($table) \
                      WHERE queue = $queue \
                                              AND (state = 'enqueued' OR state = 'leased') \
                        AND scheduled_at <= $now \
                        AND (lease_expires_at = NONE OR lease_expires_at <= $now) \
                      ORDER BY scheduled_at ASC, priority ASC \
-                     LIMIT 1"
+                     LIMIT 1",
                 )
                 .bind(("table", self.table.clone()))
                 .bind(("queue", queue.to_string()))

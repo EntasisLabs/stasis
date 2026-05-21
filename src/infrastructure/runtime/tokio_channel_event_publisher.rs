@@ -24,8 +24,8 @@ impl TokioChannelEventPublisher {
 #[async_trait]
 impl EventPublisher for TokioChannelEventPublisher {
     async fn publish(&self, event: &OutboxEvent) -> Result<()> {
-        self.tx.send(event.clone()).map_err(|e| {
-            StasisError::PortFailure(format!("publish to tokio channel bus: {e}"))
-        })
+        self.tx
+            .send(event.clone())
+            .map_err(|e| StasisError::PortFailure(format!("publish to tokio channel bus: {e}")))
     }
 }

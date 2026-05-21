@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use grapheme_sdk::{GraphemeEngine, GraphemeSdkError};
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task;
@@ -12,6 +13,8 @@ pub struct GraphemeSdkWorkflowEngine {
     engine: Arc<GraphemeEngine>,
     guardrails: GraphemeWorkflowGuardrails,
 }
+
+const DEFAULT_EXECUTION_TIMEOUT_MS: u64 = 2_000;
 
 #[derive(Clone, Debug)]
 pub struct GraphemeWorkflowGuardrails {
@@ -28,11 +31,27 @@ impl Default for GraphemeWorkflowGuardrails {
             // Allow all built-in Grapheme namespace modules by default.
             allowed_imports: vec!["grapheme/*".to_string()],
             max_source_bytes: 128 * 1024,
-            execution_timeout: Duration::from_secs(2),
+            execution_timeout: resolve_execution_timeout_from_env(),
             max_steps: Some(10_000),
             max_call_depth: Some(16),
         }
     }
+}
+
+fn resolve_execution_timeout_from_env() -> Duration {
+    let raw_value = std::env::var("MEDOUSA_GRAPHEME_EXECUTION_TIMEOUT_MS")
+        .ok()
+        .or_else(|| std::env::var("STASIS_GRAPHEME_EXECUTION_TIMEOUT_MS").ok())
+        .or_else(|| std::env::var("GRAPHEME_EXECUTION_TIMEOUT_MS").ok());
+
+    let timeout_ms = raw_value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_EXECUTION_TIMEOUT_MS);
+
+    Duration::from_millis(timeout_ms)
 }
 
 impl GraphemeSdkWorkflowEngine {
@@ -121,8 +140,7 @@ impl WorkflowEngine for GraphemeSdkWorkflowEngine {
 
         if self.guardrails.execution_timeout.is_zero() {
             return Err(StasisError::PortFailure(
-                "grapheme policy violation: execution timeout must be greater than 0ms"
-                    .to_string(),
+                "grapheme policy violation: execution timeout must be greater than 0ms".to_string(),
             ));
         }
 
@@ -137,13 +155,13 @@ impl WorkflowEngine for GraphemeSdkWorkflowEngine {
                     self.guardrails.execution_timeout.as_millis()
                 ))
             })?
-            .map_err(|e| {
-                StasisError::PortFailure(format!("grapheme sdk worker join error: {e}"))
-            })?
+            .map_err(|e| StasisError::PortFailure(format!("grapheme sdk worker join error: {e}")))?
             .map_err(Self::map_error)?;
 
         Ok(WorkflowExecutionOutput {
             run_id: format!("grapheme:{}", result.artifact_id),
+            execution: serde_json::to_value(&result.execution).unwrap_or(Value::Null),
+            final_state: result.final_state,
         })
     }
 }

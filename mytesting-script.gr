@@ -1,0 +1,18 @@
+glyph Testing {
+    web.duckduckgo(query:"How to be a cutie")
+    |> ParseResults
+
+    
+}
+
+iterator ParseResults on Any @loop(max: 3, each: $current.results, merge: "append"){
+  http.get(url: "$current.url")
+  |> html.to_md(html: "$current.body", options: {
+      output_format: "markdown",
+      include_document_structure: true,
+      extract_metadata: true,
+      strip_tags: ["script", "style", "nav", "footer", "aside", "img"],
+      exclude_selectors: [".cookie-banner", "#cookie", ".advertisement", "<img>"]
+    })
+    |> core.echo(message: $current.text)
+}

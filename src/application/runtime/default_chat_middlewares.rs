@@ -35,7 +35,11 @@ struct LoggingChatClient {
 
 #[async_trait]
 impl AiChatClient for LoggingChatClient {
-    async fn complete(&self, request: ChatRequest, options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         let started = Instant::now();
         eprintln!(
             "stasis.chat request messages={} options_present={}",
@@ -91,7 +95,11 @@ struct TelemetryChatClient {
 
 #[async_trait]
 impl AiChatClient for TelemetryChatClient {
-    async fn complete(&self, request: ChatRequest, options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         self.metrics.incr_counter(CHAT_REQUESTS_TOTAL, 1);
         let started = Instant::now();
         match self.inner.complete(request, options).await {
@@ -149,7 +157,11 @@ struct CacheChatClient {
 
 #[async_trait]
 impl AiChatClient for CacheChatClient {
-    async fn complete(&self, request: ChatRequest, options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         let cache_key = deterministic_cache_key(&request, options);
         if let Some(cached) = self.cache.get(&cache_key) {
             if let Some(metrics) = &self.metrics {
@@ -213,7 +225,11 @@ struct ToolCallInterceptionChatClient {
 
 #[async_trait]
 impl AiChatClient for ToolCallInterceptionChatClient {
-    async fn complete(&self, request: ChatRequest, options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         let request_fingerprint = deterministic_cache_key(&request, options);
         let response = self.inner.complete(request, options).await?;
 

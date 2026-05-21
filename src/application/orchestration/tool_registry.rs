@@ -95,7 +95,9 @@ impl InMemoryToolRegistry {
 
     fn validate_input_against_schema(schema: &Value, input: &Value) -> Result<()> {
         let schema_obj = schema.as_object().ok_or_else(|| {
-            StasisError::PortFailure("policy violation: tool schema must be a JSON object".to_string())
+            StasisError::PortFailure(
+                "policy violation: tool schema must be a JSON object".to_string(),
+            )
         })?;
 
         let expected_type = schema_obj.get("type").and_then(|value| value.as_str());
@@ -103,10 +105,14 @@ impl InMemoryToolRegistry {
             Self::assert_json_type("$", input, expected)?;
         }
 
-        if let Some(required) = schema_obj.get("required").and_then(|value| value.as_array()) {
+        if let Some(required) = schema_obj
+            .get("required")
+            .and_then(|value| value.as_array())
+        {
             let input_obj = input.as_object().ok_or_else(|| {
                 StasisError::PortFailure(
-                    "policy violation: tool input must be an object for required fields".to_string(),
+                    "policy violation: tool input must be an object for required fields"
+                        .to_string(),
                 )
             })?;
 
@@ -120,7 +126,10 @@ impl InMemoryToolRegistry {
             }
         }
 
-        if let Some(properties) = schema_obj.get("properties").and_then(|value| value.as_object()) {
+        if let Some(properties) = schema_obj
+            .get("properties")
+            .and_then(|value| value.as_object())
+        {
             let input_obj = input.as_object().ok_or_else(|| {
                 StasisError::PortFailure(
                     "policy violation: tool input must be an object for property validation"

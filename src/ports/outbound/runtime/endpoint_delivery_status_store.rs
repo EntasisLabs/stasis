@@ -36,7 +36,9 @@ where
         event_id: &str,
         at: DateTime<Utc>,
     ) -> Result<()> {
-        self.as_ref().record_success(endpoint_id, event_id, at).await
+        self.as_ref()
+            .record_success(endpoint_id, event_id, at)
+            .await
     }
 
     async fn record_failure(

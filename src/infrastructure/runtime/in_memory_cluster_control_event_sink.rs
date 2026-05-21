@@ -13,10 +13,9 @@ pub struct InMemoryClusterControlEventSink {
 
 impl InMemoryClusterControlEventSink {
     pub fn events(&self) -> Result<Vec<ClusterControlEvent>> {
-        let events = self
-            .events
-            .read()
-            .map_err(|_| StasisError::PortFailure("cluster event sink lock poisoned".to_string()))?;
+        let events = self.events.read().map_err(|_| {
+            StasisError::PortFailure("cluster event sink lock poisoned".to_string())
+        })?;
         Ok(events.clone())
     }
 }
@@ -24,10 +23,9 @@ impl InMemoryClusterControlEventSink {
 #[async_trait]
 impl ClusterControlEventSink for InMemoryClusterControlEventSink {
     async fn emit(&self, event: ClusterControlEvent) -> Result<()> {
-        let mut events = self
-            .events
-            .write()
-            .map_err(|_| StasisError::PortFailure("cluster event sink lock poisoned".to_string()))?;
+        let mut events = self.events.write().map_err(|_| {
+            StasisError::PortFailure("cluster event sink lock poisoned".to_string())
+        })?;
         events.push(event);
         Ok(())
     }

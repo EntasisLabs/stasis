@@ -5,9 +5,9 @@ use async_trait::async_trait;
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::delivery_endpoint::DeliveryEndpoint;
 use crate::domain::runtime::outbox::OutboxEvent;
+use crate::infrastructure::runtime::endpoint_routing_policy::AllowAllEndpointRoutingPolicy;
 use crate::infrastructure::runtime::http_webhook_event_publisher::HttpWebhookTransportPublisher;
 use crate::infrastructure::runtime::tcp_socket_transport_publisher::TcpSocketTransportPublisher;
-use crate::infrastructure::runtime::endpoint_routing_policy::AllowAllEndpointRoutingPolicy;
 use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
 use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
 use crate::ports::outbound::runtime::endpoint_routing_policy::EndpointRoutingPolicy;
@@ -77,7 +77,11 @@ impl EndpointRoutingEventPublisher {
         self
     }
 
-    async fn publish_to_endpoint(&self, endpoint: &DeliveryEndpoint, event: &OutboxEvent) -> Result<()> {
+    async fn publish_to_endpoint(
+        &self,
+        endpoint: &DeliveryEndpoint,
+        event: &OutboxEvent,
+    ) -> Result<()> {
         let Some(transport) = self
             .transports
             .iter()
@@ -108,22 +112,26 @@ impl EventPublisher for EndpointRoutingEventPublisher {
         {
             if let Err(err) = self.publish_to_endpoint(endpoint, event).await {
                 if let Some(store) = &self.status_store {
-                    let _ = store.record_failure(
-                        &endpoint.endpoint_id,
-                        &event.event_id,
-                        &err.to_string(),
-                        event.event.occurred_at,
-                    ).await;
+                    let _ = store
+                        .record_failure(
+                            &endpoint.endpoint_id,
+                            &event.event_id,
+                            &err.to_string(),
+                            event.event.occurred_at,
+                        )
+                        .await;
                 }
                 return Err(err);
             }
 
             if let Some(store) = &self.status_store {
-                store.record_success(
-                    &endpoint.endpoint_id,
-                    &event.event_id,
-                    event.event.occurred_at,
-                ).await?;
+                store
+                    .record_success(
+                        &endpoint.endpoint_id,
+                        &event.event_id,
+                        event.event.occurred_at,
+                    )
+                    .await?;
             }
         }
 
@@ -140,14 +148,16 @@ mod tests {
     use crate::domain::runtime::delivery_endpoint::{
         DeliveryEndpoint, DeliveryProtocol, NewDeliveryEndpoint,
     };
-    use crate::domain::runtime::outbox::{OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType};
+    use crate::domain::runtime::outbox::{
+        OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType,
+    };
     use crate::infrastructure::runtime::endpoint_routing_policy::{
         EndpointRouteRule, RuleBasedEndpointRoutingPolicy,
     };
-    use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
     use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
-    use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
+    use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
     use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
+    use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
     use crate::ports::outbound::runtime::endpoint_transport_publisher::EndpointTransportPublisher;
     use crate::ports::outbound::runtime::event_publisher::EventPublisher;
 
@@ -170,10 +180,9 @@ mod tests {
             endpoint: &DeliveryEndpoint,
             _event: &OutboxEvent,
         ) -> crate::domain::errors::Result<()> {
-            let mut calls = self
-                .calls
-                .write()
-                .map_err(|_| crate::domain::errors::StasisError::PortFailure("calls lock poisoned".to_string()))?;
+            let mut calls = self.calls.write().map_err(|_| {
+                crate::domain::errors::StasisError::PortFailure("calls lock poisoned".to_string())
+            })?;
             calls.push(endpoint.endpoint_id.clone());
             Ok(())
         }
@@ -242,10 +251,12 @@ mod tests {
             .expect("disable should succeed");
 
         let calls = Arc::new(RwLock::new(Vec::new()));
-        let publisher = EndpointRoutingEventPublisher::new(Arc::new(store)).with_transport(RecordingTransport {
-            protocol: DeliveryProtocol::HttpWebhook,
-            calls: Arc::clone(&calls),
-        });
+        let publisher = EndpointRoutingEventPublisher::new(Arc::new(store)).with_transport(
+            RecordingTransport {
+                protocol: DeliveryProtocol::HttpWebhook,
+                calls: Arc::clone(&calls),
+            },
+        );
 
         publisher
             .publish(&sample_event())
@@ -275,10 +286,12 @@ mod tests {
             .expect("insert should succeed");
 
         let calls = Arc::new(RwLock::new(Vec::new()));
-        let publisher = EndpointRoutingEventPublisher::new(Arc::new(store)).with_transport(RecordingTransport {
-            protocol: DeliveryProtocol::HttpWebhook,
-            calls,
-        });
+        let publisher = EndpointRoutingEventPublisher::new(Arc::new(store)).with_transport(
+            RecordingTransport {
+                protocol: DeliveryProtocol::HttpWebhook,
+                calls,
+            },
+        );
 
         let result = publisher.publish(&sample_event()).await;
         assert!(result.is_err());

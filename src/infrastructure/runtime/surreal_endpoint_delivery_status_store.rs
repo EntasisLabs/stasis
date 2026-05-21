@@ -58,8 +58,7 @@ impl SurrealEndpointDeliveryStatusStore {
     }
 
     async fn save_record(&self, record: EndpointDeliveryStatusRecord) -> Result<()> {
-        self
-            .db
+        self.db
             .query("UPDATE type::record($table, $id) CONTENT $data")
             .bind(("table", self.table.clone()))
             .bind(("id", record.endpoint_id.clone()))
@@ -126,11 +125,15 @@ impl From<EndpointDeliveryStatus> for EndpointDeliveryStatusRecord {
 
 #[async_trait]
 impl EndpointDeliveryStatusStore for SurrealEndpointDeliveryStatusStore {
-    async fn record_success(&self, endpoint_id: &str, event_id: &str, at: DateTime<Utc>) -> Result<()> {
-        let mut record = self
-            .load_record(endpoint_id)
-            .await?
-            .unwrap_or_else(|| EndpointDeliveryStatusRecord::from(EndpointDeliveryStatus::new(endpoint_id, at)));
+    async fn record_success(
+        &self,
+        endpoint_id: &str,
+        event_id: &str,
+        at: DateTime<Utc>,
+    ) -> Result<()> {
+        let mut record = self.load_record(endpoint_id).await?.unwrap_or_else(|| {
+            EndpointDeliveryStatusRecord::from(EndpointDeliveryStatus::new(endpoint_id, at))
+        });
 
         record.success_count = record.success_count.saturating_add(1);
         record.last_event_id = Some(event_id.to_string());
@@ -148,10 +151,9 @@ impl EndpointDeliveryStatusStore for SurrealEndpointDeliveryStatusStore {
         error: &str,
         at: DateTime<Utc>,
     ) -> Result<()> {
-        let mut record = self
-            .load_record(endpoint_id)
-            .await?
-            .unwrap_or_else(|| EndpointDeliveryStatusRecord::from(EndpointDeliveryStatus::new(endpoint_id, at)));
+        let mut record = self.load_record(endpoint_id).await?.unwrap_or_else(|| {
+            EndpointDeliveryStatusRecord::from(EndpointDeliveryStatus::new(endpoint_id, at))
+        });
 
         record.failure_count = record.failure_count.saturating_add(1);
         record.last_event_id = Some(event_id.to_string());
@@ -163,7 +165,10 @@ impl EndpointDeliveryStatusStore for SurrealEndpointDeliveryStatusStore {
     }
 
     async fn get(&self, endpoint_id: &str) -> Result<Option<EndpointDeliveryStatus>> {
-        Ok(self.load_record(endpoint_id).await?.map(EndpointDeliveryStatus::from))
+        Ok(self
+            .load_record(endpoint_id)
+            .await?
+            .map(EndpointDeliveryStatus::from))
     }
 
     async fn list(&self) -> Result<Vec<EndpointDeliveryStatus>> {
@@ -227,7 +232,10 @@ impl EndpointDeliveryStatusStore for SurrealEndpointDeliveryStatusStore {
                 if message.contains("does not exist") && message.contains(&self.table) {
                     return Ok(0);
                 }
-                return Err(Self::port_err("decode pruned endpoint delivery statuses", err));
+                return Err(Self::port_err(
+                    "decode pruned endpoint delivery statuses",
+                    err,
+                ));
             }
         };
 

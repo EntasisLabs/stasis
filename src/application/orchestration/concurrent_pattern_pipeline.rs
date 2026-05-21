@@ -49,7 +49,10 @@ impl ConcurrentPatternPipeline {
         Self { prompt_pipeline }
     }
 
-    pub async fn execute(&self, request: ConcurrentPatternExecutionRequest) -> Result<ConcurrentPatternExecutionResponse> {
+    pub async fn execute(
+        &self,
+        request: ConcurrentPatternExecutionRequest,
+    ) -> Result<ConcurrentPatternExecutionResponse> {
         let merge_strategy = request
             .merge_strategy
             .unwrap_or_else(|| "join_with_headers".to_string());
@@ -73,15 +76,13 @@ impl ConcurrentPatternPipeline {
                 let context = PromptExecutionContext {
                     trace_id,
                     correlation_id,
-                    policy_profile: branch
-                        .policy_profile
-                        .clone()
-                        .or(default_policy_profile),
+                    policy_profile: branch.policy_profile.clone().or(default_policy_profile),
                     model_hint: branch.model_hint.clone().or(default_model_hint),
                 };
 
                 let mut prompt_request =
-                    PromptExecutionRequest::from_user_prompt(rendered_prompt.clone()).with_context(context);
+                    PromptExecutionRequest::from_user_prompt(rendered_prompt.clone())
+                        .with_context(context);
                 if let Some(system_prompt) = branch.system_prompt {
                     prompt_request = prompt_request.with_system_prompt(system_prompt);
                 }

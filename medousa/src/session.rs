@@ -21,6 +21,7 @@ pub struct TuiDefaults {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
+    pub env_overrides: Option<String>,
     pub allowed_modules: Option<Vec<String>>,
     pub tool_call_mode: Option<String>,
     pub max_tool_rounds: Option<usize>,

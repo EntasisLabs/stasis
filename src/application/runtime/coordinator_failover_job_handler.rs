@@ -63,7 +63,10 @@ impl CoordinatorFailoverJobHandler {
         }
     }
 
-    fn remaining_ttl_seconds(lease_expires_at: chrono::DateTime<Utc>, now: chrono::DateTime<Utc>) -> i64 {
+    fn remaining_ttl_seconds(
+        lease_expires_at: chrono::DateTime<Utc>,
+        now: chrono::DateTime<Utc>,
+    ) -> i64 {
         lease_expires_at
             .signed_duration_since(now)
             .num_seconds()
@@ -111,16 +114,14 @@ impl JobHandler for CoordinatorFailoverJobHandler {
             )));
         }
 
-        let target_node_id = payload
-            .failover_to_node_id
-            .clone()
-            .or_else(|| {
-                nodes.iter()
-                    .filter(|node| node.node_id != source.node_id)
-                    .filter(|node| node.lease_expires_at >= now)
-                    .find(|node| node.region == source.region)
-                    .map(|node| node.node_id.clone())
-            });
+        let target_node_id = payload.failover_to_node_id.clone().or_else(|| {
+            nodes
+                .iter()
+                .filter(|node| node.node_id != source.node_id)
+                .filter(|node| node.lease_expires_at >= now)
+                .find(|node| node.region == source.region)
+                .map(|node| node.node_id.clone())
+        });
 
         let Some(target_node_id) = target_node_id else {
             return Ok(Self::failure("no active failover target available"));
@@ -153,7 +154,11 @@ impl JobHandler for CoordinatorFailoverJobHandler {
         let moved_queues = if let Some(scope) = payload.queue_scope {
             scope.into_iter().collect::<BTreeSet<_>>()
         } else {
-            source.queue_ownership.iter().cloned().collect::<BTreeSet<_>>()
+            source
+                .queue_ownership
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>()
         };
 
         let source_queues = source
@@ -162,10 +167,7 @@ impl JobHandler for CoordinatorFailoverJobHandler {
             .filter(|queue| !moved_queues.contains(queue))
             .collect::<Vec<_>>();
 
-        let mut target_queue_set = target
-            .queue_ownership
-            .into_iter()
-            .collect::<BTreeSet<_>>();
+        let mut target_queue_set = target.queue_ownership.into_iter().collect::<BTreeSet<_>>();
         for queue in &moved_queues {
             target_queue_set.insert(queue.clone());
         }
@@ -192,7 +194,9 @@ impl JobHandler for CoordinatorFailoverJobHandler {
             .await;
 
         if source_update.is_err() {
-            return Ok(Self::retryable("failed to update source node during failover"));
+            return Ok(Self::retryable(
+                "failed to update source node during failover",
+            ));
         }
 
         let target_update = self
@@ -215,7 +219,9 @@ impl JobHandler for CoordinatorFailoverJobHandler {
             .await;
 
         if target_update.is_err() {
-            return Ok(Self::retryable("failed to update target node during failover"));
+            return Ok(Self::retryable(
+                "failed to update target node during failover",
+            ));
         }
 
         let diagnostics = json!({

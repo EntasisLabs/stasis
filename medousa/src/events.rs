@@ -29,4 +29,6 @@ pub enum TuiEvent {
     AgentChunk { delta: String },
     /// The tool loop failed with an error.
     AgentError(String),
+    /// General UI notification emitted by background workers.
+    UiNotice(String),
 }

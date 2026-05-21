@@ -1,12 +1,15 @@
 use std::sync::Arc;
-use std::{collections::hash_map::DefaultHasher, hash::{Hash, Hasher}};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::application::orchestration::agent_session_payload::{
-    AgentToolCallMode, AgentTurnJobPayload, MemoryFallbackPolicyPayload,
-    MemoryPolicyPayload, MemoryStoreModePayload, MemoryStrictnessModePayload,
+    AgentToolCallMode, AgentTurnJobPayload, MemoryFallbackPolicyPayload, MemoryPolicyPayload,
+    MemoryStoreModePayload, MemoryStrictnessModePayload,
 };
 use crate::application::orchestration::agent_session_pipeline::{
     AgentIdentity, AgentSessionPipeline, AgentTurnExecutionPolicy, AgentTurnExecutionRequest,
@@ -58,13 +61,19 @@ impl AgentTurnJobHandler {
             .map_err(|err| format!("policy violation: invalid agent-turn payload json: {err}"))?;
 
         if payload.agent_id.trim().is_empty() {
-            return Err("policy violation: agent-turn payload.agent_id must be non-empty".to_string());
+            return Err(
+                "policy violation: agent-turn payload.agent_id must be non-empty".to_string(),
+            );
         }
         if payload.user_prompt.trim().is_empty() {
-            return Err("policy violation: agent-turn payload.user_prompt must be non-empty".to_string());
+            return Err(
+                "policy violation: agent-turn payload.user_prompt must be non-empty".to_string(),
+            );
         }
         if payload.tool_name.trim().is_empty() {
-            return Err("policy violation: agent-turn payload.tool_name must be non-empty".to_string());
+            return Err(
+                "policy violation: agent-turn payload.tool_name must be non-empty".to_string(),
+            );
         }
 
         Ok(payload)
@@ -130,11 +139,12 @@ impl AgentTurnJobHandler {
         request.include_explain = memory_policy
             .and_then(|policy| policy.include_explain)
             .unwrap_or(true);
-        request.fallback_policy = match memory_policy.and_then(|policy| policy.fallback_policy.clone()) {
-            Some(MemoryFallbackPolicyPayload::Never) => MemoryFallbackPolicy::Never,
-            Some(MemoryFallbackPolicyPayload::Always) => MemoryFallbackPolicy::Always,
-            _ => MemoryFallbackPolicy::OnEmpty,
-        };
+        request.fallback_policy =
+            match memory_policy.and_then(|policy| policy.fallback_policy.clone()) {
+                Some(MemoryFallbackPolicyPayload::Never) => MemoryFallbackPolicy::Never,
+                Some(MemoryFallbackPolicyPayload::Always) => MemoryFallbackPolicy::Always,
+                _ => MemoryFallbackPolicy::OnEmpty,
+            };
         request.strictness = match memory_policy.and_then(|policy| policy.strictness.clone()) {
             Some(MemoryStrictnessModePayload::Precision) => MemoryStrictnessMode::Precision,
             Some(MemoryStrictnessModePayload::Recall) => MemoryStrictnessMode::Recall,
@@ -151,7 +161,10 @@ impl AgentTurnJobHandler {
         )
     }
 
-    fn memory_scope_hash(correlation_id: &str, memory_policy: Option<&MemoryPolicyPayload>) -> String {
+    fn memory_scope_hash(
+        correlation_id: &str,
+        memory_policy: Option<&MemoryPolicyPayload>,
+    ) -> String {
         let basis = format!(
             "corr={correlation_id}|sessions={:?}|tiers={:?}|from={:?}|to={:?}",
             memory_policy.and_then(|policy| policy.session_ids.clone()),
@@ -221,12 +234,10 @@ impl JobHandler for AgentTurnJobHandler {
         let mut input_memory_query_id = None;
         let mut input_memory_query_fingerprint = None;
         if let Some(reader) = &self.memory_reader {
-            let recall_request = Self::build_recall_request(
-                &job.correlation_id,
-                &user_prompt,
-                memory_policy,
-            );
-            input_memory_query_id = Some(Self::memory_query_id(&job.correlation_id, &recall_request));
+            let recall_request =
+                Self::build_recall_request(&job.correlation_id, &user_prompt, memory_policy);
+            input_memory_query_id =
+                Some(Self::memory_query_id(&job.correlation_id, &recall_request));
             input_memory_query_fingerprint = Some(Self::memory_query_fingerprint(&recall_request));
 
             match reader.recall(&recall_request).await {
@@ -304,15 +315,19 @@ impl JobHandler for AgentTurnJobHandler {
         let mut memory_store_error = None;
         if Self::should_store(memory_policy) {
             if let Some(writer) = &self.memory_writer {
-            let store_request = MemoryStoreRequest {
-                session_id: job.correlation_id.clone(),
-                raw_node: Self::render_sttp_node(&job.correlation_id, &response.agent_id, &response.text),
-            };
+                let store_request = MemoryStoreRequest {
+                    session_id: job.correlation_id.clone(),
+                    raw_node: Self::render_sttp_node(
+                        &job.correlation_id,
+                        &response.agent_id,
+                        &response.text,
+                    ),
+                };
 
-            match writer.store_context(&store_request).await {
-                Ok(stored) => memory_store = Some(stored),
-                Err(err) => memory_store_error = Some(err.to_string()),
-            }
+                match writer.store_context(&store_request).await {
+                    Ok(stored) => memory_store = Some(stored),
+                    Err(err) => memory_store_error = Some(err.to_string()),
+                }
             }
         }
 

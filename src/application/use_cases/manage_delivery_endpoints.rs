@@ -34,10 +34,14 @@ where
             ));
         }
         if request.name.trim().is_empty() {
-            return Err(StasisError::PortFailure("name must not be empty".to_string()));
+            return Err(StasisError::PortFailure(
+                "name must not be empty".to_string(),
+            ));
         }
         if request.target.trim().is_empty() {
-            return Err(StasisError::PortFailure("target must not be empty".to_string()));
+            return Err(StasisError::PortFailure(
+                "target must not be empty".to_string(),
+            ));
         }
 
         let record = self

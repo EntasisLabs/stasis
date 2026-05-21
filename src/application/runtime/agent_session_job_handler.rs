@@ -1,16 +1,19 @@
 use std::sync::Arc;
-use std::{collections::hash_map::DefaultHasher, hash::{Hash, Hasher}};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+use crate::application::orchestration::agent_session_payload::{
+    AgentSessionJobPayload, AgentToolCallMode, MemoryFallbackPolicyPayload, MemoryPolicyPayload,
+    MemoryStoreModePayload, MemoryStrictnessModePayload,
+};
 use crate::application::orchestration::agent_session_pipeline::{
     AgentParticipant, AgentSessionCoordinator, AgentSessionPipeline, AgentSessionRunRequest,
     AgentTurnExecutionPolicy, MaxTurnsTerminationStrategy, RoundRobinSelectionStrategy,
-};
-use crate::application::orchestration::agent_session_payload::{
-    AgentSessionJobPayload, AgentToolCallMode, MemoryFallbackPolicyPayload,
-    MemoryPolicyPayload, MemoryStoreModePayload, MemoryStrictnessModePayload,
 };
 use crate::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline,
@@ -57,8 +60,9 @@ impl AgentSessionJobHandler {
     }
 
     fn parse_payload(raw: &str) -> std::result::Result<AgentSessionJobPayload, String> {
-        let payload: AgentSessionJobPayload = serde_json::from_str(raw)
-            .map_err(|err| format!("policy violation: invalid agent-session payload json: {err}"))?;
+        let payload: AgentSessionJobPayload = serde_json::from_str(raw).map_err(|err| {
+            format!("policy violation: invalid agent-session payload json: {err}")
+        })?;
 
         if payload.initial_user_prompt.trim().is_empty() {
             return Err(
@@ -68,7 +72,8 @@ impl AgentSessionJobHandler {
         }
         if payload.participants.is_empty() {
             return Err(
-                "policy violation: agent-session payload.participants must be non-empty".to_string(),
+                "policy violation: agent-session payload.participants must be non-empty"
+                    .to_string(),
             );
         }
 
@@ -149,11 +154,12 @@ impl AgentSessionJobHandler {
         request.include_explain = memory_policy
             .and_then(|policy| policy.include_explain)
             .unwrap_or(true);
-        request.fallback_policy = match memory_policy.and_then(|policy| policy.fallback_policy.clone()) {
-            Some(MemoryFallbackPolicyPayload::Never) => MemoryFallbackPolicy::Never,
-            Some(MemoryFallbackPolicyPayload::Always) => MemoryFallbackPolicy::Always,
-            _ => MemoryFallbackPolicy::OnEmpty,
-        };
+        request.fallback_policy =
+            match memory_policy.and_then(|policy| policy.fallback_policy.clone()) {
+                Some(MemoryFallbackPolicyPayload::Never) => MemoryFallbackPolicy::Never,
+                Some(MemoryFallbackPolicyPayload::Always) => MemoryFallbackPolicy::Always,
+                _ => MemoryFallbackPolicy::OnEmpty,
+            };
         request.strictness = match memory_policy.and_then(|policy| policy.strictness.clone()) {
             Some(MemoryStrictnessModePayload::Precision) => MemoryStrictnessMode::Precision,
             Some(MemoryStrictnessModePayload::Recall) => MemoryStrictnessMode::Recall,
@@ -170,7 +176,10 @@ impl AgentSessionJobHandler {
         )
     }
 
-    fn memory_scope_hash(correlation_id: &str, memory_policy: Option<&MemoryPolicyPayload>) -> String {
+    fn memory_scope_hash(
+        correlation_id: &str,
+        memory_policy: Option<&MemoryPolicyPayload>,
+    ) -> String {
         let basis = format!(
             "corr={correlation_id}|sessions={:?}|tiers={:?}|from={:?}|to={:?}",
             memory_policy.and_then(|policy| policy.session_ids.clone()),
@@ -245,7 +254,8 @@ impl JobHandler for AgentSessionJobHandler {
                 &initial_user_prompt,
                 memory_policy,
             );
-            input_memory_query_id = Some(Self::memory_query_id(&job.correlation_id, &recall_request));
+            input_memory_query_id =
+                Some(Self::memory_query_id(&job.correlation_id, &recall_request));
             input_memory_query_fingerprint = Some(Self::memory_query_fingerprint(&recall_request));
 
             match reader.recall(&recall_request).await {
@@ -345,15 +355,15 @@ impl JobHandler for AgentSessionJobHandler {
         let mut memory_store_error = None;
         if Self::should_store(memory_policy) {
             if let Some(writer) = &self.memory_writer {
-            let store_request = MemoryStoreRequest {
-                session_id: job.correlation_id.clone(),
-                raw_node: Self::render_sttp_node(&job.correlation_id, &summary_text),
-            };
+                let store_request = MemoryStoreRequest {
+                    session_id: job.correlation_id.clone(),
+                    raw_node: Self::render_sttp_node(&job.correlation_id, &summary_text),
+                };
 
-            match writer.store_context(&store_request).await {
-                Ok(stored) => memory_store = Some(stored),
-                Err(err) => memory_store_error = Some(err.to_string()),
-            }
+                match writer.store_context(&store_request).await {
+                    Ok(stored) => memory_store = Some(stored),
+                    Err(err) => memory_store_error = Some(err.to_string()),
+                }
             }
         }
 

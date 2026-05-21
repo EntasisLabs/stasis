@@ -17,10 +17,9 @@ pub struct InMemoryClusterNodeStore {
 impl ClusterNodeStore for InMemoryClusterNodeStore {
     async fn register(&self, node: NewClusterNode) -> Result<ClusterNode> {
         let record = node.into_record();
-        let mut nodes = self
-            .nodes
-            .write()
-            .map_err(|_| StasisError::PortFailure("cluster node store lock poisoned".to_string()))?;
+        let mut nodes = self.nodes.write().map_err(|_| {
+            StasisError::PortFailure("cluster node store lock poisoned".to_string())
+        })?;
 
         if nodes.contains_key(&record.node_id) {
             return Err(StasisError::PortFailure(format!(
@@ -34,17 +33,17 @@ impl ClusterNodeStore for InMemoryClusterNodeStore {
     }
 
     async fn heartbeat(&self, heartbeat: ClusterNodeHeartbeat) -> Result<Option<ClusterNode>> {
-        let mut nodes = self
-            .nodes
-            .write()
-            .map_err(|_| StasisError::PortFailure("cluster node store lock poisoned".to_string()))?;
+        let mut nodes = self.nodes.write().map_err(|_| {
+            StasisError::PortFailure("cluster node store lock poisoned".to_string())
+        })?;
 
         let Some(node) = nodes.get_mut(&heartbeat.node_id) else {
             return Ok(None);
         };
 
         node.heartbeat_at = heartbeat.heartbeat_at;
-        node.lease_expires_at = heartbeat.heartbeat_at + Duration::seconds(heartbeat.lease_ttl_seconds.max(1));
+        node.lease_expires_at =
+            heartbeat.heartbeat_at + Duration::seconds(heartbeat.lease_ttl_seconds.max(1));
         if let Some(queue_ownership) = heartbeat.queue_ownership {
             node.queue_ownership = queue_ownership;
         }
@@ -60,36 +59,32 @@ impl ClusterNodeStore for InMemoryClusterNodeStore {
     }
 
     async fn get(&self, node_id: &str) -> Result<Option<ClusterNode>> {
-        let nodes = self
-            .nodes
-            .read()
-            .map_err(|_| StasisError::PortFailure("cluster node store lock poisoned".to_string()))?;
+        let nodes = self.nodes.read().map_err(|_| {
+            StasisError::PortFailure("cluster node store lock poisoned".to_string())
+        })?;
         Ok(nodes.get(node_id).cloned())
     }
 
     async fn list(&self) -> Result<Vec<ClusterNode>> {
-        let nodes = self
-            .nodes
-            .read()
-            .map_err(|_| StasisError::PortFailure("cluster node store lock poisoned".to_string()))?;
+        let nodes = self.nodes.read().map_err(|_| {
+            StasisError::PortFailure("cluster node store lock poisoned".to_string())
+        })?;
         let mut out = nodes.values().cloned().collect::<Vec<_>>();
         out.sort_by(|a, b| a.node_id.cmp(&b.node_id));
         Ok(out)
     }
 
     async fn remove(&self, node_id: &str) -> Result<bool> {
-        let mut nodes = self
-            .nodes
-            .write()
-            .map_err(|_| StasisError::PortFailure("cluster node store lock poisoned".to_string()))?;
+        let mut nodes = self.nodes.write().map_err(|_| {
+            StasisError::PortFailure("cluster node store lock poisoned".to_string())
+        })?;
         Ok(nodes.remove(node_id).is_some())
     }
 
     async fn prune_expired(&self, now: DateTime<Utc>) -> Result<u64> {
-        let mut nodes = self
-            .nodes
-            .write()
-            .map_err(|_| StasisError::PortFailure("cluster node store lock poisoned".to_string()))?;
+        let mut nodes = self.nodes.write().map_err(|_| {
+            StasisError::PortFailure("cluster node store lock poisoned".to_string())
+        })?;
 
         let before = nodes.len();
         nodes.retain(|_, node| node.lease_expires_at >= now);

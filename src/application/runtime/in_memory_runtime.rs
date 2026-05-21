@@ -6,6 +6,11 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value as JsonValue;
 
+use crate::application::runtime::replay_report::ReplayReport;
+use crate::application::runtime::retention::{RetentionPolicy, RetentionPruneReport};
+use crate::application::use_cases::investigate_runtime_lineage::{
+    InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
+};
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job::{Job, JobState, NewJob};
 use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
@@ -13,22 +18,17 @@ use crate::domain::runtime::outbox::{
     OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
 };
 use crate::domain::runtime::recurring::RecurringDefinition;
-use crate::application::runtime::replay_report::ReplayReport;
-use crate::application::runtime::retention::{RetentionPolicy, RetentionPruneReport};
-use crate::application::use_cases::investigate_runtime_lineage::{
-    InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
-};
-use crate::ports::outbound::runtime::event_publisher::EventPublisher;
+use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
+use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
+use crate::infrastructure::runtime::system_clock::SystemClock;
 use crate::ports::outbound::runtime::clock::Clock;
+use crate::ports::outbound::runtime::event_publisher::EventPublisher;
 use crate::ports::outbound::runtime::id_generator::IdGenerator;
 use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
 use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
-use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
-use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
-use crate::infrastructure::runtime::system_clock::SystemClock;
 
 const METRIC_JOB_SUCCEEDED_TOTAL: &str = "runtime.job.succeeded.total";
 const METRIC_JOB_RETRYABLE_FAILURE_TOTAL: &str = "runtime.job.retryable_failure.total";
@@ -138,7 +138,10 @@ impl InMemoryRuntime {
         Ok(())
     }
 
-    pub fn register_event_publisher<P: EventPublisher + 'static>(&self, publisher: P) -> Result<()> {
+    pub fn register_event_publisher<P: EventPublisher + 'static>(
+        &self,
+        publisher: P,
+    ) -> Result<()> {
         let mut state = self
             .publisher
             .write()
@@ -170,12 +173,22 @@ impl InMemoryRuntime {
         self.job_attempt_store.list_by_job_id(job_id).await
     }
 
-    pub async fn list_attempts_by_guardrail_code(&self, guardrail_code: &str) -> Result<Vec<JobAttempt>> {
-        self.job_attempt_store.list_by_guardrail_code(guardrail_code).await
+    pub async fn list_attempts_by_guardrail_code(
+        &self,
+        guardrail_code: &str,
+    ) -> Result<Vec<JobAttempt>> {
+        self.job_attempt_store
+            .list_by_guardrail_code(guardrail_code)
+            .await
     }
 
-    pub async fn list_attempts_by_execution_id(&self, execution_id: &str) -> Result<Vec<JobAttempt>> {
-        self.job_attempt_store.list_by_execution_id(execution_id).await
+    pub async fn list_attempts_by_execution_id(
+        &self,
+        execution_id: &str,
+    ) -> Result<Vec<JobAttempt>> {
+        self.job_attempt_store
+            .list_by_execution_id(execution_id)
+            .await
     }
 
     pub async fn list_lineage_events(&self, job_id: &str) -> Result<Vec<OutboxEvent>> {
@@ -189,11 +202,17 @@ impl InMemoryRuntime {
         self.outbox_store.list_by_execution_id(execution_id).await
     }
 
-    pub async fn list_lineage_events_by_thread_id(&self, thread_id: &str) -> Result<Vec<OutboxEvent>> {
+    pub async fn list_lineage_events_by_thread_id(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<OutboxEvent>> {
         self.outbox_store.list_by_thread_id(thread_id).await
     }
 
-    pub async fn investigate_lineage(&self, query: RuntimeLineageQuery) -> Result<RuntimeLineageReport> {
+    pub async fn investigate_lineage(
+        &self,
+        query: RuntimeLineageQuery,
+    ) -> Result<RuntimeLineageReport> {
         InvestigateRuntimeLineage::new(self.job_attempt_store.clone(), self.outbox_store.clone())
             .execute(query)
             .await
@@ -220,10 +239,14 @@ impl InMemoryRuntime {
     }
 
     pub async fn materialize_recurring_now(&self, scheduler_id: &str) -> Result<usize> {
-        self.materialize_recurring(self.clock.now(), scheduler_id).await
+        self.materialize_recurring(self.clock.now(), scheduler_id)
+            .await
     }
 
-    pub async fn prune_terminal_records(&self, cutoff: DateTime<Utc>) -> Result<RetentionPruneReport> {
+    pub async fn prune_terminal_records(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> Result<RetentionPruneReport> {
         Ok(RetentionPruneReport {
             jobs_pruned: self.job_store.prune_terminal_before(cutoff).await?,
             attempts_pruned: self.job_attempt_store.prune_finished_before(cutoff).await?,
@@ -262,10 +285,7 @@ impl InMemoryRuntime {
                 continue;
             }
 
-            let id = format!(
-                "{}",
-                self.id_generator.next_id(&definition.id)
-            );
+            let id = format!("{}", self.id_generator.next_id(&definition.id));
 
             let scheduled_at = now + Duration::seconds(definition.jitter_seconds.max(0));
 
@@ -358,7 +378,7 @@ impl InMemoryRuntime {
                     execution_id.clone(),
                     diagnostics.as_deref(),
                 )
-                    .await?;
+                .await?;
 
                 self.append_job_attempt(
                     &job,
@@ -407,7 +427,7 @@ impl InMemoryRuntime {
                         execution_id.clone(),
                         diagnostics.as_deref(),
                     )
-                        .await?;
+                    .await?;
 
                     self.metrics.incr_counter(METRIC_JOB_DEAD_LETTER_TOTAL, 1);
                 } else {
@@ -429,9 +449,10 @@ impl InMemoryRuntime {
                         execution_id.clone(),
                         diagnostics.as_deref(),
                     )
-                        .await?;
+                    .await?;
 
-                    self.metrics.incr_counter(METRIC_JOB_RETRY_SCHEDULED_TOTAL, 1);
+                    self.metrics
+                        .incr_counter(METRIC_JOB_RETRY_SCHEDULED_TOTAL, 1);
                 }
 
                 self.job_store.save(job.clone()).await?;
@@ -488,7 +509,7 @@ impl InMemoryRuntime {
                     execution_id.clone(),
                     diagnostics.as_deref(),
                 )
-                    .await?;
+                .await?;
 
                 self.append_job_attempt(
                     &job,
@@ -565,7 +586,11 @@ impl InMemoryRuntime {
         let mut published = 0usize;
 
         for mut event in pending {
-            if event.next_attempt_at.map(|next| next > now).unwrap_or(false) {
+            if event
+                .next_attempt_at
+                .map(|next| next > now)
+                .unwrap_or(false)
+            {
                 continue;
             }
 
@@ -624,8 +649,7 @@ impl InMemoryRuntime {
             input_memory_query_fingerprint,
             output_memory_node_id,
             retrieval_path,
-        ) =
-            Self::extract_memory_lineage_fields(diagnostics);
+        ) = Self::extract_memory_lineage_fields(diagnostics);
         let thread_id = Self::extract_thread_id(diagnostics);
         let event = OutboxEvent {
             event_id: self.id_generator.next_id(&format!("evt-{}", job.id)),
@@ -718,7 +742,12 @@ impl InMemoryRuntime {
 
     fn extract_memory_lineage_fields(
         diagnostics: Option<&str>,
-    ) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
         let Some(raw) = diagnostics else {
             return (None, None, None, None);
         };
@@ -1131,7 +1160,6 @@ impl OutboxStore for InMemoryOutboxStore {
 
         Ok(before.saturating_sub(state.len()))
     }
-
 }
 
 #[async_trait]
@@ -1288,7 +1316,9 @@ mod tests {
         async fn publish(&self, _event: &OutboxEvent) -> Result<()> {
             let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
             if call <= self.failures_before_success {
-                return Err(StasisError::PortFailure("synthetic publish failure".to_string()));
+                return Err(StasisError::PortFailure(
+                    "synthetic publish failure".to_string(),
+                ));
             }
 
             Ok(())

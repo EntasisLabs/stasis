@@ -1,24 +1,18 @@
 use async_trait::async_trait;
 
 use crate::application::dto::{
-    ClusterForwardOutcomeRow, ClusterNodeHealthRow,
-    ForwardClusterCommandRequest,
-    ForwardClusterCommandResponse, HeartbeatClusterNodeRequest,
-    InitiateCoordinatorFailoverRequest,
-    InitiateCoordinatorFailoverResponse,
-    InitiateCoordinatorHandoffRequest,
-    InitiateCoordinatorHandoffResponse,
-    EndpointDiagnosticsReadModelRow, ListEndpointDiagnosticsReadModelRequest,
-    EndpointFailureRateTrendRow, ListEndpointFailureRateTrendsRequest,
-    ListClusterForwardOutcomesRequest,
-    ListClusterNodeHealthRequest, ListQueueOwnershipHealthRequest,
+    ClusterForwardOutcomeRow, ClusterNodeHealthRow, EndpointDiagnosticsReadModelRow,
+    EndpointFailureRateTrendRow, ForwardClusterCommandRequest, ForwardClusterCommandResponse,
+    HeartbeatClusterNodeRequest, InitiateCoordinatorFailoverRequest,
+    InitiateCoordinatorFailoverResponse, InitiateCoordinatorHandoffRequest,
+    InitiateCoordinatorHandoffResponse, ListClusterForwardOutcomesRequest,
+    ListClusterNodeHealthRequest, ListEndpointDiagnosticsReadModelRequest,
+    ListEndpointFailureRateTrendsRequest, ListQueueOwnershipHealthRequest,
     ListTopUnhealthyEndpointsRequest, PruneEndpointDeliveryStatusesRequest,
-    PruneExpiredClusterNodesRequest, QueueOwnershipHealthRow,
-    RebalanceQueueOwnershipRequest, RebalanceQueueOwnershipResponse,
-    RunClusterHeartbeatSweepRequest, RunClusterHeartbeatSweepResponse,
-    RegisterClusterNodeRequest,
-    RegisterDeliveryEndpointRequest, RegisterDeliveryEndpointResponse,
-    SetDeliveryEndpointEnabledRequest,
+    PruneExpiredClusterNodesRequest, QueueOwnershipHealthRow, RebalanceQueueOwnershipRequest,
+    RebalanceQueueOwnershipResponse, RegisterClusterNodeRequest, RegisterDeliveryEndpointRequest,
+    RegisterDeliveryEndpointResponse, RunClusterHeartbeatSweepRequest,
+    RunClusterHeartbeatSweepResponse, SetDeliveryEndpointEnabledRequest,
 };
 use crate::domain::errors::Result;
 use crate::domain::runtime::cluster_node::ClusterNode;
@@ -57,8 +51,14 @@ pub trait ControlPlaneCommands {
         &self,
         request: PruneEndpointDeliveryStatusesRequest,
     ) -> Result<u64>;
-    async fn register_cluster_node(&self, request: RegisterClusterNodeRequest) -> Result<ClusterNode>;
-    async fn heartbeat_cluster_node(&self, request: HeartbeatClusterNodeRequest) -> Result<ClusterNode>;
+    async fn register_cluster_node(
+        &self,
+        request: RegisterClusterNodeRequest,
+    ) -> Result<ClusterNode>;
+    async fn heartbeat_cluster_node(
+        &self,
+        request: HeartbeatClusterNodeRequest,
+    ) -> Result<ClusterNode>;
     async fn list_cluster_node_health(
         &self,
         request: ListClusterNodeHealthRequest,

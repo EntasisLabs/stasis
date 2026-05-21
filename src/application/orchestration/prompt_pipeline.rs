@@ -81,14 +81,20 @@ impl PromptExecutionPipeline {
         context: PromptExecutionContext,
         chunk_tx: Option<&mpsc::UnboundedSender<String>>,
     ) -> Result<PromptChatCompletion> {
-        let response = self.chat_client.complete_stream(request, None, chunk_tx).await?;
+        let response = self
+            .chat_client
+            .complete_stream(request, None, chunk_tx)
+            .await?;
         Ok(PromptChatCompletion {
             response,
             metadata: context,
         })
     }
 
-    pub async fn execute(&self, request: PromptExecutionRequest) -> Result<PromptExecutionResponse> {
+    pub async fn execute(
+        &self,
+        request: PromptExecutionRequest,
+    ) -> Result<PromptExecutionResponse> {
         let context = request.context.clone();
         let mut messages = Vec::with_capacity(2);
         if let Some(system_prompt) = request.system_prompt {

@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -99,7 +99,10 @@ impl AgentSessionPipeline {
         Self { tool_loop_pipeline }
     }
 
-    pub async fn execute_turn(&self, request: AgentTurnExecutionRequest) -> Result<AgentTurnExecutionResponse> {
+    pub async fn execute_turn(
+        &self,
+        request: AgentTurnExecutionRequest,
+    ) -> Result<AgentTurnExecutionResponse> {
         let agent_id = request.identity.agent_id.clone();
         let thread_id = request.identity.thread_id.clone();
 
@@ -229,7 +232,10 @@ impl AgentSessionCoordinator {
         }
     }
 
-    pub async fn run_session(&self, request: AgentSessionRunRequest) -> Result<AgentSessionRunResponse> {
+    pub async fn run_session(
+        &self,
+        request: AgentSessionRunRequest,
+    ) -> Result<AgentSessionRunResponse> {
         if request.participants.is_empty() {
             return Err(StasisError::PortFailure(
                 "policy violation: agent session requires at least one participant".to_string(),

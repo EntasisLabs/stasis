@@ -10,10 +10,9 @@ impl LocusNodeStoreFactory {
     pub async fn in_memory() -> Result<Arc<dyn NodeStore>> {
         let store = Arc::new(InMemoryNodeStore::new());
         let initializer: Arc<dyn NodeStoreInitializer> = store.clone();
-        initializer
-            .initialize_async()
-            .await
-            .map_err(|e| StasisError::PortFailure(format!("initialize locus in-memory store: {e}")))?;
+        initializer.initialize_async().await.map_err(|e| {
+            StasisError::PortFailure(format!("initialize locus in-memory store: {e}"))
+        })?;
         Ok(store)
     }
 }

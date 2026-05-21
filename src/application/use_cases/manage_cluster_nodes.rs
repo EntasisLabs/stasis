@@ -3,22 +3,18 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::application::dto::{
-    ClusterForwardOutcomeRow, ClusterNodeHealthRow,
-    ForwardClusterCommandRequest, ForwardClusterCommandResponse,
-    HeartbeatClusterNodeRequest, InitiateCoordinatorHandoffRequest,
+    ClusterForwardOutcomeRow, ClusterNodeHealthRow, ForwardClusterCommandRequest,
+    ForwardClusterCommandResponse, HeartbeatClusterNodeRequest, InitiateCoordinatorFailoverRequest,
+    InitiateCoordinatorFailoverResponse, InitiateCoordinatorHandoffRequest,
     InitiateCoordinatorHandoffResponse, ListClusterForwardOutcomesRequest,
-    InitiateCoordinatorFailoverRequest, InitiateCoordinatorFailoverResponse,
-    ListClusterNodeHealthRequest, ListQueueOwnershipHealthRequest,
-    PruneExpiredClusterNodesRequest, QueueOwnershipHealthRow,
-    RebalanceQueueOwnershipRequest, RebalanceQueueOwnershipResponse,
-    RegisterClusterNodeRequest, RunClusterHeartbeatSweepRequest,
-    RunClusterHeartbeatSweepResponse,
+    ListClusterNodeHealthRequest, ListQueueOwnershipHealthRequest, PruneExpiredClusterNodesRequest,
+    QueueOwnershipHealthRow, RebalanceQueueOwnershipRequest, RebalanceQueueOwnershipResponse,
+    RegisterClusterNodeRequest, RunClusterHeartbeatSweepRequest, RunClusterHeartbeatSweepResponse,
 };
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::cluster_node::{
-    ClusterNode, ClusterNodeHealth, ClusterNodeHealthSnapshot, ClusterNodeHeartbeat,
-    ClusterControlEvent, ClusterForwardCommand, NewClusterNode,
-    QueueOwnershipMode,
+    ClusterControlEvent, ClusterForwardCommand, ClusterNode, ClusterNodeHealth,
+    ClusterNodeHealthSnapshot, ClusterNodeHeartbeat, NewClusterNode, QueueOwnershipMode,
 };
 use crate::ports::outbound::runtime::cluster_command_forwarder::ClusterCommandForwarder;
 use crate::ports::outbound::runtime::cluster_control_event_sink::ClusterControlEventSink;
@@ -44,10 +40,14 @@ where
 
     pub async fn execute(&self, request: RegisterClusterNodeRequest) -> Result<ClusterNode> {
         if request.node_id.trim().is_empty() {
-            return Err(StasisError::PortFailure("node_id must not be empty".to_string()));
+            return Err(StasisError::PortFailure(
+                "node_id must not be empty".to_string(),
+            ));
         }
         if request.region.trim().is_empty() {
-            return Err(StasisError::PortFailure("region must not be empty".to_string()));
+            return Err(StasisError::PortFailure(
+                "region must not be empty".to_string(),
+            ));
         }
 
         let mode = request
@@ -285,7 +285,9 @@ where
             ));
         }
         if request.queue.trim().is_empty() {
-            return Err(StasisError::PortFailure("queue must not be empty".to_string()));
+            return Err(StasisError::PortFailure(
+                "queue must not be empty".to_string(),
+            ));
         }
         if request.desired_owners.is_empty() {
             return Err(StasisError::PortFailure(
@@ -401,7 +403,9 @@ where
             ));
         }
         if request.payload.trim().is_empty() {
-            return Err(StasisError::PortFailure("payload must not be empty".to_string()));
+            return Err(StasisError::PortFailure(
+                "payload must not be empty".to_string(),
+            ));
         }
 
         let accepted = self
@@ -480,8 +484,20 @@ where
             .list()
             .await?
             .into_iter()
-            .filter(|node| request.role.as_ref().map(|role| &node.role == role).unwrap_or(true))
-            .filter(|node| request.region.as_ref().map(|region| &node.region == region).unwrap_or(true))
+            .filter(|node| {
+                request
+                    .role
+                    .as_ref()
+                    .map(|role| &node.role == role)
+                    .unwrap_or(true)
+            })
+            .filter(|node| {
+                request
+                    .region
+                    .as_ref()
+                    .map(|region| &node.region == region)
+                    .unwrap_or(true)
+            })
             .filter(|node| {
                 request
                     .capability_tag
@@ -564,15 +580,16 @@ where
                     }
                 }
 
-                let row = by_queue
-                    .entry(queue.clone())
-                    .or_insert_with(|| QueueOwnershipHealthRow {
-                        queue: queue.clone(),
-                        owners: Vec::new(),
-                        healthy_owners: 0,
-                        degraded_owners: 0,
-                        offline_owners: 0,
-                    });
+                let row =
+                    by_queue
+                        .entry(queue.clone())
+                        .or_insert_with(|| QueueOwnershipHealthRow {
+                            queue: queue.clone(),
+                            owners: Vec::new(),
+                            healthy_owners: 0,
+                            degraded_owners: 0,
+                            offline_owners: 0,
+                        });
 
                 row.owners.push(node.node_id.clone());
                 match health {
@@ -671,9 +688,9 @@ mod tests {
     use chrono::{Duration, Utc};
 
     use crate::application::dto::{
-        HeartbeatClusterNodeRequest, ListClusterNodeHealthRequest,
-        ListQueueOwnershipHealthRequest, PruneExpiredClusterNodesRequest,
-        RegisterClusterNodeRequest, RunClusterHeartbeatSweepRequest,
+        HeartbeatClusterNodeRequest, ListClusterNodeHealthRequest, ListQueueOwnershipHealthRequest,
+        PruneExpiredClusterNodesRequest, RegisterClusterNodeRequest,
+        RunClusterHeartbeatSweepRequest,
     };
     use crate::domain::runtime::cluster_node::{
         ClusterControlEvent, ClusterNodeHealth, ClusterNodeRole, QueueOwnershipMode,
@@ -754,11 +771,10 @@ mod tests {
         assert_eq!(deleted, 1);
 
         let event_sink = InMemoryClusterControlEventSink::default();
-        let sweep = RunClusterHeartbeatSweep::new(InMemoryClusterNodeStore::default(), event_sink.clone());
+        let sweep =
+            RunClusterHeartbeatSweep::new(InMemoryClusterNodeStore::default(), event_sink.clone());
         let response = sweep
-            .execute(RunClusterHeartbeatSweepRequest {
-                now: Utc::now(),
-            })
+            .execute(RunClusterHeartbeatSweepRequest { now: Utc::now() })
             .await
             .expect("sweep should succeed");
         assert_eq!(response.pruned_nodes, 0);
@@ -804,9 +820,10 @@ mod tests {
             .await
             .expect_err("conflicting single owner queue should fail");
 
-        assert!(err
-            .to_string()
-            .contains("queue ownership conflict for queue=default"));
+        assert!(
+            err.to_string()
+                .contains("queue ownership conflict for queue=default")
+        );
 
         let sweep_sink = InMemoryClusterControlEventSink::default();
         let sweep = RunClusterHeartbeatSweep::new(store, sweep_sink.clone());
@@ -823,7 +840,10 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
-            ClusterControlEvent::ExpiredNodesPruned { pruned_count: 1, .. }
+            ClusterControlEvent::ExpiredNodesPruned {
+                pruned_count: 1,
+                ..
+            }
         ));
     }
 }

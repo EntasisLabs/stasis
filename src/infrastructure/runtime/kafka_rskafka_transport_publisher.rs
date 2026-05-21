@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use rskafka::client::{
-    partition::{Compression, UnknownTopicHandling},
     ClientBuilder,
+    partition::{Compression, UnknownTopicHandling},
 };
 use rskafka::record::Record;
 use serde::Deserialize;
@@ -190,8 +190,9 @@ mod tests {
 
     #[test]
     fn parses_kafka_target_with_topic_suffix() {
-        let parsed = RskafkaTransportPublisher::parse_target("kafka://b1:9092,b2:9092/events.topic")
-            .expect("target should parse");
+        let parsed =
+            RskafkaTransportPublisher::parse_target("kafka://b1:9092,b2:9092/events.topic")
+                .expect("target should parse");
         assert_eq!(parsed.bootstrap_brokers, vec!["b1:9092", "b2:9092"]);
         assert_eq!(parsed.topic.as_deref(), Some("events.topic"));
     }
@@ -230,8 +231,8 @@ mod tests {
 
     #[test]
     fn empty_kafka_metadata_uses_defaults() {
-        let metadata = RskafkaTransportPublisher::parse_metadata(None)
-            .expect("metadata should default");
+        let metadata =
+            RskafkaTransportPublisher::parse_metadata(None).expect("metadata should default");
         assert_eq!(metadata, KafkaEndpointMetadata::default());
     }
 }

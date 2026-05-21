@@ -74,8 +74,9 @@ pub struct AgentSessionJobPayload {
 
 impl AgentSessionJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode agent-session payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode agent-session payload: {err}"))
+        })
     }
 }
 
@@ -95,8 +96,9 @@ pub struct AgentTurnJobPayload {
 
 impl AgentTurnJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode agent-turn payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode agent-turn payload: {err}"))
+        })
     }
 }
 
@@ -114,8 +116,9 @@ pub struct ToolLoopJobPayload {
 
 impl ToolLoopJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode tool-loop payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode tool-loop payload: {err}"))
+        })
     }
 }
 
@@ -130,8 +133,9 @@ pub struct PromptJobPayload {
 
 impl PromptJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode prompt payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode prompt payload: {err}"))
+        })
     }
 }
 
@@ -155,8 +159,11 @@ pub struct SequentialPatternJobPayload {
 
 impl SequentialPatternJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode sequential-pattern payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!(
+                "failed to encode sequential-pattern payload: {err}"
+            ))
+        })
     }
 }
 
@@ -181,8 +188,11 @@ pub struct ConcurrentPatternJobPayload {
 
 impl ConcurrentPatternJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode concurrent-pattern payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!(
+                "failed to encode concurrent-pattern payload: {err}"
+            ))
+        })
     }
 }
 
@@ -206,8 +216,9 @@ pub struct HandoffPatternJobPayload {
 
 impl HandoffPatternJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode handoff-pattern payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode handoff-pattern payload: {err}"))
+        })
     }
 }
 
@@ -232,8 +243,11 @@ pub struct OrchestratorPatternJobPayload {
 
 impl OrchestratorPatternJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode orchestrator-pattern payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!(
+                "failed to encode orchestrator-pattern payload: {err}"
+            ))
+        })
     }
 }
 
@@ -244,8 +258,9 @@ pub struct MemoryRecallJobPayload {
 
 impl MemoryRecallJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode memory-recall payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode memory-recall payload: {err}"))
+        })
     }
 }
 
@@ -262,8 +277,9 @@ pub struct MemoryAggregateJobPayload {
 
 impl MemoryAggregateJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode memory-aggregate payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode memory-aggregate payload: {err}"))
+        })
     }
 }
 
@@ -291,8 +307,9 @@ pub struct MemoryTransformJobPayload {
 
 impl MemoryTransformJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode memory-transform payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode memory-transform payload: {err}"))
+        })
     }
 }
 
@@ -309,8 +326,9 @@ pub struct MemoryRollupJobPayload {
 
 impl MemoryRollupJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode memory-rollup payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode memory-rollup payload: {err}"))
+        })
     }
 }
 
@@ -319,7 +337,8 @@ pub struct MemorySchemaJobPayload {}
 
 impl MemorySchemaJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
-        serde_json::to_string(self)
-            .map_err(|err| StasisError::PortFailure(format!("failed to encode memory-schema payload: {err}")))
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode memory-schema payload: {err}"))
+        })
     }
 }

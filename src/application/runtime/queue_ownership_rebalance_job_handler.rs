@@ -40,7 +40,11 @@ impl QueueOwnershipRebalanceJobHandler {
         if payload.desired_owners.is_empty() {
             return Err("desired_owners must not be empty".to_string());
         }
-        if payload.desired_owners.iter().any(|owner| owner.trim().is_empty()) {
+        if payload
+            .desired_owners
+            .iter()
+            .any(|owner| owner.trim().is_empty())
+        {
             return Err("desired_owners must not contain empty values".to_string());
         }
 
@@ -63,7 +67,10 @@ impl QueueOwnershipRebalanceJobHandler {
         }
     }
 
-    fn remaining_ttl_seconds(lease_expires_at: chrono::DateTime<Utc>, now: chrono::DateTime<Utc>) -> i64 {
+    fn remaining_ttl_seconds(
+        lease_expires_at: chrono::DateTime<Utc>,
+        now: chrono::DateTime<Utc>,
+    ) -> i64 {
         lease_expires_at
             .signed_duration_since(now)
             .num_seconds()
@@ -152,7 +159,9 @@ impl JobHandler for QueueOwnershipRebalanceJobHandler {
                 .await;
 
             if result.is_err() {
-                return Ok(Self::retryable("failed to update node during queue rebalance"));
+                return Ok(Self::retryable(
+                    "failed to update node during queue rebalance",
+                ));
             }
 
             updated_nodes += 1;

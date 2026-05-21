@@ -55,14 +55,20 @@ pub struct ToolLoopPipeline {
 }
 
 impl ToolLoopPipeline {
-    pub fn new(prompt_pipeline: PromptExecutionPipeline, tool_registry: Arc<dyn ToolRegistry>) -> Self {
+    pub fn new(
+        prompt_pipeline: PromptExecutionPipeline,
+        tool_registry: Arc<dyn ToolRegistry>,
+    ) -> Self {
         Self {
             prompt_pipeline,
             tool_registry,
         }
     }
 
-    pub async fn execute(&self, request: ToolLoopExecutionRequest) -> Result<ToolLoopExecutionResponse> {
+    pub async fn execute(
+        &self,
+        request: ToolLoopExecutionRequest,
+    ) -> Result<ToolLoopExecutionResponse> {
         self.execute_internal(request, Vec::new(), None, DEFAULT_MAX_TOOL_ROUNDS)
             .await
     }
@@ -91,13 +97,8 @@ impl ToolLoopPipeline {
         prior_messages: Vec<ChatMessage>,
         chunk_tx: Option<&mpsc::UnboundedSender<String>>,
     ) -> Result<ToolLoopExecutionResponse> {
-        self.execute_internal(
-            request,
-            prior_messages,
-            chunk_tx,
-            DEFAULT_MAX_TOOL_ROUNDS,
-        )
-        .await
+        self.execute_internal(request, prior_messages, chunk_tx, DEFAULT_MAX_TOOL_ROUNDS)
+            .await
     }
 
     pub async fn execute_with_stream_prior_messages_max_rounds(
@@ -131,7 +132,7 @@ impl ToolLoopPipeline {
 
         let mut tools = self.tool_registry.list_tools().await?;
         if !selected_tool_name.trim().is_empty() {
-            let selected_sanitized =  sanitize_tool_name_for_model(&selected_tool_name);
+            let selected_sanitized = sanitize_tool_name_for_model(&selected_tool_name);
             tools.retain(|tool| {
                 tool.name == selected_tool_name
                     || tool.name == selected_sanitized
@@ -224,11 +225,9 @@ impl ToolLoopPipeline {
             }
 
             if !should_use_legacy_fallback {
-                return Err(StasisError::PortFailure(
-                    format!(
-                        "tool loop exceeded max rounds ({max_tool_rounds}) without final response"
-                    ),
-                ));
+                return Err(StasisError::PortFailure(format!(
+                    "tool loop exceeded max rounds ({max_tool_rounds}) without final response"
+                )));
             }
         }
 
@@ -241,8 +240,9 @@ impl ToolLoopPipeline {
         let draft_text = if let Some(text) = fallback_draft_text {
             text
         } else {
-            let mut first_request = PromptExecutionRequest::from_user_prompt(request.user_prompt.clone())
-                .with_context(context.clone());
+            let mut first_request =
+                PromptExecutionRequest::from_user_prompt(request.user_prompt.clone())
+                    .with_context(context.clone());
             if let Some(system_prompt) = request.system_prompt.clone() {
                 first_request = first_request.with_system_prompt(system_prompt);
             }
@@ -255,10 +255,7 @@ impl ToolLoopPipeline {
 
         let synthesis_prompt = format!(
             "User request:\n{}\n\nDraft analysis:\n{}\n\nTool '{}' output JSON:\n{}\n\nProduce final answer grounded in the tool output.",
-            request.user_prompt,
-            draft_text,
-            request.tool_name,
-            tool_output
+            request.user_prompt, draft_text, request.tool_name, tool_output
         );
 
         let mut final_request = PromptExecutionRequest::from_user_prompt(synthesis_prompt)

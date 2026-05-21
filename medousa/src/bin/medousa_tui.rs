@@ -39,9 +39,10 @@ use medousa::{
     tui::allowlist_preview::analyze_allowlist_preview,
     tui::editor_buffer::TextBuffer,
     tui::settings::{
-        RuntimeSettings, cycle_backend, cycle_tool_call_mode, parse_bool_with_default,
-        parse_usize_with_bounds, resolve_backend_name, resolve_bool_arg,
-        resolve_tool_call_mode_name, resolve_usize_arg, settings_validation_errors,
+        RuntimeSettings, cycle_backend, cycle_tool_call_mode, env_overrides_validation_errors,
+        parse_bool_with_default, parse_env_overrides, parse_usize_with_bounds,
+        resolve_backend_name, resolve_bool_arg, resolve_tool_call_mode_name, resolve_usize_arg,
+        settings_validation_errors,
     },
 };
 use stasis::application::orchestration::tool_loop_pipeline::{
@@ -141,11 +142,15 @@ struct TuiState {
     editor_scroll: u16,
     settings_selected: usize,
     settings_editing: bool,
+    runtime_env_editing: bool,
     provider_model: String,
     session_id: String,
     thinking_trace: VecDeque<String>,
     thinking_scroll: u16,
     thinking_max_scroll: u16,
+    grapheme_console: VecDeque<String>,
+    grapheme_console_scroll: u16,
+    grapheme_console_max_scroll: u16,
     obs_scroll: u16,
     obs_max_scroll: u16,
     job_scroll: u16,
@@ -161,11 +166,13 @@ enum UiMode {
     History,
     CommandPalette,
     Settings,
+    RuntimeEnv,
     ObservabilityPanel,
     AllowlistPreview,
     Editor,
     ThinkingPeek,
     ThinkingPanel,
+    GraphemeConsole,
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -185,6 +192,10 @@ async fn main() -> Result<()> {
     let daemon_url = find_arg_value(&args, "--daemon-url");
     let explicit_session = find_arg_value(&args, "--session");
     let defaults = load_tui_defaults();
+
+    if let Some(raw) = defaults.env_overrides.as_deref() {
+        apply_env_overrides(raw);
+    }
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_help();
@@ -258,6 +269,7 @@ async fn main() -> Result<()> {
         provider: resolved_provider.clone(),
         model: resolved_model.clone(),
         base_url: resolved_base_url.clone().unwrap_or_default(),
+        env_overrides: defaults.env_overrides.clone().unwrap_or_default(),
         api_key: resolved_api_key.clone(),
         allowed_modules: resolved_allowed_modules.clone(),
         tool_call_mode: resolved_tool_call_mode.clone(),
@@ -293,11 +305,15 @@ async fn main() -> Result<()> {
         editor_scroll: 0,
         settings_selected: 0,
         settings_editing: false,
+        runtime_env_editing: false,
         provider_model,
         session_id: session_id.clone(),
         thinking_trace: VecDeque::new(),
         thinking_scroll: 0,
         thinking_max_scroll: 0,
+        grapheme_console: VecDeque::new(),
+        grapheme_console_scroll: 0,
+        grapheme_console_max_scroll: 0,
         obs_scroll: 0,
         obs_max_scroll: 0,
         job_scroll: 0,
@@ -369,6 +385,15 @@ async fn handle_key_event(
     };
 
     if key.code == KeyCode::Esc {
+        if state.mode == UiMode::RuntimeEnv {
+            state.mode = UiMode::Settings;
+            state.runtime_env_editing = false;
+            return EventOutcome::Continue;
+        }
+        if state.mode == UiMode::GraphemeConsole {
+            state.mode = UiMode::Chat;
+            return EventOutcome::Continue;
+        }
         if state.mode == UiMode::Settings {
             state.settings_draft = state.settings.clone();
         }
@@ -391,6 +416,15 @@ async fn handle_key_event(
             state.mode = UiMode::Chat;
         } else if !state.thinking_trace.is_empty() || state.is_processing {
             state.mode = UiMode::ThinkingPeek;
+        }
+        return EventOutcome::Continue;
+    }
+
+    if key.code == KeyCode::F(3) {
+        if state.mode == UiMode::GraphemeConsole {
+            state.mode = UiMode::Chat;
+        } else {
+            state.mode = UiMode::GraphemeConsole;
         }
         return EventOutcome::Continue;
     }
@@ -420,14 +454,16 @@ async fn handle_key_event(
     }
 
     if key.code == KeyCode::Char(',') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        if state.mode == UiMode::Settings {
+        if state.mode == UiMode::Settings || state.mode == UiMode::RuntimeEnv {
             state.mode = UiMode::Chat;
             state.settings_editing = false;
+            state.runtime_env_editing = false;
             state.settings_draft = state.settings.clone();
         } else {
             state.mode = UiMode::Settings;
             state.settings_selected = 0;
             state.settings_editing = false;
+            state.runtime_env_editing = false;
             state.settings_draft = state.settings.clone();
         }
         return EventOutcome::Continue;
@@ -454,6 +490,10 @@ async fn handle_key_event(
         return handle_settings_key_event(key.code, state, tui_rt, event_tx).await;
     }
 
+    if state.mode == UiMode::RuntimeEnv {
+        return handle_runtime_env_key_event(key.code, state);
+    }
+
     if state.mode == UiMode::AllowlistPreview {
         return handle_allowlist_preview_key_event(key.code, state);
     }
@@ -466,11 +506,17 @@ async fn handle_key_event(
         return handle_thinking_key_event(key.code, state);
     }
 
+    if state.mode == UiMode::GraphemeConsole {
+        return handle_grapheme_console_key_event(key.code, state);
+    }
+
     if state.mode == UiMode::ObservabilityPanel {
         return handle_observability_key_event(key.code, state);
     }
 
-    if state.mode == UiMode::Chat && key.modifiers.contains(KeyModifiers::SHIFT) {
+    let side_scroll_mod =
+        key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::ALT);
+    if state.mode == UiMode::Chat && side_scroll_mod {
         match key.code {
             KeyCode::Up => {
                 state.obs_scroll = state.obs_scroll.saturating_sub(1);
@@ -506,6 +552,50 @@ async fn handle_key_event(
             KeyCode::End => {
                 state.obs_scroll = state.obs_max_scroll;
                 state.job_scroll = state.job_max_scroll;
+                return EventOutcome::Continue;
+            }
+            _ => {}
+        }
+    }
+
+    if state.mode == UiMode::Chat && key.modifiers.contains(KeyModifiers::ALT) {
+        match key.code {
+            KeyCode::Char('o') => {
+                state.obs_scroll = state.obs_scroll.saturating_sub(1);
+                return EventOutcome::Continue;
+            }
+            KeyCode::Char('p') => {
+                state.obs_scroll = state.obs_scroll.saturating_add(1).min(state.obs_max_scroll);
+                return EventOutcome::Continue;
+            }
+            KeyCode::Char('j') => {
+                state.job_scroll = state.job_scroll.saturating_sub(1);
+                return EventOutcome::Continue;
+            }
+            KeyCode::Char('k') => {
+                state.job_scroll = state.job_scroll.saturating_add(1).min(state.job_max_scroll);
+                return EventOutcome::Continue;
+            }
+            _ => {}
+        }
+    }
+
+    if state.mode == UiMode::Chat && key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('u') => {
+                state.obs_scroll = state.obs_scroll.saturating_sub(10);
+                state.job_scroll = state.job_scroll.saturating_sub(10);
+                return EventOutcome::Continue;
+            }
+            KeyCode::Char('d') => {
+                state.obs_scroll = state
+                    .obs_scroll
+                    .saturating_add(10)
+                    .min(state.obs_max_scroll);
+                state.job_scroll = state
+                    .job_scroll
+                    .saturating_add(10)
+                    .min(state.job_max_scroll);
                 return EventOutcome::Continue;
             }
             _ => {}
@@ -660,6 +750,38 @@ fn handle_observability_key_event(code: KeyCode, state: &mut TuiState) -> EventO
         }
         KeyCode::End => {
             state.obs_scroll = state.obs_max_scroll;
+        }
+        _ => {}
+    }
+
+    EventOutcome::Continue
+}
+
+fn handle_grapheme_console_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
+    match code {
+        KeyCode::Up => {
+            state.grapheme_console_scroll = state.grapheme_console_scroll.saturating_sub(1);
+        }
+        KeyCode::Down => {
+            state.grapheme_console_scroll = state
+                .grapheme_console_scroll
+                .saturating_add(1)
+                .min(state.grapheme_console_max_scroll);
+        }
+        KeyCode::PageUp => {
+            state.grapheme_console_scroll = state.grapheme_console_scroll.saturating_sub(10);
+        }
+        KeyCode::PageDown => {
+            state.grapheme_console_scroll = state
+                .grapheme_console_scroll
+                .saturating_add(10)
+                .min(state.grapheme_console_max_scroll);
+        }
+        KeyCode::Home => {
+            state.grapheme_console_scroll = 0;
+        }
+        KeyCode::End => {
+            state.grapheme_console_scroll = state.grapheme_console_max_scroll;
         }
         _ => {}
     }
@@ -888,10 +1010,44 @@ async fn run_editor_source_via_runtime(
             }
         };
 
+    let runtime = tui_rt.runtime.clone();
+    let source_bytes = source.len();
+    let allowed_modules = parse_allowed_modules(&state.settings.allowed_modules);
+    let queued_label = source_label.clone();
+    let tx = event_tx.clone();
+
+    push_obs(state, format!("↻ run queued: {queued_label}"));
+
+    tokio::spawn(async move {
+        if let Err(message) = execute_editor_run_task(
+            runtime,
+            tx.clone(),
+            source,
+            source_label,
+            source_bytes,
+            referenced_ops,
+            allowed_modules,
+        )
+        .await
+        {
+            let _ = tx.send(TuiEvent::UiNotice(format!("⚠ {message}"))).await;
+        }
+    });
+}
+
+async fn execute_editor_run_task(
+    runtime: std::sync::Arc<RuntimeComposition>,
+    event_tx: mpsc::Sender<TuiEvent>,
+    source: String,
+    source_label: String,
+    source_bytes: usize,
+    referenced_ops: Vec<String>,
+    allowed_modules: Vec<String>,
+) -> std::result::Result<(), String> {
     let _ = event_tx
         .send(TuiEvent::ToolInvoked {
             tool_name: "editor.gr.run".to_string(),
-            input_summary: format!("{source_label}  {} byte(s)", source.len()),
+            input_summary: format!("{source_label}  {source_bytes} byte(s)"),
         })
         .await;
 
@@ -913,14 +1069,13 @@ async fn run_editor_source_via_runtime(
         backoff_policy: BackoffPolicy::default(),
     };
 
-    let enqueue_result = match &*tui_rt.runtime {
+    let enqueue_result = match &*runtime {
         RuntimeComposition::InMemory(rt) => rt.enqueue(job).await,
         RuntimeComposition::Surreal(rt) => rt.enqueue(job).await,
     };
 
     if let Err(err) = enqueue_result {
-        push_obs(state, format!("⚠ run enqueue failed: {err}"));
-        return;
+        return Err(format!("run enqueue failed: {err}"));
     }
 
     let _ = event_tx
@@ -930,27 +1085,22 @@ async fn run_editor_source_via_runtime(
         })
         .await;
 
-    if let Err(err) = process_once(&tui_rt.runtime, "medousa_tui.editor_run").await {
-        push_obs(state, format!("⚠ run processing failed: {err}"));
-        return;
+    if let Err(err) = process_once(&runtime, "medousa_tui.editor_run").await {
+        return Err(format!("run processing failed: {err}"));
     }
 
-    let attempts_result = match &*tui_rt.runtime {
+    let attempts_result = match &*runtime {
         RuntimeComposition::InMemory(rt) => rt.job_attempt_store.list_by_job_id(&job_id).await,
         RuntimeComposition::Surreal(rt) => rt.job_attempt_store.list_by_job_id(&job_id).await,
     };
 
     let attempts = match attempts_result {
         Ok(list) => list,
-        Err(err) => {
-            push_obs(state, format!("⚠ run diagnostics failed: {err}"));
-            return;
-        }
+        Err(err) => return Err(format!("run diagnostics failed: {err}")),
     };
 
     let Some(last_attempt) = attempts.last() else {
-        push_obs(state, "⚠ run failed: no attempt recorded".to_string());
-        return;
+        return Err("run failed: no attempt recorded".to_string());
     };
 
     let succeeded = last_attempt.outcome == JobAttemptOutcome::Succeeded;
@@ -983,17 +1133,20 @@ async fn run_editor_source_via_runtime(
         "execution_id": last_attempt.execution_id,
         "diagnostics": diagnostics_json,
     });
+
     let _ = event_tx
         .send(TuiEvent::ToolPayload {
             tool_name: "editor.gr.run".to_string(),
             tool_input: serde_json::json!({
-                "source_bytes": source.len(),
+                "source_bytes": source_bytes,
                 "referenced_ops": referenced_ops,
-                "allowed_modules": parse_allowed_modules(&state.settings.allowed_modules),
+                "allowed_modules": allowed_modules,
             }),
             tool_output: output,
         })
         .await;
+
+    Ok(())
 }
 
 fn start_prompt_run(
@@ -1383,29 +1536,38 @@ async fn handle_slash_command(
                         push_obs(state, format!("✓ daemon url set to {}", state.daemon_url));
                     }
                 }
-                "health" => match daemon_health(&state.daemon_url).await {
-                    Ok(payload) => push_obs(
-                        state,
-                        format!(
-                            "✓ daemon {} backend={} worker={}",
-                            payload.status, payload.backend, payload.worker_id
-                        ),
-                    ),
-                    Err(err) => push_obs(state, format!("⚠ daemon health failed: {err}")),
-                },
+                "health" => {
+                    let daemon_url = state.daemon_url.clone();
+                    let tx = event_tx.clone();
+                    push_obs(state, format!("↻ daemon health check: {daemon_url}"));
+                    tokio::spawn(async move {
+                        let notice = match daemon_health(&daemon_url).await {
+                            Ok(payload) => format!(
+                                "✓ daemon {} backend={} worker={}",
+                                payload.status, payload.backend, payload.worker_id
+                            ),
+                            Err(err) => format!("⚠ daemon health failed: {err}"),
+                        };
+                        let _ = tx.send(TuiEvent::UiNotice(notice)).await;
+                    });
+                }
                 "ask" => {
                     let prompt = parts.collect::<Vec<_>>().join(" ");
                     if prompt.trim().is_empty() {
                         push_obs(state, "⚠ usage: /daemon ask <prompt>".to_string());
                     } else {
-                        match daemon_enqueue_ask(&state.daemon_url, &prompt).await {
-                            Ok(payload) => {
-                                push_obs(state, format!("✓ daemon job enqueued {}", payload.job_id))
-                            }
-                            Err(err) => {
-                                push_obs(state, format!("⚠ daemon ask failed: {err}"));
-                            }
-                        }
+                        let daemon_url = state.daemon_url.clone();
+                        let tx = event_tx.clone();
+                        push_obs(state, "↻ daemon ask queued".to_string());
+                        tokio::spawn(async move {
+                            let notice = match daemon_enqueue_ask(&daemon_url, &prompt).await {
+                                Ok(payload) => {
+                                    format!("✓ daemon job enqueued {}", payload.job_id)
+                                }
+                                Err(err) => format!("⚠ daemon ask failed: {err}"),
+                            };
+                            let _ = tx.send(TuiEvent::UiNotice(notice)).await;
+                        });
                     }
                 }
                 _ => {
@@ -1447,16 +1609,28 @@ async fn handle_slash_command(
                 return EventOutcome::Continue;
             }
 
-            match daemon_register_recurring_prompt(&state.daemon_url, cron_expr, &prompt).await {
-                Ok(payload) => push_obs(
-                    state,
-                    format!(
-                        "✓ watch {} next={}",
-                        payload.recurring_id, payload.next_run_at_utc
-                    ),
-                ),
-                Err(err) => push_obs(state, format!("⚠ watch add failed: {err}")),
-            }
+            let daemon_url = state.daemon_url.clone();
+            let cron_expr = cron_expr.to_string();
+            let tx = event_tx.clone();
+            push_obs(state, format!("↻ watch add queued ({cron_expr})"));
+            tokio::spawn(async move {
+                let notice = match daemon_register_recurring_prompt(
+                    &daemon_url,
+                    &cron_expr,
+                    &prompt,
+                )
+                .await
+                {
+                    Ok(payload) => {
+                        format!(
+                            "✓ watch {} next={}",
+                            payload.recurring_id, payload.next_run_at_utc
+                        )
+                    }
+                    Err(err) => format!("⚠ watch add failed: {err}"),
+                };
+                let _ = tx.send(TuiEvent::UiNotice(notice)).await;
+            });
         }
         _ => {
             push_obs(
@@ -1541,6 +1715,9 @@ async fn handle_command_palette_key_event(
 
 fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
     match event {
+        TuiEvent::UiNotice(text) => {
+            push_obs(state, text);
+        }
         TuiEvent::AgentChunk { delta } => {
             if delta.is_empty() {
                 return;
@@ -1676,6 +1853,26 @@ fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
                 state,
                 format!("◆ {tool_name}\ninput:\n{input}\noutput:\n{output}\n────────────────"),
             );
+
+            if tool_name == "editor.gr.run" {
+                let source = tool_output
+                    .get("source")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("editor:buffer");
+                let job_id = tool_output
+                    .get("job_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown-job");
+                let succeeded = tool_output
+                    .get("succeeded")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let diagnostics = tool_output
+                    .get("diagnostics")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                push_grapheme_console_entry(state, source, job_id, succeeded, &diagnostics);
+            }
         }
     }
 }
@@ -1729,6 +1926,10 @@ fn emit_settings_validation_summary(state: &mut TuiState) -> bool {
     settings_ui::emit_settings_validation_summary(state)
 }
 
+fn handle_runtime_env_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
+    settings_ui::handle_runtime_env_key_event(code, state)
+}
+
 async fn apply_settings(
     state: &mut TuiState,
     tui_rt: &mut TuiRuntime,
@@ -1773,6 +1974,8 @@ async fn apply_settings(
     } else {
         Some(state.settings_draft.base_url.trim().to_string())
     };
+    let env_overrides_raw = state.settings_draft.env_overrides.clone();
+    let changed = apply_env_overrides(&env_overrides_raw);
 
     match build_tui_runtime(
         parse_backend(Some(&backend)),
@@ -1791,6 +1994,7 @@ async fn apply_settings(
             state.settings.provider = provider.clone();
             state.settings.model = model.clone();
             state.settings.base_url = base_url.clone().unwrap_or_default();
+            state.settings.env_overrides = env_overrides_raw.clone();
             state.settings.allowed_modules = allowed_modules.join(",");
             state.settings.tool_call_mode = tool_call_mode.clone();
             state.settings.max_tool_rounds = max_tool_rounds.to_string();
@@ -1813,6 +2017,11 @@ async fn apply_settings(
                 provider: Some(provider),
                 model: Some(model),
                 base_url,
+                env_overrides: if env_overrides_raw.trim().is_empty() {
+                    None
+                } else {
+                    Some(env_overrides_raw)
+                },
                 allowed_modules: if allowed_modules.is_empty() {
                     None
                 } else {
@@ -1825,7 +2034,10 @@ async fn apply_settings(
             });
             push_obs(
                 state,
-                "✓ settings applied (sensitive values redacted)".to_string(),
+                format!(
+                    "✓ settings applied (sensitive values redacted, {} env override(s) active)",
+                    changed
+                ),
             );
         }
         Err(err) => {
@@ -1839,6 +2051,52 @@ fn push_obs(state: &mut TuiState, text: String) {
     if state.observability.len() > 50 {
         state.observability.pop_back();
     }
+}
+
+fn push_grapheme_console_entry(
+    state: &mut TuiState,
+    source_label: &str,
+    job_id: &str,
+    succeeded: bool,
+    diagnostics: &Value,
+) {
+    let status = if succeeded { "succeeded" } else { "failed" };
+    let mut entry = format!("[{status}] {source_label} ({job_id})");
+    let console_json = diagnostics
+        .get("final_state")
+        .cloned()
+        .unwrap_or_else(|| diagnostics.clone());
+
+    let rendered =
+        serde_json::to_string_pretty(&console_json).unwrap_or_else(|_| console_json.to_string());
+    if !rendered.trim().is_empty() {
+        entry.push('\n');
+        entry.push_str(&rendered);
+    }
+
+    state.grapheme_console.push_front(entry);
+    if state.grapheme_console.len() > 100 {
+        state.grapheme_console.pop_back();
+    }
+}
+
+fn apply_env_overrides(raw: &str) -> usize {
+    let mut changed = 0usize;
+    for (key, value) in parse_env_overrides(raw) {
+        if value.is_empty() {
+            // Runtime env mutation is process-global; keep it explicit.
+            unsafe {
+                std::env::remove_var(&key);
+            }
+        } else {
+            // Runtime env mutation is process-global; keep it explicit.
+            unsafe {
+                std::env::set_var(&key, &value);
+            }
+        }
+        changed = changed.saturating_add(1);
+    }
+    changed
 }
 
 fn push_thinking(state: &mut TuiState, raw: String) {
@@ -2149,6 +2407,8 @@ fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
         render_allowlist_preview_overlay(frame, state);
     } else if state.mode == UiMode::Editor {
         render_editor_overlay(frame, state);
+    } else if state.mode == UiMode::RuntimeEnv {
+        settings_ui::render_runtime_env_overlay(frame, state);
     } else if state.mode == UiMode::Settings {
         render_settings_overlay(frame, state);
     } else if state.mode == UiMode::ObservabilityPanel {
@@ -2157,7 +2417,62 @@ fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
         render_thinking_peek_overlay(frame, state);
     } else if state.mode == UiMode::ThinkingPanel {
         render_thinking_panel_overlay(frame, state);
+    } else if state.mode == UiMode::GraphemeConsole {
+        render_grapheme_console_overlay(frame, state);
     }
+}
+
+fn render_grapheme_console_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
+    let area = frame.area();
+    let popup = centered_rect(area, 90, 82);
+    frame.render_widget(Clear, popup);
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        " Up/Down/Page: scroll  Home/End: jump  Esc/F3: close ",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(""));
+
+    if state.grapheme_console.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No Grapheme console output yet. Run /run or /run-current to capture output.",
+            Style::default().fg(Color::Gray),
+        )));
+    } else {
+        for (idx, entry) in state.grapheme_console.iter().enumerate() {
+            if idx > 0 {
+                lines.push(Line::from(Span::styled(
+                    "",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+            for line in render_markdown_lines(entry, popup.width.saturating_sub(2)) {
+                lines.push(line);
+            }
+        }
+    }
+
+    let text = Text::from(lines);
+    let inner_width = popup.width.saturating_sub(2);
+    let visible_height = popup.height.saturating_sub(2);
+    let visual_lines = visual_line_count(&text, inner_width);
+    let max_scroll = visual_lines.saturating_sub(visible_height);
+    state.grapheme_console_max_scroll = max_scroll;
+    state.grapheme_console_scroll = state.grapheme_console_scroll.min(max_scroll);
+
+    let panel = Paragraph::new(text)
+        .block(
+            Block::default()
+                .title(" Grapheme Console ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(ui_accent_primary()))
+                .style(Style::default().bg(ui_modal_bg())),
+        )
+        .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
+        .wrap(Wrap { trim: false })
+        .scroll((state.grapheme_console_scroll, 0));
+    frame.render_widget(panel, popup);
 }
 
 fn build_observability_text(state: &TuiState, expanded: bool, width: u16) -> Text<'static> {
@@ -2738,6 +3053,7 @@ fn print_help() {
     println!("  --thinking-capture <b> Capture thinking chunks: true | false");
     println!("  --thinking-max-lines <n> Retained thinking lines (50-5000)");
     println!("  --daemon-url <url>    Medousa daemon base URL (env: MEDOUSA_DAEMON_URL)");
+    println!("                        Grapheme timeout env: MEDOUSA_GRAPHEME_EXECUTION_TIMEOUT_MS");
     println!("  --session <id>        Resume a specific session by ID");
     println!("  --help, -h            Print this help");
     println!();
@@ -2751,8 +3067,12 @@ fn print_help() {
     println!("  Ctrl+K       Open/close command palette");
     println!("  Ctrl+,       Open/close settings menu");
     println!("  Ctrl+O       Open/close observability detail panel");
-    println!("  Shift+Arrows Scroll observability + job panes");
+    println!("  Shift/Alt+Arrows  Scroll observability + job panes");
+    println!("  Alt+O / Alt+P      Scroll observability up/down");
+    println!("  Alt+J / Alt+K      Scroll job pane up/down");
+    println!("  Ctrl+U / Ctrl+D   Page observability + job panes up/down");
     println!("  F2           Toggle thinking peek overlay");
+    println!("  F3           Toggle Grapheme console overlay");
     println!("  Ctrl+T       Toggle thinking detail panel");
     println!("  Ctrl+G       Stop active generation");
     println!("  Esc          Close current menu");
@@ -2856,6 +3176,7 @@ mod tests {
             provider: "openai".to_string(),
             model: "gpt-4o-mini".to_string(),
             base_url: String::new(),
+            env_overrides: String::new(),
             api_key: String::new(),
             allowed_modules: "http.fetch".to_string(),
             tool_call_mode: "auto".to_string(),
@@ -2895,11 +3216,15 @@ mod tests {
             editor_scroll: 0,
             settings_selected: 0,
             settings_editing: false,
+            runtime_env_editing: false,
             provider_model: "openai:gpt-4o-mini".to_string(),
             session_id: "test-session".to_string(),
             thinking_trace: VecDeque::new(),
             thinking_scroll: 0,
             thinking_max_scroll: 0,
+            grapheme_console: VecDeque::new(),
+            grapheme_console_scroll: 0,
+            grapheme_console_max_scroll: 0,
             obs_scroll: 0,
             obs_max_scroll: 0,
             job_scroll: 0,

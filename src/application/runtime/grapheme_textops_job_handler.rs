@@ -102,11 +102,19 @@ impl GraphemeTextOpsJobHandler {
         }
 
         if sentences.is_empty() {
-            let fallback = text.split_whitespace().take(24).collect::<Vec<_>>().join(" ");
+            let fallback = text
+                .split_whitespace()
+                .take(24)
+                .collect::<Vec<_>>()
+                .join(" ");
             return fallback;
         }
 
-        sentences.into_iter().take(max_items).collect::<Vec<_>>().join(" ")
+        sentences
+            .into_iter()
+            .take(max_items)
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     fn extract_keywords(text: &str, max_items: usize) -> String {
@@ -129,9 +137,7 @@ impl GraphemeTextOpsJobHandler {
 
         let mut ranked = counts.into_iter().collect::<Vec<_>>();
         ranked.sort_by(|(a_word, a_count), (b_word, b_count)| {
-            b_count
-                .cmp(a_count)
-                .then_with(|| a_word.cmp(b_word))
+            b_count.cmp(a_count).then_with(|| a_word.cmp(b_word))
         });
 
         ranked

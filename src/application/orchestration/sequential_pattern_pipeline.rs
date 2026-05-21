@@ -46,7 +46,10 @@ impl SequentialPatternPipeline {
         Self { prompt_pipeline }
     }
 
-    pub async fn execute(&self, request: SequentialPatternExecutionRequest) -> Result<SequentialPatternExecutionResponse> {
+    pub async fn execute(
+        &self,
+        request: SequentialPatternExecutionRequest,
+    ) -> Result<SequentialPatternExecutionResponse> {
         let mut current_input = request.initial_user_prompt;
         let mut stage_results = Vec::with_capacity(request.stages.len());
 
@@ -63,11 +66,15 @@ impl SequentialPatternPipeline {
                     .policy_profile
                     .clone()
                     .or_else(|| request.policy_profile.clone()),
-                model_hint: stage.model_hint.clone().or_else(|| request.model_hint.clone()),
+                model_hint: stage
+                    .model_hint
+                    .clone()
+                    .or_else(|| request.model_hint.clone()),
             };
 
             let mut prompt_request =
-                PromptExecutionRequest::from_user_prompt(rendered_prompt.clone()).with_context(context);
+                PromptExecutionRequest::from_user_prompt(rendered_prompt.clone())
+                    .with_context(context);
             if let Some(system_prompt) = stage.system_prompt {
                 prompt_request = prompt_request.with_system_prompt(system_prompt);
             }

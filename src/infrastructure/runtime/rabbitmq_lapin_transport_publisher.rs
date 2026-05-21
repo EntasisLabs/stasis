@@ -102,7 +102,8 @@ impl EndpointTransportPublisher for LapinRabbitMqTransportPublisher {
         })?;
 
         let payload = Self::build_payload(event)?;
-        let mut properties = BasicProperties::default().with_content_type("application/json".into());
+        let mut properties =
+            BasicProperties::default().with_content_type("application/json".into());
         if metadata.persistent.unwrap_or(true) {
             properties = properties.with_delivery_mode(2);
         }
@@ -158,8 +159,8 @@ mod tests {
 
     #[test]
     fn empty_rabbitmq_metadata_uses_defaults() {
-        let metadata = LapinRabbitMqTransportPublisher::parse_metadata(None)
-            .expect("metadata should default");
+        let metadata =
+            LapinRabbitMqTransportPublisher::parse_metadata(None).expect("metadata should default");
         assert_eq!(metadata, RabbitMqEndpointMetadata::default());
     }
 }

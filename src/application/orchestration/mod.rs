@@ -1,5 +1,5 @@
-pub mod agent_session_pipeline;
 pub mod agent_session_payload;
+pub mod agent_session_pipeline;
 pub mod concurrent_pattern_pipeline;
 pub mod handoff_pattern_pipeline;
 pub mod orchestrator_pattern_pipeline;

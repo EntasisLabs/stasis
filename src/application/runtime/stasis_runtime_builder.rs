@@ -26,7 +26,9 @@ use crate::application::runtime::memory_transform_job_handler::MemoryTransformJo
 use crate::application::runtime::orchestrator_pattern_job_handler::OrchestratorPatternJobHandler;
 use crate::application::runtime::prompt_chat_job_handler::PromptChatJobHandler;
 use crate::application::runtime::queue_ownership_rebalance_job_handler::QueueOwnershipRebalanceJobHandler;
-use crate::application::runtime::runtime_factory::{RuntimeBackend, RuntimeComposition, RuntimeFactory};
+use crate::application::runtime::runtime_factory::{
+    RuntimeBackend, RuntimeComposition, RuntimeFactory,
+};
 use crate::application::runtime::sequential_pattern_job_handler::SequentialPatternJobHandler;
 use crate::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
 use crate::domain::errors::Result;
@@ -35,12 +37,11 @@ use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
 use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
 use crate::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
 use crate::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
-use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
 use crate::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
-use crate::ports::outbound::runtime::endpoint_routing_policy::EndpointRoutingPolicy;
+use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
+use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
 use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
 use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
-use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
 use crate::infrastructure::runtime::in_memory_thread_store::InMemoryThreadStore;
 use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
 use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
@@ -52,10 +53,11 @@ use crate::ports::outbound::ai_chat_tool_interceptor::AiChatToolInterceptor;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use crate::ports::outbound::memory::memory_operations::MemoryOperations;
+use crate::ports::outbound::runtime::cluster_node_store::ClusterNodeStore;
 use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
 use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
+use crate::ports::outbound::runtime::endpoint_routing_policy::EndpointRoutingPolicy;
 use crate::ports::outbound::runtime::endpoint_transport_publisher::EndpointTransportPublisher;
-use crate::ports::outbound::runtime::cluster_node_store::ClusterNodeStore;
 use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
 use crate::ports::outbound::runtime::thread_store::ThreadStore;
 
@@ -136,7 +138,10 @@ impl StasisRuntimeBuilder {
         self
     }
 
-    pub fn with_chat_middleware<M: ChatClientMiddleware + 'static>(mut self, middleware: M) -> Self {
+    pub fn with_chat_middleware<M: ChatClientMiddleware + 'static>(
+        mut self,
+        middleware: M,
+    ) -> Self {
         self.chat_middlewares.push(Arc::new(middleware));
         self
     }
@@ -165,12 +170,18 @@ impl StasisRuntimeBuilder {
         self.with_chat_middleware(ToolCallInterceptionChatMiddleware::new(interceptor))
     }
 
-    pub fn with_memory_context_reader(mut self, memory_context_reader: Arc<dyn MemoryContextReader>) -> Self {
+    pub fn with_memory_context_reader(
+        mut self,
+        memory_context_reader: Arc<dyn MemoryContextReader>,
+    ) -> Self {
         self.memory_context_reader = Some(memory_context_reader);
         self
     }
 
-    pub fn with_memory_context_writer(mut self, memory_context_writer: Arc<dyn MemoryContextWriter>) -> Self {
+    pub fn with_memory_context_writer(
+        mut self,
+        memory_context_writer: Arc<dyn MemoryContextWriter>,
+    ) -> Self {
         self.memory_context_writer = Some(memory_context_writer);
         self
     }
@@ -314,7 +325,9 @@ impl StasisRuntimeBuilder {
         let configured_endpoint_routing_policy = self.endpoint_routing_policy.clone();
 
         if self.enable_locus_memory
-            && (memory_context_reader.is_none() || memory_context_writer.is_none() || memory_operations.is_none())
+            && (memory_context_reader.is_none()
+                || memory_context_writer.is_none()
+                || memory_operations.is_none())
         {
             let store = LocusNodeStoreFactory::in_memory().await?;
             if memory_context_reader.is_none() {
@@ -340,12 +353,13 @@ impl StasisRuntimeBuilder {
                     .unwrap_or_else(|| Arc::new(InMemoryClusterNodeStore::default()));
 
                 if self.enable_endpoint_routing_delivery {
-                    let endpoint_store = configured_endpoint_store.clone().unwrap_or_else(|| {
-                        Arc::new(InMemoryDeliveryEndpointStore::default())
-                    });
-                    let status_store = configured_endpoint_status_store.clone().unwrap_or_else(|| {
-                        Arc::new(InMemoryEndpointDeliveryStatusStore::default())
-                    });
+                    let endpoint_store = configured_endpoint_store
+                        .clone()
+                        .unwrap_or_else(|| Arc::new(InMemoryDeliveryEndpointStore::default()));
+                    let status_store =
+                        configured_endpoint_status_store.clone().unwrap_or_else(|| {
+                            Arc::new(InMemoryEndpointDeliveryStatusStore::default())
+                        });
 
                     let mut routing_publisher = EndpointRoutingEventPublisher::new(endpoint_store)
                         .fail_on_unsupported_protocol(false);
@@ -372,7 +386,9 @@ impl StasisRuntimeBuilder {
 
                 if self.include_grapheme_handlers {
                     rt.register_handler(GraphemeJobHandler::new(workflow_engine.clone()))?;
-                    rt.register_handler(GraphemeHealthcheckJobHandler::new(workflow_engine.clone()))?;
+                    rt.register_handler(GraphemeHealthcheckJobHandler::new(
+                        workflow_engine.clone(),
+                    ))?;
                     rt.register_handler(GraphemeEchoJobHandler::new(workflow_engine.clone()))?;
                     rt.register_handler(GraphemeTextOpsJobHandler::new(workflow_engine.clone()))?;
                 }
@@ -452,20 +468,21 @@ impl StasisRuntimeBuilder {
                 }
             }
             RuntimeComposition::Surreal(rt) => {
-                let thread_store = default_thread_store.clone().unwrap_or_else(|| {
-                    Arc::new(SurrealThreadStore::new(rt.job_store.db()))
-                });
-                let cluster_store = configured_cluster_store.clone().unwrap_or_else(|| {
-                    Arc::new(SurrealClusterNodeStore::new(rt.job_store.db()))
-                });
+                let thread_store = default_thread_store
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(SurrealThreadStore::new(rt.job_store.db())));
+                let cluster_store = configured_cluster_store
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(SurrealClusterNodeStore::new(rt.job_store.db())));
 
                 if self.enable_endpoint_routing_delivery {
                     let endpoint_store = configured_endpoint_store.clone().unwrap_or_else(|| {
                         Arc::new(SurrealDeliveryEndpointStore::new(rt.job_store.db()))
                     });
-                    let status_store = configured_endpoint_status_store.clone().unwrap_or_else(|| {
-                        Arc::new(SurrealEndpointDeliveryStatusStore::new(rt.job_store.db()))
-                    });
+                    let status_store =
+                        configured_endpoint_status_store.clone().unwrap_or_else(|| {
+                            Arc::new(SurrealEndpointDeliveryStatusStore::new(rt.job_store.db()))
+                        });
 
                     let mut routing_publisher = EndpointRoutingEventPublisher::new(endpoint_store)
                         .fail_on_unsupported_protocol(false);
@@ -492,7 +509,9 @@ impl StasisRuntimeBuilder {
 
                 if self.include_grapheme_handlers {
                     rt.register_handler(GraphemeJobHandler::new(workflow_engine.clone()))?;
-                    rt.register_handler(GraphemeHealthcheckJobHandler::new(workflow_engine.clone()))?;
+                    rt.register_handler(GraphemeHealthcheckJobHandler::new(
+                        workflow_engine.clone(),
+                    ))?;
                     rt.register_handler(GraphemeEchoJobHandler::new(workflow_engine.clone()))?;
                     rt.register_handler(GraphemeTextOpsJobHandler::new(workflow_engine.clone()))?;
                 }
@@ -618,7 +637,10 @@ mod tests {
             "test.success"
         }
 
-        async fn execute(&self, _job: &crate::domain::runtime::job::Job) -> Result<JobExecutionOutcome> {
+        async fn execute(
+            &self,
+            _job: &crate::domain::runtime::job::Job,
+        ) -> Result<JobExecutionOutcome> {
             Ok(JobExecutionOutcome::Success {
                 sttp_output_node_id: "sttp:out:test".to_string(),
                 execution_id: Some("exec:test".to_string()),

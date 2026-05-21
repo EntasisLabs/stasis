@@ -8,10 +8,7 @@ use crate::domain::errors::{Result, StasisError};
 #[derive(Clone, Debug)]
 pub enum RuntimeBackend {
     InMemory,
-    SurrealMem {
-        namespace: String,
-        database: String,
-    },
+    SurrealMem { namespace: String, database: String },
 }
 
 #[derive(Clone)]
@@ -34,10 +31,9 @@ impl RuntimeFactory {
                     .await
                     .map_err(|e| StasisError::PortFailure(format!("create surreal mem db: {e}")))?;
 
-                db.use_ns(namespace)
-                    .use_db(database)
-                    .await
-                    .map_err(|e| StasisError::PortFailure(format!("select surreal namespace/database: {e}")))?;
+                db.use_ns(namespace).use_db(database).await.map_err(|e| {
+                    StasisError::PortFailure(format!("select surreal namespace/database: {e}"))
+                })?;
 
                 Ok(RuntimeComposition::Surreal(SurrealRuntime::new(db)))
             }

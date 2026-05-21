@@ -38,7 +38,11 @@ impl RuleBasedEndpointRoutingPolicy {
         self
     }
 
-    fn rule_matches(rule: &EndpointRouteRule, endpoint: &DeliveryEndpoint, event: &OutboxEvent) -> bool {
+    fn rule_matches(
+        rule: &EndpointRouteRule,
+        endpoint: &DeliveryEndpoint,
+        event: &OutboxEvent,
+    ) -> bool {
         let endpoint_match = rule
             .endpoint_ids
             .as_ref()

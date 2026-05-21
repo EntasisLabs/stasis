@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use chrono::{Duration, Utc};
 
 use crate::application::dto::{
-    EndpointDiagnosticsReadModelRow, EndpointFailureRateTrendRow,
-    EndpointFailureTrendDirection, ListEndpointDiagnosticsReadModelRequest,
-    ListEndpointFailureRateTrendsRequest, ListTopUnhealthyEndpointsRequest,
+    EndpointDiagnosticsReadModelRow, EndpointFailureRateTrendRow, EndpointFailureTrendDirection,
+    ListEndpointDiagnosticsReadModelRequest, ListEndpointFailureRateTrendsRequest,
+    ListTopUnhealthyEndpointsRequest,
 };
 use crate::domain::errors::Result;
 use crate::domain::runtime::endpoint_delivery_status::EndpointDeliveryStatus;
@@ -226,7 +226,11 @@ where
         &self,
         request: &ListTopUnhealthyEndpointsRequest,
     ) -> Result<Vec<EndpointDiagnosticsReadModelRow>> {
-        let limit = if request.limit == 0 { 10 } else { request.limit };
+        let limit = if request.limit == 0 {
+            10
+        } else {
+            request.limit
+        };
         self.read_model
             .execute(&ListEndpointDiagnosticsReadModelRequest {
                 endpoint_ids: None,
@@ -388,8 +392,8 @@ mod tests {
     use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
 
     use super::{
-        ListEndpointDiagnosticsReadModel, ListEndpointFailureRateTrends,
-        ListTopUnhealthyEndpoints, PruneEndpointDeliveryStatuses,
+        ListEndpointDiagnosticsReadModel, ListEndpointFailureRateTrends, ListTopUnhealthyEndpoints,
+        PruneEndpointDeliveryStatuses,
     };
 
     #[tokio::test]
@@ -577,20 +581,39 @@ mod tests {
             .expect("insert should succeed");
 
         status_store
-            .record_failure("endpoint.trend.worse", "evt-1", "boom", now - Duration::minutes(2))
+            .record_failure(
+                "endpoint.trend.worse",
+                "evt-1",
+                "boom",
+                now - Duration::minutes(2),
+            )
             .await
             .expect("record should succeed");
         status_store
-            .record_failure("endpoint.trend.worse", "evt-2", "boom", now - Duration::minutes(1))
+            .record_failure(
+                "endpoint.trend.worse",
+                "evt-2",
+                "boom",
+                now - Duration::minutes(1),
+            )
             .await
             .expect("record should succeed");
 
         status_store
-            .record_failure("endpoint.trend.improve", "evt-3", "oops", now - Duration::minutes(2))
+            .record_failure(
+                "endpoint.trend.improve",
+                "evt-3",
+                "oops",
+                now - Duration::minutes(2),
+            )
             .await
             .expect("record should succeed");
         status_store
-            .record_success("endpoint.trend.improve", "evt-4", now - Duration::seconds(30))
+            .record_success(
+                "endpoint.trend.improve",
+                "evt-4",
+                now - Duration::seconds(30),
+            )
             .await
             .expect("record should succeed");
 

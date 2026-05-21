@@ -70,23 +70,25 @@ impl GenaiChatClient {
     }
 
     fn build_client(base_url: Option<&str>) -> Client {
-        let mut builder = Client::builder().with_auth_resolver_fn(|model_iden: genai::ModelIden| {
-            Ok(Self::resolve_auth_data(model_iden.adapter_kind))
-        });
+        let mut builder =
+            Client::builder().with_auth_resolver_fn(|model_iden: genai::ModelIden| {
+                Ok(Self::resolve_auth_data(model_iden.adapter_kind))
+            });
 
         if let Some(base_url) = base_url
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(Self::normalize_base_url)
         {
-            builder = builder.with_service_target_resolver_fn(move |service_target: ServiceTarget| {
-                let ServiceTarget { auth, model, .. } = service_target;
-                Ok(ServiceTarget {
-                    endpoint: Endpoint::from_owned(base_url.clone()),
-                    auth,
-                    model,
-                })
-            });
+            builder =
+                builder.with_service_target_resolver_fn(move |service_target: ServiceTarget| {
+                    let ServiceTarget { auth, model, .. } = service_target;
+                    Ok(ServiceTarget {
+                        endpoint: Endpoint::from_owned(base_url.clone()),
+                        auth,
+                        model,
+                    })
+                });
         }
 
         builder.build()
@@ -133,12 +135,15 @@ impl GenaiChatClient {
 
         candidates
     }
-
 }
 
 #[async_trait]
 impl AiChatClient for GenaiChatClient {
-    async fn complete(&self, request: ChatRequest, options: Option<&ChatOptions>) -> Result<ChatResponse> {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
         let response = self
             .client
             .exec_chat(&self.model, request, options)
@@ -252,7 +257,10 @@ mod tests {
 
     #[test]
     fn build_model_target_keeps_existing_namespace() {
-        let target = GenaiChatClient::build_model_target(Some("openai"), "anthropic::claude-3-5-haiku-latest");
+        let target = GenaiChatClient::build_model_target(
+            Some("openai"),
+            "anthropic::claude-3-5-haiku-latest",
+        );
         assert_eq!(target, "anthropic::claude-3-5-haiku-latest");
     }
 

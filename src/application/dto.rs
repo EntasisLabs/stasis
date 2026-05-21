@@ -1,8 +1,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::domain::runtime::cluster_node::{
-    ClusterNode, ClusterNodeHealth, ClusterNodeHealthSnapshot, ClusterNodeRole,
-    QueueOwnershipMode,
+    ClusterNode, ClusterNodeHealth, ClusterNodeHealthSnapshot, ClusterNodeRole, QueueOwnershipMode,
 };
 use crate::domain::runtime::delivery_endpoint::DeliveryProtocol;
 

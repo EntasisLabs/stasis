@@ -79,7 +79,8 @@ fn orchestration_handlers_use_thread_store_port_not_infrastructure_impls() {
     let sequential = include_str!("../src/application/runtime/sequential_pattern_job_handler.rs");
     let concurrent = include_str!("../src/application/runtime/concurrent_pattern_job_handler.rs");
     let handoff = include_str!("../src/application/runtime/handoff_pattern_job_handler.rs");
-    let orchestrator = include_str!("../src/application/runtime/orchestrator_pattern_job_handler.rs");
+    let orchestrator =
+        include_str!("../src/application/runtime/orchestrator_pattern_job_handler.rs");
 
     for (name, source) in [
         ("sequential", sequential),
@@ -107,7 +108,8 @@ fn orchestration_handlers_include_standard_diagnostics_contract_fields() {
     let sequential = include_str!("../src/application/runtime/sequential_pattern_job_handler.rs");
     let concurrent = include_str!("../src/application/runtime/concurrent_pattern_job_handler.rs");
     let handoff = include_str!("../src/application/runtime/handoff_pattern_job_handler.rs");
-    let orchestrator = include_str!("../src/application/runtime/orchestrator_pattern_job_handler.rs");
+    let orchestrator =
+        include_str!("../src/application/runtime/orchestrator_pattern_job_handler.rs");
 
     for (name, source) in [
         ("sequential", sequential),

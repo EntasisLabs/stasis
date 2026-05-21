@@ -6,6 +6,7 @@ pub struct RuntimeSettings {
     pub provider: String,
     pub model: String,
     pub base_url: String,
+    pub env_overrides: String,
     pub api_key: String,
     pub allowed_modules: String,
     pub tool_call_mode: String,
@@ -24,6 +25,60 @@ pub fn settings_validation_errors(settings: &RuntimeSettings) -> Vec<String> {
             invalid_modules.join(", ")
         ));
     }
+
+    let env_errors = env_overrides_validation_errors(&settings.env_overrides);
+    errors.extend(env_errors);
+
+    errors
+}
+
+pub fn parse_env_overrides(raw: &str) -> Vec<(String, String)> {
+    raw.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            Some((key.trim().to_string(), value.trim().to_string()))
+        })
+        .collect()
+}
+
+pub fn env_overrides_validation_errors(raw: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+
+    for (idx, line) in raw.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let Some((key, _value)) = trimmed.split_once('=') else {
+            errors.push(format!(
+                "env override line {} must use KEY=VALUE format",
+                idx + 1
+            ));
+            continue;
+        };
+
+        let key = key.trim();
+        if key.is_empty() {
+            errors.push(format!("env override line {} has empty key", idx + 1));
+            continue;
+        }
+
+        let valid = key
+            .chars()
+            .enumerate()
+            .all(|(i, c)| c == '_' || c.is_ascii_alphanumeric() && !(i == 0 && c.is_ascii_digit()));
+        if !valid {
+            errors.push(format!(
+                "env override line {} has invalid key '{}'; use [A-Z0-9_] and do not start with a digit",
+                idx + 1,
+                key
+            ));
+        }
+    }
+
     errors
 }
 
@@ -131,6 +186,7 @@ mod tests {
             provider: "openai".to_string(),
             model: "gpt-4o-mini".to_string(),
             base_url: String::new(),
+            env_overrides: String::new(),
             api_key: String::new(),
             allowed_modules: "bad id".to_string(),
             tool_call_mode: "auto".to_string(),

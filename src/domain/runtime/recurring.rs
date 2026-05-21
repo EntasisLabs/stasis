@@ -32,7 +32,10 @@ impl RecurringDefinition {
         })?;
 
         let tz: Tz = self.timezone.parse().map_err(|e| {
-            StasisError::PortFailure(format!("invalid timezone for recurring_id={}: {}", self.id, e))
+            StasisError::PortFailure(format!(
+                "invalid timezone for recurring_id={}: {}",
+                self.id, e
+            ))
         })?;
 
         let local_from = from.with_timezone(&tz);

@@ -36,10 +36,9 @@ impl HttpWebhookEventPublisher {
             request = request.bearer_auth(token);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| StasisError::PortFailure(format!("publish webhook request failed: {e}")))?;
+        let response = request.send().await.map_err(|e| {
+            StasisError::PortFailure(format!("publish webhook request failed: {e}"))
+        })?;
 
         if !response.status().is_success() {
             return Err(StasisError::PortFailure(format!(
@@ -151,7 +150,9 @@ impl EventPublisher for HttpWebhookEventPublisher {
 mod tests {
     use chrono::Utc;
 
-    use crate::domain::runtime::outbox::{OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType};
+    use crate::domain::runtime::outbox::{
+        OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType,
+    };
 
     use super::WebhookRuntimeEvent;
 
