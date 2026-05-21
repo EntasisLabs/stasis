@@ -27,6 +27,7 @@ pub struct TuiDefaults {
     pub max_tool_rounds: Option<usize>,
     pub thinking_capture: Option<bool>,
     pub thinking_max_lines: Option<usize>,
+    pub command_usage_counts: Option<std::collections::HashMap<String, u64>>,
 }
 
 #[derive(Debug, Clone)]

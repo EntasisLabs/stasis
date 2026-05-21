@@ -8,7 +8,7 @@ use ratatui::{
 use super::{
     ConversationTurn, TuiState, UiMode, api_key_storage_backend_label, centered_rect,
     command_preview_ui, settings_ui, ui_accent_primary, ui_accent_warn, ui_bg, ui_border,
-    ui_modal_bg, ui_panel_bg, ui_subtle_panel_bg,
+    ui_modal_bg, ui_panel_bg,
 };
 use crate::markdown_cache::render_markdown_lines_cached;
 
@@ -19,6 +19,11 @@ pub(crate) fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
         area,
     );
 
+    if state.mode == UiMode::Startup {
+        render_startup_overlay(frame, state);
+        return;
+    }
+
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(3), Constraint::Length(3)])
@@ -27,21 +32,7 @@ pub(crate) fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
     let content_area = outer[0];
     let input_area = outer[1];
 
-    let content = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
-        .split(content_area);
-
-    let left = content[0];
-    let right = content[1];
-
-    let right_panes = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(right);
-
-    let obs_area = right_panes[0];
-    let jobs_area = right_panes[1];
+    let left = content_area;
 
     let conv_title = if state.is_processing {
         " Conversation  ⟳ "
@@ -81,56 +72,20 @@ pub(crate) fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
         .scroll((safe_scroll, 0));
     frame.render_widget(conv_widget, left);
 
-    let obs_inner_width = obs_area.width.saturating_sub(2);
-    let obs_text = build_observability_text(state, false, obs_inner_width);
-    let obs_visible_height = obs_area.height.saturating_sub(2);
-    let obs_visual_lines = visual_line_count(&obs_text, obs_inner_width);
-    state.obs_max_scroll = obs_visual_lines.saturating_sub(obs_visible_height);
-    state.obs_scroll = state.obs_scroll.min(state.obs_max_scroll);
-
-    let obs_widget = Paragraph::new(obs_text)
-        .block(
-            Block::default()
-                .title(" Observability  (Ctrl+O expand, Shift+Arrows scroll side panes) ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(ui_border()))
-                .style(Style::default().bg(ui_subtle_panel_bg())),
-        )
-        .style(Style::default().fg(Color::White).bg(ui_subtle_panel_bg()))
-        .wrap(Wrap { trim: false })
-        .scroll((state.obs_scroll, 0));
-    frame.render_widget(obs_widget, obs_area);
-
-    let jobs_inner_width = jobs_area.width.saturating_sub(2);
-    let jobs_text = build_job_history_text(state, jobs_inner_width);
-    let jobs_visible_height = jobs_area.height.saturating_sub(2);
-    let jobs_visual_lines = visual_line_count(&jobs_text, jobs_inner_width);
-    state.job_max_scroll = jobs_visual_lines.saturating_sub(jobs_visible_height);
-    state.job_scroll = state.job_scroll.min(state.job_max_scroll);
-
-    let jobs_widget = Paragraph::new(jobs_text)
-        .block(
-            Block::default()
-                .title(" Job History  (Shift+Arrows scroll side panes) ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(ui_border()))
-                .style(Style::default().bg(ui_subtle_panel_bg())),
-        )
-        .style(Style::default().fg(Color::White).bg(ui_subtle_panel_bg()))
-        .wrap(Wrap { trim: false })
-        .scroll((state.job_scroll, 0));
-    frame.render_widget(jobs_widget, jobs_area);
+    let obs_count = state.observability.len();
+    let jobs_count = state.job_history.len();
+    let drops = state.perf.dropped_events;
 
     let session_short: String = state.session_id.chars().take(8).collect();
     let thinking_hint = if state.is_processing {
-        "  thinking... (F2 peek / Ctrl+t panel)"
+        "  thinking... (F2 peek / Ctrl+T detail)"
     } else if !state.thinking_trace.is_empty() {
         "  [F2 thinking]"
     } else {
         ""
     };
     let input_title = format!(
-        " {}  session:{session_short}{} ",
+        " {}  session:{session_short}{}  |  obs:{obs_count} jobs:{jobs_count} drops:{drops}  [Ctrl+O for details] ",
         state.provider_model, thinking_hint
     );
     let input_display = format!("  {}_", state.input_buffer);
@@ -174,6 +129,79 @@ pub(crate) fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
     }
 }
 
+fn render_startup_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
+    let area = frame.area();
+    let popup = centered_rect(area, 72, 62);
+    frame.render_widget(Clear, popup);
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        " Welcome to Medousa ",
+        Style::default()
+            .fg(ui_accent_primary())
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(Span::styled(
+        "Choose your model, then start.",
+        Style::default().fg(Color::Gray),
+    )));
+    lines.push(Line::from(Span::styled(
+        "Up/Down: select  Left/Right: cycle provider  Type/Backspace: edit model  Enter: continue",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(""));
+
+    let rows = [
+        format!("Provider: {}", state.settings_draft.provider),
+        format!("Model: {}", state.settings_draft.model),
+        "Start".to_string(),
+    ];
+
+    for (idx, row) in rows.iter().enumerate() {
+        let selected = idx == state.startup_selected;
+        let marker = if selected { ">" } else { " " };
+        let style = if selected {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else if idx == 2 {
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        lines.push(Line::from(Span::styled(format!("{marker} {row}"), style)));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Tip: changing provider sets a sensible model default.",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(Span::styled(
+        "Need detail? F2 for thinking, Ctrl+O for diagnostics.",
+        Style::default().fg(Color::Cyan),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("Secret backend: {}", api_key_storage_backend_label()),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let panel = Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title(" Get Started ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(ui_accent_primary()))
+                .style(Style::default().bg(ui_modal_bg())),
+        )
+        .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(panel, popup);
+}
+
 fn render_grapheme_console_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
     let area = frame.area();
     let popup = centered_rect(area, 90, 82);
@@ -188,7 +216,7 @@ fn render_grapheme_console_overlay(frame: &mut ratatui::Frame, state: &mut TuiSt
 
     if state.grapheme_console.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No Grapheme console output yet. Run /run or /run-current to capture output.",
+            "No console output yet. Run /run or /run-current to capture results.",
             Style::default().fg(Color::Gray),
         )));
     } else {
@@ -232,7 +260,7 @@ fn build_observability_text(state: &TuiState, expanded: bool, width: u16) -> Tex
 
     lines.push(Line::from(Span::styled(
         format!(
-            " Redaction mode: strict (payload secrets scrubbed) | Secret backend: {} ",
+            " Diagnostics are redacted | Secure storage: {} ",
             api_key_storage_backend_label()
         ),
         Style::default().fg(Color::Cyan),
@@ -264,7 +292,7 @@ fn build_observability_text(state: &TuiState, expanded: bool, width: u16) -> Tex
 
     if state.observability.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No observability events yet.",
+            "No diagnostics yet.",
             Style::default().fg(Color::Gray),
         )));
         return Text::from(lines);
@@ -321,7 +349,35 @@ fn render_observability_panel_overlay(frame: &mut ratatui::Frame, state: &mut Tu
     frame.render_widget(Clear, popup);
 
     let inner_width = popup.width.saturating_sub(2);
-    let text = build_observability_text(state, true, inner_width);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        " Up/Down/Page: scroll  Home/End: jump  Esc/Ctrl+O: close ",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(""));
+
+    lines.push(Line::from(Span::styled(
+        " Diagnostics ",
+        Style::default()
+            .fg(ui_accent_primary())
+            .add_modifier(Modifier::BOLD),
+    )));
+    for line in build_observability_text(state, false, inner_width).lines {
+        lines.push(line);
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " Recent Jobs ",
+        Style::default()
+            .fg(ui_accent_primary())
+            .add_modifier(Modifier::BOLD),
+    )));
+    for line in build_job_history_text(state, inner_width).lines {
+        lines.push(line);
+    }
+
+    let text = Text::from(lines);
     let visible_height = popup.height.saturating_sub(2);
     let visual_lines = visual_line_count(&text, inner_width);
     let max_scroll = visual_lines.saturating_sub(visible_height);
@@ -331,7 +387,7 @@ fn render_observability_panel_overlay(frame: &mut ratatui::Frame, state: &mut Tu
     let panel = Paragraph::new(text)
         .block(
             Block::default()
-                .title(" Observability Detail ")
+                .title(" Awareness Detail ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ui_accent_primary()))
                 .style(Style::default().bg(ui_modal_bg())),
@@ -349,7 +405,7 @@ fn render_thinking_peek_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        " Esc/F2: close  Enter/Down: open panel ",
+        " Esc/F2: close  Enter/Down: open detail ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
@@ -357,9 +413,9 @@ fn render_thinking_peek_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
     if state.thinking_trace.is_empty() {
         lines.push(Line::from(Span::styled(
             if state.is_processing {
-                "Thinking stream is active. Waiting for chunks..."
+                "Thinking is active. Waiting for updates..."
             } else {
-                "No captured thinking yet in this run."
+                "No thinking updates in this run."
             },
             Style::default().fg(Color::Gray),
         )));
@@ -392,14 +448,14 @@ fn render_thinking_panel_overlay(frame: &mut ratatui::Frame, state: &mut TuiStat
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        " Up/Down/Page: scroll  Home/End: jump  Esc/Ctrl+t: close ",
+        " Up/Down/Page: scroll  Home/End: jump  Esc/Ctrl+T: close ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
 
     if state.thinking_trace.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No captured thinking chunks.",
+            "No thinking details yet.",
             Style::default().fg(Color::Gray),
         )));
     } else {
@@ -422,7 +478,7 @@ fn render_thinking_panel_overlay(frame: &mut ratatui::Frame, state: &mut TuiStat
     let panel = Paragraph::new(text)
         .block(
             Block::default()
-                .title(" Thinking Detail ")
+                .title(" Thinking ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ui_accent_primary()))
                 .style(Style::default().bg(ui_modal_bg())),
@@ -440,7 +496,7 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        " Enter: load session   Esc: close ",
+        " Enter: open session  Esc: close ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
@@ -481,7 +537,7 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
     let panel = Paragraph::new(Text::from(lines))
         .block(
             Block::default()
-                .title(" Session History ")
+                .title(" Sessions ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ui_accent_primary()))
                 .style(Style::default().bg(ui_modal_bg())),
@@ -491,7 +547,7 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
     frame.render_widget(panel, popup);
 }
 
-fn render_command_palette_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
+fn render_command_palette_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
     command_preview_ui::render_command_palette_overlay(frame, state)
 }
 
@@ -499,7 +555,7 @@ fn render_allowlist_preview_overlay(frame: &mut ratatui::Frame, state: &TuiState
     command_preview_ui::render_allowlist_preview_overlay(frame, state)
 }
 
-fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
+fn render_settings_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
     settings_ui::render_settings_overlay(frame, state)
 }
 
@@ -512,7 +568,7 @@ fn render_editor_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
     let (line, col) = state.editor_buffer.line_col();
     let dirty_marker = if state.editor_dirty { "*" } else { "" };
     lines.push(Line::from(Span::styled(
-        " Type to edit  Enter: newline  Up/Down: keep column  Ctrl+S: save  /save [path]: save  /run [path]: execute  Esc: close ",
+        " Type to edit  Enter: new line  Up/Down: keep column  Ctrl+S: save  /save [path]: save  /run [path]: run  Esc: close ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(Span::styled(
@@ -588,7 +644,7 @@ fn render_editor_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
     let panel = Paragraph::new(Text::from(lines))
         .block(
             Block::default()
-                .title(" Editor ")
+                .title(" Script Editor ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ui_accent_primary()))
                 .style(Style::default().bg(ui_modal_bg())),

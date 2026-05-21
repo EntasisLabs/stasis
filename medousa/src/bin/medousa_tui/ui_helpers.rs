@@ -11,10 +11,6 @@ pub(crate) fn ui_panel_bg() -> Color {
     Color::Rgb(26, 32, 41)
 }
 
-pub(crate) fn ui_subtle_panel_bg() -> Color {
-    Color::Rgb(23, 28, 36)
-}
-
 pub(crate) fn ui_modal_bg() -> Color {
     Color::Rgb(31, 38, 49)
 }

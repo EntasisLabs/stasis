@@ -2,95 +2,283 @@ use super::*;
 
 #[derive(Clone, Copy)]
 struct PaletteAction {
+    category: PaletteCategory,
     title: &'static str,
+    subtitle: &'static str,
     command: &'static str,
+    risk: ActionRisk,
+    key_hint: &'static str,
+    aliases: &'static [&'static str],
 }
 
-const PALETTE_ACTIONS: [PaletteAction; 17] = [
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PaletteCategory {
+    QuickActions,
+    Session,
+    ModelRuntime,
+    ToolsScripts,
+    SafetyKeys,
+}
+
+#[derive(Clone, Copy)]
+enum ActionRisk {
+    Safe,
+    Caution,
+}
+
+const CATEGORY_ORDER: [PaletteCategory; 5] = [
+    PaletteCategory::QuickActions,
+    PaletteCategory::Session,
+    PaletteCategory::ModelRuntime,
+    PaletteCategory::ToolsScripts,
+    PaletteCategory::SafetyKeys,
+];
+
+const PALETTE_ACTIONS: [PaletteAction; 16] = [
     PaletteAction {
-        title: "New Session",
+        category: PaletteCategory::QuickActions,
+        title: "Start New Chat",
+        subtitle: "Create a fresh session and clear the current thread",
         command: "/new",
+        risk: ActionRisk::Caution,
+        key_hint: "/new",
+        aliases: &["new", "reset", "fresh"],
     },
     PaletteAction {
-        title: "Open History",
+        category: PaletteCategory::QuickActions,
+        title: "Open Past Sessions",
+        subtitle: "Browse and switch to a previous conversation",
         command: "/history",
+        risk: ActionRisk::Safe,
+        key_hint: "Ctrl+H",
+        aliases: &["history", "sessions", "recent"],
     },
     PaletteAction {
+        category: PaletteCategory::QuickActions,
         title: "Open Settings",
+        subtitle: "Adjust model, runtime, and safety preferences",
         command: "/settings",
+        risk: ActionRisk::Safe,
+        key_hint: "Ctrl+,",
+        aliases: &["preferences", "config", "options"],
     },
     PaletteAction {
-        title: "Open Embedded Editor",
+        category: PaletteCategory::QuickActions,
+        title: "Open Script Editor",
+        subtitle: "Edit Grapheme source before running",
         command: "/edit",
+        risk: ActionRisk::Safe,
+        key_hint: "/edit",
+        aliases: &["editor", "script", "open file"],
     },
     PaletteAction {
-        title: "Run Current .gr (Editor)",
+        category: PaletteCategory::QuickActions,
+        title: "Run Editor Script",
+        subtitle: "Execute source from the editor buffer",
         command: "/run",
+        risk: ActionRisk::Caution,
+        key_hint: "/run",
+        aliases: &["run", "execute", "launch"],
     },
     PaletteAction {
-        title: "Run Current File Path (.gr)",
+        category: PaletteCategory::ToolsScripts,
+        title: "Run Current File",
+        subtitle: "Execute the active script file path",
         command: "/run-current",
+        risk: ActionRisk::Caution,
+        key_hint: "/run-current",
+        aliases: &["current", "run file", "execute file"],
     },
     PaletteAction {
+        category: PaletteCategory::ToolsScripts,
         title: "Allowlist Preview",
+        subtitle: "Check referenced operations against policy",
         command: "/allowlist-preview",
+        risk: ActionRisk::Safe,
+        key_hint: "/allowlist-preview",
+        aliases: &["allowlist", "policy", "permissions"],
     },
     PaletteAction {
-        title: "Clear API Key",
-        command: "/clear-key",
-    },
-    PaletteAction {
-        title: "Rotate API Key",
-        command: "/rotate-key",
-    },
-    PaletteAction {
-        title: "Show Current Model",
-        command: "/model",
-    },
-    PaletteAction {
+        category: PaletteCategory::Session,
         title: "Stop Generation",
+        subtitle: "Interrupt the active response stream",
         command: "/stop",
+        risk: ActionRisk::Safe,
+        key_hint: "Ctrl+G",
+        aliases: &["stop", "cancel", "interrupt"],
     },
     PaletteAction {
+        category: PaletteCategory::Session,
         title: "Regenerate Last Response",
+        subtitle: "Re-run the last assistant turn",
         command: "/regen",
+        risk: ActionRisk::Safe,
+        key_hint: "/regen",
+        aliases: &["regen", "retry", "again"],
     },
     PaletteAction {
-        title: "Export Transcript (Markdown)",
-        command: "/export md",
+        category: PaletteCategory::ModelRuntime,
+        title: "Show Active Model",
+        subtitle: "Display current provider and model",
+        command: "/model",
+        risk: ActionRisk::Safe,
+        key_hint: "/model",
+        aliases: &["model", "provider", "status"],
     },
     PaletteAction {
-        title: "Export Transcript (JSONL)",
-        command: "/export jsonl",
-    },
-    PaletteAction {
-        title: "Set Model (Open Settings)",
-        command: "/settings",
-    },
-    PaletteAction {
-        title: "Daemon Health",
+        category: PaletteCategory::ModelRuntime,
+        title: "Check Daemon Status",
+        subtitle: "Read daemon health and connectivity",
         command: "/daemon health",
+        risk: ActionRisk::Safe,
+        key_hint: "/daemon health",
+        aliases: &["daemon", "health", "status"],
     },
     PaletteAction {
+        category: PaletteCategory::ModelRuntime,
         title: "Daemon Command Help",
+        subtitle: "See daemon subcommands and examples",
         command: "/daemon",
+        risk: ActionRisk::Safe,
+        key_hint: "/daemon",
+        aliases: &["daemon help", "watch", "jobs"],
+    },
+    PaletteAction {
+        category: PaletteCategory::Session,
+        title: "Export Session (Markdown)",
+        subtitle: "Save the current conversation as markdown",
+        command: "/export md",
+        risk: ActionRisk::Safe,
+        key_hint: "/export md",
+        aliases: &["export", "markdown", "save"],
+    },
+    PaletteAction {
+        category: PaletteCategory::Session,
+        title: "Export Session (JSONL)",
+        subtitle: "Save the current conversation as jsonl",
+        command: "/export jsonl",
+        risk: ActionRisk::Safe,
+        key_hint: "/export jsonl",
+        aliases: &["export", "jsonl", "archive"],
+    },
+    PaletteAction {
+        category: PaletteCategory::SafetyKeys,
+        title: "Clear API Key",
+        subtitle: "Remove the stored key from secure backend",
+        command: "/clear-key",
+        risk: ActionRisk::Caution,
+        key_hint: "/clear-key",
+        aliases: &["api", "key", "clear", "revoke"],
+    },
+    PaletteAction {
+        category: PaletteCategory::SafetyKeys,
+        title: "Rotate API Key",
+        subtitle: "Replace key and update runtime auth",
+        command: "/rotate-key",
+        risk: ActionRisk::Caution,
+        key_hint: "/rotate-key",
+        aliases: &["api", "key", "rotate", "update"],
     },
 ];
 
-fn filtered_palette_actions(query: &str) -> Vec<PaletteAction> {
+fn ranked_palette_actions(
+    query: &str,
+    usage_counts: &HashMap<String, u64>,
+    category: PaletteCategory,
+) -> Vec<PaletteAction> {
     let q = query.trim().to_ascii_lowercase();
-    if q.is_empty() {
-        return PALETTE_ACTIONS.to_vec();
-    }
-
-    PALETTE_ACTIONS
+    let mut scored = PALETTE_ACTIONS
         .iter()
         .copied()
-        .filter(|action| {
-            action.title.to_ascii_lowercase().contains(&q)
-                || action.command.to_ascii_lowercase().contains(&q)
+        .enumerate()
+        .filter(|(_, action)| action.category == category)
+        .filter_map(|(index, action)| {
+            score_palette_action(&q, &action, usage_counts).map(|score| (score, index, action))
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().map(|(_, _, action)| action).collect()
+}
+
+fn score_palette_action(
+    query: &str,
+    action: &PaletteAction,
+    usage_counts: &HashMap<String, u64>,
+) -> Option<i32> {
+    let usage_bonus = usage_counts
+        .get(action.command)
+        .copied()
+        .unwrap_or(0)
+        .min(25) as i32
+        * 8;
+
+    if query.is_empty() {
+        let quick_action_bonus = if action.category == PaletteCategory::QuickActions {
+            120
+        } else {
+            0
+        };
+        return Some(usage_bonus + quick_action_bonus);
+    }
+
+    let title = action.title.to_ascii_lowercase();
+    let subtitle = action.subtitle.to_ascii_lowercase();
+    let command = action.command.to_ascii_lowercase();
+    let alias_match = action
+        .aliases
+        .iter()
+        .any(|alias| alias.to_ascii_lowercase().contains(query));
+
+    let mut score = 0i32;
+    if title.starts_with(query) {
+        score += 180;
+    }
+    if title.contains(query) {
+        score += 120;
+    }
+    if subtitle.contains(query) {
+        score += 70;
+    }
+    if command.starts_with(query) {
+        score += 90;
+    }
+    if command.contains(query) {
+        score += 60;
+    }
+    if alias_match {
+        score += 80;
+    }
+
+    if score == 0 {
+        None
+    } else {
+        Some(score + usage_bonus)
+    }
+}
+
+fn active_palette_category(state: &TuiState) -> PaletteCategory {
+    CATEGORY_ORDER
+        .get(state.command_tab)
+        .copied()
+        .unwrap_or(PaletteCategory::QuickActions)
+}
+
+fn switch_palette_tab(state: &mut TuiState, forward: bool) {
+    let current = state
+        .command_tab
+        .min(CATEGORY_ORDER.len().saturating_sub(1));
+    state.command_tab = if forward {
+        (current + 1) % CATEGORY_ORDER.len()
+    } else if current == 0 {
+        CATEGORY_ORDER.len() - 1
+    } else {
+        current - 1
+    };
+
+    state.command_selected = 0;
+    state.command_scroll = 0;
+    state.command_max_scroll = 0;
 }
 
 pub(crate) async fn handle_command_palette_key_event(
@@ -100,29 +288,64 @@ pub(crate) async fn handle_command_palette_key_event(
     event_tx: &mpsc::Sender<TuiEvent>,
 ) -> EventOutcome {
     match code {
+        KeyCode::Tab => {
+            switch_palette_tab(state, true);
+        }
+        KeyCode::BackTab => {
+            switch_palette_tab(state, false);
+        }
         KeyCode::Backspace => {
             state.command_query.pop();
             state.command_selected = 0;
+            state.command_scroll = 0;
         }
         KeyCode::Char(c) => {
             state.command_query.push(c);
             state.command_selected = 0;
+            state.command_scroll = 0;
         }
         KeyCode::Up => {
             state.command_selected = state.command_selected.saturating_sub(1);
         }
         KeyCode::Down => {
-            let max = filtered_palette_actions(&state.command_query)
-                .len()
-                .saturating_sub(1);
+            let max = ranked_palette_actions(
+                &state.command_query,
+                &state.command_usage_counts,
+                active_palette_category(state),
+            )
+            .len()
+            .saturating_sub(1);
             state.command_selected = (state.command_selected + 1).min(max);
         }
+        KeyCode::PageUp => {
+            state.command_scroll = state.command_scroll.saturating_sub(8);
+        }
+        KeyCode::PageDown => {
+            state.command_scroll = state
+                .command_scroll
+                .saturating_add(8)
+                .min(state.command_max_scroll);
+        }
+        KeyCode::Home => {
+            state.command_scroll = 0;
+        }
+        KeyCode::End => {
+            state.command_scroll = state.command_max_scroll;
+        }
         KeyCode::Enter => {
-            let actions = filtered_palette_actions(&state.command_query);
+            let actions = ranked_palette_actions(
+                &state.command_query,
+                &state.command_usage_counts,
+                active_palette_category(state),
+            );
             if let Some(action) = actions.get(state.command_selected).copied() {
+                record_palette_usage(state, action.command);
                 state.mode = UiMode::Chat;
                 state.command_query.clear();
+                state.command_tab = 0;
                 state.command_selected = 0;
+                state.command_scroll = 0;
+                state.command_max_scroll = 0;
                 return super::handle_slash_command(action.command, state, tui_rt, event_tx).await;
             }
         }
@@ -130,6 +353,60 @@ pub(crate) async fn handle_command_palette_key_event(
     }
 
     EventOutcome::Continue
+}
+
+fn record_palette_usage(state: &mut TuiState, command: &str) {
+    let entry = state
+        .command_usage_counts
+        .entry(command.to_string())
+        .or_insert(0);
+    *entry = entry.saturating_add(1);
+
+    save_tui_defaults(&TuiDefaults {
+        backend: Some(state.settings.backend.clone()),
+        provider: Some(state.settings.provider.clone()),
+        model: Some(state.settings.model.clone()),
+        base_url: if state.settings.base_url.trim().is_empty() {
+            None
+        } else {
+            Some(state.settings.base_url.clone())
+        },
+        env_overrides: if state.settings.env_overrides.trim().is_empty() {
+            None
+        } else {
+            Some(state.settings.env_overrides.clone())
+        },
+        allowed_modules: {
+            let parsed = parse_allowed_modules(&state.settings.allowed_modules);
+            if parsed.is_empty() {
+                None
+            } else {
+                Some(parsed)
+            }
+        },
+        tool_call_mode: Some(state.settings.tool_call_mode.clone()),
+        max_tool_rounds: Some(parse_usize_with_bounds(
+            &state.settings.max_tool_rounds,
+            10,
+            1,
+            50,
+        )),
+        thinking_capture: Some(parse_bool_with_default(
+            &state.settings.thinking_capture,
+            true,
+        )),
+        thinking_max_lines: Some(parse_usize_with_bounds(
+            &state.settings.thinking_max_lines,
+            300,
+            50,
+            5000,
+        )),
+        command_usage_counts: if state.command_usage_counts.is_empty() {
+            None
+        } else {
+            Some(state.command_usage_counts.clone())
+        },
+    });
 }
 
 pub(crate) fn handle_allowlist_preview_key_event(
@@ -156,34 +433,28 @@ pub(crate) fn handle_allowlist_preview_key_event(
                 push_obs(
                     state,
                     format!(
-                        "⚠ allowlist preview invalid allowlist ids: {}",
+                        "⚠ invalid allowlist ids: {}",
                         analysis.invalid_allowlist.join(", ")
                     ),
                 );
                 return EventOutcome::Continue;
             }
             if analysis.referenced_ops.is_empty() {
-                push_obs(
-                    state,
-                    "allowlist preview: no module operation calls found in source".to_string(),
-                );
+                push_obs(state, "no module calls found in source".to_string());
                 return EventOutcome::Continue;
             }
             if analysis.blocked_ops.is_empty() {
                 push_obs(
                     state,
                     format!(
-                        "✓ allowlist preview: all referenced ops allowed ({})",
+                        "✓ all referenced operations are allowed ({})",
                         analysis.referenced_ops.join(", ")
                     ),
                 );
             } else {
                 push_obs(
                     state,
-                    format!(
-                        "⚠ allowlist preview: blocked ops {}",
-                        analysis.blocked_ops.join(", ")
-                    ),
+                    format!("⚠ blocked operations: {}", analysis.blocked_ops.join(", ")),
                 );
             }
         }
@@ -191,14 +462,14 @@ pub(crate) fn handle_allowlist_preview_key_event(
             if analysis.referenced_ops.is_empty() {
                 push_obs(
                     state,
-                    "⚠ allowlist preview replace skipped: no referenced ops detected".to_string(),
+                    "⚠ replace skipped: no operations detected".to_string(),
                 );
             } else {
                 state.settings_draft.allowed_modules = analysis.referenced_ops.join(",");
                 push_obs(
                     state,
                     format!(
-                        "✓ allowlist preview replaced draft allowlist with {} op(s)",
+                        "✓ allowlist replaced with {} operation(s)",
                         analysis.referenced_ops.len()
                     ),
                 );
@@ -208,7 +479,7 @@ pub(crate) fn handle_allowlist_preview_key_event(
             if analysis.referenced_ops.is_empty() {
                 push_obs(
                     state,
-                    "⚠ allowlist preview append skipped: no referenced ops detected".to_string(),
+                    "⚠ append skipped: no operations detected".to_string(),
                 );
             } else {
                 let mut merged = parse_allowed_modules(&state.settings_draft.allowed_modules);
@@ -225,7 +496,7 @@ pub(crate) fn handle_allowlist_preview_key_event(
                 state.settings_draft.allowed_modules = merged.join(",");
                 push_obs(
                     state,
-                    format!("✓ allowlist preview appended {appended} op(s) to draft allowlist"),
+                    format!("✓ allowlist appended with {appended} operation(s)"),
                 );
             }
         }
@@ -234,60 +505,230 @@ pub(crate) fn handle_allowlist_preview_key_event(
     EventOutcome::Continue
 }
 
-pub(crate) fn render_command_palette_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
+pub(crate) fn render_command_palette_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
     let area = frame.area();
-    let popup = centered_rect(area, 72, 58);
+    let popup = centered_rect(area, 78, 64);
     frame.render_widget(Clear, popup);
 
-    let actions = filtered_palette_actions(&state.command_query);
+    let active_category = active_palette_category(state);
+    let actions = ranked_palette_actions(
+        &state.command_query,
+        &state.command_usage_counts,
+        active_category,
+    );
+    let selected = state.command_selected.min(actions.len().saturating_sub(1));
+    state.command_selected = selected;
+
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        format!(" Query: {}", state.command_query),
+        format!(
+            " Find Action: {}",
+            if state.command_query.is_empty() {
+                "(type to filter)"
+            } else {
+                state.command_query.as_str()
+            }
+        ),
         Style::default().fg(Color::Cyan),
     )));
+
+    let tab_nav = CATEGORY_ORDER
+        .iter()
+        .enumerate()
+        .map(|(idx, category)| {
+            let label = category_label(*category);
+            if idx == state.command_tab {
+                format!("[{label}]")
+            } else {
+                label.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("  ");
     lines.push(Line::from(Span::styled(
-        " Up/Down: select  Enter: run  Esc/Ctrl+K: close ",
+        format!(" Tabs: {tab_nav} "),
+        Style::default().fg(Color::LightCyan),
+    )));
+    lines.push(Line::from(Span::styled(
+        " Up/Down: move  Tab/Shift+Tab: tab  PgUp/PgDn/Wheel: scroll  Enter: run  Esc/Ctrl+K: close ",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(" {} ", tab_help_text(active_category)),
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
 
+    let mut selected_line: Option<usize> = None;
+
     if actions.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No matching commands.",
+            format!(
+                "No matching commands in {}.",
+                category_label(active_category)
+            ),
             Style::default().fg(Color::Gray),
         )));
     } else {
+        lines.push(Line::from(Span::styled(
+            format!(" {} ", category_label(active_category)),
+            Style::default()
+                .fg(ui_accent_primary())
+                .add_modifier(Modifier::BOLD),
+        )));
+
         for (idx, action) in actions.iter().enumerate() {
-            let marker = if idx == state.command_selected {
-                ">"
-            } else {
-                " "
-            };
-            let style = if idx == state.command_selected {
+            if idx == selected {
+                selected_line = Some(lines.len());
+            }
+
+            let marker = if idx == selected { ">" } else { " " };
+            let row_style = if idx == selected {
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
+
             lines.push(Line::from(Span::styled(
-                format!("{marker} {}  ({})", action.title, action.command),
-                style,
+                format!(
+                    "{marker} {}  [{}]  {}  ({})",
+                    action.title,
+                    risk_label(action.risk),
+                    action.command,
+                    action.key_hint
+                ),
+                row_style,
+            )));
+
+            let subtitle_style = if idx == selected {
+                Style::default().fg(Color::Black).bg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            lines.push(Line::from(Span::styled(
+                format!("    {}", action.subtitle),
+                subtitle_style,
+            )));
+        }
+
+        lines.push(Line::from(""));
+
+        if let Some(action) = actions.get(selected) {
+            lines.push(Line::from(Span::styled(
+                " Selected Action ",
+                Style::default()
+                    .fg(ui_accent_primary())
+                    .add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!(" Will run: {}", action.command),
+                Style::default().fg(Color::Cyan),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!(" Effect: {}", command_effect(action.command)),
+                Style::default().fg(Color::DarkGray),
             )));
         }
     }
 
-    let panel = Paragraph::new(Text::from(lines))
+    let text = Text::from(lines);
+    let inner_width = popup.width.saturating_sub(2);
+    let visible_height = popup.height.saturating_sub(2);
+    let visual_lines = visual_line_count(&text, inner_width);
+    state.command_max_scroll = visual_lines.saturating_sub(visible_height);
+    state.command_scroll = state.command_scroll.min(state.command_max_scroll);
+
+    if let Some(line_idx) = selected_line {
+        let visible_rows = visible_height as usize;
+        if visible_rows > 0 {
+            let top = state.command_scroll as usize;
+            let bottom = top.saturating_add(visible_rows.saturating_sub(1));
+            if line_idx < top {
+                state.command_scroll = line_idx as u16;
+            } else if line_idx > bottom {
+                state.command_scroll =
+                    line_idx.saturating_add(1).saturating_sub(visible_rows) as u16;
+            }
+            state.command_scroll = state.command_scroll.min(state.command_max_scroll);
+        }
+    }
+
+    let panel = Paragraph::new(text)
         .block(
             Block::default()
-                .title(" Command Palette ")
+                .title(" Command Center ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ui_accent_primary()))
                 .style(Style::default().bg(ui_modal_bg())),
         )
         .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((state.command_scroll, 0));
     frame.render_widget(panel, popup);
+}
+
+fn visual_line_count(text: &Text, inner_width: u16) -> u16 {
+    if inner_width == 0 {
+        return text.lines.len() as u16;
+    }
+
+    text.lines
+        .iter()
+        .map(|line| {
+            let w = line.width() as u16;
+            if w == 0 { 1 } else { w.div_ceil(inner_width) }
+        })
+        .fold(0u16, |acc, rows| acc.saturating_add(rows))
+}
+
+fn category_label(category: PaletteCategory) -> &'static str {
+    match category {
+        PaletteCategory::QuickActions => "Quick Actions",
+        PaletteCategory::Session => "Session",
+        PaletteCategory::ModelRuntime => "Model & Runtime",
+        PaletteCategory::ToolsScripts => "Tools & Scripts",
+        PaletteCategory::SafetyKeys => "Safety & Keys",
+    }
+}
+
+fn tab_help_text(category: PaletteCategory) -> &'static str {
+    match category {
+        PaletteCategory::QuickActions => " High-frequency moves to keep momentum.",
+        PaletteCategory::Session => " History, exports, and response iteration controls.",
+        PaletteCategory::ModelRuntime => " Model visibility and daemon runtime tooling.",
+        PaletteCategory::ToolsScripts => " Script execution and allowlist diagnostics.",
+        PaletteCategory::SafetyKeys => " API key lifecycle and sensitive access actions.",
+    }
+}
+
+fn risk_label(risk: ActionRisk) -> &'static str {
+    match risk {
+        ActionRisk::Safe => "safe",
+        ActionRisk::Caution => "caution",
+    }
+}
+
+fn command_effect(command: &str) -> &'static str {
+    match command {
+        "/new" => "Resets context to a fresh conversation.",
+        "/history" => "Opens session history for quick switching.",
+        "/settings" => "Opens settings tabs for model/runtime changes.",
+        "/edit" => "Opens script editor.",
+        "/run" | "/run-current" => "Executes script against runtime and tools.",
+        "/allowlist-preview" => "Analyzes policy coverage for referenced operations.",
+        "/stop" => "Stops the active generation stream.",
+        "/regen" => "Repeats the previous assistant response attempt.",
+        "/model" => "Shows the currently active model routing.",
+        "/daemon health" => "Reads daemon health state.",
+        "/daemon" => "Shows daemon command help.",
+        "/export md" | "/export jsonl" => "Writes session transcript to disk.",
+        "/clear-key" => "Removes stored API key from secure storage.",
+        "/rotate-key" => "Rotates API key and updates runtime access.",
+        _ => "Runs the selected slash command.",
+    }
 }
 
 pub(crate) fn render_allowlist_preview_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
@@ -302,17 +743,17 @@ pub(crate) fn render_allowlist_preview_overlay(frame: &mut ratatui::Frame, state
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        " Type source, Enter: newline, Tab: emit verdict, F5: replace allowlist, F6: append allowlist, Esc: close ",
+        " Type source  Enter: new line  Tab: evaluate  F5: replace allowlist  F6: append allowlist  Esc: close ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(Span::styled(
-        " Uses same parser/policy shape as runtime module enforcement ",
+        " Uses the same parser and policy checks as runtime enforcement ",
         Style::default().fg(Color::Cyan),
     )));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         format!(
-            "Draft allowlist: {}",
+            "Allowlist: {}",
             if state.settings_draft.allowed_modules.trim().is_empty() {
                 "(all operations allowed)".to_string()
             } else {
@@ -351,9 +792,9 @@ pub(crate) fn render_allowlist_preview_overlay(frame: &mut ratatui::Frame, state
     } else {
         lines.push(Line::from(Span::styled(
             if analysis.blocked_ops.is_empty() {
-                "Verdict: ALLOW".to_string()
+                "Result: Allowed".to_string()
             } else {
-                "Verdict: BLOCK".to_string()
+                "Result: Blocked".to_string()
             },
             Style::default().fg(if analysis.blocked_ops.is_empty() {
                 Color::Green

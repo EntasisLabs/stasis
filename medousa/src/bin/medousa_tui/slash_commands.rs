@@ -55,8 +55,11 @@ pub(crate) async fn handle_slash_command(
         }
         "/settings" => {
             state.mode = UiMode::Settings;
+            state.settings_tab = 0;
             state.settings_selected = 0;
             state.settings_editing = false;
+            state.settings_scroll = 0;
+            state.settings_max_scroll = 0;
             state.settings_draft = state.settings.clone();
         }
         "/allowlist-preview" => {

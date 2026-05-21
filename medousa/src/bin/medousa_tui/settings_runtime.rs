@@ -214,6 +214,11 @@ pub(crate) async fn finalize_settings_apply_if_ready(
                 max_tool_rounds: Some(snapshot.max_tool_rounds),
                 thinking_capture: Some(snapshot.thinking_capture),
                 thinking_max_lines: Some(snapshot.thinking_max_lines),
+                command_usage_counts: if state.command_usage_counts.is_empty() {
+                    None
+                } else {
+                    Some(state.command_usage_counts.clone())
+                },
             });
 
             super::push_obs(

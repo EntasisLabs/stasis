@@ -1,9 +1,11 @@
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use tokio::sync::mpsc;
 
 use medousa::{TuiRuntime, events::TuiEvent};
 
 use super::{EventOutcome, TuiState, UiMode};
+
+const STARTUP_PROVIDER_OPTIONS: [&str; 5] = ["openai", "anthropic", "google", "xai", "ollama"];
 
 pub(crate) async fn handle_key_event(
     event: Event,
@@ -11,9 +13,51 @@ pub(crate) async fn handle_key_event(
     tui_rt: &mut TuiRuntime,
     event_tx: &mpsc::Sender<TuiEvent>,
 ) -> EventOutcome {
-    let Event::Key(key) = event else {
-        return EventOutcome::Continue;
+    let key = match event {
+        Event::Key(key) => key,
+        Event::Mouse(mouse) => {
+            if state.mode == UiMode::Settings {
+                match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        state.settings_scroll = state.settings_scroll.saturating_sub(3);
+                        return EventOutcome::Continue;
+                    }
+                    MouseEventKind::ScrollDown => {
+                        state.settings_scroll = state
+                            .settings_scroll
+                            .saturating_add(3)
+                            .min(state.settings_max_scroll);
+                        return EventOutcome::Continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            if state.mode == UiMode::CommandPalette {
+                match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        state.command_scroll = state.command_scroll.saturating_sub(2);
+                        return EventOutcome::Continue;
+                    }
+                    MouseEventKind::ScrollDown => {
+                        state.command_scroll = state
+                            .command_scroll
+                            .saturating_add(2)
+                            .min(state.command_max_scroll);
+                        return EventOutcome::Continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            return EventOutcome::Continue;
+        }
+        _ => return EventOutcome::Continue,
     };
+
+    if state.mode == UiMode::Startup {
+        return handle_startup_key_event(key, state, tui_rt, event_tx).await;
+    }
 
     if key.code == KeyCode::Esc {
         if state.mode == UiMode::RuntimeEnv {
@@ -64,11 +108,17 @@ pub(crate) async fn handle_key_event(
         if state.mode == UiMode::CommandPalette {
             state.mode = UiMode::Chat;
             state.command_query.clear();
+            state.command_tab = 0;
             state.command_selected = 0;
+            state.command_scroll = 0;
+            state.command_max_scroll = 0;
         } else {
             state.mode = UiMode::CommandPalette;
             state.command_query.clear();
+            state.command_tab = 0;
             state.command_selected = 0;
+            state.command_scroll = 0;
+            state.command_max_scroll = 0;
         }
         return EventOutcome::Continue;
     }
@@ -92,8 +142,11 @@ pub(crate) async fn handle_key_event(
             state.settings_draft = state.settings.clone();
         } else {
             state.mode = UiMode::Settings;
+            state.settings_tab = 0;
             state.settings_selected = 0;
             state.settings_editing = false;
+            state.settings_scroll = 0;
+            state.settings_max_scroll = 0;
             state.runtime_env_editing = false;
             state.settings_draft = state.settings.clone();
         }
@@ -315,6 +368,108 @@ pub(crate) async fn handle_key_event(
     }
 
     EventOutcome::Continue
+}
+
+async fn handle_startup_key_event(
+    key: KeyEvent,
+    state: &mut TuiState,
+    tui_rt: &mut TuiRuntime,
+    event_tx: &mpsc::Sender<TuiEvent>,
+) -> EventOutcome {
+    match (key.code, key.modifiers) {
+        (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => {
+            return EventOutcome::Break;
+        }
+        (KeyCode::Char('q'), m) if m.contains(KeyModifiers::CONTROL) => {
+            return EventOutcome::Break;
+        }
+        _ => {}
+    }
+
+    match key.code {
+        KeyCode::Up => {
+            state.startup_selected = state.startup_selected.saturating_sub(1);
+        }
+        KeyCode::Down => {
+            state.startup_selected = (state.startup_selected + 1).min(2);
+        }
+        KeyCode::Left => {
+            if state.startup_selected == 0 {
+                cycle_startup_provider(state, false);
+            }
+        }
+        KeyCode::Right | KeyCode::Tab => {
+            if state.startup_selected == 0 {
+                cycle_startup_provider(state, true);
+            }
+        }
+        KeyCode::Backspace => {
+            if state.startup_selected == 1 {
+                state.settings_draft.model.pop();
+            }
+        }
+        KeyCode::Char(c) => {
+            if state.startup_selected == 1 {
+                state.settings_draft.model.push(c);
+            }
+        }
+        KeyCode::Enter => {
+            if state.startup_selected == 2 {
+                let provider = state.settings_draft.provider.trim().to_string();
+                let model = state.settings_draft.model.trim().to_string();
+                if provider.is_empty() || model.is_empty() {
+                    super::push_obs(
+                        state,
+                        "⚠ startup requires a non-empty provider and model".to_string(),
+                    );
+                    return EventOutcome::Continue;
+                }
+
+                state.settings_draft.provider = provider;
+                state.settings_draft.model = model;
+                state.provider_model = format!(
+                    "{}:{}",
+                    state.settings_draft.provider, state.settings_draft.model
+                );
+                super::apply_settings(state, tui_rt, event_tx).await;
+                state.mode = UiMode::Chat;
+                return EventOutcome::Continue;
+            }
+        }
+        _ => {}
+    }
+
+    EventOutcome::Continue
+}
+
+fn cycle_startup_provider(state: &mut TuiState, forward: bool) {
+    let current = state.settings_draft.provider.trim().to_ascii_lowercase();
+    let idx = STARTUP_PROVIDER_OPTIONS
+        .iter()
+        .position(|p| *p == current)
+        .unwrap_or(0);
+
+    let next = if forward {
+        (idx + 1) % STARTUP_PROVIDER_OPTIONS.len()
+    } else if idx == 0 {
+        STARTUP_PROVIDER_OPTIONS.len() - 1
+    } else {
+        idx - 1
+    };
+
+    let provider = STARTUP_PROVIDER_OPTIONS[next];
+    state.settings_draft.provider = provider.to_string();
+    state.settings_draft.model = default_model_for_provider(provider).to_string();
+}
+
+fn default_model_for_provider(provider: &str) -> &'static str {
+    match provider {
+        "anthropic" => "claude-3-7-sonnet-latest",
+        "google" => "gemini-2.5-pro",
+        "xai" => "grok-3-mini",
+        "ollama" => "llama3.2",
+        _ => "gpt-4o-mini",
+    }
 }
 
 fn handle_thinking_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {

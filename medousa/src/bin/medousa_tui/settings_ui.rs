@@ -1,11 +1,20 @@
 use super::*;
 
+const SETTINGS_SECTIONS: [(&str, usize, usize); 4] = [
+    ("Model", 0, 5),
+    ("Runtime", 6, 10),
+    ("Safety", 11, 13),
+    ("Session", 14, 16),
+];
+
 pub(crate) async fn handle_settings_key_event(
     code: KeyCode,
     state: &mut TuiState,
     tui_rt: &mut TuiRuntime,
     event_tx: &mpsc::Sender<TuiEvent>,
 ) -> EventOutcome {
+    clamp_selected_to_active_tab(state);
+
     if state.settings_editing {
         match code {
             KeyCode::Enter => {
@@ -25,6 +34,27 @@ pub(crate) async fn handle_settings_key_event(
     }
 
     match code {
+        KeyCode::Tab => {
+            switch_settings_tab(state, true);
+        }
+        KeyCode::BackTab => {
+            switch_settings_tab(state, false);
+        }
+        KeyCode::PageUp => {
+            state.settings_scroll = state.settings_scroll.saturating_sub(6);
+        }
+        KeyCode::PageDown => {
+            state.settings_scroll = state
+                .settings_scroll
+                .saturating_add(6)
+                .min(state.settings_max_scroll);
+        }
+        KeyCode::Home => {
+            state.settings_scroll = 0;
+        }
+        KeyCode::End => {
+            state.settings_scroll = state.settings_max_scroll;
+        }
         KeyCode::Char(' ') | KeyCode::Right => {
             quick_adjust_setting(state, true);
         }
@@ -42,10 +72,12 @@ pub(crate) async fn handle_settings_key_event(
             }
         }
         KeyCode::Up => {
-            state.settings_selected = state.settings_selected.saturating_sub(1);
+            let (start, _) = active_tab_bounds(state);
+            state.settings_selected = state.settings_selected.saturating_sub(1).max(start);
         }
         KeyCode::Down => {
-            state.settings_selected = (state.settings_selected + 1).min(16);
+            let (_, end) = active_tab_bounds(state);
+            state.settings_selected = state.settings_selected.saturating_add(1).min(end);
         }
         KeyCode::Enter => match state.settings_selected {
             1..=5 => {
@@ -65,30 +97,24 @@ pub(crate) async fn handle_settings_key_event(
                 state.settings_draft.api_key.clear();
                 push_obs(
                     state,
-                    "✓ settings draft: api key marked for clear".to_string(),
+                    "✓ API key will be cleared when changes are applied".to_string(),
                 );
             }
             13 => {
                 let key = state.settings_draft.api_key.trim().to_string();
                 if key.is_empty() {
-                    push_obs(
-                        state,
-                        "⚠ key rotation requires a non-empty draft API key".to_string(),
-                    );
+                    push_obs(state, "⚠ enter an API key before updating".to_string());
                 } else {
                     save_tui_api_key(Some(&key));
                     state.settings.api_key = key.clone();
                     state.settings_draft.api_key = key;
-                    push_obs(state, "✓ api key rotated in secure storage".to_string());
+                    push_obs(state, "✓ API key updated".to_string());
                 }
             }
             14 => {
                 state.settings_draft = state.settings.clone();
                 state.settings_editing = false;
-                push_obs(
-                    state,
-                    "✓ settings draft reverted to last applied".to_string(),
-                );
+                push_obs(state, "✓ changes reverted".to_string());
             }
             15 => {
                 super::apply_settings(state, tui_rt, event_tx).await;
@@ -106,7 +132,7 @@ pub(crate) async fn handle_settings_key_event(
     EventOutcome::Continue
 }
 
-pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiState) {
+pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
     let area = frame.area();
     let popup = centered_rect(area, 76, 62);
     frame.render_widget(Clear, popup);
@@ -115,18 +141,15 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
     let has_pending_changes = state.settings_draft != state.settings;
     let validation_errors = settings_validation_errors(&state.settings_draft);
     let validation_line = if validation_errors.is_empty() {
-        " Validation: OK (draft can be applied) ".to_string()
+        " Status: ready to apply ".to_string()
     } else {
-        format!(
-            " Validation: {} issue(s) - press Validate Draft for details ",
-            validation_errors.len()
-        )
+        format!(" Status: {} issue(s) to review ", validation_errors.len())
     };
     lines.push(Line::from(Span::styled(
         if has_pending_changes {
-            " Draft has unapplied changes "
+            " Changes not applied "
         } else {
-            " Draft matches applied settings "
+            " All changes applied "
         },
         Style::default().fg(if has_pending_changes {
             Color::Yellow
@@ -135,7 +158,7 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
         }),
     )));
     lines.push(Line::from(Span::styled(
-        format!(" Secret backend: {} ", api_key_storage_backend_label()),
+        format!(" Secure storage: {} ", api_key_storage_backend_label()),
         Style::default().fg(Color::Cyan),
     )));
     lines.push(Line::from(Span::styled(
@@ -147,13 +170,39 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
         }),
     )));
     lines.push(Line::from(Span::styled(
-        " Up/Down: select  Enter: edit/action  Space/Left/Right: quick toggle  +/-: adjust number  Ctrl+,/Esc: cancel ",
+        " Up/Down: move  Enter: edit/action  Space/Left/Right: adjust  +/-: numbers  Tab/Shift+Tab: tab  PgUp/PgDn/Wheel: scroll  Ctrl+,/Esc: close ",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(""));
+
+    let active_section = active_settings_tab_index(state);
+    let section_nav = SETTINGS_SECTIONS
+        .iter()
+        .enumerate()
+        .map(|(idx, (name, _, _))| {
+            if idx == active_section {
+                format!("[{name}]")
+            } else {
+                name.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("  ");
+    lines.push(Line::from(Span::styled(
+        format!(" Tabs: {section_nav} "),
+        Style::default().fg(Color::LightCyan),
+    )));
+    lines.push(Line::from(Span::styled(
+        section_help_text(active_section),
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
 
     let rows = vec![
-        format!("Backend: {}  [toggle]", state.settings_draft.backend),
+        format!(
+            "Runtime backend: {}  [toggle]",
+            state.settings_draft.backend
+        ),
         format!("Provider: {}  [edit]", state.settings_draft.provider),
         format!("Model: {}  [edit]", state.settings_draft.model),
         format!(
@@ -169,7 +218,7 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
             mask_secret_value(&state.settings_draft.api_key)
         ),
         format!(
-            "Allowed Grapheme Modules: {}  [edit]",
+            "Allowed modules: {}  [edit]",
             if state.settings_draft.allowed_modules.trim().is_empty() {
                 "(all)".to_string()
             } else {
@@ -177,7 +226,7 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
             }
         ),
         format!(
-            "Tool Call Mode: {}  [toggle]",
+            "Tool calls: {}  [toggle]",
             state.settings_draft.tool_call_mode
         ),
         format!(
@@ -193,7 +242,7 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
             state.settings_draft.thinking_max_lines
         ),
         format!(
-            "Runtime/Env Variables Submenu: {} line(s)  [open]",
+            "Environment variables: {} line(s)  [open]",
             state
                 .settings_draft
                 .env_overrides
@@ -204,36 +253,65 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
                 })
                 .count()
         ),
-        "Validate Draft  [action]".to_string(),
-        "Clear API Key (Draft)  [action]".to_string(),
-        "Rotate API Key (Persist Draft)  [action]".to_string(),
-        "Revert to Last Applied  [action]".to_string(),
-        "Apply and Save  [action]".to_string(),
-        "Cancel (Discard Draft)  [action]".to_string(),
+        "Review configuration  [action]".to_string(),
+        "Clear API key  [action]".to_string(),
+        "Update API key  [action]".to_string(),
+        "Revert changes  [action]".to_string(),
+        "Apply changes  [action]".to_string(),
+        "Cancel  [action]".to_string(),
     ];
 
-    for (idx, row) in rows.iter().enumerate() {
+    let (start, end) = active_tab_bounds(state);
+    let (tab_title, _, _) = SETTINGS_SECTIONS[active_section];
+    lines.push(Line::from(Span::styled(
+        format!(" {tab_title} "),
+        Style::default()
+            .fg(ui_accent_primary())
+            .add_modifier(Modifier::BOLD),
+    )));
+
+    let mut selected_line: Option<usize> = None;
+    for idx in start..=end {
+        if idx == state.settings_selected {
+            selected_line = Some(lines.len());
+        }
+        let row = &rows[idx];
         let marker = if idx == state.settings_selected {
             ">"
         } else {
             " "
         };
-        let mut style = if idx == state.settings_selected {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::White)
-        };
-
+        let mut style = row_style_for_settings_index(idx, idx == state.settings_selected);
         if idx == state.settings_selected && state.settings_editing && idx <= 9 {
             style = style.add_modifier(Modifier::UNDERLINED);
         }
-
         lines.push(Line::from(Span::styled(format!("{marker} {row}"), style)));
     }
+    lines.push(Line::from(""));
 
-    let panel = Paragraph::new(Text::from(lines))
+    let text = Text::from(lines);
+    let inner_width = popup.width.saturating_sub(2);
+    let visible_height = popup.height.saturating_sub(2);
+    let visual_lines = visual_line_count(&text, inner_width);
+    state.settings_max_scroll = visual_lines.saturating_sub(visible_height);
+    state.settings_scroll = state.settings_scroll.min(state.settings_max_scroll);
+
+    if let Some(line_idx) = selected_line {
+        let visible_rows = visible_height as usize;
+        if visible_rows > 0 {
+            let top = state.settings_scroll as usize;
+            let bottom = top.saturating_add(visible_rows.saturating_sub(1));
+            if line_idx < top {
+                state.settings_scroll = line_idx as u16;
+            } else if line_idx > bottom {
+                state.settings_scroll =
+                    line_idx.saturating_add(1).saturating_sub(visible_rows) as u16;
+            }
+            state.settings_scroll = state.settings_scroll.min(state.settings_max_scroll);
+        }
+    }
+
+    let panel = Paragraph::new(text)
         .block(
             Block::default()
                 .title(" Settings ")
@@ -242,7 +320,8 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &TuiSta
                 .style(Style::default().bg(ui_modal_bg())),
         )
         .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((state.settings_scroll, 0));
     frame.render_widget(panel, popup);
 }
 
@@ -281,17 +360,17 @@ pub(crate) fn render_runtime_env_overlay(frame: &mut ratatui::Frame, state: &Tui
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        " Runtime/Env Variables (Draft) ",
+        " Environment Variables ",
         Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(Span::styled(
-        " Format: KEY=VALUE (one per line). Empty lines and # comments are ignored. ",
+        " Format: KEY=VALUE. One per line. Empty lines and # comments are ignored. ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(Span::styled(
-        " Esc: back to Settings  Enter: newline  Tab: '=' shortcut ",
+        " Esc: back  Enter: new line  Tab: insert '=' ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
@@ -299,12 +378,12 @@ pub(crate) fn render_runtime_env_overlay(frame: &mut ratatui::Frame, state: &Tui
     let env_errors = env_overrides_validation_errors(&state.settings_draft.env_overrides);
     if env_errors.is_empty() {
         lines.push(Line::from(Span::styled(
-            " Validation: OK ",
+            " Status: ready ",
             Style::default().fg(Color::Green),
         )));
     } else {
         lines.push(Line::from(Span::styled(
-            format!(" Validation: {} issue(s) ", env_errors.len()),
+            format!(" Status: {} issue(s) ", env_errors.len()),
             Style::default().fg(Color::Red),
         )));
         for err in env_errors.iter().take(3) {
@@ -338,7 +417,7 @@ pub(crate) fn render_runtime_env_overlay(frame: &mut ratatui::Frame, state: &Tui
     let panel = Paragraph::new(Text::from(lines))
         .block(
             Block::default()
-                .title(" Runtime/Env Submenu ")
+                .title(" Environment ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(ui_accent_primary()))
                 .style(Style::default().bg(ui_modal_bg())),
@@ -351,14 +430,11 @@ pub(crate) fn render_runtime_env_overlay(frame: &mut ratatui::Frame, state: &Tui
 pub(crate) fn emit_settings_validation_summary(state: &mut TuiState) -> bool {
     let errors = settings_validation_errors(&state.settings_draft);
     if errors.is_empty() {
-        push_obs(
-            state,
-            "✓ settings validation passed (draft ready to apply)".to_string(),
-        );
+        push_obs(state, "✓ configuration ready".to_string());
         true
     } else {
         for error in errors {
-            push_obs(state, format!("⚠ settings validation: {error}"));
+            push_obs(state, format!("⚠ configuration: {error}"));
         }
         false
     }
@@ -418,4 +494,85 @@ fn selected_settings_field_mut(state: &mut TuiState) -> &mut String {
         9 => &mut state.settings_draft.thinking_max_lines,
         _ => &mut state.settings_draft.base_url,
     }
+}
+
+fn switch_settings_tab(state: &mut TuiState, forward: bool) {
+    let current = active_settings_tab_index(state);
+    let next = if forward {
+        (current + 1) % SETTINGS_SECTIONS.len()
+    } else if current == 0 {
+        SETTINGS_SECTIONS.len() - 1
+    } else {
+        current - 1
+    };
+
+    state.settings_tab = next;
+    let (_, start, _) = SETTINGS_SECTIONS[next];
+    state.settings_selected = start;
+    state.settings_editing = false;
+    state.settings_scroll = 0;
+    state.settings_max_scroll = 0;
+}
+
+fn active_settings_tab_index(state: &TuiState) -> usize {
+    state
+        .settings_tab
+        .min(SETTINGS_SECTIONS.len().saturating_sub(1))
+}
+
+fn active_tab_bounds(state: &TuiState) -> (usize, usize) {
+    let tab = active_settings_tab_index(state);
+    let (_, start, end) = SETTINGS_SECTIONS[tab];
+    (start, end)
+}
+
+fn clamp_selected_to_active_tab(state: &mut TuiState) {
+    let (start, end) = active_tab_bounds(state);
+    state.settings_selected = state.settings_selected.clamp(start, end);
+}
+
+fn row_style_for_settings_index(idx: usize, selected: bool) -> Style {
+    let base = if selected {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        match idx {
+            15 => Style::default().fg(Color::Green),
+            16 => Style::default().fg(Color::LightRed),
+            12 => Style::default().fg(Color::LightYellow),
+            13 => Style::default().fg(Color::LightMagenta),
+            11 => Style::default().fg(Color::Cyan),
+            _ => Style::default().fg(Color::White),
+        }
+    };
+
+    if idx >= 14 {
+        base.add_modifier(Modifier::BOLD)
+    } else {
+        base
+    }
+}
+
+fn section_help_text(active_section: usize) -> &'static str {
+    match active_section {
+        0 => " Provider, model, connection, API key, and module access.",
+        1 => " Runtime behavior, tool limits, and thinking capture.",
+        2 => " Review configuration and key-related safety actions.",
+        _ => " Revert, apply, or close without applying.",
+    }
+}
+
+fn visual_line_count(text: &Text, inner_width: u16) -> u16 {
+    if inner_width == 0 {
+        return text.lines.len() as u16;
+    }
+
+    text.lines
+        .iter()
+        .map(|line| {
+            let w = line.width() as u16;
+            if w == 0 { 1 } else { w.div_ceil(inner_width) }
+        })
+        .fold(0u16, |acc, rows| acc.saturating_add(rows))
 }

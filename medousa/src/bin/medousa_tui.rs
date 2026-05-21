@@ -92,7 +92,6 @@ use settings_runtime::{
 use slash_commands::handle_slash_command;
 use ui_helpers::{
     centered_rect, ui_accent_primary, ui_accent_warn, ui_bg, ui_border, ui_modal_bg, ui_panel_bg,
-    ui_subtle_panel_bg,
 };
 use ui_render::render;
 use workers::{
@@ -167,10 +166,15 @@ struct TuiState {
     auto_scroll: bool,
     active_agent_stream_turn: Option<usize>,
     mode: UiMode,
+    startup_selected: usize,
     history_items: Vec<SessionHistorySummary>,
     history_selected: usize,
     command_query: String,
+    command_tab: usize,
     command_selected: usize,
+    command_scroll: u16,
+    command_max_scroll: u16,
+    command_usage_counts: HashMap<String, u64>,
     settings: RuntimeSettings,
     settings_draft: RuntimeSettings,
     allowlist_preview_source: String,
@@ -180,8 +184,11 @@ struct TuiState {
     editor_dirty: bool,
     editor_preferred_col: Option<usize>,
     editor_scroll: u16,
+    settings_tab: usize,
     settings_selected: usize,
     settings_editing: bool,
+    settings_scroll: u16,
+    settings_max_scroll: u16,
     runtime_env_editing: bool,
     provider_model: String,
     session_id: String,
@@ -245,6 +252,7 @@ struct PendingSettingsApply {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UiMode {
+    Startup,
     Chat,
     History,
     CommandPalette,
@@ -376,11 +384,16 @@ async fn main() -> Result<()> {
         active_request_task: None,
         auto_scroll: true,
         active_agent_stream_turn: None,
-        mode: UiMode::Chat,
+        mode: UiMode::Startup,
+        startup_selected: 0,
         history_items: Vec::new(),
         history_selected: 0,
         command_query: String::new(),
+        command_tab: 0,
         command_selected: 0,
+        command_scroll: 0,
+        command_max_scroll: 0,
+        command_usage_counts: defaults.command_usage_counts.unwrap_or_default(),
         settings: initial_settings.clone(),
         settings_draft: initial_settings,
         allowlist_preview_source: String::new(),
@@ -390,8 +403,11 @@ async fn main() -> Result<()> {
         editor_dirty: false,
         editor_preferred_col: None,
         editor_scroll: 0,
+        settings_tab: 0,
         settings_selected: 0,
         settings_editing: false,
+        settings_scroll: 0,
+        settings_max_scroll: 0,
         runtime_env_editing: false,
         provider_model,
         session_id: session_id.clone(),
@@ -730,7 +746,7 @@ mod tests {
     };
     use medousa::events::TuiEvent;
     use medousa::session::{ConversationTurn, SessionHistorySummary};
-    use std::collections::VecDeque;
+    use std::collections::{HashMap, VecDeque};
     use std::path::PathBuf;
     use tokio::sync::mpsc;
     use tokio::sync::mpsc::error::TryRecvError;
@@ -815,10 +831,15 @@ mod tests {
             auto_scroll: true,
             active_agent_stream_turn: None,
             mode: UiMode::Chat,
+            startup_selected: 0,
             history_items: Vec::<SessionHistorySummary>::new(),
             history_selected: 0,
             command_query: String::new(),
+            command_tab: 0,
             command_selected: 0,
+            command_scroll: 0,
+            command_max_scroll: 0,
+            command_usage_counts: HashMap::new(),
             settings: settings.clone(),
             settings_draft: settings,
             allowlist_preview_source: String::new(),
@@ -830,8 +851,11 @@ mod tests {
             editor_dirty: false,
             editor_preferred_col: None,
             editor_scroll: 0,
+            settings_tab: 0,
             settings_selected: 0,
             settings_editing: false,
+            settings_scroll: 0,
+            settings_max_scroll: 0,
             runtime_env_editing: false,
             provider_model: "openai:gpt-4o-mini".to_string(),
             session_id: "test-session".to_string(),
