@@ -57,6 +57,30 @@ pub(crate) async fn apply_settings(
         super::parse_bool_with_default(&state.settings_draft.thinking_capture, true);
     let thinking_max_lines =
         super::parse_usize_with_bounds(&state.settings_draft.thinking_max_lines, 300, 50, 5000);
+    let verifier_min_citation_coverage = super::parse_f32_with_bounds(
+        &state.settings_draft.verifier_min_citation_coverage,
+        0.60,
+        0.0,
+        1.0,
+    );
+    let verifier_min_avg_support_strength = super::parse_f32_with_bounds(
+        &state.settings_draft.verifier_min_avg_support_strength,
+        0.70,
+        0.0,
+        1.0,
+    );
+    let verifier_min_supported_claim_ratio = super::parse_f32_with_bounds(
+        &state.settings_draft.verifier_min_supported_claim_ratio,
+        0.60,
+        0.0,
+        1.0,
+    );
+    let verifier_min_claim_support_strength = super::parse_f32_with_bounds(
+        &state.settings_draft.verifier_min_claim_support_strength,
+        0.65,
+        0.0,
+        1.0,
+    );
     let provider = if state.settings_draft.provider.trim().is_empty() {
         super::resolve_llm_provider(None)
     } else {
@@ -87,6 +111,11 @@ pub(crate) async fn apply_settings(
         max_tool_rounds,
         thinking_capture,
         thinking_max_lines,
+        verifier_min_citation_coverage,
+        verifier_min_avg_support_strength,
+        verifier_min_supported_claim_ratio,
+        verifier_min_claim_support_strength,
+        stage_routing: state.stage_routing_draft.clone(),
         api_key,
     };
 
@@ -184,6 +213,15 @@ pub(crate) async fn finalize_settings_apply_if_ready(
             state.settings.max_tool_rounds = snapshot.max_tool_rounds.to_string();
             state.settings.thinking_capture = snapshot.thinking_capture.to_string();
             state.settings.thinking_max_lines = snapshot.thinking_max_lines.to_string();
+            state.settings.verifier_min_citation_coverage =
+                format!("{:.2}", snapshot.verifier_min_citation_coverage);
+            state.settings.verifier_min_avg_support_strength =
+                format!("{:.2}", snapshot.verifier_min_avg_support_strength);
+            state.settings.verifier_min_supported_claim_ratio =
+                format!("{:.2}", snapshot.verifier_min_supported_claim_ratio);
+            state.settings.verifier_min_claim_support_strength =
+                format!("{:.2}", snapshot.verifier_min_claim_support_strength);
+            state.stage_routing = snapshot.stage_routing.clone();
             state.settings.api_key = snapshot.api_key.clone();
             state.provider_model = format!("{}:{}", snapshot.provider, snapshot.model);
 
@@ -194,6 +232,7 @@ pub(crate) async fn finalize_settings_apply_if_ready(
             }
 
             state.settings_draft = state.settings.clone();
+            state.stage_routing_draft = state.stage_routing.clone();
 
             super::save_tui_defaults(&super::TuiDefaults {
                 backend: Some(snapshot.backend),
@@ -214,6 +253,16 @@ pub(crate) async fn finalize_settings_apply_if_ready(
                 max_tool_rounds: Some(snapshot.max_tool_rounds),
                 thinking_capture: Some(snapshot.thinking_capture),
                 thinking_max_lines: Some(snapshot.thinking_max_lines),
+                verifier_min_citation_coverage: Some(snapshot.verifier_min_citation_coverage),
+                verifier_min_avg_support_strength: Some(snapshot.verifier_min_avg_support_strength),
+                verifier_min_supported_claim_ratio: Some(
+                    snapshot.verifier_min_supported_claim_ratio,
+                ),
+                verifier_min_claim_support_strength: Some(
+                    snapshot.verifier_min_claim_support_strength,
+                ),
+                response_depth_mode: Some(state.response_depth_mode.clone()),
+                stage_routing: Some(state.stage_routing.clone()),
                 command_usage_counts: if state.command_usage_counts.is_empty() {
                     None
                 } else {

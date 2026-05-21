@@ -1,92 +1,96 @@
 # Component: medousa-tui
 
-## Entry
+## Role in the Product
 
-- Binary: `medousa/src/bin/medousa_tui.rs`
+medousa-tui is the primary operator workspace.
 
-## Core Runtime Assembly
+It combines interaction, observability, and control in one surface:
 
-TUI runtime is built by `build_tui_runtime(...)` in `medousa/src/tools.rs`:
+- conversational operation with streaming output
+- artifact and verification workflows
+- runtime/routing/depth controls
+- keyboard-first panel and overlay navigation
 
-- creates Stasis runtime composition
-- creates memory reader/writer (Locus in-memory store)
-- registers tool set in `InMemoryToolRegistry`
-- wraps registry with `PolicyAwareToolRegistry` for Grapheme module allowlist enforcement
-- composes `PromptExecutionPipeline + ToolLoopPipeline`
+## Entry Point
 
-Result surface:
+- Binary: medousa/src/bin/medousa_tui.rs
 
-- `TuiRuntime { runtime, tool_loop_pipeline, memory_reader, memory_writer }`
+## Runtime Assembly
 
-## Main State Owner
+Runtime composition is built through build_tui_runtime(...) in medousa/src/tools.rs.
 
-`TuiState` in `medousa_tui.rs` is the central in-memory state machine:
+Assembly includes:
 
-- conversation + scroll state
-- observability log + jobs list
-- settings + settings draft
-- editor buffer/file state
-- thinking trace
-- grapheme console output
-- UI mode (`UiMode`)
+- Stasis runtime composition
+- memory reader/writer bindings
+- tool registry and policy-aware allowlist enforcement
+- prompt execution pipeline and tool-loop pipeline
 
-## Event Loop Model
+Runtime surface exposed to UI loop:
 
-TUI has a multiplexed async loop:
+- TuiRuntime { runtime, tool_loop_pipeline, tool_registry, memory_reader, memory_writer }
 
-1. Keyboard events (crossterm) -> key handlers
-2. Tool/runtime events (`mpsc::Receiver<TuiEvent>`) -> `handle_tui_event`
-3. periodic redraw tick
+## State Ownership
 
-`TuiEvent` variants (`medousa/src/events.rs`):
+TuiState in medousa_tui.rs is the central state machine.
 
-- `ToolInvoked`
-- `ToolPayload`
-- `JobEnqueued`
-- `JobProcessed`
-- `AgentResponse`
-- `AgentChunk`
-- `AgentError`
+It owns:
 
-This is the boundary between asynchronous tool execution and deterministic UI state updates.
+- conversation + scrolling
+- observability + recent job status
+- settings and routing drafts
+- script editor state
+- thinking traces and grapheme console output
+- mode transitions across overlays
+
+## Event and Update Model
+
+The TUI loop multiplexes:
+
+1. keyboard input events
+2. asynchronous runtime/tool events (TuiEvent)
+3. redraw cadence
+
+TuiEvent is the explicit async boundary between runtime activity and UI projection.
 
 ## Interaction Surfaces
 
-1. Chat loop
-- executes prompt through `ToolLoopPipeline`
-- streams partial output chunks into conversation
+Primary surfaces:
 
-2. Slash commands
-- session control (`/new`, `/history`, `/settings`, etc.)
-- editor (`/open`, `/save`, `/run`, `/run-current`)
-- daemon proxy commands (`/daemon ...`, `/watch add ...`)
-
-3. Overlays/panels
-- history
-- command palette
-- settings + runtime/env submenu
-- observability detail
-- thinking overlays
-- grapheme console
+- chat loop (prompt execution and streaming)
+- slash command control plane
+- history/session management overlay
+- settings and routing editor overlay
+- observability panel
+- thinking views and grapheme console
+- command palette and script editor
 
 ## Persistence and Secrets
 
-In `medousa/src/session.rs`:
+User-level persistence (session.rs):
 
-- conversation history: `~/.local/share/medousa/history/<session>.jsonl`
-- last session id: `~/.local/share/medousa/last_session`
-- TUI defaults: `~/.local/share/medousa/tui_defaults.json`
-- API key: keyring first, file fallback at `~/.local/share/medousa/secrets/api_key`
+- history: ~/.local/share/medousa/history/<session>.jsonl
+- defaults: ~/.local/share/medousa/tui_defaults.json
+- last session pointer: ~/.local/share/medousa/last_session
+- API key: OS keyring first, file fallback at ~/.local/share/medousa/secrets/api_key
 
-## Settings + Env Override Semantics
+## Configuration Semantics
 
-- settings draft is validated before apply
-- env overrides parsed as `KEY=VALUE`
-- env overrides are applied before runtime rebuild to ensure new runtime picks up values
-- applied settings are persisted to defaults
+Settings behavior is transactional:
 
-## State Boundary Summary
+- edit in draft
+- validate
+- apply or revert
 
-- Ephemeral UI state: `TuiState`
-- Durable user state: session/defaults/key storage
-- Runtime durable/execution state: backend job stores (in-memory or surreal-mem)
+Runtime/env notes:
+
+- env overrides are parsed as KEY=VALUE
+- env overrides are applied before runtime rebuild
+- applied settings and routing/depth preferences are persisted
+
+## Operational Expectations
+
+- TUI state is ephemeral but deterministic while running
+- user-facing persistence survives restart
+- execution durability depends on selected backend (in-memory or surreal-mem)
+- evidence/confidence visibility is progressive, not forced

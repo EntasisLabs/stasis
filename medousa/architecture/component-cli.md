@@ -1,51 +1,66 @@
 # Component: medousa-cli
 
-## Entry
+## Role in the Product
 
-- Binary: `medousa/src/bin/medousa_cli.rs`
+medousa-cli is the non-interactive control surface for Medousa.
 
-## Command Families
+Use it when you want:
 
-1. Local runtime commands
-- `ask`
-- `llm`
+- one-shot prompt/ask execution
+- scripted automation in shell environments
+- daemon interaction without opening the TUI
 
-2. Daemon API commands
-- `daemon-health`
-- `daemon-stats`
-- `daemon-ask`
-- `daemon-watch-add`
+## Entry Point
 
-## Local Runtime Path
+- Binary: medousa/src/bin/medousa_cli.rs
 
-For `ask`/`llm`:
+## Command Categories
 
-1. Parse args and resolve backend/provider/model/base-url.
-2. Build runtime via `build_runtime(...)`.
-3. Create workflow payload (`AgentSessionJobPayload` or `PromptJobPayload`).
-4. Build `NewJob` via `StasisWorkflowJobBuilder`.
-5. Enqueue in runtime.
-6. Call `process_once(...)`.
-7. Read attempts/diagnostics and print result.
+Local runtime commands:
 
-## Daemon Client Path
+- ask
+- llm
 
-CLI acts as HTTP client (reqwest) against daemon endpoints:
+Daemon client commands:
 
-- `/health`
-- `/v1/stats`
-- `/v1/jobs/ask`
-- `/v1/recurring/prompt`
+- daemon-health
+- daemon-stats
+- daemon-ask
+- daemon-watch-add
 
-## State Handling
+## Local Execution Flow
 
-CLI is mostly stateless:
+For ask and llm commands, the CLI performs a full local runtime cycle:
 
-- no long-lived in-process state between commands
-- no local session persistence owned by CLI
-- all durable state lives in runtime backend and/or daemon-side stores
+1. resolve backend/provider/model/base-url from args/env defaults
+2. build runtime composition via build_runtime(...)
+3. construct workflow/prompt payload contract
+4. build NewJob with Stasis workflow builder
+5. enqueue job into runtime
+6. process one cycle (process_once)
+7. read attempt diagnostics and print output
 
-## Failure/Visibility Notes
+This gives deterministic one-command behavior while still using durable runtime primitives.
 
-- local commands surface diagnostics from job attempts
-- daemon commands surface HTTP errors and typed response payloads
+## Daemon Client Flow
+
+For daemon-* commands, CLI acts as an HTTP client against daemon endpoints:
+
+- /health
+- /v1/stats
+- /v1/jobs/ask
+- /v1/recurring/prompt
+
+## State and Persistence Characteristics
+
+CLI is intentionally near-stateless:
+
+- no long-lived in-process application state
+- no local session history owned by CLI
+- durable state is owned by runtime backend and/or daemon stores
+
+## Operational Expectations
+
+- local commands return attempt-level diagnostics when available
+- daemon commands return typed API responses or HTTP failure information
+- behavior remains aligned with TUI/daemon because execution primitives are shared

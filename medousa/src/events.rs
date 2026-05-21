@@ -11,6 +11,8 @@ pub enum TuiEvent {
         tool_name: String,
         tool_input: serde_json::Value,
         tool_output: serde_json::Value,
+        input_receipt: Option<crate::payload_receipt::ArtifactReceiptMeta>,
+        output_receipt: Option<crate::payload_receipt::ArtifactReceiptMeta>,
     },
     /// A job was enqueued into the Stasis runtime.
     JobEnqueued { job_id: String, job_type: String },
@@ -27,6 +29,8 @@ pub enum TuiEvent {
     },
     /// Partial assistant output chunk streamed from the model.
     AgentChunk { delta: String },
+    /// Partial model reasoning chunk streamed from the model.
+    AgentReasoningChunk { delta: String },
     /// The tool loop failed with an error.
     AgentError(String),
     /// General UI notification emitted by background workers.

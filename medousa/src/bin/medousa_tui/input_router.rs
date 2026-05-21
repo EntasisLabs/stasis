@@ -93,6 +93,8 @@ pub(crate) async fn handle_key_event(
         }
         if state.mode == UiMode::Settings {
             state.settings_draft = state.settings.clone();
+            state.stage_routing_draft = state.stage_routing.clone();
+            state.routing_editor_role_idx = 0;
         }
         state.settings_editing = false;
         state.mode = UiMode::Chat;
@@ -153,6 +155,7 @@ pub(crate) async fn handle_key_event(
             state.history_selected = 0;
             state.history_scroll = 0;
             state.history_max_scroll = 0;
+            state.history_show_verification_detail = false;
             state.mode = UiMode::History;
         }
         return EventOutcome::Continue;
@@ -164,6 +167,8 @@ pub(crate) async fn handle_key_event(
             state.settings_editing = false;
             state.runtime_env_editing = false;
             state.settings_draft = state.settings.clone();
+            state.stage_routing_draft = state.stage_routing.clone();
+            state.routing_editor_role_idx = 0;
         } else {
             state.mode = UiMode::Settings;
             state.settings_tab = 0;
@@ -171,8 +176,10 @@ pub(crate) async fn handle_key_event(
             state.settings_editing = false;
             state.settings_scroll = 0;
             state.settings_max_scroll = 0;
+            state.routing_editor_role_idx = 0;
             state.runtime_env_editing = false;
             state.settings_draft = state.settings.clone();
+            state.stage_routing_draft = state.stage_routing.clone();
         }
         return EventOutcome::Continue;
     }
@@ -537,6 +544,16 @@ fn handle_thinking_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcom
 
 fn handle_observability_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
     match code {
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            state.observability_filter = match state.observability_filter {
+                super::ObservabilityFilter::All => super::ObservabilityFilter::ReceiptsOnly,
+                super::ObservabilityFilter::ReceiptsOnly => {
+                    super::ObservabilityFilter::ArtifactsOnly
+                }
+                super::ObservabilityFilter::ArtifactsOnly => super::ObservabilityFilter::All,
+            };
+            state.obs_scroll = 0;
+        }
         KeyCode::Up => {
             state.obs_scroll = state.obs_scroll.saturating_sub(1);
         }

@@ -401,6 +401,32 @@ fn record_palette_usage(state: &mut TuiState, command: &str) {
             50,
             5000,
         )),
+        verifier_min_citation_coverage: Some(parse_f32_with_bounds(
+            &state.settings.verifier_min_citation_coverage,
+            0.60,
+            0.0,
+            1.0,
+        )),
+        verifier_min_avg_support_strength: Some(parse_f32_with_bounds(
+            &state.settings.verifier_min_avg_support_strength,
+            0.70,
+            0.0,
+            1.0,
+        )),
+        verifier_min_supported_claim_ratio: Some(parse_f32_with_bounds(
+            &state.settings.verifier_min_supported_claim_ratio,
+            0.60,
+            0.0,
+            1.0,
+        )),
+        verifier_min_claim_support_strength: Some(parse_f32_with_bounds(
+            &state.settings.verifier_min_claim_support_strength,
+            0.65,
+            0.0,
+            1.0,
+        )),
+        response_depth_mode: Some(state.response_depth_mode.clone()),
+        stage_routing: Some(state.stage_routing.clone()),
         command_usage_counts: if state.command_usage_counts.is_empty() {
             None
         } else {

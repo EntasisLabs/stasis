@@ -1,68 +1,79 @@
 # Component: medousa-daemon
 
-## Entry
+## Role in the Product
 
-- Binary: `medousa/src/bin/medousa_daemon.rs`
+medousa-daemon is the service-mode control plane for Medousa.
+
+It is used when you need:
+
+- long-running scheduling and execution
+- HTTP-accessible enqueue and recurring APIs
+- separation between clients and runtime workers
+
+## Entry Point
+
+- Binary: medousa/src/bin/medousa_daemon.rs
 
 ## Process Model
 
-Daemon has two concurrent loops:
+The daemon runs two concurrent paths:
 
-1. HTTP server (Axum)
-2. Scheduler loop (`run_scheduler_loop`)
+1. HTTP API server
+2. scheduler/runtime tick loop
 
-Scheduler tick (`tick_runtime`):
+Each scheduler tick performs:
 
-1. materialize recurring jobs (`materialize_recurring_now`)
-2. process one queued job (`process_once`)
-3. publish pending outbox events (`publish_pending`)
+1. recurring materialization (due definitions -> jobs)
+2. queued job processing
+3. outbox publish progression
 
 ## API Surface
 
-From shared types in `medousa/src/daemon_api.rs`:
+Defined through shared daemon contracts:
 
-- `GET /health`
-- `GET /v1/stats`
-- `POST /v1/jobs/ask`
-- `POST /v1/jobs/prompt`
-- `POST /v1/recurring/prompt`
+- GET /health
+- GET /v1/stats
+- POST /v1/jobs/ask
+- POST /v1/jobs/prompt
+- POST /v1/recurring/prompt
 
-Optional dashboard mount for in-memory backend:
+Optional local dashboard mount (in-memory backend):
 
-- `/dashboard`
+- /dashboard
 
-## AppState Ownership
+## Service State Ownership
 
-`AppState` stores:
+Daemon AppState stores runtime composition and service metadata:
 
-- `runtime: Arc<RuntimeComposition>`
+- runtime handle
 - backend label
-- worker id
-- `last_tick_at` (RwLock)
+- worker identifier
+- last_tick_at marker
 
 ## Request Handling Pattern
 
-Typical write endpoint flow:
+For enqueue-style writes:
 
-1. validate request payload
-2. build workflow payload + `NewJob`
+1. validate request contract
+2. construct workflow payload and NewJob
 3. enqueue into runtime
-4. return accepted response with `job_id`
+4. return accepted response with identifiers
 
-Recurring registration additionally computes and stores `next_run_at`.
+Recurring registration also computes and stores next_run_at.
 
-## State and Durability
+## Durability Model
 
-Daemon itself persists no custom files.
-State durability is delegated to runtime backend stores:
+Daemon process does not maintain separate custom persistence files.
 
-- jobs
-- attempts
-- outbox
+Durability is delegated to runtime backend stores:
+
+- job and attempt records
 - recurring definitions
+- outbox event state
 
-## Operational Notes
+## Operational Expectations
 
-- `--once` runs a single scheduler tick and exits
-- `--interval-ms` controls scheduler cadence
-- graceful shutdown via Ctrl+C + watch signal
+- --once performs a single tick and exits
+- --interval-ms controls steady-state scheduler cadence
+- graceful shutdown is signal-driven
+- backend selection defines execution durability profile

@@ -33,13 +33,14 @@ use medousa::{
         load_tui_defaults, save_last_session_id, save_tui_api_key, save_tui_defaults,
     },
     settings_guard::{invalid_module_ids, parse_allowed_modules},
+    stage_routing::StageRoutingMatrix,
     tui::allowlist_preview::analyze_allowlist_preview,
     tui::editor_buffer::TextBuffer,
     tui::settings::{
         RuntimeSettings, cycle_backend, cycle_tool_call_mode, env_overrides_validation_errors,
-        parse_bool_with_default, parse_env_overrides, parse_usize_with_bounds,
-        resolve_backend_name, resolve_bool_arg, resolve_tool_call_mode_name, resolve_usize_arg,
-        settings_validation_errors,
+        parse_bool_with_default, parse_env_overrides, parse_f32_with_bounds,
+        parse_usize_with_bounds, resolve_backend_name, resolve_bool_arg, resolve_f32_arg,
+        resolve_tool_call_mode_name, resolve_usize_arg, settings_validation_errors,
     },
 };
 #[path = "medousa_tui/agent_runtime.rs"]
@@ -108,7 +109,7 @@ Read it as policy memory, then follow it strictly during this conversation.
 ⊕⟨ ⏣0{ trigger: runtime_bootstrap, response_format: temporal_node, origin_session: "medousa-system-prompt", compression_depth: 1, parent_node: null, prime: { attractor_config: { stability: 0.90, friction: 0.24, logic: 0.95, autonomy: 0.84 }, context_summary: "Execution-first assistant policy for Medousa with strict tool grounding and deterministic Grapheme workflow sequencing.", relevant_tier: raw, retrieval_budget: 16 } } ⟩
 ⦿⟨ ⏣0{ timestamp: "2026-05-16T00:00:00Z", tier: raw, session_id: "medousa-system", schema_version: "sttp-1.0", user_avec: { stability: 0.88, friction: 0.28, logic: 0.93, autonomy: 0.83, psi: 2.92 }, model_avec: { stability: 0.89, friction: 0.25, logic: 0.94, autonomy: 0.82, psi: 2.90 } } ⟩
 ◈⟨ ⏣0{
-    role(.99): "You are an execution-first assistant running inside Medousa.",
+    role(.99): "You are an execution-first assistant running inside Medousa. You go by Medusa/Medousa unless the user asks for a different name.",
     primary_rule(.99): {
         fact_grounding(.99): "Do not present memory-only answers as factual web/current data.",
         tool_requirement(.99): "For current facts, you must use tools."
@@ -117,6 +118,8 @@ Read it as policy memory, then follow it strictly during this conversation.
         modules_search_scope(.99): "grapheme.modules.search is only for discovering module docs, examples, signatures, and usage patterns.",
         modules_search_not_web(.99): "grapheme.modules.search is not a web search tool and is not evidence for real-world facts.",
         real_world_retrieval(.99): "Real-world retrieval must use a runtime script that calls web/http/websearch modules."
+        complex_flows(.95): "Complex requests and workflows should utilize different grapheme modules to create composites."
+        syntax_guidance(.999): "Grapheme uses a GraphQL style syntax with a mix of Elixir's piping. Always match example syntax before scripting. ALWAYS LOOK AT AVAILABLE MODULES BEFORE ATTEMPTING TO RUN A TOOL."
     },
     workflow(.99): {
         step_1_classify_intent(.98): "If user asks for current/external facts, perform tool-based retrieval. If user asks for local transformation/coding, select relevant modules.",
@@ -134,9 +137,10 @@ Read it as policy memory, then follow it strictly during this conversation.
         no_code_without_example(.99): "Never generate new workflow/code steps without first retrieving at least one relevant example.",
         example_fallback_required(.98): "Never assume module-local curated examples always exist; follow fallback discovery order when modules.examples is empty.",
         retry_once(.96): "If run fails, report exact failure briefly, adjust once, and retry once."
+
     },
     style(.94): {
-        brevity(.94): "Keep responses short and structured for small models.",
+        brevity(.94): "Keep responses short and structured for small models but do not kill the momentum of the conversation. Match user's energy by interpreting their AVEC dimensions.",
         provenance_language(.93): "Use explicit source-of-truth language, e.g., Based on tool output."
     }
 } ⟩
@@ -157,6 +161,7 @@ struct JobHistoryEntry {
 struct TuiState {
     conversation: Vec<ConversationTurn>,
     observability: VecDeque<ObsEvent>,
+    observability_filter: ObservabilityFilter,
     job_history: VecDeque<JobHistoryEntry>,
     input_buffer: String,
     conv_scroll: u16,
@@ -171,6 +176,7 @@ struct TuiState {
     history_selected: usize,
     history_scroll: u16,
     history_max_scroll: u16,
+    history_show_verification_detail: bool,
     command_query: String,
     command_tab: usize,
     command_selected: usize,
@@ -191,10 +197,16 @@ struct TuiState {
     settings_editing: bool,
     settings_scroll: u16,
     settings_max_scroll: u16,
+    routing_editor_role_idx: usize,
     runtime_env_editing: bool,
     provider_model: String,
+    response_depth_mode: String,
     session_id: String,
+    selected_context_pack_query: Option<String>,
+    stage_routing: StageRoutingMatrix,
+    stage_routing_draft: StageRoutingMatrix,
     thinking_trace: VecDeque<String>,
+    pending_thinking_buffer: String,
     thinking_scroll: u16,
     thinking_max_scroll: u16,
     grapheme_console: VecDeque<String>,
@@ -206,6 +218,8 @@ struct TuiState {
     job_max_scroll: u16,
     in_thinking_tag: bool,
     stream_tag_tail: String,
+    received_native_reasoning: bool,
+    pending_response_verified: Option<bool>,
     daemon_url: String,
     next_settings_apply_request_id: u64,
     active_settings_apply_request_id: Option<u64>,
@@ -225,6 +239,13 @@ struct TuiState {
     perf_baseline: Option<PerfSnapshot>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObservabilityFilter {
+    All,
+    ReceiptsOnly,
+    ArtifactsOnly,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct MarkdownCacheKey {
     width: u16,
@@ -242,6 +263,11 @@ struct SettingsApplySnapshot {
     max_tool_rounds: usize,
     thinking_capture: bool,
     thinking_max_lines: usize,
+    verifier_min_citation_coverage: f32,
+    verifier_min_avg_support_strength: f32,
+    verifier_min_supported_claim_ratio: f32,
+    verifier_min_claim_support_strength: f32,
+    stage_routing: StageRoutingMatrix,
     api_key: String,
 }
 
@@ -314,6 +340,30 @@ async fn main() -> Result<()> {
         50,
         5000,
     );
+    let resolved_verifier_min_citation_coverage = resolve_f32_arg(
+        None,
+        defaults.verifier_min_citation_coverage.unwrap_or(0.60),
+        0.0,
+        1.0,
+    );
+    let resolved_verifier_min_avg_support_strength = resolve_f32_arg(
+        None,
+        defaults.verifier_min_avg_support_strength.unwrap_or(0.70),
+        0.0,
+        1.0,
+    );
+    let resolved_verifier_min_supported_claim_ratio = resolve_f32_arg(
+        None,
+        defaults.verifier_min_supported_claim_ratio.unwrap_or(0.60),
+        0.0,
+        1.0,
+    );
+    let resolved_verifier_min_claim_support_strength = resolve_f32_arg(
+        None,
+        defaults.verifier_min_claim_support_strength.unwrap_or(0.65),
+        0.0,
+        1.0,
+    );
     let resolved_base_url = resolve_llm_base_url(
         Some(&resolved_provider),
         base_url.or(defaults.base_url.as_deref()),
@@ -325,6 +375,16 @@ async fn main() -> Result<()> {
         .unwrap_or_default()
         .join(",");
     let provider_model = format!("{resolved_provider}:{resolved_model}");
+    let resolved_stage_routing = defaults
+        .stage_routing
+        .clone()
+        .unwrap_or_else(|| StageRoutingMatrix::default_for(&resolved_provider, &resolved_model));
+    let resolved_response_depth_mode = normalize_response_depth_mode(
+        defaults
+            .response_depth_mode
+            .as_deref()
+            .unwrap_or("standard"),
+    );
     let resolved_daemon_url = resolve_daemon_url(daemon_url);
 
     let session_id = if let Some(sid) = explicit_session {
@@ -373,11 +433,25 @@ async fn main() -> Result<()> {
         max_tool_rounds: resolved_max_tool_rounds.to_string(),
         thinking_capture: resolved_thinking_capture.to_string(),
         thinking_max_lines: resolved_thinking_max_lines.to_string(),
+        verifier_min_citation_coverage: format!("{:.2}", resolved_verifier_min_citation_coverage),
+        verifier_min_avg_support_strength: format!(
+            "{:.2}",
+            resolved_verifier_min_avg_support_strength
+        ),
+        verifier_min_supported_claim_ratio: format!(
+            "{:.2}",
+            resolved_verifier_min_supported_claim_ratio
+        ),
+        verifier_min_claim_support_strength: format!(
+            "{:.2}",
+            resolved_verifier_min_claim_support_strength
+        ),
     };
 
     let mut state = TuiState {
         conversation: history,
         observability: VecDeque::new(),
+        observability_filter: ObservabilityFilter::All,
         job_history: VecDeque::new(),
         input_buffer: String::new(),
         conv_scroll: 0,
@@ -392,6 +466,7 @@ async fn main() -> Result<()> {
         history_selected: 0,
         history_scroll: 0,
         history_max_scroll: 0,
+        history_show_verification_detail: false,
         command_query: String::new(),
         command_tab: 0,
         command_selected: 0,
@@ -412,10 +487,16 @@ async fn main() -> Result<()> {
         settings_editing: false,
         settings_scroll: 0,
         settings_max_scroll: 0,
+        routing_editor_role_idx: 0,
         runtime_env_editing: false,
         provider_model,
+        response_depth_mode: resolved_response_depth_mode,
         session_id: session_id.clone(),
+        selected_context_pack_query: None,
+        stage_routing: resolved_stage_routing.clone(),
+        stage_routing_draft: resolved_stage_routing,
         thinking_trace: VecDeque::new(),
+        pending_thinking_buffer: String::new(),
         thinking_scroll: 0,
         thinking_max_scroll: 0,
         grapheme_console: VecDeque::new(),
@@ -427,6 +508,8 @@ async fn main() -> Result<()> {
         job_max_scroll: 0,
         in_thinking_tag: false,
         stream_tag_tail: String::new(),
+        received_native_reasoning: false,
+        pending_response_verified: None,
         daemon_url: resolved_daemon_url,
         next_settings_apply_request_id: 0,
         active_settings_apply_request_id: None,
@@ -520,6 +603,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn normalize_response_depth_mode(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "concise" => "concise".to_string(),
+        "deep" => "deep".to_string(),
+        _ => "standard".to_string(),
+    }
+}
+
 // ── Event handling ────────────────────────────────────────────────────────────
 
 enum EventOutcome {
@@ -572,6 +663,9 @@ async fn handle_command_palette_key_event(
 
 fn handle_history_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
     match code {
+        KeyCode::Char('v') | KeyCode::Char('V') => {
+            state.history_show_verification_detail = !state.history_show_verification_detail;
+        }
         KeyCode::Up => {
             state.history_selected = state.history_selected.saturating_sub(1);
         }
@@ -612,10 +706,12 @@ fn handle_history_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome
                 state.conversation = load_history(&state.session_id);
                 invalidate_markdown_cache(state);
                 state.thinking_trace.clear();
+                state.pending_thinking_buffer.clear();
                 state.thinking_scroll = 0;
                 state.thinking_max_scroll = 0;
                 state.in_thinking_tag = false;
                 state.stream_tag_tail.clear();
+                state.received_native_reasoning = false;
                 state.input_buffer.clear();
                 state.is_processing = false;
                 state.active_agent_stream_turn = None;
@@ -669,10 +765,69 @@ fn push_grapheme_console_entry(
 
 fn push_thinking(state: &mut TuiState, raw: String) {
     if !parse_bool_with_default(&state.settings.thinking_capture, true) {
+        state.pending_thinking_buffer.clear();
         return;
     }
 
-    for line in raw.lines() {
+    let fragment = raw.replace('\r', "");
+    if fragment.trim().is_empty() {
+        return;
+    }
+
+    append_thinking_fragment(&mut state.pending_thinking_buffer, &fragment);
+
+    if should_flush_thinking_buffer(&state.pending_thinking_buffer) {
+        flush_thinking_buffer(state);
+    }
+}
+
+fn append_thinking_fragment(buffer: &mut String, fragment: &str) {
+    let trimmed = fragment.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    let needs_space = !buffer.is_empty()
+        && buffer
+            .chars()
+            .last()
+            .map(|c| c.is_ascii_alphanumeric())
+            .unwrap_or(false)
+        && trimmed
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_alphanumeric())
+            .unwrap_or(false);
+
+    if needs_space {
+        buffer.push(' ');
+    }
+
+    buffer.push_str(trimmed);
+}
+
+fn should_flush_thinking_buffer(buffer: &str) -> bool {
+    const THINKING_BUFFER_FLUSH_CHARS: usize = 120;
+
+    if buffer.contains('\n') {
+        return true;
+    }
+
+    let trimmed = buffer.trim_end();
+    if trimmed.chars().count() >= THINKING_BUFFER_FLUSH_CHARS {
+        return true;
+    }
+
+    trimmed
+        .chars()
+        .last()
+        .map(|c| matches!(c, '.' | '!' | '?' | ';' | ':'))
+        .unwrap_or(false)
+}
+
+pub(crate) fn flush_thinking_buffer(state: &mut TuiState) {
+    let buffered = std::mem::take(&mut state.pending_thinking_buffer);
+    for line in buffered.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -701,12 +856,28 @@ fn export_current_session(state: &TuiState, format: &str) -> std::result::Result
     std::fs::create_dir_all(&exports_dir).map_err(|e| e.to_string())?;
 
     let ts = Utc::now().format("%Y%m%d-%H%M%S").to_string();
+    let verification_runs = medousa::verification_store::list_verifications(&state.session_id, 500);
     match format {
         "jsonl" => {
             let path = exports_dir.join(format!("{}-{ts}.jsonl", state.session_id));
             let mut out = String::new();
             for turn in &state.conversation {
-                let line = serde_json::to_string(turn).map_err(|e| e.to_string())?;
+                let line = serde_json::to_string(&serde_json::json!({
+                    "kind": "turn",
+                    "session_id": state.session_id,
+                    "payload": turn,
+                }))
+                .map_err(|e| e.to_string())?;
+                out.push_str(&line);
+                out.push('\n');
+            }
+            for verification in &verification_runs {
+                let line = serde_json::to_string(&serde_json::json!({
+                    "kind": "verification",
+                    "session_id": state.session_id,
+                    "payload": verification,
+                }))
+                .map_err(|e| e.to_string())?;
                 out.push_str(&line);
                 out.push('\n');
             }
@@ -729,6 +900,25 @@ fn export_current_session(state: &TuiState, format: &str) -> std::result::Result
                     out.push_str(&format!("Tools: {}\n\n", turn.tool_names.join(", ")));
                 }
             }
+
+            out.push_str("## Verification Runs\n\n");
+            if verification_runs.is_empty() {
+                out.push_str("No verification runs recorded for this session.\n\n");
+            } else {
+                for run in verification_runs {
+                    out.push_str(&format!(
+                        "- {}  pack={}  verified={}  confidence={:.2}  source={}  {}\n",
+                        run.verification_id,
+                        run.pack_id,
+                        run.is_verified,
+                        run.confidence_score,
+                        run.source,
+                        run.created_at_utc.to_rfc3339(),
+                    ));
+                }
+                out.push('\n');
+            }
+
             std::fs::write(&path, out).map_err(|e| e.to_string())?;
             Ok(path)
         }
@@ -767,10 +957,10 @@ fn api_key_storage_backend_label() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        JobHistoryEntry, RuntimeSettings, TextBuffer, TuiState, UiMode, UiPerfStats, WorkerCommand,
-        build_tui_runtime, load_editor_file, parse_allowed_modules, parse_backend,
-        resolve_editor_run_source, run_editor_source_via_runtime, validate_editor_run_allowlist,
-        write_editor_file,
+        JobHistoryEntry, ObservabilityFilter, RuntimeSettings, StageRoutingMatrix, TextBuffer,
+        TuiState, UiMode, UiPerfStats, WorkerCommand, build_tui_runtime, load_editor_file,
+        parse_allowed_modules, parse_backend, resolve_editor_run_source,
+        run_editor_source_via_runtime, validate_editor_run_allowlist, write_editor_file,
     };
     use medousa::events::TuiEvent;
     use medousa::session::{ConversationTurn, SessionHistorySummary};
@@ -842,6 +1032,10 @@ mod tests {
             max_tool_rounds: "10".to_string(),
             thinking_capture: "true".to_string(),
             thinking_max_lines: "300".to_string(),
+            verifier_min_citation_coverage: "0.60".to_string(),
+            verifier_min_avg_support_strength: "0.70".to_string(),
+            verifier_min_supported_claim_ratio: "0.60".to_string(),
+            verifier_min_claim_support_strength: "0.65".to_string(),
         }
     }
 
@@ -850,6 +1044,7 @@ mod tests {
             worker_cmd_tx: mpsc::channel::<WorkerCommand>(8).0,
             conversation: Vec::<ConversationTurn>::new(),
             observability: VecDeque::new(),
+            observability_filter: ObservabilityFilter::All,
             job_history: VecDeque::<JobHistoryEntry>::new(),
             input_buffer: String::new(),
             conv_scroll: 0,
@@ -864,6 +1059,7 @@ mod tests {
             history_selected: 0,
             history_scroll: 0,
             history_max_scroll: 0,
+            history_show_verification_detail: false,
             command_query: String::new(),
             command_tab: 0,
             command_selected: 0,
@@ -886,10 +1082,16 @@ mod tests {
             settings_editing: false,
             settings_scroll: 0,
             settings_max_scroll: 0,
+            routing_editor_role_idx: 0,
             runtime_env_editing: false,
             provider_model: "openai:gpt-4o-mini".to_string(),
+            response_depth_mode: "standard".to_string(),
             session_id: "test-session".to_string(),
+            selected_context_pack_query: None,
+            stage_routing: StageRoutingMatrix::default_for("openai", "gpt-4o-mini"),
+            stage_routing_draft: StageRoutingMatrix::default_for("openai", "gpt-4o-mini"),
             thinking_trace: VecDeque::new(),
+            pending_thinking_buffer: String::new(),
             thinking_scroll: 0,
             thinking_max_scroll: 0,
             grapheme_console: VecDeque::new(),
@@ -901,6 +1103,8 @@ mod tests {
             job_max_scroll: 0,
             in_thinking_tag: false,
             stream_tag_tail: String::new(),
+            received_native_reasoning: false,
+            pending_response_verified: None,
             daemon_url: "http://127.0.0.1:8787".to_string(),
             next_settings_apply_request_id: 0,
             active_settings_apply_request_id: None,

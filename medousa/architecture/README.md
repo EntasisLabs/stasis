@@ -1,17 +1,17 @@
 # Medousa Architecture Map
 
-This directory maps the runtime architecture for:
+This directory documents Medousa as a runtime product.
 
-- medousa-cli
-- medousa-tui
-- medousa-daemon
+It focuses on:
 
-Focus areas:
+- executable surfaces and their boundaries
+- state ownership (ephemeral UI, persisted user state, durable runtime state)
+- runtime composition and orchestration behavior
+- operational interaction flows across local and daemon modes
 
-- interaction boundaries
-- state ownership and persistence
-- runtime composition and tool orchestration
-- where control flow crosses process boundaries
+Start here for product-level usage:
+
+- [../README.md](../README.md)
 
 ## Documents
 

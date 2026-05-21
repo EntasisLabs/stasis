@@ -10,6 +10,7 @@ use crate::application::orchestration::prompt_pipeline::{
 };
 use crate::application::orchestration::tool_registry::ToolRegistry;
 use crate::domain::errors::{Result, StasisError};
+use crate::ports::outbound::ai_chat_client::StreamDelta;
 
 const DEFAULT_MAX_TOOL_ROUNDS: usize = 10;
 
@@ -85,7 +86,7 @@ impl ToolLoopPipeline {
     pub async fn execute_with_stream(
         &self,
         request: ToolLoopExecutionRequest,
-        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<ToolLoopExecutionResponse> {
         self.execute_internal(request, Vec::new(), chunk_tx, DEFAULT_MAX_TOOL_ROUNDS)
             .await
@@ -95,7 +96,7 @@ impl ToolLoopPipeline {
         &self,
         request: ToolLoopExecutionRequest,
         prior_messages: Vec<ChatMessage>,
-        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<ToolLoopExecutionResponse> {
         self.execute_internal(request, prior_messages, chunk_tx, DEFAULT_MAX_TOOL_ROUNDS)
             .await
@@ -105,7 +106,7 @@ impl ToolLoopPipeline {
         &self,
         request: ToolLoopExecutionRequest,
         prior_messages: Vec<ChatMessage>,
-        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
         max_tool_rounds: usize,
     ) -> Result<ToolLoopExecutionResponse> {
         self.execute_internal(request, prior_messages, chunk_tx, max_tool_rounds)
@@ -116,7 +117,7 @@ impl ToolLoopPipeline {
         &self,
         request: ToolLoopExecutionRequest,
         prior_messages: Vec<ChatMessage>,
-        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
         max_tool_rounds: usize,
     ) -> Result<ToolLoopExecutionResponse> {
         let max_tool_rounds = max_tool_rounds.max(1);

@@ -4,6 +4,13 @@ use tokio::sync::mpsc;
 
 use crate::domain::errors::Result;
 
+#[derive(Debug, Clone)]
+pub enum StreamDelta {
+    Content(String),
+    Reasoning(String),
+    ThoughtSignature(String),
+}
+
 #[async_trait]
 pub trait AiChatClient: Send + Sync {
     async fn complete(
@@ -16,11 +23,11 @@ pub trait AiChatClient: Send + Sync {
         &self,
         request: ChatRequest,
         options: Option<&ChatOptions>,
-        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<ChatResponse> {
         let response = self.complete(request, options).await?;
         if let (Some(tx), Some(text)) = (chunk_tx, response.first_text()) {
-            let _ = tx.send(text.to_string());
+            let _ = tx.send(StreamDelta::Content(text.to_string()));
         }
         Ok(response)
     }

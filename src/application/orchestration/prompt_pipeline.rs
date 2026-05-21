@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::ports::outbound::ai_chat_client::AiChatClient;
+use crate::ports::outbound::ai_chat_client::StreamDelta;
 
 #[derive(Clone, Debug, Default)]
 pub struct PromptExecutionContext {
@@ -79,7 +80,7 @@ impl PromptExecutionPipeline {
         &self,
         request: ChatRequest,
         context: PromptExecutionContext,
-        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<PromptChatCompletion> {
         let response = self
             .chat_client

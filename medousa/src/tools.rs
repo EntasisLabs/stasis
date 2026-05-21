@@ -1860,8 +1860,31 @@ pub fn extract_module_ops_from_source(source: &str) -> Vec<String> {
 pub struct TuiRuntime {
     pub runtime: Arc<RuntimeComposition>,
     pub tool_loop_pipeline: ToolLoopPipeline,
+    pub tool_registry: Arc<dyn ToolRegistry>,
     pub memory_reader: Arc<dyn MemoryContextReader>,
     pub memory_writer: Arc<dyn MemoryContextWriter>,
+}
+
+impl TuiRuntime {
+    pub fn tool_loop_pipeline_for_target(
+        &self,
+        provider: &str,
+        model: &str,
+        base_url: Option<&str>,
+    ) -> ToolLoopPipeline {
+        let resolved_provider = crate::resolve_llm_provider(Some(provider));
+        let resolved_model = crate::resolve_llm_model(Some(model));
+        let resolved_base_url = crate::resolve_llm_base_url(Some(&resolved_provider), base_url);
+        let chat_client: Arc<dyn AiChatClient> = Arc::new(
+            stasis::infrastructure::llm::genai_chat_client::GenaiChatClient::from_provider_model_with_base_url(
+                Some(&resolved_provider),
+                &resolved_model,
+                resolved_base_url.as_deref(),
+            ),
+        );
+        let prompt_pipeline = PromptExecutionPipeline::new(chat_client);
+        ToolLoopPipeline::new(prompt_pipeline, self.tool_registry.clone())
+    }
 }
 
 pub async fn build_tui_runtime(
@@ -1952,11 +1975,12 @@ pub async fn build_tui_runtime(
         base_registry,
         allowed_grapheme_modules,
     ));
-    let tool_loop_pipeline = ToolLoopPipeline::new(prompt_pipeline, guarded_registry);
+    let tool_loop_pipeline = ToolLoopPipeline::new(prompt_pipeline, guarded_registry.clone());
 
     Ok(TuiRuntime {
         runtime,
         tool_loop_pipeline,
+        tool_registry: guarded_registry,
         memory_reader,
         memory_writer,
     })

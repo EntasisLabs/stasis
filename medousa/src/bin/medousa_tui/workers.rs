@@ -185,12 +185,28 @@ pub(crate) async fn worker_loop(
             } => {
                 let safe_input = medousa::settings_guard::redact_json_value(&tool_input);
                 let safe_output = medousa::settings_guard::redact_json_value(&tool_output);
+                let (safe_input, input_is_receipt) = medousa::payload_receipt::inline_or_receipt(
+                    &safe_input,
+                    medousa::payload_receipt::DEFAULT_MAX_INLINE_BYTES,
+                    medousa::payload_receipt::DEFAULT_PREVIEW_CHARS,
+                );
+                let (safe_output, output_is_receipt) = medousa::payload_receipt::inline_or_receipt(
+                    &safe_output,
+                    medousa::payload_receipt::DEFAULT_MAX_INLINE_BYTES,
+                    medousa::payload_receipt::DEFAULT_PREVIEW_CHARS,
+                );
                 let input = serde_json::to_string_pretty(&safe_input)
                     .unwrap_or_else(|_| safe_input.to_string());
                 let output = serde_json::to_string_pretty(&safe_output)
                     .unwrap_or_else(|_| safe_output.to_string());
-                let text =
-                    format!("◆ {tool_name}\ninput:\n{input}\noutput:\n{output}\n────────────────");
+                let receipt_hint = if input_is_receipt || output_is_receipt {
+                    "\n(note: large payload replaced with artifact receipt)"
+                } else {
+                    ""
+                };
+                let text = format!(
+                    "◆ {tool_name}\ninput:\n{input}\noutput:\n{output}{receipt_hint}\n────────────────"
+                );
                 WorkerResult::FormattedToolPayload { request_id, text }
             }
         };

@@ -1,9 +1,17 @@
+pub mod artifact_chunking;
+pub mod artifact_extraction;
+pub mod artifact_store;
+pub mod context_pack;
 pub mod daemon_api;
 pub mod events;
+pub mod payload_receipt;
 pub mod session;
 pub mod settings_guard;
+pub mod stage_routing;
 pub mod tools;
 pub mod tui;
+pub mod verification_store;
+pub mod verifier;
 
 use std::sync::Arc;
 

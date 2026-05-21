@@ -6,9 +6,9 @@ use ratatui::{
 };
 
 use super::{
-    ConversationTurn, TuiState, UiMode, api_key_storage_backend_label, centered_rect,
-    command_preview_ui, settings_ui, ui_accent_primary, ui_accent_warn, ui_bg, ui_border,
-    ui_modal_bg, ui_panel_bg,
+    ConversationTurn, ObservabilityFilter, TuiState, UiMode, api_key_storage_backend_label,
+    centered_rect, command_preview_ui, settings_ui, ui_accent_primary, ui_accent_warn, ui_bg,
+    ui_border, ui_modal_bg, ui_panel_bg,
 };
 use crate::markdown_cache::render_markdown_lines_cached;
 
@@ -85,8 +85,8 @@ pub(crate) fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
         ""
     };
     let input_title = format!(
-        " {}  session:{session_short}{}  |  obs:{obs_count} jobs:{jobs_count} drops:{drops}  [Ctrl+O for details] ",
-        state.provider_model, thinking_hint
+        " {}  depth:{}  session:{session_short}{}  |  obs:{obs_count} jobs:{jobs_count} drops:{drops}  [Ctrl+O for details] ",
+        state.provider_model, state.response_depth_mode, thinking_hint
     );
     let input_display = format!("  {}_", state.input_buffer);
     let input_border = if state.is_processing {
@@ -290,15 +290,49 @@ fn build_observability_text(state: &TuiState, expanded: bool, width: u16) -> Tex
         lines.push(Line::from(""));
     }
 
-    if state.observability.is_empty() {
+    let filter_label = match state.observability_filter {
+        ObservabilityFilter::All => "all",
+        ObservabilityFilter::ReceiptsOnly => "receipts",
+        ObservabilityFilter::ArtifactsOnly => "artifacts",
+    };
+    let artifact_stats = medousa::artifact_store::artifact_index_stats(&state.session_id);
+    lines.push(Line::from(Span::styled(
+        format!(
+            " Filter: {filter_label} | artifacts(records={}, unique={}, bytes={}) ",
+            artifact_stats.records, artifact_stats.unique_hashes, artifact_stats.total_bytes
+        ),
+        Style::default().fg(Color::Gray),
+    )));
+    lines.push(Line::from(""));
+
+    let filtered_events: Vec<_> = state
+        .observability
+        .iter()
+        .filter(|ev| match state.observability_filter {
+            ObservabilityFilter::All => true,
+            ObservabilityFilter::ReceiptsOnly => ev.text.contains("◈ receipt "),
+            ObservabilityFilter::ArtifactsOnly => {
+                ev.text.contains("◈ artifact ")
+                    || ev.text.contains("◈ chunk refs ")
+                    || ev.text.contains("◈ verification ")
+                    || ev.text.contains("◈ context pack verification")
+            }
+        })
+        .collect();
+
+    if filtered_events.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No diagnostics yet.",
+            match state.observability_filter {
+                ObservabilityFilter::All => "No diagnostics yet.",
+                ObservabilityFilter::ReceiptsOnly => "No receipt diagnostics yet.",
+                ObservabilityFilter::ArtifactsOnly => "No artifact diagnostics yet.",
+            },
             Style::default().fg(Color::Gray),
         )));
         return Text::from(lines);
     }
 
-    for (idx, ev) in state.observability.iter().enumerate() {
+    for (idx, ev) in filtered_events.iter().enumerate() {
         if idx > 0 {
             lines.push(Line::from(Span::styled(
                 "",
@@ -351,7 +385,7 @@ fn render_observability_panel_overlay(frame: &mut ratatui::Frame, state: &mut Tu
     let inner_width = popup.width.saturating_sub(2);
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(Span::styled(
-        " Up/Down/Page: scroll  Home/End: jump  Esc/Ctrl+O: close ",
+        " Up/Down/Page: scroll  Home/End: jump  R: receipt filter  Esc/Ctrl+O: close ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
@@ -496,7 +530,7 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
-        " Up/Down: move  PgUp/PgDn/Wheel: scroll  Home/End: jump  Enter: open session  Esc: close ",
+        " Up/Down: move  PgUp/PgDn/Wheel: scroll  Home/End: jump  V: trust detail  Enter: open session  Esc: close ",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
@@ -523,10 +557,27 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
                 .last_timestamp
                 .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_else(|| "-".to_string());
+            let verification_ts = item
+                .last_verification_timestamp
+                .map(|t| t.format("%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "-".to_string());
             let id_short: String = item.session_id.chars().take(8).collect();
+            let trust = item
+                .last_verification_confidence
+                .map(|confidence| {
+                    let level = if confidence >= 0.80 {
+                        "H"
+                    } else if confidence >= 0.60 {
+                        "M"
+                    } else {
+                        "L"
+                    };
+                    format!("{level}:{confidence:.2}")
+                })
+                .unwrap_or_else(|| "-".to_string());
             let line = format!(
-                "{marker} {id_short}  {ts}  {} turn(s)  {}",
-                item.turns, item.preview
+                "{marker} {id_short}  {ts}  turn={} ver={} trust={} last_verify={}  {}",
+                item.turns, item.verification_runs, trust, verification_ts, item.preview
             );
 
             let style = if idx == state.history_selected {
@@ -537,6 +588,56 @@ fn render_history_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
                 Style::default().fg(Color::White)
             };
             lines.push(Line::from(Span::styled(line, style)));
+        }
+
+        if state.history_show_verification_detail {
+            if let Some(selected) = state.history_items.get(state.history_selected) {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    " Verification Signals ",
+                    Style::default()
+                        .fg(ui_accent_primary())
+                        .add_modifier(Modifier::BOLD),
+                )));
+
+                match (
+                    selected.last_verification_confidence,
+                    selected.last_verification_coverage,
+                    selected.last_verification_verified,
+                ) {
+                    (Some(confidence), Some(coverage), Some(verified)) => {
+                        let trust_label = if confidence >= 0.80 {
+                            "high"
+                        } else if confidence >= 0.60 {
+                            "medium"
+                        } else {
+                            "low"
+                        };
+                        let status = if verified { "verified" } else { "failed" };
+                        let status_style = if verified {
+                            Style::default().fg(Color::Green)
+                        } else {
+                            Style::default().fg(Color::Red)
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(" status=", Style::default().fg(Color::Gray)),
+                            Span::styled(status, status_style),
+                            Span::styled(
+                                format!(
+                                    "  confidence={confidence:.2} ({trust_label})  citation_coverage={coverage:.2}"
+                                ),
+                                Style::default().fg(Color::White),
+                            ),
+                        ]));
+                    }
+                    _ => {
+                        lines.push(Line::from(Span::styled(
+                            " no verification metrics available for selected session",
+                            Style::default().fg(Color::Gray),
+                        )));
+                    }
+                }
+            }
         }
     }
 
@@ -718,7 +819,23 @@ fn build_conversation_text(
                 )));
             }
         } else {
-            lines.extend(render_markdown_lines_cached(state, &turn.content, width));
+            let (legacy_answer_state, content_body) = split_answer_state_prefix(&turn.content);
+            let answer_state = turn.answer_state.as_deref().or(legacy_answer_state);
+            if let Some(answer_state) = answer_state {
+                let (label, color) = match answer_state {
+                    "verified" => ("verified", Color::Green),
+                    "provisional" => ("provisional", Color::Yellow),
+                    _ => (answer_state, Color::Gray),
+                };
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(
+                        format!("[{label}]"),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+            lines.extend(render_markdown_lines_cached(state, content_body, width));
         }
 
         if !turn.tool_names.is_empty() {
@@ -732,6 +849,18 @@ fn build_conversation_text(
     }
 
     Text::from(lines)
+}
+
+fn split_answer_state_prefix(content: &str) -> (Option<&str>, &str) {
+    let Some(rest) = content.strip_prefix("◈ answer_state=") else {
+        return (None, content);
+    };
+
+    let Some((state, remainder)) = rest.split_once('\n') else {
+        return (Some(rest.trim()), "");
+    };
+
+    (Some(state.trim()), remainder)
 }
 
 fn visual_line_count(text: &Text, inner_width: u16) -> u16 {

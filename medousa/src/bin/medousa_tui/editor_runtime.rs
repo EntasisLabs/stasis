@@ -258,15 +258,25 @@ async fn execute_editor_run_task(
         "diagnostics": diagnostics_json,
     });
 
+    let tool_input = serde_json::json!({
+        "source_bytes": source_bytes,
+        "referenced_ops": referenced_ops,
+        "allowed_modules": allowed_modules,
+    });
+
     let _ = event_tx
         .send(TuiEvent::ToolPayload {
             tool_name: "editor.gr.run".to_string(),
-            tool_input: serde_json::json!({
-                "source_bytes": source_bytes,
-                "referenced_ops": referenced_ops,
-                "allowed_modules": allowed_modules,
-            }),
-            tool_output: output,
+            tool_input: tool_input.clone(),
+            tool_output: output.clone(),
+            input_receipt: medousa::payload_receipt::receipt_meta(
+                &tool_input,
+                medousa::payload_receipt::DEFAULT_MAX_INLINE_BYTES,
+            ),
+            output_receipt: medousa::payload_receipt::receipt_meta(
+                &output,
+                medousa::payload_receipt::DEFAULT_MAX_INLINE_BYTES,
+            ),
         })
         .await;
 

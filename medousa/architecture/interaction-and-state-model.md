@@ -1,121 +1,120 @@
 # Interaction and State Model
 
+This document describes how Medousa behaves at runtime across interaction surfaces and where state is owned.
+
 ## End-to-End Interaction Flows
 
-## 1) TUI Chat Turn
+## 1) TUI chat turn
 
-1. User submits prompt in TUI.
-2. TUI calls `start_prompt_run(...)`.
-3. Tool loop executes with streaming chunks.
-4. `TuiEvent::AgentChunk` updates incremental UI text.
-5. Tool invocations emit `ToolPayload`/`ToolInvoked` to observability.
-6. Final `AgentResponse` is persisted to session history.
-
-State touched:
-
-- in-memory: conversation buffers, processing flags, scroll positions
-- durable: history jsonl append
-
-## 2) TUI Grapheme Script Run
-
-1. `/run` or `/run-current` resolves source.
-2. allowlist precheck validates referenced ops.
-3. enqueue `workflow.grapheme.run` job.
-4. run `process_once`.
-5. fetch attempts + diagnostics.
-6. update job history/observability and Grapheme console.
+1. user submits prompt from chat input
+2. TUI starts prompt run through tool loop execution path
+3. streaming chunks update visible conversation incrementally
+4. tool events are emitted into observability stream
+5. final response is committed to conversation history
 
 State touched:
 
-- in-memory: job list, obs log, grapheme console
-- runtime backend: job + attempt records
+- in-memory: conversation buffers, processing flags, overlay state
+- persisted user state: session history append
 
-## 3) CLI Local Prompt/Ask
+## 2) TUI script execution flow
 
-1. CLI builds runtime.
-2. CLI enqueues prompt or agent-session job.
-3. CLI runs one processing cycle.
-4. CLI prints diagnostics/result.
-
-State touched:
-
-- process-local only during command
-- runtime backend for job lifecycle data
-
-## 4) Daemon Enqueue + Scheduler
-
-1. API call enqueues job/recurring definition.
-2. scheduler tick materializes recurring due jobs.
-3. scheduler processes one job.
-4. scheduler publishes outbox events.
+1. script source is resolved from editor/file command
+2. allowlist precheck validates referenced operations
+3. grapheme workflow job is enqueued and processed
+4. attempt diagnostics are collected
+5. UI updates job list, observability, and console output
 
 State touched:
 
-- runtime backend stores
-- daemon `last_tick_at` in-memory metric
+- in-memory: job list, diagnostics view state, console pane
+- runtime durable state: job and attempt records
+
+## 3) CLI local execution flow
+
+1. CLI builds runtime composition
+2. prompt/ask payload is converted to job contract
+3. single processing cycle executes
+4. result + diagnostics are printed
+
+State touched:
+
+- process-local state during command lifecycle
+- runtime backend state for durable job/attempt data
+
+## 4) Daemon enqueue and scheduler flow
+
+1. API request enqueues job or recurring definition
+2. scheduler tick materializes due recurring jobs
+3. scheduler processes queued work
+4. outbox publisher advances pending events
+
+State touched:
+
+- runtime backend durable stores
+- daemon in-memory service metadata (for example last_tick_at)
 
 ## State Domains
 
-## A. UI Domain (TUI only)
+## A) UI state domain (TUI)
 
-Owned by `TuiState`:
+Owned by TuiState:
 
-- rendering mode and panel state
-- drafts/editor buffers/scroll offsets
-- transient traces and console outputs
+- mode and panel projections
+- drafts and editor buffers
+- scroll/selection/transient display state
 
 Properties:
 
 - volatile
-- deterministic reducer-style updates from key events + `TuiEvent`
+- deterministic updates from input + runtime events
 
-## B. User Persistence Domain
+## B) user persistence domain
 
-Owned by `session.rs`:
+Owned by session.rs:
 
-- session history
-- defaults
-- last session id
-- API key secret storage
+- session history files
+- defaults (settings/routing/depth)
+- last-session pointer
+- secure key material (keyring/file fallback)
 
 Properties:
 
-- file + keyring backed
-- independent of runtime backend selection
+- local host persistence
+- backend-independent
 
-## C. Runtime Execution Domain
+## C) runtime execution domain
 
-Owned by Stasis runtime backend:
+Owned by Stasis backend:
 
-- jobs and transitions
+- jobs and lifecycle transitions
 - attempts and diagnostics
 - recurring definitions
-- outbox events
+- outbox event progression
 
 Properties:
 
-- source of truth for orchestration outcomes
-- shared by CLI/TUI/daemon when pointed at same backend context
+- source of truth for execution outcomes
+- shared across surfaces when backend context is shared
 
-## Configuration Precedence (Observed Pattern)
+## Configuration Resolution Pattern
 
-1. explicit CLI/TUI args
-2. saved defaults (TUI)
-3. environment variables
-4. hardcoded defaults
+Observed precedence:
+
+1. explicit runtime arguments
+2. saved defaults
+3. environment values
+4. hardcoded fallback defaults
 
 For TUI runtime/env overrides:
 
-- overrides are applied before runtime rebuild so new runtime instances read updated env values.
+- env overrides are applied before runtime rebuild so the new composition reads updated process environment.
 
 ## Coupling Boundaries
 
-- TUI <-> runtime: via `TuiRuntime` and events channel
-- CLI <-> runtime: direct synchronous orchestration calls
-- CLI <-> daemon: HTTP API only
-- daemon <-> runtime: direct runtime orchestration + scheduler tick
+- TUI <-> runtime: in-process through TuiRuntime and event channel
+- CLI <-> runtime: direct in-process orchestration calls
+- CLI <-> daemon: HTTP API contract only
+- daemon <-> runtime: direct runtime orchestration and scheduler tick
 
-This keeps transport boundaries explicit:
-
-- in-process function calls for local orchestration
-- HTTP for remote daemon orchestration
+This separation keeps transport semantics explicit while preserving shared execution primitives.

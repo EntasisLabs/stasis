@@ -13,6 +13,10 @@ pub struct RuntimeSettings {
     pub max_tool_rounds: String,
     pub thinking_capture: String,
     pub thinking_max_lines: String,
+    pub verifier_min_citation_coverage: String,
+    pub verifier_min_avg_support_strength: String,
+    pub verifier_min_supported_claim_ratio: String,
+    pub verifier_min_claim_support_strength: String,
 }
 
 pub fn settings_validation_errors(settings: &RuntimeSettings) -> Vec<String> {
@@ -29,7 +33,39 @@ pub fn settings_validation_errors(settings: &RuntimeSettings) -> Vec<String> {
     let env_errors = env_overrides_validation_errors(&settings.env_overrides);
     errors.extend(env_errors);
 
+    validate_unit_interval(
+        "verifier min citation coverage",
+        &settings.verifier_min_citation_coverage,
+        &mut errors,
+    );
+    validate_unit_interval(
+        "verifier min avg support strength",
+        &settings.verifier_min_avg_support_strength,
+        &mut errors,
+    );
+    validate_unit_interval(
+        "verifier min supported claim ratio",
+        &settings.verifier_min_supported_claim_ratio,
+        &mut errors,
+    );
+    validate_unit_interval(
+        "verifier min claim support strength",
+        &settings.verifier_min_claim_support_strength,
+        &mut errors,
+    );
+
     errors
+}
+
+fn validate_unit_interval(name: &str, value: &str, errors: &mut Vec<String>) {
+    let trimmed = value.trim();
+    let Ok(parsed) = trimmed.parse::<f32>() else {
+        errors.push(format!("{name} must be a number in [0.0, 1.0]"));
+        return;
+    };
+    if !(0.0..=1.0).contains(&parsed) {
+        errors.push(format!("{name} must be in [0.0, 1.0]"));
+    }
 }
 
 pub fn parse_env_overrides(raw: &str) -> Vec<(String, String)> {
@@ -163,6 +199,27 @@ pub fn parse_usize_with_bounds(
     resolve_usize_arg(Some(value), default_value, min_value, max_value)
 }
 
+pub fn resolve_f32_arg(
+    value: Option<&str>,
+    default_value: f32,
+    min_value: f32,
+    max_value: f32,
+) -> f32 {
+    value
+        .and_then(|raw| raw.trim().parse::<f32>().ok())
+        .unwrap_or(default_value)
+        .clamp(min_value, max_value)
+}
+
+pub fn parse_f32_with_bounds(
+    value: &str,
+    default_value: f32,
+    min_value: f32,
+    max_value: f32,
+) -> f32 {
+    resolve_f32_arg(Some(value), default_value, min_value, max_value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{RuntimeSettings, cycle_backend, resolve_backend_name, settings_validation_errors};
@@ -193,6 +250,10 @@ mod tests {
             max_tool_rounds: "10".to_string(),
             thinking_capture: "true".to_string(),
             thinking_max_lines: "300".to_string(),
+            verifier_min_citation_coverage: "0.6".to_string(),
+            verifier_min_avg_support_strength: "0.7".to_string(),
+            verifier_min_supported_claim_ratio: "0.6".to_string(),
+            verifier_min_claim_support_strength: "0.65".to_string(),
         };
 
         let errors = settings_validation_errors(&settings);

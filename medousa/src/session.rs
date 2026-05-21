@@ -13,6 +13,8 @@ pub struct ConversationTurn {
     pub content: String,
     pub timestamp: DateTime<Utc>,
     pub tool_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_state: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -27,6 +29,12 @@ pub struct TuiDefaults {
     pub max_tool_rounds: Option<usize>,
     pub thinking_capture: Option<bool>,
     pub thinking_max_lines: Option<usize>,
+    pub verifier_min_citation_coverage: Option<f32>,
+    pub verifier_min_avg_support_strength: Option<f32>,
+    pub verifier_min_supported_claim_ratio: Option<f32>,
+    pub verifier_min_claim_support_strength: Option<f32>,
+    pub response_depth_mode: Option<String>,
+    pub stage_routing: Option<crate::stage_routing::StageRoutingMatrix>,
     pub command_usage_counts: Option<std::collections::HashMap<String, u64>>,
 }
 
@@ -34,7 +42,12 @@ pub struct TuiDefaults {
 pub struct SessionHistorySummary {
     pub session_id: String,
     pub turns: usize,
+    pub verification_runs: usize,
     pub last_timestamp: Option<DateTime<Utc>>,
+    pub last_verification_timestamp: Option<DateTime<Utc>>,
+    pub last_verification_confidence: Option<f32>,
+    pub last_verification_coverage: Option<f32>,
+    pub last_verification_verified: Option<bool>,
     pub preview: String,
 }
 
@@ -255,7 +268,21 @@ pub fn list_history_sessions(limit: usize) -> Vec<SessionHistorySummary> {
         .take(limit)
         .map(|(session_id, _)| {
             let turns = load_history(&session_id);
+            let verifications =
+                crate::verification_store::list_verifications(&session_id, usize::MAX);
             let last_timestamp = turns.last().map(|t| t.timestamp);
+            let last_verification_timestamp = verifications.first().map(|v| v.created_at_utc);
+            let latest_verification =
+                crate::verification_store::find_verification(&session_id, None);
+            let last_verification_confidence = latest_verification
+                .as_ref()
+                .map(|run| run.record.confidence_score);
+            let last_verification_coverage = latest_verification
+                .as_ref()
+                .map(|run| run.report.citation_coverage);
+            let last_verification_verified = latest_verification
+                .as_ref()
+                .map(|run| run.record.is_verified);
             let preview = turns
                 .iter()
                 .rev()
@@ -269,7 +296,12 @@ pub fn list_history_sessions(limit: usize) -> Vec<SessionHistorySummary> {
             SessionHistorySummary {
                 session_id,
                 turns: turns.len(),
+                verification_runs: verifications.len(),
                 last_timestamp,
+                last_verification_timestamp,
+                last_verification_confidence,
+                last_verification_coverage,
+                last_verification_verified,
                 preview,
             }
         })

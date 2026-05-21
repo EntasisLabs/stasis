@@ -7,7 +7,7 @@ use genai::{Client, ServiceTarget};
 use tokio::sync::mpsc;
 
 use crate::domain::errors::{Result, StasisError};
-use crate::ports::outbound::ai_chat_client::AiChatClient;
+use crate::ports::outbound::ai_chat_client::{AiChatClient, StreamDelta};
 
 const DEFAULT_MODEL: &str = "gpt-4o-mini";
 const DEFAULT_PROVIDER: &str = "openai";
@@ -161,14 +161,16 @@ impl AiChatClient for GenaiChatClient {
         &self,
         request: ChatRequest,
         options: Option<&ChatOptions>,
-        chunk_tx: Option<&mpsc::UnboundedSender<String>>,
+        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<ChatResponse> {
         let fallback_request = request.clone();
         let stream_options = options
             .cloned()
             .unwrap_or_default()
             .with_capture_content(true)
-            .with_capture_usage(true);
+            .with_capture_usage(true)
+            .with_capture_reasoning_content(true)
+            .with_normalize_reasoning_content(true);
 
         let mut stream_response = self
             .client
@@ -183,7 +185,9 @@ impl AiChatClient for GenaiChatClient {
 
         let model_iden = stream_response.model_iden.clone();
         let mut streamed_text = String::new();
+        let mut reasoning_text = String::new();
         let mut captured_content: Option<MessageContent> = None;
+        let mut captured_reasoning_content: Option<String> = None;
         let mut usage: Usage = Usage::default();
 
         while let Some(event) = stream_response.stream.next().await {
@@ -197,12 +201,28 @@ impl AiChatClient for GenaiChatClient {
                     if !chunk.content.is_empty() {
                         streamed_text.push_str(&chunk.content);
                         if let Some(tx) = chunk_tx {
-                            let _ = tx.send(chunk.content);
+                            let _ = tx.send(StreamDelta::Content(chunk.content));
+                        }
+                    }
+                }
+                ChatStreamEvent::ReasoningChunk(chunk) => {
+                    if !chunk.content.is_empty() {
+                        reasoning_text.push_str(&chunk.content);
+                        if let Some(tx) = chunk_tx {
+                            let _ = tx.send(StreamDelta::Reasoning(chunk.content));
+                        }
+                    }
+                }
+                ChatStreamEvent::ThoughtSignatureChunk(chunk) => {
+                    if !chunk.content.is_empty() {
+                        if let Some(tx) = chunk_tx {
+                            let _ = tx.send(StreamDelta::ThoughtSignature(chunk.content));
                         }
                     }
                 }
                 ChatStreamEvent::End(end) => {
                     captured_content = end.captured_content;
+                    captured_reasoning_content = end.captured_reasoning_content;
                     usage = end.captured_usage.unwrap_or_default();
                 }
                 _ => {}
@@ -221,14 +241,22 @@ impl AiChatClient for GenaiChatClient {
         if content.first_text().is_none() && content.tool_calls().is_empty() {
             let fallback = self.complete(fallback_request, options).await?;
             if let (Some(tx), Some(text)) = (chunk_tx, fallback.first_text()) {
-                let _ = tx.send(text.to_string());
+                let _ = tx.send(StreamDelta::Content(text.to_string()));
             }
             return Ok(fallback);
         }
 
+        let reasoning_content = captured_reasoning_content.or_else(|| {
+            if reasoning_text.trim().is_empty() {
+                None
+            } else {
+                Some(reasoning_text)
+            }
+        });
+
         Ok(ChatResponse {
             content,
-            reasoning_content: None,
+            reasoning_content,
             model_iden: model_iden.clone(),
             provider_model_iden: model_iden,
             usage,
