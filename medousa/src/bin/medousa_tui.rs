@@ -1,7 +1,9 @@
-use std::collections::{HashSet, VecDeque};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::Utc;
@@ -158,6 +160,121 @@ struct TuiState {
     in_thinking_tag: bool,
     stream_tag_tail: String,
     daemon_url: String,
+    next_settings_apply_request_id: u64,
+    active_settings_apply_request_id: Option<u64>,
+    pending_settings_apply: Option<PendingSettingsApply>,
+    ui_dirty: bool,
+    pending_agent_chunk_delta: String,
+    pending_agent_chunk_count: u64,
+    pending_paint_since: Option<Instant>,
+    perf: UiPerfStats,
+    worker_cmd_tx: mpsc::Sender<WorkerCommand>,
+    next_worker_request_id: u64,
+    latest_daemon_health_request_id: u64,
+    latest_daemon_ask_request_id: u64,
+    latest_watch_add_request_id: u64,
+    markdown_cache: RefCell<HashMap<MarkdownCacheKey, Vec<Line<'static>>>>,
+    markdown_cache_order: RefCell<VecDeque<MarkdownCacheKey>>,
+    perf_baseline: Option<PerfSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct MarkdownCacheKey {
+    width: u16,
+    content_hash: u64,
+}
+
+struct SettingsApplySnapshot {
+    backend: String,
+    provider: String,
+    model: String,
+    base_url: Option<String>,
+    env_overrides_raw: String,
+    allowed_modules: Vec<String>,
+    tool_call_mode: String,
+    max_tool_rounds: usize,
+    thinking_capture: bool,
+    thinking_max_lines: usize,
+    api_key: String,
+}
+
+struct PendingSettingsApply {
+    request_id: u64,
+    changed_env_count: usize,
+    snapshot: SettingsApplySnapshot,
+    handle: tokio::task::JoinHandle<std::result::Result<TuiRuntime, String>>,
+}
+
+#[derive(Debug)]
+enum WorkerCommand {
+    DaemonHealth {
+        request_id: u64,
+        daemon_url: String,
+    },
+    DaemonAsk {
+        request_id: u64,
+        daemon_url: String,
+        prompt: String,
+    },
+    WatchAdd {
+        request_id: u64,
+        daemon_url: String,
+        cron_expr: String,
+        prompt: String,
+    },
+    FormatToolPayload {
+        request_id: u64,
+        tool_name: String,
+        tool_input: Value,
+        tool_output: Value,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkerRequestKind {
+    DaemonHealth,
+    DaemonAsk,
+    WatchAdd,
+}
+
+#[derive(Debug)]
+enum WorkerResult {
+    Notice {
+        request_id: u64,
+        kind: WorkerRequestKind,
+        text: String,
+    },
+    FormattedToolPayload {
+        request_id: u64,
+        text: String,
+    },
+}
+
+#[derive(Default)]
+struct UiPerfStats {
+    frames_rendered: u64,
+    last_frame_render_ms: u64,
+    last_input_to_paint_ms: u64,
+    total_frame_render_ms: u128,
+    total_input_to_paint_ms: u128,
+    frame_samples: u64,
+    coalesced_agent_chunks: u64,
+    coalesced_key_events: u64,
+    dropped_events: u64,
+    worker_queue_depth: u64,
+    worker_queue_peak: u64,
+}
+
+#[derive(Clone)]
+struct PerfSnapshot {
+    label: String,
+    captured_at: chrono::DateTime<Utc>,
+    last_frame_render_ms: u64,
+    avg_frame_render_ms: u64,
+    last_input_to_paint_ms: u64,
+    avg_input_to_paint_ms: u64,
+    dropped_events: u64,
+    worker_queue_peak: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,6 +361,10 @@ async fn main() -> Result<()> {
     let history = load_history(&session_id);
 
     let (event_tx, mut event_rx) = mpsc::channel::<TuiEvent>(256);
+    let (worker_cmd_tx, worker_cmd_rx) = mpsc::channel::<WorkerCommand>(32);
+    let (worker_result_tx, mut worker_result_rx) = mpsc::channel::<WorkerResult>(64);
+
+    tokio::spawn(worker_loop(worker_cmd_rx, worker_result_tx));
 
     let mut tui_rt = build_tui_runtime(
         parse_backend(Some(&resolved_backend)),
@@ -321,6 +442,22 @@ async fn main() -> Result<()> {
         in_thinking_tag: false,
         stream_tag_tail: String::new(),
         daemon_url: resolved_daemon_url,
+        next_settings_apply_request_id: 0,
+        active_settings_apply_request_id: None,
+        pending_settings_apply: None,
+        ui_dirty: false,
+        pending_agent_chunk_delta: String::new(),
+        pending_agent_chunk_count: 0,
+        pending_paint_since: None,
+        perf: UiPerfStats::default(),
+        worker_cmd_tx,
+        next_worker_request_id: 0,
+        latest_daemon_health_request_id: 0,
+        latest_daemon_ask_request_id: 0,
+        latest_watch_add_request_id: 0,
+        markdown_cache: RefCell::new(HashMap::new()),
+        markdown_cache_order: RefCell::new(VecDeque::new()),
+        perf_baseline: None,
     };
 
     // ── Keyboard reader (spawn_blocking to keep async event loop clean) ───────
@@ -341,22 +478,52 @@ async fn main() -> Result<()> {
     });
 
     // ── Main event loop ───────────────────────────────────────────────────────
+    let initial_render_started = Instant::now();
     terminal.draw(|f| render(f, &mut state))?;
+    note_frame_rendered(&mut state, initial_render_started);
     loop {
+        let wake_after = next_ui_wake_delay(&state);
         tokio::select! {
             Some(event) = key_rx.recv() => {
+                mark_ui_activity(&mut state);
                 match handle_key_event(event, &mut state, &mut tui_rt, &event_tx).await {
                     EventOutcome::Break => break,
-                    EventOutcome::Continue => {}
+                    EventOutcome::Continue => {
+                        state.ui_dirty = true;
+                    }
                 }
             }
             Some(tui_event) = event_rx.recv() => {
+                mark_ui_activity(&mut state);
                 handle_tui_event(tui_event, &mut state);
+                state.ui_dirty = true;
             }
-            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+            Some(worker_result) = worker_result_rx.recv() => {
+                mark_ui_activity(&mut state);
+                handle_worker_result(worker_result, &mut state);
+                state.ui_dirty = true;
+            }
+            _ = tokio::time::sleep(wake_after) => {}
         }
 
-        terminal.draw(|f| render(f, &mut state))?;
+        match drain_pending_key_events(&mut key_rx, &mut state, &mut tui_rt, &event_tx).await {
+            EventOutcome::Break => break,
+            EventOutcome::Continue => {}
+        }
+
+        flush_pending_agent_chunks(&mut state);
+
+        if finalize_settings_apply_if_ready(&mut state, &mut tui_rt).await {
+            mark_ui_activity(&mut state);
+            state.ui_dirty = true;
+        }
+
+        if state.ui_dirty {
+            let render_started = Instant::now();
+            terminal.draw(|f| render(f, &mut state))?;
+            note_frame_rendered(&mut state, render_started);
+            state.ui_dirty = false;
+        }
     }
 
     // ── Restore terminal ──────────────────────────────────────────────────────
@@ -372,6 +539,63 @@ async fn main() -> Result<()> {
 enum EventOutcome {
     Continue,
     Break,
+}
+
+fn mark_ui_activity(state: &mut TuiState) {
+    if state.pending_paint_since.is_none() {
+        state.pending_paint_since = Some(Instant::now());
+    }
+}
+
+fn note_frame_rendered(state: &mut TuiState, started_at: Instant) {
+    state.perf.frames_rendered = state.perf.frames_rendered.saturating_add(1);
+    state.perf.last_frame_render_ms = started_at.elapsed().as_millis() as u64;
+    state.perf.total_frame_render_ms = state
+        .perf
+        .total_frame_render_ms
+        .saturating_add(state.perf.last_frame_render_ms as u128);
+    state.perf.frame_samples = state.perf.frame_samples.saturating_add(1);
+    if let Some(activity_ts) = state.pending_paint_since.take() {
+        state.perf.last_input_to_paint_ms = activity_ts.elapsed().as_millis() as u64;
+        state.perf.total_input_to_paint_ms = state
+            .perf
+            .total_input_to_paint_ms
+            .saturating_add(state.perf.last_input_to_paint_ms as u128);
+    }
+}
+
+async fn drain_pending_key_events(
+    key_rx: &mut mpsc::Receiver<Event>,
+    state: &mut TuiState,
+    tui_rt: &mut TuiRuntime,
+    event_tx: &mpsc::Sender<TuiEvent>,
+) -> EventOutcome {
+    let mut drained = 0usize;
+    while drained < 32 {
+        match key_rx.try_recv() {
+            Ok(event) => {
+                mark_ui_activity(state);
+                match handle_key_event(event, state, tui_rt, event_tx).await {
+                    EventOutcome::Break => return EventOutcome::Break,
+                    EventOutcome::Continue => {
+                        state.ui_dirty = true;
+                    }
+                }
+                drained = drained.saturating_add(1);
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            | Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+        }
+    }
+
+    if drained > 0 {
+        state.perf.coalesced_key_events = state
+            .perf
+            .coalesced_key_events
+            .saturating_add(drained as u64);
+    }
+
+    EventOutcome::Continue
 }
 
 async fn handle_key_event(
@@ -1300,6 +1524,56 @@ fn stop_active_generation(state: &mut TuiState) {
     }
 }
 
+fn avg_u64(total: u128, samples: u64) -> u64 {
+    if samples == 0 {
+        0
+    } else {
+        (total / samples as u128) as u64
+    }
+}
+
+fn capture_perf_snapshot(state: &TuiState, label: impl Into<String>) -> PerfSnapshot {
+    PerfSnapshot {
+        label: label.into(),
+        captured_at: Utc::now(),
+        last_frame_render_ms: state.perf.last_frame_render_ms,
+        avg_frame_render_ms: avg_u64(state.perf.total_frame_render_ms, state.perf.frame_samples),
+        last_input_to_paint_ms: state.perf.last_input_to_paint_ms,
+        avg_input_to_paint_ms: avg_u64(
+            state.perf.total_input_to_paint_ms,
+            state.perf.frame_samples,
+        ),
+        dropped_events: state.perf.dropped_events,
+        worker_queue_peak: state.perf.worker_queue_peak,
+    }
+}
+
+fn format_perf_snapshot(snapshot: &PerfSnapshot) -> String {
+    format!(
+        "label={} at={} | paint(last/avg)={}/{}ms | frame(last/avg)={}/{}ms | dropped={} | worker_q_peak={}",
+        snapshot.label,
+        snapshot.captured_at.format("%H:%M:%S"),
+        snapshot.last_input_to_paint_ms,
+        snapshot.avg_input_to_paint_ms,
+        snapshot.last_frame_render_ms,
+        snapshot.avg_frame_render_ms,
+        snapshot.dropped_events,
+        snapshot.worker_queue_peak,
+    )
+}
+
+fn format_perf_delta(current: &PerfSnapshot, baseline: &PerfSnapshot) -> String {
+    let paint_avg_delta =
+        current.avg_input_to_paint_ms as i64 - baseline.avg_input_to_paint_ms as i64;
+    let frame_avg_delta = current.avg_frame_render_ms as i64 - baseline.avg_frame_render_ms as i64;
+    let dropped_delta = current.dropped_events as i64 - baseline.dropped_events as i64;
+    let queue_peak_delta = current.worker_queue_peak as i64 - baseline.worker_queue_peak as i64;
+    format!(
+        "delta vs {}: paint_avg={}ms, frame_avg={}ms, dropped={}, worker_q_peak={}",
+        baseline.label, paint_avg_delta, frame_avg_delta, dropped_delta, queue_peak_delta
+    )
+}
+
 async fn handle_slash_command(
     prompt: &str,
     state: &mut TuiState,
@@ -1314,6 +1588,7 @@ async fn handle_slash_command(
             stop_active_generation(state);
             state.session_id = Uuid::new_v4().simple().to_string();
             state.conversation.clear();
+            invalidate_markdown_cache(state);
             state.active_agent_stream_turn = None;
             state.thinking_trace.clear();
             state.thinking_scroll = 0;
@@ -1463,19 +1738,20 @@ async fn handle_slash_command(
                 return EventOutcome::Continue;
             }
 
+            let mut draft = state.settings_draft.clone();
             if args.len() == 1 {
                 if let Some((provider, model)) = args[0].split_once(':') {
-                    state.settings.provider = provider.trim().to_string();
-                    state.settings.model = model.trim().to_string();
+                    draft.provider = provider.trim().to_string();
+                    draft.model = model.trim().to_string();
                 } else {
-                    state.settings.model = args[0].trim().to_string();
+                    draft.model = args[0].trim().to_string();
                 }
             } else {
-                state.settings.provider = args[0].trim().to_string();
-                state.settings.model = args[1].trim().to_string();
+                draft.provider = args[0].trim().to_string();
+                draft.model = args[1].trim().to_string();
             }
 
-            state.settings_draft = state.settings.clone();
+            state.settings_draft = draft;
 
             apply_settings(state, tui_rt, event_tx).await;
         }
@@ -1515,6 +1791,44 @@ async fn handle_slash_command(
                 Err(err) => push_obs(state, format!("⚠ export failed: {err}")),
             }
         }
+        "/perf" => {
+            let sub = parts.next().unwrap_or("report");
+            match sub {
+                "baseline" => {
+                    let label = parts.collect::<Vec<_>>().join(" ");
+                    let label = if label.trim().is_empty() {
+                        "baseline".to_string()
+                    } else {
+                        label.trim().to_string()
+                    };
+                    let snapshot = capture_perf_snapshot(state, label.clone());
+                    state.perf_baseline = Some(snapshot.clone());
+                    push_obs(
+                        state,
+                        format!("✓ perf baseline set: {}", format_perf_snapshot(&snapshot)),
+                    );
+                }
+                "reset" => {
+                    state.perf = UiPerfStats::default();
+                    state.perf_baseline = None;
+                    push_obs(state, "✓ perf counters and baseline reset".to_string());
+                }
+                _ => {
+                    let label = if sub == "report" {
+                        "report".to_string()
+                    } else {
+                        sub.to_string()
+                    };
+                    let current = capture_perf_snapshot(state, label);
+                    let mut line = format!("perf {}", format_perf_snapshot(&current));
+                    if let Some(baseline) = &state.perf_baseline {
+                        line.push_str(" | ");
+                        line.push_str(&format_perf_delta(&current, baseline));
+                    }
+                    push_obs(state, line);
+                }
+            }
+        }
         "/daemon" => {
             let sub = parts.next().unwrap_or("");
             match sub {
@@ -1537,37 +1851,44 @@ async fn handle_slash_command(
                     }
                 }
                 "health" => {
+                    let request_id = next_worker_request_id(state);
+                    state.latest_daemon_health_request_id = request_id;
                     let daemon_url = state.daemon_url.clone();
-                    let tx = event_tx.clone();
-                    push_obs(state, format!("↻ daemon health check: {daemon_url}"));
-                    tokio::spawn(async move {
-                        let notice = match daemon_health(&daemon_url).await {
-                            Ok(payload) => format!(
-                                "✓ daemon {} backend={} worker={}",
-                                payload.status, payload.backend, payload.worker_id
-                            ),
-                            Err(err) => format!("⚠ daemon health failed: {err}"),
-                        };
-                        let _ = tx.send(TuiEvent::UiNotice(notice)).await;
-                    });
+                    let queued = queue_worker_command(
+                        state,
+                        WorkerCommand::DaemonHealth {
+                            request_id,
+                            daemon_url: daemon_url.clone(),
+                        },
+                        true,
+                    );
+                    if queued {
+                        push_obs(
+                            state,
+                            format!("↻ daemon health check queued #{request_id}: {daemon_url}"),
+                        );
+                    }
                 }
                 "ask" => {
                     let prompt = parts.collect::<Vec<_>>().join(" ");
                     if prompt.trim().is_empty() {
                         push_obs(state, "⚠ usage: /daemon ask <prompt>".to_string());
                     } else {
+                        let request_id = next_worker_request_id(state);
+                        state.latest_daemon_ask_request_id = request_id;
                         let daemon_url = state.daemon_url.clone();
-                        let tx = event_tx.clone();
-                        push_obs(state, "↻ daemon ask queued".to_string());
-                        tokio::spawn(async move {
-                            let notice = match daemon_enqueue_ask(&daemon_url, &prompt).await {
-                                Ok(payload) => {
-                                    format!("✓ daemon job enqueued {}", payload.job_id)
-                                }
-                                Err(err) => format!("⚠ daemon ask failed: {err}"),
-                            };
-                            let _ = tx.send(TuiEvent::UiNotice(notice)).await;
-                        });
+                        let queued = queue_worker_command(
+                            state,
+                            WorkerCommand::DaemonAsk {
+                                request_id,
+                                daemon_url,
+                                prompt,
+                            },
+                            false,
+                        );
+                        if queued {
+                            push_obs(state, format!("↻ daemon ask queued #{request_id}"));
+                        }
                     }
                 }
                 _ => {
@@ -1609,33 +1930,31 @@ async fn handle_slash_command(
                 return EventOutcome::Continue;
             }
 
+            let request_id = next_worker_request_id(state);
+            state.latest_watch_add_request_id = request_id;
             let daemon_url = state.daemon_url.clone();
             let cron_expr = cron_expr.to_string();
-            let tx = event_tx.clone();
-            push_obs(state, format!("↻ watch add queued ({cron_expr})"));
-            tokio::spawn(async move {
-                let notice = match daemon_register_recurring_prompt(
-                    &daemon_url,
-                    &cron_expr,
-                    &prompt,
-                )
-                .await
-                {
-                    Ok(payload) => {
-                        format!(
-                            "✓ watch {} next={}",
-                            payload.recurring_id, payload.next_run_at_utc
-                        )
-                    }
-                    Err(err) => format!("⚠ watch add failed: {err}"),
-                };
-                let _ = tx.send(TuiEvent::UiNotice(notice)).await;
-            });
+            let queued = queue_worker_command(
+                state,
+                WorkerCommand::WatchAdd {
+                    request_id,
+                    daemon_url,
+                    cron_expr: cron_expr.clone(),
+                    prompt,
+                },
+                false,
+            );
+            if queued {
+                push_obs(
+                    state,
+                    format!("↻ watch add queued #{request_id} ({cron_expr})"),
+                );
+            }
         }
         _ => {
             push_obs(
                 state,
-                "⚠ unknown command. try /new /history /settings /edit /open /save /run /run-current /close /allowlist-preview /clear-key /rotate-key /model /stop /regen /export /daemon /watch"
+                "⚠ unknown command. try /new /history /settings /edit /open /save /run /run-current /close /allowlist-preview /clear-key /rotate-key /model /stop /regen /export /perf /daemon /watch"
                     .to_string(),
             );
         }
@@ -1704,6 +2023,154 @@ async fn daemon_register_recurring_prompt(
     Ok(response.json::<RegisterRecurringResponse>().await?)
 }
 
+fn next_worker_request_id(state: &mut TuiState) -> u64 {
+    let next = state.next_worker_request_id.saturating_add(1);
+    state.next_worker_request_id = next;
+    next
+}
+
+fn queue_worker_command(state: &mut TuiState, command: WorkerCommand, low_priority: bool) -> bool {
+    match state.worker_cmd_tx.try_send(command) {
+        Ok(()) => {
+            state.perf.worker_queue_depth = state.perf.worker_queue_depth.saturating_add(1);
+            state.perf.worker_queue_peak = state
+                .perf
+                .worker_queue_peak
+                .max(state.perf.worker_queue_depth);
+            true
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            state.perf.dropped_events = state.perf.dropped_events.saturating_add(1);
+            if !low_priority {
+                push_obs(state, "⚠ worker queue busy: command dropped".to_string());
+            }
+            false
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            state.perf.dropped_events = state.perf.dropped_events.saturating_add(1);
+            push_obs(state, "⚠ worker queue unavailable".to_string());
+            false
+        }
+    }
+}
+
+fn handle_worker_result(result: WorkerResult, state: &mut TuiState) {
+    match result {
+        WorkerResult::Notice {
+            request_id,
+            kind,
+            text,
+        } => {
+            state.perf.worker_queue_depth = state.perf.worker_queue_depth.saturating_sub(1);
+            let latest = match kind {
+                WorkerRequestKind::DaemonHealth => state.latest_daemon_health_request_id,
+                WorkerRequestKind::DaemonAsk => state.latest_daemon_ask_request_id,
+                WorkerRequestKind::WatchAdd => state.latest_watch_add_request_id,
+            };
+
+            if request_id < latest {
+                state.perf.dropped_events = state.perf.dropped_events.saturating_add(1);
+                return;
+            }
+
+            push_obs(state, text);
+        }
+        WorkerResult::FormattedToolPayload { request_id, text } => {
+            state.perf.worker_queue_depth = state.perf.worker_queue_depth.saturating_sub(1);
+            let _ = request_id;
+            push_obs(state, text);
+        }
+    }
+}
+
+fn invalidate_markdown_cache(state: &TuiState) {
+    state.markdown_cache.borrow_mut().clear();
+    state.markdown_cache_order.borrow_mut().clear();
+}
+
+async fn worker_loop(
+    mut command_rx: mpsc::Receiver<WorkerCommand>,
+    result_tx: mpsc::Sender<WorkerResult>,
+) {
+    while let Some(command) = command_rx.recv().await {
+        let result = match command {
+            WorkerCommand::DaemonHealth {
+                request_id,
+                daemon_url,
+            } => {
+                let text = match daemon_health(&daemon_url).await {
+                    Ok(payload) => format!(
+                        "✓ daemon {} backend={} worker={}",
+                        payload.status, payload.backend, payload.worker_id
+                    ),
+                    Err(err) => format!("⚠ daemon health failed: {err}"),
+                };
+                WorkerResult::Notice {
+                    request_id,
+                    kind: WorkerRequestKind::DaemonHealth,
+                    text,
+                }
+            }
+            WorkerCommand::DaemonAsk {
+                request_id,
+                daemon_url,
+                prompt,
+            } => {
+                let text = match daemon_enqueue_ask(&daemon_url, &prompt).await {
+                    Ok(payload) => format!("✓ daemon job enqueued {}", payload.job_id),
+                    Err(err) => format!("⚠ daemon ask failed: {err}"),
+                };
+                WorkerResult::Notice {
+                    request_id,
+                    kind: WorkerRequestKind::DaemonAsk,
+                    text,
+                }
+            }
+            WorkerCommand::WatchAdd {
+                request_id,
+                daemon_url,
+                cron_expr,
+                prompt,
+            } => {
+                let text = match daemon_register_recurring_prompt(&daemon_url, &cron_expr, &prompt)
+                    .await
+                {
+                    Ok(payload) => {
+                        format!(
+                            "✓ watch {} next={}",
+                            payload.recurring_id, payload.next_run_at_utc
+                        )
+                    }
+                    Err(err) => format!("⚠ watch add failed: {err}"),
+                };
+                WorkerResult::Notice {
+                    request_id,
+                    kind: WorkerRequestKind::WatchAdd,
+                    text,
+                }
+            }
+            WorkerCommand::FormatToolPayload {
+                request_id,
+                tool_name,
+                tool_input,
+                tool_output,
+            } => {
+                let safe_input = redact_json_value(&tool_input);
+                let safe_output = redact_json_value(&tool_output);
+                let input = serde_json::to_string_pretty(&safe_input)
+                    .unwrap_or_else(|_| safe_input.to_string());
+                let output = serde_json::to_string_pretty(&safe_output)
+                    .unwrap_or_else(|_| safe_output.to_string());
+                let text =
+                    format!("◆ {tool_name}\ninput:\n{input}\noutput:\n{output}\n────────────────");
+                WorkerResult::FormattedToolPayload { request_id, text }
+            }
+        };
+
+        let _ = result_tx.send(result).await;
+    }
+}
+
 async fn handle_command_palette_key_event(
     code: KeyCode,
     state: &mut TuiState,
@@ -1713,45 +2180,74 @@ async fn handle_command_palette_key_event(
     command_preview_ui::handle_command_palette_key_event(code, state, tui_rt, event_tx).await
 }
 
+fn apply_agent_chunk_delta(delta: &str, state: &mut TuiState) {
+    if delta.is_empty() {
+        return;
+    }
+
+    let (visible_delta, thinking_chunks) = extract_thinking_from_stream(
+        delta,
+        &mut state.in_thinking_tag,
+        &mut state.stream_tag_tail,
+    );
+    for chunk in thinking_chunks {
+        push_thinking(state, chunk);
+    }
+
+    if visible_delta.is_empty() {
+        return;
+    }
+
+    if let Some(idx) = state.active_agent_stream_turn {
+        if let Some(turn) = state.conversation.get_mut(idx) {
+            turn.content.push_str(&visible_delta);
+        }
+    } else {
+        state.conversation.push(ConversationTurn {
+            role: "agent".to_string(),
+            content: visible_delta,
+            timestamp: Utc::now(),
+            tool_names: vec![],
+        });
+        state.active_agent_stream_turn = Some(state.conversation.len().saturating_sub(1));
+    }
+
+    if state.auto_scroll {
+        state.conv_scroll = state.conv_max_scroll;
+    }
+    invalidate_markdown_cache(state);
+}
+
+fn flush_pending_agent_chunks(state: &mut TuiState) {
+    if state.pending_agent_chunk_delta.is_empty() {
+        state.pending_agent_chunk_count = 0;
+        return;
+    }
+
+    let delta = std::mem::take(&mut state.pending_agent_chunk_delta);
+    if state.pending_agent_chunk_count > 1 {
+        state.perf.coalesced_agent_chunks = state
+            .perf
+            .coalesced_agent_chunks
+            .saturating_add(state.pending_agent_chunk_count.saturating_sub(1));
+    }
+    state.pending_agent_chunk_count = 0;
+    apply_agent_chunk_delta(&delta, state);
+}
+
 fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
+    if !matches!(event, TuiEvent::AgentChunk { .. }) {
+        flush_pending_agent_chunks(state);
+    }
+
     match event {
         TuiEvent::UiNotice(text) => {
             push_obs(state, text);
         }
         TuiEvent::AgentChunk { delta } => {
-            if delta.is_empty() {
-                return;
-            }
-
-            let (visible_delta, thinking_chunks) = extract_thinking_from_stream(
-                &delta,
-                &mut state.in_thinking_tag,
-                &mut state.stream_tag_tail,
-            );
-            for chunk in thinking_chunks {
-                push_thinking(state, chunk);
-            }
-
-            if visible_delta.is_empty() {
-                return;
-            }
-
-            if let Some(idx) = state.active_agent_stream_turn {
-                if let Some(turn) = state.conversation.get_mut(idx) {
-                    turn.content.push_str(&visible_delta);
-                }
-            } else {
-                state.conversation.push(ConversationTurn {
-                    role: "agent".to_string(),
-                    content: visible_delta,
-                    timestamp: Utc::now(),
-                    tool_names: vec![],
-                });
-                state.active_agent_stream_turn = Some(state.conversation.len().saturating_sub(1));
-            }
-
-            if state.auto_scroll {
-                state.conv_scroll = state.conv_max_scroll;
+            if !delta.is_empty() {
+                state.pending_agent_chunk_delta.push_str(&delta);
+                state.pending_agent_chunk_count = state.pending_agent_chunk_count.saturating_add(1);
             }
         }
         TuiEvent::AgentResponse { text, tool_names } => {
@@ -1797,6 +2293,7 @@ fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
             if state.auto_scroll {
                 state.conv_scroll = state.conv_max_scroll;
             }
+            invalidate_markdown_cache(state);
         }
         TuiEvent::AgentError(err) => {
             state.is_processing = false;
@@ -1816,6 +2313,7 @@ fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
             if state.job_history.len() > 100 {
                 state.job_history.pop_back();
             }
+            invalidate_markdown_cache(state);
         }
         TuiEvent::JobProcessed {
             job_id,
@@ -1831,6 +2329,7 @@ fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
                     break;
                 }
             }
+            invalidate_markdown_cache(state);
         }
         TuiEvent::ToolInvoked {
             tool_name,
@@ -1843,16 +2342,23 @@ fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
             tool_input,
             tool_output,
         } => {
-            let safe_input = redact_json_value(&tool_input);
-            let safe_output = redact_json_value(&tool_output);
-            let input = serde_json::to_string_pretty(&safe_input)
-                .unwrap_or_else(|_| safe_input.to_string());
-            let output = serde_json::to_string_pretty(&safe_output)
-                .unwrap_or_else(|_| safe_output.to_string());
-            push_obs(
+            let request_id = next_worker_request_id(state);
+            let queued = queue_worker_command(
                 state,
-                format!("◆ {tool_name}\ninput:\n{input}\noutput:\n{output}\n────────────────"),
+                WorkerCommand::FormatToolPayload {
+                    request_id,
+                    tool_name: tool_name.clone(),
+                    tool_input,
+                    tool_output: tool_output.clone(),
+                },
+                true,
             );
+            if !queued {
+                push_obs(
+                    state,
+                    format!("◆ {tool_name}  payload omitted (formatter busy)"),
+                );
+            }
 
             if tool_name == "editor.gr.run" {
                 let source = tool_output
@@ -1893,6 +2399,7 @@ fn handle_history_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome
                 stop_active_generation(state);
                 state.session_id = selected.session_id.clone();
                 state.conversation = load_history(&state.session_id);
+                invalidate_markdown_cache(state);
                 state.thinking_trace.clear();
                 state.thinking_scroll = 0;
                 state.thinking_max_scroll = 0;
@@ -1932,7 +2439,7 @@ fn handle_runtime_env_key_event(code: KeyCode, state: &mut TuiState) -> EventOut
 
 async fn apply_settings(
     state: &mut TuiState,
-    tui_rt: &mut TuiRuntime,
+    _tui_rt: &mut TuiRuntime,
     event_tx: &mpsc::Sender<TuiEvent>,
 ) {
     if !emit_settings_validation_summary(state) {
@@ -1977,73 +2484,171 @@ async fn apply_settings(
     let env_overrides_raw = state.settings_draft.env_overrides.clone();
     let changed = apply_env_overrides(&env_overrides_raw);
 
-    match build_tui_runtime(
-        parse_backend(Some(&backend)),
-        Some(&provider),
-        Some(&model),
-        base_url.as_deref(),
-        allowed_modules.clone(),
-        &state.session_id,
-        event_tx.clone(),
-    )
-    .await
-    {
-        Ok(new_rt) => {
-            *tui_rt = new_rt;
-            state.settings.backend = backend.clone();
-            state.settings.provider = provider.clone();
-            state.settings.model = model.clone();
-            state.settings.base_url = base_url.clone().unwrap_or_default();
-            state.settings.env_overrides = env_overrides_raw.clone();
-            state.settings.allowed_modules = allowed_modules.join(",");
-            state.settings.tool_call_mode = tool_call_mode.clone();
-            state.settings.max_tool_rounds = max_tool_rounds.to_string();
-            state.settings.thinking_capture = thinking_capture.to_string();
-            state.settings.thinking_max_lines = thinking_max_lines.to_string();
-            state.provider_model = format!("{provider}:{model}");
+    let api_key = state.settings_draft.api_key.trim().to_string();
+    let snapshot = SettingsApplySnapshot {
+        backend: backend.clone(),
+        provider: provider.clone(),
+        model: model.clone(),
+        base_url: base_url.clone(),
+        env_overrides_raw,
+        allowed_modules: allowed_modules.clone(),
+        tool_call_mode,
+        max_tool_rounds,
+        thinking_capture,
+        thinking_max_lines,
+        api_key,
+    };
 
-            let api_key = state.settings_draft.api_key.trim().to_string();
-            state.settings.api_key = api_key.clone();
-            if api_key.is_empty() {
+    let request_id = state.next_settings_apply_request_id.saturating_add(1);
+    state.next_settings_apply_request_id = request_id;
+    state.active_settings_apply_request_id = Some(request_id);
+
+    if let Some(previous) = state.pending_settings_apply.take() {
+        previous.handle.abort();
+        push_obs(
+            state,
+            format!(
+                "↻ settings apply request #{request_id} superseded request #{}",
+                previous.request_id
+            ),
+        );
+    }
+
+    let session_id = state.session_id.clone();
+    let event_tx = event_tx.clone();
+    let backend_for_build = snapshot.backend.clone();
+    let provider_for_build = snapshot.provider.clone();
+    let model_for_build = snapshot.model.clone();
+    let base_url_for_build = snapshot.base_url.clone();
+    let allowed_modules_for_build = snapshot.allowed_modules.clone();
+    let handle = tokio::spawn(async move {
+        build_tui_runtime(
+            parse_backend(Some(&backend_for_build)),
+            Some(&provider_for_build),
+            Some(&model_for_build),
+            base_url_for_build.as_deref(),
+            allowed_modules_for_build,
+            &session_id,
+            event_tx,
+        )
+        .await
+        .map_err(|err| err.to_string())
+    });
+
+    state.pending_settings_apply = Some(PendingSettingsApply {
+        request_id,
+        changed_env_count: changed,
+        snapshot,
+        handle,
+    });
+    push_obs(
+        state,
+        format!("↻ settings apply queued (request #{request_id})"),
+    );
+}
+
+fn next_ui_wake_delay(state: &TuiState) -> Duration {
+    if state.pending_settings_apply.is_some() {
+        Duration::from_millis(50)
+    } else if state.is_processing || state.active_agent_stream_turn.is_some() {
+        Duration::from_millis(100)
+    } else {
+        Duration::from_millis(1000)
+    }
+}
+
+async fn finalize_settings_apply_if_ready(state: &mut TuiState, tui_rt: &mut TuiRuntime) -> bool {
+    let is_ready = state
+        .pending_settings_apply
+        .as_ref()
+        .map(|pending| pending.handle.is_finished())
+        .unwrap_or(false);
+    if !is_ready {
+        return false;
+    }
+
+    let Some(pending) = state.pending_settings_apply.take() else {
+        return false;
+    };
+
+    if state.active_settings_apply_request_id != Some(pending.request_id) {
+        return false;
+    }
+
+    let request_id = pending.request_id;
+    match pending.handle.await {
+        Ok(Ok(new_rt)) => {
+            *tui_rt = new_rt;
+            let snapshot = pending.snapshot;
+            state.settings.backend = snapshot.backend.clone();
+            state.settings.provider = snapshot.provider.clone();
+            state.settings.model = snapshot.model.clone();
+            state.settings.base_url = snapshot.base_url.clone().unwrap_or_default();
+            state.settings.env_overrides = snapshot.env_overrides_raw.clone();
+            state.settings.allowed_modules = snapshot.allowed_modules.join(",");
+            state.settings.tool_call_mode = snapshot.tool_call_mode.clone();
+            state.settings.max_tool_rounds = snapshot.max_tool_rounds.to_string();
+            state.settings.thinking_capture = snapshot.thinking_capture.to_string();
+            state.settings.thinking_max_lines = snapshot.thinking_max_lines.to_string();
+            state.settings.api_key = snapshot.api_key.clone();
+            state.provider_model = format!("{}:{}", snapshot.provider, snapshot.model);
+
+            if snapshot.api_key.is_empty() {
                 save_tui_api_key(None);
             } else {
-                save_tui_api_key(Some(&api_key));
+                save_tui_api_key(Some(&snapshot.api_key));
             }
 
             state.settings_draft = state.settings.clone();
 
             save_tui_defaults(&TuiDefaults {
-                backend: Some(backend),
-                provider: Some(provider),
-                model: Some(model),
-                base_url,
-                env_overrides: if env_overrides_raw.trim().is_empty() {
+                backend: Some(snapshot.backend),
+                provider: Some(snapshot.provider),
+                model: Some(snapshot.model),
+                base_url: snapshot.base_url,
+                env_overrides: if snapshot.env_overrides_raw.trim().is_empty() {
                     None
                 } else {
-                    Some(env_overrides_raw)
+                    Some(snapshot.env_overrides_raw)
                 },
-                allowed_modules: if allowed_modules.is_empty() {
+                allowed_modules: if snapshot.allowed_modules.is_empty() {
                     None
                 } else {
-                    Some(allowed_modules)
+                    Some(snapshot.allowed_modules)
                 },
-                tool_call_mode: Some(tool_call_mode),
-                max_tool_rounds: Some(max_tool_rounds),
-                thinking_capture: Some(thinking_capture),
-                thinking_max_lines: Some(thinking_max_lines),
+                tool_call_mode: Some(snapshot.tool_call_mode),
+                max_tool_rounds: Some(snapshot.max_tool_rounds),
+                thinking_capture: Some(snapshot.thinking_capture),
+                thinking_max_lines: Some(snapshot.thinking_max_lines),
             });
+
             push_obs(
                 state,
                 format!(
-                    "✓ settings applied (sensitive values redacted, {} env override(s) active)",
-                    changed
+                    "✓ settings applied (request #{request_id}, sensitive values redacted, {} env override(s) active)",
+                    pending.changed_env_count
                 ),
             );
         }
+        Ok(Err(err)) => {
+            push_obs(
+                state,
+                format!("⚠ settings apply failed (request #{request_id}): {err}"),
+            );
+        }
         Err(err) => {
-            push_obs(state, format!("⚠ settings apply failed: {err}"));
+            push_obs(
+                state,
+                format!("⚠ settings apply task failed (request #{request_id}): {err}"),
+            );
         }
     }
+
+    if state.active_settings_apply_request_id == Some(request_id) {
+        state.active_settings_apply_request_id = None;
+    }
+
+    true
 }
 
 fn push_obs(state: &mut TuiState, text: String) {
@@ -2051,6 +2656,7 @@ fn push_obs(state: &mut TuiState, text: String) {
     if state.observability.len() > 50 {
         state.observability.pop_back();
     }
+    invalidate_markdown_cache(state);
 }
 
 fn push_grapheme_console_entry(
@@ -2078,6 +2684,7 @@ fn push_grapheme_console_entry(
     if state.grapheme_console.len() > 100 {
         state.grapheme_console.pop_back();
     }
+    invalidate_markdown_cache(state);
 }
 
 fn apply_env_overrides(raw: &str) -> usize {
@@ -2294,7 +2901,7 @@ fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
     };
 
     let inner_width = left.width.saturating_sub(2);
-    let conv_text = build_conversation_text(&state.conversation, inner_width);
+    let conv_text = build_conversation_text(state, &state.conversation, inner_width);
     // Compute visual wrapped height so scrolling lands on real bottom.
     let visible_height = left.height.saturating_sub(2);
     let visual_lines = visual_line_count(&conv_text, inner_width);
@@ -2447,7 +3054,7 @@ fn render_grapheme_console_overlay(frame: &mut ratatui::Frame, state: &mut TuiSt
                     Style::default().fg(Color::DarkGray),
                 )));
             }
-            for line in render_markdown_lines(entry, popup.width.saturating_sub(2)) {
+            for line in render_markdown_lines_cached(state, entry, popup.width.saturating_sub(2)) {
                 lines.push(line);
             }
         }
@@ -2485,6 +3092,21 @@ fn build_observability_text(state: &TuiState, expanded: bool, width: u16) -> Tex
         ),
         Style::default().fg(Color::Cyan),
     )));
+    let settings_queue_depth = usize::from(state.pending_settings_apply.is_some());
+    lines.push(Line::from(Span::styled(
+        format!(
+            " Perf: input->paint={}ms | frame={}ms | settings_q={} | worker_q={}/{} | coalesced(chunk/key)={}/{} | dropped={} ",
+            state.perf.last_input_to_paint_ms,
+            state.perf.last_frame_render_ms,
+            settings_queue_depth,
+            state.perf.worker_queue_depth,
+            state.perf.worker_queue_peak,
+            state.perf.coalesced_agent_chunks,
+            state.perf.coalesced_key_events,
+            state.perf.dropped_events
+        ),
+        Style::default().fg(Color::LightCyan),
+    )));
     lines.push(Line::from(""));
 
     if expanded {
@@ -2510,7 +3132,7 @@ fn build_observability_text(state: &TuiState, expanded: bool, width: u16) -> Tex
                 Style::default().fg(Color::DarkGray),
             )));
         }
-        for line in render_markdown_lines(&ev.text, width) {
+        for line in render_markdown_lines_cached(state, &ev.text, width) {
             lines.push(line);
         }
     }
@@ -2542,7 +3164,7 @@ fn build_job_history_text(state: &TuiState, width: u16) -> Text<'static> {
         let type_label = j.job_type.split('.').last().unwrap_or(&j.job_type);
         let id_short: String = j.job_id.chars().take(12).collect();
         let summary = format!("{symbol} {type_label}  {id_short}  [{}]", j.status);
-        lines.extend(render_markdown_lines(&summary, width));
+        lines.extend(render_markdown_lines_cached(state, &summary, width));
     }
 
     Text::from(lines)
@@ -2926,7 +3548,11 @@ fn export_current_session(state: &TuiState, format: &str) -> std::result::Result
     }
 }
 
-fn build_conversation_text(turns: &[ConversationTurn], width: u16) -> Text<'static> {
+fn build_conversation_text(
+    state: &TuiState,
+    turns: &[ConversationTurn],
+    width: u16,
+) -> Text<'static> {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     for turn in turns {
@@ -2957,7 +3583,7 @@ fn build_conversation_text(turns: &[ConversationTurn], width: u16) -> Text<'stat
                 )));
             }
         } else {
-            lines.extend(render_markdown_lines(&turn.content, width));
+            lines.extend(render_markdown_lines_cached(state, &turn.content, width));
         }
 
         if !turn.tool_names.is_empty() {
@@ -2971,6 +3597,40 @@ fn build_conversation_text(turns: &[ConversationTurn], width: u16) -> Text<'stat
     }
 
     Text::from(lines)
+}
+
+fn content_hash(content: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    content.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn render_markdown_lines_cached(state: &TuiState, content: &str, width: u16) -> Vec<Line<'static>> {
+    let key = MarkdownCacheKey {
+        width,
+        content_hash: content_hash(content),
+    };
+
+    if let Some(lines) = state.markdown_cache.borrow().get(&key) {
+        return lines.clone();
+    }
+
+    let rendered = render_markdown_lines(content, width);
+    {
+        let mut cache = state.markdown_cache.borrow_mut();
+        let mut order = state.markdown_cache_order.borrow_mut();
+        if !cache.contains_key(&key) {
+            order.push_back(key);
+        }
+        cache.insert(key, rendered.clone());
+        while order.len() > 512 {
+            if let Some(old) = order.pop_front() {
+                cache.remove(&old);
+            }
+        }
+    }
+
+    rendered
 }
 
 fn render_markdown_lines(content: &str, width: u16) -> Vec<Line<'static>> {
@@ -3100,6 +3760,9 @@ fn print_help() {
     println!("  /stop                   Stop active generation");
     println!("  /regen                  Regenerate last user prompt");
     println!("  /export [md|jsonl]      Export current transcript");
+    println!("  /perf report            Show current perf metrics snapshot");
+    println!("  /perf baseline [label]  Capture a baseline for delta comparisons");
+    println!("  /perf reset             Reset perf counters and baseline");
     println!("  /daemon                 Show daemon URL and command help");
     println!("  /daemon health          Probe central daemon status");
     println!("  /daemon ask <prompt>    Submit prompt to central daemon");
@@ -3109,9 +3772,10 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::{
-        JobHistoryEntry, RuntimeSettings, TextBuffer, TuiState, UiMode, build_tui_runtime,
-        load_editor_file, parse_allowed_modules, parse_backend, resolve_editor_run_source,
-        run_editor_source_via_runtime, validate_editor_run_allowlist, write_editor_file,
+        JobHistoryEntry, RuntimeSettings, TextBuffer, TuiState, UiMode, UiPerfStats, WorkerCommand,
+        build_tui_runtime, load_editor_file, parse_allowed_modules, parse_backend,
+        resolve_editor_run_source, run_editor_source_via_runtime, validate_editor_run_allowlist,
+        write_editor_file,
     };
     use medousa::events::TuiEvent;
     use medousa::session::{ConversationTurn, SessionHistorySummary};
@@ -3188,6 +3852,7 @@ mod tests {
 
     fn test_state(settings: RuntimeSettings) -> TuiState {
         TuiState {
+            worker_cmd_tx: mpsc::channel::<WorkerCommand>(8).0,
             conversation: Vec::<ConversationTurn>::new(),
             observability: VecDeque::new(),
             job_history: VecDeque::<JobHistoryEntry>::new(),
@@ -3232,6 +3897,21 @@ mod tests {
             in_thinking_tag: false,
             stream_tag_tail: String::new(),
             daemon_url: "http://127.0.0.1:8787".to_string(),
+            next_settings_apply_request_id: 0,
+            active_settings_apply_request_id: None,
+            pending_settings_apply: None,
+            ui_dirty: false,
+            pending_agent_chunk_delta: String::new(),
+            pending_agent_chunk_count: 0,
+            pending_paint_since: None,
+            perf: UiPerfStats::default(),
+            next_worker_request_id: 0,
+            latest_daemon_health_request_id: 0,
+            latest_daemon_ask_request_id: 0,
+            latest_watch_add_request_id: 0,
+            markdown_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+            markdown_cache_order: std::cell::RefCell::new(VecDeque::new()),
+            perf_baseline: None,
         }
     }
 
