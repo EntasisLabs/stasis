@@ -24,6 +24,9 @@ pub(crate) async fn handle_slash_command(
             state.in_thinking_tag = false;
             state.stream_tag_tail.clear();
             state.is_processing = false;
+            state.open_stream_turn_id = None;
+            state.pending_agent_chunk_delta.clear();
+            state.pending_agent_chunk_count = 0;
             state.auto_scroll = true;
             state.conv_scroll = 0;
             save_last_session_id(&state.session_id);
@@ -67,6 +70,51 @@ pub(crate) async fn handle_slash_command(
             state.routing_editor_role_idx = 0;
             state.settings_draft = state.settings.clone();
             state.stage_routing_draft = state.stage_routing.clone();
+        }
+        "/themes" => {
+            open_theme_menu(state, UiMode::Chat);
+        }
+        "/theme" => {
+            let requested = parts.collect::<Vec<_>>().join(" ").trim().to_string();
+            if requested.is_empty() {
+                push_obs(
+                    state,
+                    format!(
+                        "◈ current theme: {} ({}) | available: {}",
+                        ui_theme_display_name(&state.settings.theme_id),
+                        state.settings.theme_id,
+                        ui_theme_ids().join(", ")
+                    ),
+                );
+            } else if let Some(theme_id) = ui_theme_ids()
+                .iter()
+                .find(|id| id.eq_ignore_ascii_case(&requested))
+            {
+                let selected = (*theme_id).to_string();
+                state.settings.theme_id = selected.clone();
+                state.settings_draft.theme_id = selected.clone();
+
+                let mut defaults = load_tui_defaults();
+                defaults.theme_id = Some(selected.clone());
+                save_tui_defaults(&defaults);
+
+                push_obs(
+                    state,
+                    format!(
+                        "✓ theme applied: {} ({selected})",
+                        ui_theme_display_name(&selected)
+                    ),
+                );
+            } else {
+                push_obs(
+                    state,
+                    format!(
+                        "⚠ unknown theme '{}'. available: {}",
+                        requested,
+                        ui_theme_ids().join(", ")
+                    ),
+                );
+            }
         }
         "/allowlist-preview" => {
             state.mode = UiMode::AllowlistPreview;

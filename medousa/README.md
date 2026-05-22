@@ -157,6 +157,7 @@ API keys use OS keyring when available.
 For technical internals:
 
 - [architecture/README.md](architecture/README.md)
+- [architecture/enterprise-architecture-and-flow-guide.md](architecture/enterprise-architecture-and-flow-guide.md)
 - [architecture/system-overview.md](architecture/system-overview.md)
 - [architecture/component-tui.md](architecture/component-tui.md)
 - [architecture/component-cli.md](architecture/component-cli.md)

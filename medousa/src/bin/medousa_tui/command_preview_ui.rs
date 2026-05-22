@@ -34,7 +34,7 @@ const CATEGORY_ORDER: [PaletteCategory; 5] = [
     PaletteCategory::SafetyKeys,
 ];
 
-const PALETTE_ACTIONS: [PaletteAction; 16] = [
+const PALETTE_ACTIONS: [PaletteAction; 17] = [
     PaletteAction {
         category: PaletteCategory::QuickActions,
         title: "Start New Chat",
@@ -61,6 +61,15 @@ const PALETTE_ACTIONS: [PaletteAction; 16] = [
         risk: ActionRisk::Safe,
         key_hint: "Ctrl+,",
         aliases: &["preferences", "config", "options"],
+    },
+    PaletteAction {
+        category: PaletteCategory::QuickActions,
+        title: "Open Theme Menu",
+        subtitle: "Preview and apply UI themes",
+        command: "/themes",
+        risk: ActionRisk::Safe,
+        key_hint: "/themes",
+        aliases: &["theme", "appearance", "colors"],
     },
     PaletteAction {
         category: PaletteCategory::QuickActions,
@@ -364,6 +373,7 @@ fn record_palette_usage(state: &mut TuiState, command: &str) {
 
     save_tui_defaults(&TuiDefaults {
         backend: Some(state.settings.backend.clone()),
+        theme_id: Some(state.settings.theme_id.clone()),
         provider: Some(state.settings.provider.clone()),
         model: Some(state.settings.model.clone()),
         base_url: if state.settings.base_url.trim().is_empty() {
@@ -400,6 +410,48 @@ fn record_palette_usage(state: &mut TuiState, command: &str) {
             300,
             50,
             5000,
+        )),
+        activation_direct_answer_max_prompt_chars: Some(parse_usize_with_bounds(
+            &state.settings.activation_direct_answer_max_prompt_chars,
+            320,
+            64,
+            4000,
+        )),
+        activation_long_session_turn_threshold: Some(parse_usize_with_bounds(
+            &state.settings.activation_long_session_turn_threshold,
+            28,
+            8,
+            500,
+        )),
+        activation_long_session_max_prompt_chars: Some(parse_usize_with_bounds(
+            &state.settings.activation_long_session_max_prompt_chars,
+            420,
+            64,
+            4000,
+        )),
+        slice_hot_window_turns: Some(parse_usize_with_bounds(
+            &state.settings.slice_hot_window_turns,
+            8,
+            2,
+            32,
+        )),
+        slice_cold_window_turns: Some(parse_usize_with_bounds(
+            &state.settings.slice_cold_window_turns,
+            24,
+            4,
+            128,
+        )),
+        retry_runtime_max_retries: Some(parse_usize_with_bounds(
+            &state.settings.retry_runtime_max_retries,
+            1,
+            0,
+            5,
+        )),
+        retry_runtime_max_rounds: Some(parse_usize_with_bounds(
+            &state.settings.retry_runtime_max_rounds,
+            3,
+            1,
+            10,
         )),
         verifier_min_citation_coverage: Some(parse_f32_with_bounds(
             &state.settings.verifier_min_citation_coverage,

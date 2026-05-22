@@ -49,6 +49,7 @@ pub(crate) async fn apply_settings(
     }
 
     let backend = super::resolve_backend_name(Some(state.settings_draft.backend.trim()));
+    let theme_id = super::resolve_theme_id_name(Some(state.settings_draft.theme_id.trim()));
     let tool_call_mode =
         super::resolve_tool_call_mode_name(Some(state.settings_draft.tool_call_mode.trim()));
     let max_tool_rounds =
@@ -57,6 +58,37 @@ pub(crate) async fn apply_settings(
         super::parse_bool_with_default(&state.settings_draft.thinking_capture, true);
     let thinking_max_lines =
         super::parse_usize_with_bounds(&state.settings_draft.thinking_max_lines, 300, 50, 5000);
+    let activation_direct_answer_max_prompt_chars = super::parse_usize_with_bounds(
+        &state
+            .settings_draft
+            .activation_direct_answer_max_prompt_chars,
+        320,
+        64,
+        4000,
+    );
+    let activation_long_session_turn_threshold = super::parse_usize_with_bounds(
+        &state.settings_draft.activation_long_session_turn_threshold,
+        28,
+        8,
+        500,
+    );
+    let activation_long_session_max_prompt_chars = super::parse_usize_with_bounds(
+        &state
+            .settings_draft
+            .activation_long_session_max_prompt_chars,
+        420,
+        64,
+        4000,
+    );
+    let slice_hot_window_turns =
+        super::parse_usize_with_bounds(&state.settings_draft.slice_hot_window_turns, 8, 2, 32);
+    let slice_cold_window_turns =
+        super::parse_usize_with_bounds(&state.settings_draft.slice_cold_window_turns, 24, 4, 128)
+            .max(slice_hot_window_turns);
+    let retry_runtime_max_retries =
+        super::parse_usize_with_bounds(&state.settings_draft.retry_runtime_max_retries, 1, 0, 5);
+    let retry_runtime_max_rounds =
+        super::parse_usize_with_bounds(&state.settings_draft.retry_runtime_max_rounds, 3, 1, 10);
     let verifier_min_citation_coverage = super::parse_f32_with_bounds(
         &state.settings_draft.verifier_min_citation_coverage,
         0.60,
@@ -102,6 +134,7 @@ pub(crate) async fn apply_settings(
     let api_key = state.settings_draft.api_key.trim().to_string();
     let snapshot = SettingsApplySnapshot {
         backend: backend.clone(),
+        theme_id,
         provider: provider.clone(),
         model: model.clone(),
         base_url: base_url.clone(),
@@ -111,6 +144,13 @@ pub(crate) async fn apply_settings(
         max_tool_rounds,
         thinking_capture,
         thinking_max_lines,
+        activation_direct_answer_max_prompt_chars,
+        activation_long_session_turn_threshold,
+        activation_long_session_max_prompt_chars,
+        slice_hot_window_turns,
+        slice_cold_window_turns,
+        retry_runtime_max_retries,
+        retry_runtime_max_rounds,
         verifier_min_citation_coverage,
         verifier_min_avg_support_strength,
         verifier_min_supported_claim_ratio,
@@ -204,6 +244,7 @@ pub(crate) async fn finalize_settings_apply_if_ready(
             *tui_rt = new_rt;
             let snapshot = pending.snapshot;
             state.settings.backend = snapshot.backend.clone();
+            state.settings.theme_id = snapshot.theme_id.clone();
             state.settings.provider = snapshot.provider.clone();
             state.settings.model = snapshot.model.clone();
             state.settings.base_url = snapshot.base_url.clone().unwrap_or_default();
@@ -213,6 +254,19 @@ pub(crate) async fn finalize_settings_apply_if_ready(
             state.settings.max_tool_rounds = snapshot.max_tool_rounds.to_string();
             state.settings.thinking_capture = snapshot.thinking_capture.to_string();
             state.settings.thinking_max_lines = snapshot.thinking_max_lines.to_string();
+            state.settings.activation_direct_answer_max_prompt_chars = snapshot
+                .activation_direct_answer_max_prompt_chars
+                .to_string();
+            state.settings.activation_long_session_turn_threshold =
+                snapshot.activation_long_session_turn_threshold.to_string();
+            state.settings.activation_long_session_max_prompt_chars = snapshot
+                .activation_long_session_max_prompt_chars
+                .to_string();
+            state.settings.slice_hot_window_turns = snapshot.slice_hot_window_turns.to_string();
+            state.settings.slice_cold_window_turns = snapshot.slice_cold_window_turns.to_string();
+            state.settings.retry_runtime_max_retries =
+                snapshot.retry_runtime_max_retries.to_string();
+            state.settings.retry_runtime_max_rounds = snapshot.retry_runtime_max_rounds.to_string();
             state.settings.verifier_min_citation_coverage =
                 format!("{:.2}", snapshot.verifier_min_citation_coverage);
             state.settings.verifier_min_avg_support_strength =
@@ -236,6 +290,7 @@ pub(crate) async fn finalize_settings_apply_if_ready(
 
             super::save_tui_defaults(&super::TuiDefaults {
                 backend: Some(snapshot.backend),
+                theme_id: Some(snapshot.theme_id),
                 provider: Some(snapshot.provider),
                 model: Some(snapshot.model),
                 base_url: snapshot.base_url,
@@ -253,6 +308,19 @@ pub(crate) async fn finalize_settings_apply_if_ready(
                 max_tool_rounds: Some(snapshot.max_tool_rounds),
                 thinking_capture: Some(snapshot.thinking_capture),
                 thinking_max_lines: Some(snapshot.thinking_max_lines),
+                activation_direct_answer_max_prompt_chars: Some(
+                    snapshot.activation_direct_answer_max_prompt_chars,
+                ),
+                activation_long_session_turn_threshold: Some(
+                    snapshot.activation_long_session_turn_threshold,
+                ),
+                activation_long_session_max_prompt_chars: Some(
+                    snapshot.activation_long_session_max_prompt_chars,
+                ),
+                slice_hot_window_turns: Some(snapshot.slice_hot_window_turns),
+                slice_cold_window_turns: Some(snapshot.slice_cold_window_turns),
+                retry_runtime_max_retries: Some(snapshot.retry_runtime_max_retries),
+                retry_runtime_max_rounds: Some(snapshot.retry_runtime_max_rounds),
                 verifier_min_citation_coverage: Some(snapshot.verifier_min_citation_coverage),
                 verifier_min_avg_support_strength: Some(snapshot.verifier_min_avg_support_strength),
                 verifier_min_supported_claim_ratio: Some(

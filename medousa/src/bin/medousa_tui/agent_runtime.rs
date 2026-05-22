@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use genai::chat::ChatRequest;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
@@ -6,19 +9,46 @@ use stasis::application::orchestration::tool_loop_pipeline::{
     ToolCallMode, ToolInvocation, ToolLoopExecutionRequest,
 };
 use stasis::ports::outbound::ai_chat_client::StreamDelta;
-use stasis::prelude::{ChatMessage, PromptExecutionContext};
+use stasis::prelude::{AiChatClient, ChatMessage, PromptExecutionContext, PromptExecutionPipeline};
 
 use super::{ConversationTurn, TuiState};
 
 const MAX_REQUEST_PROMPT_CHARS: usize = 48_000;
 const MAX_PRIOR_TOTAL_CHARS: usize = 24_000;
 const MAX_SINGLE_PRIOR_MESSAGE_CHARS: usize = 4_000;
+const DEFAULT_HOT_WINDOW_TURNS: usize = 8;
+const MIN_HOT_WINDOW_TURNS: usize = 2;
+const MAX_HOT_WINDOW_TURNS: usize = 32;
+const DEFAULT_COLD_WINDOW_TURNS: usize = 24;
+const MIN_COLD_WINDOW_TURNS: usize = 4;
+const MAX_COLD_WINDOW_TURNS: usize = 128;
+const HOT_WINDOW_CHAR_BUDGET: usize = 14_000;
+const COLD_WINDOW_CHAR_BUDGET: usize = 8_000;
+const COLD_SUMMARY_LINE_CHARS: usize = 240;
+const DEFAULT_ACTIVATION_DIRECT_PROMPT_CHARS: usize = 320;
+const DEFAULT_ACTIVATION_LONG_SESSION_TURN_THRESHOLD: usize = 28;
+const DEFAULT_ACTIVATION_LONG_SESSION_PROMPT_CHARS: usize = 420;
+const DEFAULT_RETRY_RUNTIME_MAX_RETRIES: usize = 1;
+const DEFAULT_RETRY_RUNTIME_MAX_ROUNDS: usize = 3;
 const CONTINUATION_TRIGGER_TOOL_OUTPUT_CHARS: usize = 8_000;
 const CONTINUATION_TRIGGER_STDOUT_CHARS: usize = 4_000;
 const CONTINUATION_MAX_DRAFT_CHARS: usize = 6_000;
 const CONTINUATION_MAX_TOOL_OUTPUT_CHARS: usize = 2_000;
 const CONTINUATION_MAX_TOOL_SUMMARIES: usize = 6;
 const CONTINUATION_MAX_ROUNDS: usize = 4;
+const INTENT_CLASSIFIER_MAX_PROMPT_CHARS: usize = 900;
+const INTENT_CLASSIFIER_MAX_CONTEXT_TURNS: usize = 4;
+const INTENT_CLASSIFIER_MAX_CONTEXT_CHARS: usize = 1400;
+const INTENT_CLASSIFIER_CONTEXT_LINE_CHARS: usize = 260;
+const INTENT_CLASSIFIER_CONFIDENCE_LOW: f32 = 0.45;
+const INTENT_CLASSIFIER_CONFIDENCE_CONVERSATIONAL: f32 = 0.55;
+const INTENT_CLASSIFIER_CONFIDENCE_TOOL_REQUIRED: f32 = 0.60;
+const BUDGET_DEFAULT_MAX_LLM_CALLS_TOTAL: usize = 2;
+const BUDGET_DEFAULT_MAX_TOOL_LOOP_CALLS: usize = 1;
+const BUDGET_DEFAULT_MAX_PROMPT_ONLY_CALLS: usize = 1;
+const BUDGET_DEFAULT_MAX_CLASSIFIER_CALLS: usize = 1;
+const BUDGET_DEFAULT_MAX_RETRIES: usize = 1;
+const BUDGET_DEFAULT_MAX_CONTINUATIONS: usize = 1;
 
 #[derive(Debug, Clone)]
 struct ContextPackQuality {
@@ -29,6 +59,53 @@ struct ContextPackQuality {
     is_usable: bool,
 }
 
+#[derive(Debug, Clone)]
+struct TurnActivationDecision {
+    turn_class: &'static str,
+    tool_call_mode: ToolCallMode,
+    max_tool_rounds: usize,
+    enforce_no_tools: bool,
+    reason: &'static str,
+}
+
+#[derive(Debug, Clone)]
+struct IntentClassification {
+    intent: String,
+    confidence: f32,
+    reason: String,
+}
+
+#[derive(Debug, Clone)]
+struct PriorMessageBuild {
+    messages: Vec<ChatMessage>,
+    hot_turns_included: usize,
+    cold_turns_summarized: usize,
+    cold_summary_chars: usize,
+    total_chars: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TurnOrchestrationState {
+    calls_total: usize,
+    classifier_calls: usize,
+    tool_loop_calls: usize,
+    prompt_only_calls: usize,
+    continuations: usize,
+    retries: usize,
+    loop_guard_tripped: bool,
+    final_mode: String,
+}
+
+#[derive(Debug, Clone)]
+struct TurnBudget {
+    max_llm_calls_total: usize,
+    max_tool_loop_calls: usize,
+    max_prompt_only_calls: usize,
+    max_classifier_calls: usize,
+    max_retries: usize,
+    max_continuations: usize,
+}
+
 pub(crate) fn start_prompt_run(
     state: &mut TuiState,
     tui_rt: &TuiRuntime,
@@ -36,10 +113,15 @@ pub(crate) fn start_prompt_run(
     prompt: String,
     persist_user_turn: bool,
 ) {
+    state.active_agent_turn_id = state.active_agent_turn_id.saturating_add(1);
+    let turn_id = state.active_agent_turn_id;
+    state.open_stream_turn_id = Some(turn_id);
     state.is_processing = true;
     state.auto_scroll = true;
     state.conv_scroll = state.conv_max_scroll;
     state.active_agent_stream_turn = None;
+    state.pending_agent_chunk_delta.clear();
+    state.pending_agent_chunk_count = 0;
     state.in_thinking_tag = false;
     state.stream_tag_tail.clear();
     state.received_native_reasoning = false;
@@ -150,21 +232,169 @@ pub(crate) fn start_prompt_run(
     };
     let tx = event_tx.clone();
     let prompt_preview: String = resolved_prompt.chars().take(48).collect();
-    let tool_call_mode = parse_tool_call_mode(&state.settings.tool_call_mode);
-    let max_tool_rounds =
+    let configured_tool_call_mode = parse_tool_call_mode(&state.settings.tool_call_mode);
+    let configured_max_tool_rounds =
         super::parse_usize_with_bounds(&state.settings.max_tool_rounds, 10, 1, 50);
-    let prior_messages = build_prior_messages(&state.conversation, &prompt, persist_user_turn);
-    let prompt_for_request = resolved_prompt;
+    let activation = decide_turn_activation(
+        &prompt,
+        configured_tool_call_mode,
+        configured_max_tool_rounds,
+        state.conversation.len(),
+        super::parse_usize_with_bounds(
+            &state.settings.activation_direct_answer_max_prompt_chars,
+            DEFAULT_ACTIVATION_DIRECT_PROMPT_CHARS,
+            64,
+            4000,
+        ),
+        super::parse_usize_with_bounds(
+            &state.settings.activation_long_session_turn_threshold,
+            DEFAULT_ACTIVATION_LONG_SESSION_TURN_THRESHOLD,
+            8,
+            500,
+        ),
+        super::parse_usize_with_bounds(
+            &state.settings.activation_long_session_max_prompt_chars,
+            DEFAULT_ACTIVATION_LONG_SESSION_PROMPT_CHARS,
+            64,
+            4000,
+        ),
+    );
+    let hot_window_turns = super::parse_usize_with_bounds(
+        &state.settings.slice_hot_window_turns,
+        DEFAULT_HOT_WINDOW_TURNS,
+        MIN_HOT_WINDOW_TURNS,
+        MAX_HOT_WINDOW_TURNS,
+    );
+    let cold_window_turns = super::parse_usize_with_bounds(
+        &state.settings.slice_cold_window_turns,
+        DEFAULT_COLD_WINDOW_TURNS,
+        MIN_COLD_WINDOW_TURNS,
+        MAX_COLD_WINDOW_TURNS,
+    )
+    .max(hot_window_turns);
+    let prior_build = build_prior_messages(
+        &state.conversation,
+        &prompt,
+        persist_user_turn,
+        hot_window_turns,
+        cold_window_turns,
+    );
+    super::push_obs(
+        state,
+        format!(
+            "◈ activation heuristic class={} mode={} rounds={} no_tools={} reason={}",
+            activation.turn_class,
+            match activation.tool_call_mode {
+                ToolCallMode::Auto => "auto",
+                ToolCallMode::Strict => "strict",
+            },
+            activation.max_tool_rounds,
+            activation.enforce_no_tools,
+            activation.reason,
+        ),
+    );
+    super::push_obs(
+        state,
+        format!(
+            "◈ turn slicing hot_turns={} cold_turns={} cold_chars={} prior_chars={}",
+            prior_build.hot_turns_included,
+            prior_build.cold_turns_summarized,
+            prior_build.cold_summary_chars,
+            prior_build.total_chars,
+        ),
+    );
+    let prior_messages = prior_build.messages;
+    let prompt_for_request = if activation.enforce_no_tools {
+        format!(
+            "{resolved_prompt}\n\n[MEDOUSA_TOOL_POLICY]\nmode=no_tools\ninstruction=Do not call tools for this turn unless the user explicitly requests external lookup, execution, or fresh evidence. Answer directly from current context."
+        )
+    } else {
+        resolved_prompt
+    };
+    let retry_max_retries = super::parse_usize_with_bounds(
+        &state.settings.retry_runtime_max_retries,
+        DEFAULT_RETRY_RUNTIME_MAX_RETRIES,
+        0,
+        5,
+    );
+    let retry_max_rounds = super::parse_usize_with_bounds(
+        &state.settings.retry_runtime_max_rounds,
+        DEFAULT_RETRY_RUNTIME_MAX_ROUNDS,
+        1,
+        10,
+    );
+    let no_tools_pipeline = build_prompt_pipeline_for_turn(final_route.as_ref(), &state.settings);
+    let intent_classifier_recent_context = build_intent_classifier_recent_context(
+        &state.conversation,
+        &prompt,
+        persist_user_turn,
+        INTENT_CLASSIFIER_MAX_CONTEXT_TURNS,
+        INTENT_CLASSIFIER_MAX_CONTEXT_CHARS,
+    );
     let original_prompt_for_continuation = prompt.clone();
+    let turn_budget = default_turn_budget();
     let handle = tokio::spawn(async move {
+        let mut orchestration_state = TurnOrchestrationState {
+            final_mode: "unknown".to_string(),
+            ..TurnOrchestrationState::default()
+        };
+
+        let mut activation = activation;
+        if should_invoke_intent_classifier(&activation) {
+            if try_consume_classifier_budget(&tx, &mut orchestration_state, &turn_budget).await {
+                let classification = classify_turn_intent_with_model(
+                    &no_tools_pipeline,
+                    &prompt,
+                    &intent_classifier_recent_context,
+                )
+                .await;
+                if let Some(classification) = classification {
+                    let _ = tx
+                        .send(TuiEvent::UiNotice(format!(
+                            "◈ intent classifier intent={} confidence={:.2} reason={}",
+                            classification.intent, classification.confidence, classification.reason
+                        )))
+                        .await;
+
+                    activation = apply_intent_classifier_override(activation, &classification);
+                    let _ = tx
+                        .send(TuiEvent::UiNotice(format!(
+                            "◈ activation final class={} mode={} rounds={} no_tools={} reason={}",
+                            activation.turn_class,
+                            match activation.tool_call_mode {
+                                ToolCallMode::Auto => "auto",
+                                ToolCallMode::Strict => "strict",
+                            },
+                            activation.max_tool_rounds,
+                            activation.enforce_no_tools,
+                            activation.reason,
+                        )))
+                        .await;
+                } else {
+                    let _ = tx
+                        .send(TuiEvent::UiNotice(
+                            "◈ intent classifier skipped: no parseable result; using heuristic"
+                                .to_string(),
+                        ))
+                        .await;
+                }
+            } else {
+                orchestration_state.final_mode = "classifier_budget_denied".to_string();
+            }
+        }
+
         let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::unbounded_channel::<StreamDelta>();
         let chunk_event_tx = tx.clone();
         tokio::spawn(async move {
             while let Some(delta) = chunk_rx.recv().await {
                 let event = match delta {
-                    StreamDelta::Content(delta) => TuiEvent::AgentChunk { delta },
-                    StreamDelta::Reasoning(delta) => TuiEvent::AgentReasoningChunk { delta },
-                    StreamDelta::ThoughtSignature(delta) => TuiEvent::AgentReasoningChunk { delta },
+                    StreamDelta::Content(delta) => TuiEvent::AgentChunk { turn_id, delta },
+                    StreamDelta::Reasoning(delta) => {
+                        TuiEvent::AgentReasoningChunk { turn_id, delta }
+                    }
+                    StreamDelta::ThoughtSignature(delta) => {
+                        TuiEvent::AgentReasoningChunk { turn_id, delta }
+                    }
                 };
                 if chunk_event_tx.send(event).await.is_err() {
                     break;
@@ -179,24 +409,107 @@ pub(crate) fn start_prompt_run(
             })
             .await;
 
+        if activation.enforce_no_tools {
+            let mut messages = Vec::with_capacity(prior_messages.len() + 2);
+            messages.push(ChatMessage::system(super::SYSTEM_PROMPT.to_string()));
+            messages.extend(prior_messages);
+            messages.push(ChatMessage::user(prompt_for_request));
+
+            if !try_consume_prompt_only_budget(&tx, &mut orchestration_state, &turn_budget).await {
+                orchestration_state.final_mode = "prompt_only_budget_denied".to_string();
+                let _ = tx
+                    .send(TuiEvent::AgentError {
+                        turn_id,
+                        message: "turn budget exhausted before prompt-only execution".to_string(),
+                    })
+                    .await;
+                emit_orchestration_summary(&tx, &orchestration_state).await;
+                return;
+            }
+            orchestration_state.final_mode = "prompt_only".to_string();
+
+            let _ = tx
+                .send(TuiEvent::UiNotice(
+                    "◈ fallback_mode=prompt_only retry_count=0 retry_reason=none".to_string(),
+                ))
+                .await;
+
+            match no_tools_pipeline
+                .complete_chat_stream(
+                    ChatRequest::new(messages),
+                    PromptExecutionContext::default(),
+                    Some(&chunk_tx),
+                )
+                .await
+            {
+                Ok(completion) => {
+                    let final_text = completion
+                        .response
+                        .into_first_text()
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| {
+                            "I do not have enough information to answer confidently without tools for this turn."
+                                .to_string()
+                        });
+                    let _ = tx
+                        .send(TuiEvent::AgentResponse {
+                            turn_id,
+                            text: final_text,
+                            tool_names: Vec::new(),
+                        })
+                        .await;
+                    emit_orchestration_summary(&tx, &orchestration_state).await;
+                }
+                Err(err) => {
+                    let _ = tx
+                        .send(TuiEvent::AgentError {
+                            turn_id,
+                            message: err.to_string(),
+                        })
+                        .await;
+                    emit_orchestration_summary(&tx, &orchestration_state).await;
+                }
+            }
+            return;
+        }
+
         let request = ToolLoopExecutionRequest {
             user_prompt: prompt_for_request,
             system_prompt: Some(super::SYSTEM_PROMPT.to_string()),
             context: PromptExecutionContext::default(),
             tool_name: String::new(),
             tool_input: Value::Null,
-            tool_call_mode,
+            tool_call_mode: activation.tool_call_mode,
         };
-        match pipeline
+        if !try_consume_tool_loop_budget(&tx, &mut orchestration_state, &turn_budget).await {
+            orchestration_state.final_mode = "tool_loop_budget_denied".to_string();
+            let _ = tx
+                .send(TuiEvent::AgentError {
+                    turn_id,
+                    message: "turn budget exhausted before tool-loop execution".to_string(),
+                })
+                .await;
+            emit_orchestration_summary(&tx, &orchestration_state).await;
+            return;
+        }
+        orchestration_state.final_mode = "tool_loop".to_string();
+        let first_attempt = pipeline
             .execute_with_stream_prior_messages_max_rounds(
-                request,
-                prior_messages,
+                request.clone(),
+                prior_messages.clone(),
                 Some(&chunk_tx),
-                max_tool_rounds,
+                activation.max_tool_rounds,
             )
-            .await
-        {
+            .await;
+
+        match first_attempt {
             Ok(response) => {
+                let _ = tx
+                    .send(TuiEvent::UiNotice(
+                        "◈ fallback_mode=tool_loop retry_count=0 retry_reason=none".to_string(),
+                    ))
+                    .await;
                 emit_tool_payload_events(&tx, &response.tool_invocations).await;
 
                 let mut combined_invocations = response.tool_invocations.clone();
@@ -233,31 +546,53 @@ pub(crate) fn start_prompt_run(
                             &final_text,
                         );
 
-                        match pipeline
-                            .execute_with_stream_prior_messages_max_rounds(
-                                continuation_request,
-                                continuation_prior_messages,
-                                Some(&chunk_tx),
-                                max_tool_rounds.min(CONTINUATION_MAX_ROUNDS).max(1),
-                            )
-                            .await
+                        if try_consume_continuation_budget(
+                            &tx,
+                            &mut orchestration_state,
+                            &turn_budget,
+                        )
+                        .await
                         {
-                            Ok(continuation_response) => {
-                                emit_tool_payload_events(
-                                    &tx,
-                                    &continuation_response.tool_invocations,
+                            orchestration_state.final_mode =
+                                "tool_loop_with_continuation".to_string();
+
+                            match pipeline
+                                .execute_with_stream_prior_messages_max_rounds(
+                                    continuation_request,
+                                    continuation_prior_messages,
+                                    Some(&chunk_tx),
+                                    activation
+                                        .max_tool_rounds
+                                        .min(CONTINUATION_MAX_ROUNDS)
+                                        .max(1),
                                 )
-                                .await;
-                                final_text = continuation_response.text;
-                                combined_invocations.extend(continuation_response.tool_invocations);
-                            }
-                            Err(err) => {
-                                let _ = tx
-                                    .send(TuiEvent::UiNotice(format!(
-                                        "⚠ continuation synthesis skipped: {err}"
-                                    )))
+                                .await
+                            {
+                                Ok(continuation_response) => {
+                                    emit_tool_payload_events(
+                                        &tx,
+                                        &continuation_response.tool_invocations,
+                                    )
                                     .await;
+                                    final_text = continuation_response.text;
+                                    combined_invocations
+                                        .extend(continuation_response.tool_invocations);
+                                }
+                                Err(err) => {
+                                    let _ = tx
+                                        .send(TuiEvent::UiNotice(format!(
+                                            "⚠ continuation synthesis skipped: {err}"
+                                        )))
+                                        .await;
+                                }
                             }
+                        } else {
+                            let _ = tx
+                                .send(TuiEvent::UiNotice(
+                                    "◈ continuation synthesis skipped: turn budget limit"
+                                        .to_string(),
+                                ))
+                                .await;
                         }
                     }
                 }
@@ -274,13 +609,96 @@ pub(crate) fn start_prompt_run(
                     .await;
                 let _ = tx
                     .send(TuiEvent::AgentResponse {
+                        turn_id,
                         text: final_text,
                         tool_names,
                     })
                     .await;
+                emit_orchestration_summary(&tx, &orchestration_state).await;
             }
             Err(err) => {
-                let _ = tx.send(TuiEvent::AgentError(err.to_string())).await;
+                let err_text = err.to_string();
+                if let Some(reason) = retryable_runtime_reason(&err_text) {
+                    let retry_rounds = activation.max_tool_rounds.min(retry_max_rounds).max(1);
+                    let mut last_err = err_text;
+                    let mut retry_count = 0usize;
+                    while retry_count < retry_max_retries {
+                        retry_count = retry_count.saturating_add(1);
+                        let _ = tx
+                            .send(TuiEvent::UiNotice(format!(
+                                "◈ retry_policy retry_count={} retry_reason={} fallback_mode=tool_loop rounds={}",
+                                retry_count, reason, retry_rounds
+                            )))
+                            .await;
+
+                        if !try_consume_retry_budget(&tx, &mut orchestration_state, &turn_budget)
+                            .await
+                        {
+                            orchestration_state.final_mode =
+                                "tool_loop_retry_budget_denied".to_string();
+                            let _ = tx
+                                .send(TuiEvent::AgentError {
+                                    turn_id,
+                                    message: "turn budget exhausted before retry".to_string(),
+                                })
+                                .await;
+                            emit_orchestration_summary(&tx, &orchestration_state).await;
+                            return;
+                        }
+                        orchestration_state.final_mode = "tool_loop_retry".to_string();
+
+                        match pipeline
+                            .execute_with_stream_prior_messages_max_rounds(
+                                request.clone(),
+                                prior_messages.clone(),
+                                Some(&chunk_tx),
+                                retry_rounds,
+                            )
+                            .await
+                        {
+                            Ok(response) => {
+                                emit_tool_payload_events(&tx, &response.tool_invocations).await;
+                                let tool_names = collect_tool_names(&response.tool_invocations);
+                                let _ = tx
+                                    .send(TuiEvent::AgentResponse {
+                                        turn_id,
+                                        text: response.text,
+                                        tool_names,
+                                    })
+                                    .await;
+                                orchestration_state.final_mode =
+                                    "tool_loop_retry_success".to_string();
+                                emit_orchestration_summary(&tx, &orchestration_state).await;
+                                return;
+                            }
+                            Err(retry_err) => {
+                                last_err = format!("{}", retry_err);
+                            }
+                        }
+                    }
+                    let _ = tx
+                        .send(TuiEvent::AgentError {
+                            turn_id,
+                            message: format!("{} (retry exhausted: {})", reason, last_err),
+                        })
+                        .await;
+                    orchestration_state.final_mode = "tool_loop_retry_exhausted".to_string();
+                    emit_orchestration_summary(&tx, &orchestration_state).await;
+                } else {
+                    let _ = tx
+                        .send(TuiEvent::UiNotice(
+                            "◈ retry_policy retry_count=0 retry_reason=not_runtime".to_string(),
+                        ))
+                        .await;
+                    let _ = tx
+                        .send(TuiEvent::AgentError {
+                            turn_id,
+                            message: err_text,
+                        })
+                        .await;
+                    orchestration_state.final_mode = "tool_loop_error_non_retryable".to_string();
+                    emit_orchestration_summary(&tx, &orchestration_state).await;
+                }
             }
         }
     });
@@ -292,9 +710,9 @@ fn build_prior_messages(
     turns: &[ConversationTurn],
     current_prompt: &str,
     current_user_persisted: bool,
-) -> Vec<ChatMessage> {
-    const MAX_TURNS: usize = 16;
-
+    hot_window_turns: usize,
+    cold_window_turns: usize,
+) -> PriorMessageBuild {
     let mut selected: Vec<&ConversationTurn> = turns.iter().collect();
 
     if current_user_persisted {
@@ -305,30 +723,388 @@ fn build_prior_messages(
         }
     }
 
-    let mut remaining_chars = MAX_PRIOR_TOTAL_CHARS;
     let mut accepted: Vec<ChatMessage> = Vec::new();
+    let mut total_chars = 0usize;
 
-    for turn in selected.into_iter().rev().take(MAX_TURNS) {
-        if remaining_chars == 0 {
+    let hot_turns: Vec<&ConversationTurn> = selected
+        .iter()
+        .rev()
+        .take(hot_window_turns)
+        .copied()
+        .collect();
+    let cold_turns: Vec<&ConversationTurn> = selected
+        .iter()
+        .rev()
+        .skip(hot_window_turns)
+        .take(cold_window_turns)
+        .copied()
+        .collect();
+
+    let mut hot_remaining = HOT_WINDOW_CHAR_BUDGET.min(MAX_PRIOR_TOTAL_CHARS);
+    for turn in hot_turns {
+        if hot_remaining == 0 {
             break;
         }
 
         let bounded = truncate_text_for_budget(&turn.content, MAX_SINGLE_PRIOR_MESSAGE_CHARS);
-        let bounded = truncate_text_for_budget(&bounded, remaining_chars);
+        let bounded = truncate_text_for_budget(&bounded, hot_remaining);
         if bounded.trim().is_empty() {
             continue;
         }
 
-        remaining_chars = remaining_chars.saturating_sub(bounded.chars().count());
+        let bounded_chars = bounded.chars().count();
+        hot_remaining = hot_remaining.saturating_sub(bounded_chars);
+        total_chars = total_chars.saturating_add(bounded_chars);
         match turn.role.as_str() {
             "user" => accepted.push(ChatMessage::user(bounded)),
-            "assistant" => accepted.push(ChatMessage::assistant(bounded)),
+            "assistant" | "agent" => accepted.push(ChatMessage::assistant(bounded)),
             _ => {}
         }
     }
 
+    let cold_lines = cold_turns
+        .iter()
+        .rev()
+        .filter_map(|turn| match turn.role.as_str() {
+            "user" | "assistant" | "agent" => {
+                let line = truncate_text_for_budget(&turn.content, COLD_SUMMARY_LINE_CHARS);
+                if line.trim().is_empty() {
+                    None
+                } else {
+                    let role = if turn.role == "agent" {
+                        "assistant"
+                    } else {
+                        turn.role.as_str()
+                    };
+                    Some(format!("{}: {}", role, line.replace('\n', " ")))
+                }
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let cold_summary = if cold_lines.is_empty() {
+        String::new()
+    } else {
+        let cold_budget =
+            COLD_WINDOW_CHAR_BUDGET.min(MAX_PRIOR_TOTAL_CHARS.saturating_sub(total_chars));
+        truncate_text_for_budget(
+            &format!("[MEDOUSA_COLD_HISTORY_SUMMARY]\n{}", cold_lines.join("\n")),
+            cold_budget,
+        )
+    };
+    let cold_summary_chars = cold_summary.chars().count();
+    if !cold_summary.trim().is_empty() {
+        total_chars = total_chars.saturating_add(cold_summary_chars);
+        accepted.push(ChatMessage::assistant(cold_summary));
+    }
+
     accepted.reverse();
-    accepted
+    PriorMessageBuild {
+        messages: accepted,
+        hot_turns_included: selected.len().min(hot_window_turns),
+        cold_turns_summarized: selected
+            .len()
+            .saturating_sub(hot_window_turns)
+            .min(cold_window_turns),
+        cold_summary_chars,
+        total_chars,
+    }
+}
+
+fn decide_turn_activation(
+    prompt: &str,
+    configured_mode: ToolCallMode,
+    configured_rounds: usize,
+    turn_count: usize,
+    direct_answer_max_prompt_chars: usize,
+    long_session_turn_threshold: usize,
+    long_session_max_prompt_chars: usize,
+) -> TurnActivationDecision {
+    let prompt_trimmed = prompt.trim();
+    let prompt_lower = prompt_trimmed.to_ascii_lowercase();
+    let prompt_chars = prompt_trimmed.chars().count();
+
+    let tool_intent = contains_tool_intent(&prompt_lower);
+    let direct_answer_intent = contains_direct_answer_intent(&prompt_lower);
+
+    if tool_intent {
+        return TurnActivationDecision {
+            turn_class: "c",
+            tool_call_mode: ToolCallMode::Auto,
+            max_tool_rounds: configured_rounds.min(12).max(2),
+            enforce_no_tools: false,
+            reason: "tool_intent_detected",
+        };
+    }
+
+    if direct_answer_intent && prompt_chars < direct_answer_max_prompt_chars {
+        return TurnActivationDecision {
+            turn_class: "a",
+            tool_call_mode: ToolCallMode::Strict,
+            max_tool_rounds: 1,
+            enforce_no_tools: true,
+            reason: "direct_answer_short_prompt",
+        };
+    }
+
+    if turn_count > long_session_turn_threshold && prompt_chars < long_session_max_prompt_chars {
+        return TurnActivationDecision {
+            turn_class: "b",
+            tool_call_mode: ToolCallMode::Strict,
+            max_tool_rounds: 1,
+            enforce_no_tools: true,
+            reason: "long_session_short_turn",
+        };
+    }
+
+    TurnActivationDecision {
+        turn_class: "b",
+        tool_call_mode: configured_mode,
+        max_tool_rounds: configured_rounds,
+        enforce_no_tools: false,
+        reason: "configured_default",
+    }
+}
+
+fn should_invoke_intent_classifier(activation: &TurnActivationDecision) -> bool {
+    activation.reason == "configured_default"
+}
+
+async fn classify_turn_intent_with_model(
+    pipeline: &PromptExecutionPipeline,
+    prompt: &str,
+    recent_context: &str,
+) -> Option<IntentClassification> {
+    let bounded_prompt = truncate_text_for_budget(prompt, INTENT_CLASSIFIER_MAX_PROMPT_CHARS);
+    let bounded_context =
+        truncate_text_for_budget(recent_context, INTENT_CLASSIFIER_MAX_CONTEXT_CHARS);
+    let messages = vec![
+        ChatMessage::system(
+            "You are an intent router. Classify intent for tool routing using CURRENT_USER_MESSAGE plus RECENT_CONTEXT. RECENT_CONTEXT is only local grounding for short follow-ups (acknowledgements, confirmations, pivots); do not treat old unresolved tasks as active unless CURRENT_USER_MESSAGE explicitly re-requests them. Return strict JSON only with fields: intent, confidence, reason. intent must be one of: conversational, tool_required, clarify, mixed.".to_string(),
+        ),
+        ChatMessage::user(format!(
+            "RECENT_CONTEXT:\n{}\n\nCURRENT_USER_MESSAGE:\n{}\n\nClassify whether this turn should use tools now.",
+            if bounded_context.trim().is_empty() {
+                "(none)"
+            } else {
+                bounded_context.as_str()
+            },
+            bounded_prompt,
+        )),
+    ];
+
+    let completion = pipeline
+        .complete_chat_stream(
+            ChatRequest::new(messages),
+            PromptExecutionContext::default(),
+            None,
+        )
+        .await
+        .ok()?;
+
+    let raw = completion
+        .response
+        .into_first_text()
+        .map(|value| value.trim().to_string())?;
+
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+    let intent = parsed
+        .get("intent")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())?;
+    let confidence = parsed
+        .get("confidence")
+        .and_then(|value| value.as_f64())
+        .map(|value| value as f32)
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    let reason = parsed
+        .get("reason")
+        .and_then(|value| value.as_str())
+        .map(|value| truncate_text_for_budget(value, 120))
+        .unwrap_or_else(|| "none".to_string());
+
+    Some(IntentClassification {
+        intent,
+        confidence,
+        reason,
+    })
+}
+
+fn apply_intent_classifier_override(
+    base: TurnActivationDecision,
+    classification: &IntentClassification,
+) -> TurnActivationDecision {
+    if classification.confidence < INTENT_CLASSIFIER_CONFIDENCE_LOW {
+        return TurnActivationDecision {
+            turn_class: "a",
+            tool_call_mode: ToolCallMode::Strict,
+            max_tool_rounds: 1,
+            enforce_no_tools: true,
+            reason: "classifier_low_confidence_bias_no_tools",
+        };
+    }
+
+    match classification.intent.as_str() {
+        "conversational"
+            if classification.confidence >= INTENT_CLASSIFIER_CONFIDENCE_CONVERSATIONAL =>
+        {
+            TurnActivationDecision {
+                turn_class: "a",
+                tool_call_mode: ToolCallMode::Strict,
+                max_tool_rounds: 1,
+                enforce_no_tools: true,
+                reason: "classifier_conversational",
+            }
+        }
+        "clarify" => TurnActivationDecision {
+            turn_class: "a",
+            tool_call_mode: ToolCallMode::Strict,
+            max_tool_rounds: 1,
+            enforce_no_tools: true,
+            reason: "classifier_clarify",
+        },
+        "tool_required"
+            if classification.confidence >= INTENT_CLASSIFIER_CONFIDENCE_TOOL_REQUIRED =>
+        {
+            TurnActivationDecision {
+                turn_class: "c",
+                tool_call_mode: ToolCallMode::Auto,
+                max_tool_rounds: base.max_tool_rounds.max(2),
+                enforce_no_tools: false,
+                reason: "classifier_tool_required",
+            }
+        }
+        "mixed" => TurnActivationDecision {
+            reason: "classifier_mixed_keep_default",
+            ..base
+        },
+        _ => base,
+    }
+}
+
+fn retryable_runtime_reason(err_text: &str) -> Option<&'static str> {
+    let text = err_text.to_ascii_lowercase();
+    if text.contains("timeout") || text.contains("timed out") {
+        return Some("timeout");
+    }
+    if text.contains("queue") && (text.contains("busy") || text.contains("full")) {
+        return Some("queue_busy");
+    }
+    if text.contains("connection")
+        || text.contains("transport")
+        || text.contains("temporar")
+        || text.contains("unavailable")
+        || text.contains("5xx")
+    {
+        return Some("transient_runtime");
+    }
+    None
+}
+
+fn build_prompt_pipeline_for_turn(
+    final_route: Option<&medousa::stage_routing::StageRoute>,
+    settings: &super::RuntimeSettings,
+) -> PromptExecutionPipeline {
+    let (provider, model, base_url) = match final_route {
+        Some(route) => (
+            route.provider.clone(),
+            route.model.clone(),
+            route_base_url(route, settings),
+        ),
+        None => {
+            let base = settings.base_url.trim();
+            (
+                settings.provider.clone(),
+                settings.model.clone(),
+                if base.is_empty() {
+                    None
+                } else {
+                    Some(base.to_string())
+                },
+            )
+        }
+    };
+
+    let chat_client: Arc<dyn AiChatClient> = Arc::new(
+        stasis::infrastructure::llm::genai_chat_client::GenaiChatClient::from_provider_model_with_base_url(
+            Some(&provider),
+            &model,
+            base_url.as_deref(),
+        ),
+    );
+    PromptExecutionPipeline::new(chat_client)
+}
+
+fn build_intent_classifier_recent_context(
+    turns: &[ConversationTurn],
+    current_prompt: &str,
+    current_user_persisted: bool,
+    max_turns: usize,
+    max_chars: usize,
+) -> String {
+    let mut selected: Vec<&ConversationTurn> = turns.iter().collect();
+
+    if current_user_persisted {
+        if let Some(last) = selected.last() {
+            if last.role == "user" && last.content.trim() == current_prompt.trim() {
+                selected.pop();
+            }
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut total_chars = 0usize;
+    for turn in selected.iter().rev().take(max_turns).rev() {
+        let role = match turn.role.as_str() {
+            "user" => "user",
+            "assistant" | "agent" => "assistant",
+            _ => continue,
+        };
+
+        let text = truncate_text_for_budget(&turn.content, INTENT_CLASSIFIER_CONTEXT_LINE_CHARS)
+            .replace('\n', " ");
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        let line = format!("{}: {}", role, text);
+        let line_chars = line.chars().count();
+        if total_chars.saturating_add(line_chars) > max_chars {
+            break;
+        }
+        total_chars = total_chars.saturating_add(line_chars);
+        lines.push(line);
+    }
+
+    lines.join("\n")
+}
+
+fn contains_tool_intent(prompt_lower: &str) -> bool {
+    [
+        "search", "look up", "lookup", "run ", "execute", "query", "fetch", "verify", "evidence",
+        "grapheme", "tool", "call", "api", "latest",
+    ]
+    .iter()
+    .any(|needle| prompt_lower.contains(needle))
+}
+
+fn contains_direct_answer_intent(prompt_lower: &str) -> bool {
+    [
+        "explain",
+        "summarize",
+        "rephrase",
+        "clarify",
+        "what does",
+        "how does",
+        "why",
+        "help me understand",
+        "give me",
+        "draft",
+    ]
+    .iter()
+    .any(|needle| prompt_lower.contains(needle))
 }
 
 async fn emit_tool_payload_events(tx: &mpsc::Sender<TuiEvent>, invocations: &[ToolInvocation]) {
@@ -441,12 +1217,244 @@ fn collect_tool_names(invocations: &[ToolInvocation]) -> Vec<String> {
     names
 }
 
+fn default_turn_budget() -> TurnBudget {
+    TurnBudget {
+        max_llm_calls_total: BUDGET_DEFAULT_MAX_LLM_CALLS_TOTAL,
+        max_tool_loop_calls: BUDGET_DEFAULT_MAX_TOOL_LOOP_CALLS,
+        max_prompt_only_calls: BUDGET_DEFAULT_MAX_PROMPT_ONLY_CALLS,
+        max_classifier_calls: BUDGET_DEFAULT_MAX_CLASSIFIER_CALLS,
+        max_retries: BUDGET_DEFAULT_MAX_RETRIES,
+        max_continuations: BUDGET_DEFAULT_MAX_CONTINUATIONS,
+    }
+}
+
+async fn try_consume_classifier_budget(
+    tx: &mpsc::Sender<TuiEvent>,
+    state: &mut TurnOrchestrationState,
+    budget: &TurnBudget,
+) -> bool {
+    if state.classifier_calls >= budget.max_classifier_calls {
+        return emit_budget_deny(
+            tx,
+            state,
+            "classifier",
+            "max_classifier_calls",
+            state.classifier_calls,
+            budget.max_classifier_calls,
+        )
+        .await;
+    }
+    if state.calls_total >= budget.max_llm_calls_total {
+        return emit_budget_deny(
+            tx,
+            state,
+            "classifier",
+            "max_llm_calls_total",
+            state.calls_total,
+            budget.max_llm_calls_total,
+        )
+        .await;
+    }
+    state.calls_total = state.calls_total.saturating_add(1);
+    state.classifier_calls = state.classifier_calls.saturating_add(1);
+    true
+}
+
+async fn try_consume_prompt_only_budget(
+    tx: &mpsc::Sender<TuiEvent>,
+    state: &mut TurnOrchestrationState,
+    budget: &TurnBudget,
+) -> bool {
+    if state.prompt_only_calls >= budget.max_prompt_only_calls {
+        return emit_budget_deny(
+            tx,
+            state,
+            "prompt_only",
+            "max_prompt_only_calls",
+            state.prompt_only_calls,
+            budget.max_prompt_only_calls,
+        )
+        .await;
+    }
+    if state.calls_total >= budget.max_llm_calls_total {
+        return emit_budget_deny(
+            tx,
+            state,
+            "prompt_only",
+            "max_llm_calls_total",
+            state.calls_total,
+            budget.max_llm_calls_total,
+        )
+        .await;
+    }
+    state.calls_total = state.calls_total.saturating_add(1);
+    state.prompt_only_calls = state.prompt_only_calls.saturating_add(1);
+    true
+}
+
+async fn try_consume_tool_loop_budget(
+    tx: &mpsc::Sender<TuiEvent>,
+    state: &mut TurnOrchestrationState,
+    budget: &TurnBudget,
+) -> bool {
+    if state.tool_loop_calls >= budget.max_tool_loop_calls {
+        return emit_budget_deny(
+            tx,
+            state,
+            "tool_loop",
+            "max_tool_loop_calls",
+            state.tool_loop_calls,
+            budget.max_tool_loop_calls,
+        )
+        .await;
+    }
+    if state.calls_total >= budget.max_llm_calls_total {
+        return emit_budget_deny(
+            tx,
+            state,
+            "tool_loop",
+            "max_llm_calls_total",
+            state.calls_total,
+            budget.max_llm_calls_total,
+        )
+        .await;
+    }
+    state.calls_total = state.calls_total.saturating_add(1);
+    state.tool_loop_calls = state.tool_loop_calls.saturating_add(1);
+    true
+}
+
+async fn try_consume_continuation_budget(
+    tx: &mpsc::Sender<TuiEvent>,
+    state: &mut TurnOrchestrationState,
+    budget: &TurnBudget,
+) -> bool {
+    if state.continuations >= budget.max_continuations {
+        return emit_budget_deny(
+            tx,
+            state,
+            "continuation",
+            "max_continuations",
+            state.continuations,
+            budget.max_continuations,
+        )
+        .await;
+    }
+    if state.tool_loop_calls >= budget.max_tool_loop_calls {
+        return emit_budget_deny(
+            tx,
+            state,
+            "continuation",
+            "max_tool_loop_calls",
+            state.tool_loop_calls,
+            budget.max_tool_loop_calls,
+        )
+        .await;
+    }
+    if state.calls_total >= budget.max_llm_calls_total {
+        return emit_budget_deny(
+            tx,
+            state,
+            "continuation",
+            "max_llm_calls_total",
+            state.calls_total,
+            budget.max_llm_calls_total,
+        )
+        .await;
+    }
+    state.calls_total = state.calls_total.saturating_add(1);
+    state.tool_loop_calls = state.tool_loop_calls.saturating_add(1);
+    state.continuations = state.continuations.saturating_add(1);
+    true
+}
+
+async fn try_consume_retry_budget(
+    tx: &mpsc::Sender<TuiEvent>,
+    state: &mut TurnOrchestrationState,
+    budget: &TurnBudget,
+) -> bool {
+    if state.retries >= budget.max_retries {
+        return emit_budget_deny(
+            tx,
+            state,
+            "retry",
+            "max_retries",
+            state.retries,
+            budget.max_retries,
+        )
+        .await;
+    }
+    if state.tool_loop_calls >= budget.max_tool_loop_calls {
+        return emit_budget_deny(
+            tx,
+            state,
+            "retry",
+            "max_tool_loop_calls",
+            state.tool_loop_calls,
+            budget.max_tool_loop_calls,
+        )
+        .await;
+    }
+    if state.calls_total >= budget.max_llm_calls_total {
+        return emit_budget_deny(
+            tx,
+            state,
+            "retry",
+            "max_llm_calls_total",
+            state.calls_total,
+            budget.max_llm_calls_total,
+        )
+        .await;
+    }
+    state.calls_total = state.calls_total.saturating_add(1);
+    state.tool_loop_calls = state.tool_loop_calls.saturating_add(1);
+    state.retries = state.retries.saturating_add(1);
+    true
+}
+
+async fn emit_budget_deny(
+    tx: &mpsc::Sender<TuiEvent>,
+    state: &mut TurnOrchestrationState,
+    stage: &str,
+    reason: &str,
+    used: usize,
+    limit: usize,
+) -> bool {
+    state.loop_guard_tripped = true;
+    let _ = tx
+        .send(TuiEvent::UiNotice(format!(
+            "◈ budget_deny stage={} reason={} used={} limit={}",
+            stage, reason, used, limit
+        )))
+        .await;
+    false
+}
+
+async fn emit_orchestration_summary(tx: &mpsc::Sender<TuiEvent>, state: &TurnOrchestrationState) {
+    let _ = tx
+        .send(TuiEvent::UiNotice(format!(
+            "◈ orchestration_summary calls_total={} classifier_calls={} tool_loop_calls={} prompt_only_calls={} continuations={} retries={} loop_guard_tripped={} final_mode={}",
+            state.calls_total,
+            state.classifier_calls,
+            state.tool_loop_calls,
+            state.prompt_only_calls,
+            state.continuations,
+            state.retries,
+            state.loop_guard_tripped,
+            state.final_mode,
+        )))
+        .await;
+}
+
 pub(crate) fn stop_active_generation(state: &mut TuiState) {
     if let Some(task) = state.active_request_task.take() {
         task.abort();
         state.is_processing = false;
+        state.open_stream_turn_id = None;
         state.active_agent_stream_turn = None;
         state.pending_response_verified = None;
+        state.pending_agent_chunk_delta.clear();
+        state.pending_agent_chunk_count = 0;
         super::flush_thinking_buffer(state);
         super::push_obs(state, "■ generation stopped".to_string());
     }
@@ -709,7 +1717,8 @@ fn route_base_url(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_prompt_with_context_pack, should_run_continuation,
+        ToolCallMode, build_intent_classifier_recent_context, build_prior_messages,
+        build_prompt_with_context_pack, decide_turn_activation, should_run_continuation,
         verifier_policy_from_settings_and_route,
     };
     use chrono::Utc;
@@ -774,6 +1783,7 @@ mod tests {
     fn derives_policy_from_settings_values() {
         let settings = super::super::RuntimeSettings {
             backend: "in-memory".to_string(),
+            theme_id: "medousa-default".to_string(),
             provider: "openai".to_string(),
             model: "gpt-4o-mini".to_string(),
             base_url: String::new(),
@@ -784,6 +1794,13 @@ mod tests {
             max_tool_rounds: "10".to_string(),
             thinking_capture: "true".to_string(),
             thinking_max_lines: "300".to_string(),
+            activation_direct_answer_max_prompt_chars: "320".to_string(),
+            activation_long_session_turn_threshold: "28".to_string(),
+            activation_long_session_max_prompt_chars: "420".to_string(),
+            slice_hot_window_turns: "8".to_string(),
+            slice_cold_window_turns: "24".to_string(),
+            retry_runtime_max_retries: "1".to_string(),
+            retry_runtime_max_rounds: "3".to_string(),
             verifier_min_citation_coverage: "0.55".to_string(),
             verifier_min_avg_support_strength: "0.66".to_string(),
             verifier_min_supported_claim_ratio: "0.77".to_string(),
@@ -801,6 +1818,7 @@ mod tests {
     fn strict_route_profile_tightens_verifier_policy() {
         let settings = super::super::RuntimeSettings {
             backend: "in-memory".to_string(),
+            theme_id: "medousa-default".to_string(),
             provider: "openai".to_string(),
             model: "gpt-4o-mini".to_string(),
             base_url: String::new(),
@@ -811,6 +1829,13 @@ mod tests {
             max_tool_rounds: "10".to_string(),
             thinking_capture: "true".to_string(),
             thinking_max_lines: "300".to_string(),
+            activation_direct_answer_max_prompt_chars: "320".to_string(),
+            activation_long_session_turn_threshold: "28".to_string(),
+            activation_long_session_max_prompt_chars: "420".to_string(),
+            slice_hot_window_turns: "8".to_string(),
+            slice_cold_window_turns: "24".to_string(),
+            retry_runtime_max_retries: "1".to_string(),
+            retry_runtime_max_rounds: "3".to_string(),
             verifier_min_citation_coverage: "0.55".to_string(),
             verifier_min_avg_support_strength: "0.66".to_string(),
             verifier_min_supported_claim_ratio: "0.57".to_string(),
@@ -844,5 +1869,141 @@ mod tests {
         ];
 
         assert!(should_run_continuation(&invocations));
+    }
+
+    #[test]
+    fn activation_policy_prefers_no_tools_for_short_explanations() {
+        let policy = decide_turn_activation(
+            "Explain what this config means",
+            ToolCallMode::Auto,
+            10,
+            4,
+            320,
+            28,
+            420,
+        );
+        assert!(policy.enforce_no_tools);
+        assert_eq!(policy.max_tool_rounds, 1);
+    }
+
+    #[test]
+    fn activation_policy_prefers_tools_for_lookup_intent() {
+        let policy = decide_turn_activation(
+            "Search latest runtime failures and verify evidence",
+            ToolCallMode::Strict,
+            3,
+            8,
+            320,
+            28,
+            420,
+        );
+        assert!(!policy.enforce_no_tools);
+        assert_eq!(policy.tool_call_mode, ToolCallMode::Auto);
+    }
+
+    #[test]
+    fn prior_messages_include_cold_history_summary() {
+        let mut turns = Vec::new();
+        for idx in 0..18 {
+            turns.push(super::super::ConversationTurn {
+                role: if idx % 2 == 0 {
+                    "user".to_string()
+                } else {
+                    "assistant".to_string()
+                },
+                content: format!("turn-{idx}-{}", "x".repeat(120)),
+                timestamp: Utc::now(),
+                tool_names: Vec::new(),
+                answer_state: None,
+            });
+        }
+
+        let built = build_prior_messages(&turns, "new prompt", false, 8, 24);
+        assert!(built.hot_turns_included > 0);
+        assert!(built.cold_turns_summarized > 0);
+        assert!(built.total_chars > 0);
+    }
+
+    #[test]
+    fn prior_messages_include_agent_role_as_assistant() {
+        let turns = vec![
+            super::super::ConversationTurn {
+                role: "user".to_string(),
+                content: "hello".to_string(),
+                timestamp: Utc::now(),
+                tool_names: Vec::new(),
+                answer_state: None,
+            },
+            super::super::ConversationTurn {
+                role: "agent".to_string(),
+                content: "hi there".to_string(),
+                timestamp: Utc::now(),
+                tool_names: Vec::new(),
+                answer_state: None,
+            },
+        ];
+
+        let built = build_prior_messages(&turns, "new prompt", false, 8, 24);
+        let has_assistant = built
+            .messages
+            .iter()
+            .any(|message| matches!(message.role, genai::chat::ChatRole::Assistant));
+        assert!(has_assistant);
+    }
+
+    #[test]
+    fn classifier_recent_context_excludes_current_persisted_user_turn() {
+        let turns = vec![
+            super::super::ConversationTurn {
+                role: "user".to_string(),
+                content: "earlier question".to_string(),
+                timestamp: Utc::now(),
+                tool_names: Vec::new(),
+                answer_state: None,
+            },
+            super::super::ConversationTurn {
+                role: "agent".to_string(),
+                content: "earlier answer".to_string(),
+                timestamp: Utc::now(),
+                tool_names: Vec::new(),
+                answer_state: None,
+            },
+            super::super::ConversationTurn {
+                role: "user".to_string(),
+                content: "thanks".to_string(),
+                timestamp: Utc::now(),
+                tool_names: Vec::new(),
+                answer_state: None,
+            },
+        ];
+
+        let context = build_intent_classifier_recent_context(&turns, "thanks", true, 4, 1400);
+        assert!(context.contains("user: earlier question"));
+        assert!(context.contains("assistant: earlier answer"));
+        assert!(!context.contains("user: thanks"));
+    }
+
+    #[test]
+    fn classifier_recent_context_normalizes_agent_role() {
+        let turns = vec![
+            super::super::ConversationTurn {
+                role: "agent".to_string(),
+                content: "done".to_string(),
+                timestamp: Utc::now(),
+                tool_names: Vec::new(),
+                answer_state: None,
+            },
+            super::super::ConversationTurn {
+                role: "user".to_string(),
+                content: "ok".to_string(),
+                timestamp: Utc::now(),
+                tool_names: Vec::new(),
+                answer_state: None,
+            },
+        ];
+
+        let context = build_intent_classifier_recent_context(&turns, "new", false, 4, 1400);
+        assert!(context.contains("assistant: done"));
+        assert!(!context.contains("agent: done"));
     }
 }

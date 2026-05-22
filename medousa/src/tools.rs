@@ -19,6 +19,9 @@ use stasis::prelude::{
 };
 
 use crate::events::TuiEvent;
+use crate::grapheme_sttp_compaction::{
+    GraphemeCompactionModelTarget, maybe_compact_output_to_sttp,
+};
 use crate::process_once;
 
 async fn run_grapheme_cli(args: Vec<String>) -> stasis::prelude::Result<Value> {
@@ -165,6 +168,84 @@ async fn read_last_grapheme_source() -> Option<String> {
     guard.clone()
 }
 
+async fn emit_compaction_observability(
+    event_tx: &mpsc::Sender<TuiEvent>,
+    tool_name: &str,
+    output: &Value,
+    raw_output_bytes: Option<usize>,
+) {
+    let trigger_bytes = std::env::var("MEDOUSA_GRAPHEME_COMPACTION_TRIGGER_BYTES")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(24 * 1024)
+        .max(1024);
+    let inline_notice_enabled = std::env::var("MEDOUSA_GRAPHEME_COMPACTION_INLINE_NOTICE")
+        .ok()
+        .map(|raw| {
+            matches!(
+                raw.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(true);
+
+    if output
+        .get("mode")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        != "sttp_compaction"
+    {
+        if inline_notice_enabled {
+            if let Some(size) = raw_output_bytes {
+                let _ = event_tx
+                    .send(TuiEvent::UiNotice(format!(
+                        "◈ sttp_compaction tool={} status=inline bytes={} trigger_bytes={}",
+                        tool_name, size, trigger_bytes
+                    )))
+                    .await;
+            }
+        }
+        return;
+    }
+
+    let status = output
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let artifact_id = output
+        .get("original_artifact_ref")
+        .and_then(|value| value.get("artifact_id"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("n/a");
+    let chunk_count = output
+        .get("chunking")
+        .and_then(|value| value.get("chunk_count"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let summaries_count = output
+        .get("summarization")
+        .and_then(|value| value.get("summaries_count"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let failure_count = output
+        .get("summarization")
+        .and_then(|value| value.get("failure_count"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let elapsed_ms = output
+        .get("summarization")
+        .and_then(|value| value.get("elapsed_ms"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+
+    let _ = event_tx
+        .send(TuiEvent::UiNotice(format!(
+            "◈ sttp_compaction tool={} status={} artifact={} chunks={} summaries={} failures={} elapsed_ms={}",
+            tool_name, status, artifact_id, chunk_count, summaries_count, failure_count, elapsed_ms
+        )))
+        .await;
+}
+
 // ── CognitionJobEnqueueTool ──────────────────────────────────────────────────
 
 pub struct CognitionJobEnqueueTool {
@@ -302,11 +383,23 @@ impl StasisTool for CognitionJobEnqueueTool {
 pub struct CognitionGraphemeRunTool {
     runtime: Arc<RuntimeComposition>,
     event_tx: mpsc::Sender<TuiEvent>,
+    session_id: String,
+    model_target: GraphemeCompactionModelTarget,
 }
 
 impl CognitionGraphemeRunTool {
-    pub fn new(runtime: Arc<RuntimeComposition>, event_tx: mpsc::Sender<TuiEvent>) -> Self {
-        Self { runtime, event_tx }
+    pub fn new(
+        runtime: Arc<RuntimeComposition>,
+        event_tx: mpsc::Sender<TuiEvent>,
+        session_id: String,
+        model_target: GraphemeCompactionModelTarget,
+    ) -> Self {
+        Self {
+            runtime,
+            event_tx,
+            session_id,
+            model_target,
+        }
     }
 }
 
@@ -383,39 +476,125 @@ impl StasisTool for CognitionGraphemeRunTool {
             .await;
 
         let runtime_ref = Arc::clone(&self.runtime);
-        let _ = process_once(&runtime_ref, "cognition_tui").await;
+        let raw_output = match process_once(&runtime_ref, "cognition_tui").await {
+            Ok(_) => {
+                let attempts = match &*runtime_ref {
+                    RuntimeComposition::InMemory(rt) => {
+                        rt.job_attempt_store.list_by_job_id(&job_id).await
+                    }
+                    RuntimeComposition::Surreal(rt) => {
+                        rt.job_attempt_store.list_by_job_id(&job_id).await
+                    }
+                };
 
-        let attempts = match &*runtime_ref {
-            RuntimeComposition::InMemory(rt) => {
-                rt.job_attempt_store.list_by_job_id(&job_id).await?
+                match attempts {
+                    Ok(list) => {
+                        if let Some(last) = list.last() {
+                            let succeeded = last.outcome == JobAttemptOutcome::Succeeded;
+                            let execution_id = last.execution_id.clone();
+                            let diagnostics = last.diagnostics.as_deref().map(|d| {
+                                serde_json::from_str::<Value>(d)
+                                    .unwrap_or_else(|_| json!({ "raw": d }))
+                            });
+
+                            let _ = self
+                                .event_tx
+                                .send(TuiEvent::JobProcessed {
+                                    job_id: job_id.clone(),
+                                    succeeded,
+                                    execution_id: execution_id.clone(),
+                                })
+                                .await;
+
+                            json!({
+                                "job_id": job_id,
+                                "status": if succeeded { "succeeded" } else { "failed" },
+                                "execution_id": execution_id,
+                                "attempt_outcome": format!("{:?}", last.outcome),
+                                "diagnostics": diagnostics,
+                            })
+                        } else {
+                            let _ = self
+                                .event_tx
+                                .send(TuiEvent::JobProcessed {
+                                    job_id: job_id.clone(),
+                                    succeeded: false,
+                                    execution_id: None,
+                                })
+                                .await;
+
+                            json!({
+                                "job_id": job_id,
+                                "status": "failed",
+                                "execution_id": Value::Null,
+                                "attempt_outcome": "NoAttempt",
+                                "diagnostics": {
+                                    "raw": "workflow.grapheme.run produced no job attempt; runtime may have failed before attempt persistence"
+                                },
+                            })
+                        }
+                    }
+                    Err(err) => {
+                        let _ = self
+                            .event_tx
+                            .send(TuiEvent::JobProcessed {
+                                job_id: job_id.clone(),
+                                succeeded: false,
+                                execution_id: None,
+                            })
+                            .await;
+
+                        json!({
+                            "job_id": job_id,
+                            "status": "failed",
+                            "execution_id": Value::Null,
+                            "attempt_outcome": "AttemptReadFailed",
+                            "diagnostics": {
+                                "raw": format!("failed to read runtime attempts: {err}")
+                            },
+                        })
+                    }
+                }
             }
-            RuntimeComposition::Surreal(rt) => rt.job_attempt_store.list_by_job_id(&job_id).await?,
+            Err(err) => {
+                let _ = self
+                    .event_tx
+                    .send(TuiEvent::JobProcessed {
+                        job_id: job_id.clone(),
+                        succeeded: false,
+                        execution_id: None,
+                    })
+                    .await;
+
+                json!({
+                    "job_id": job_id,
+                    "status": "failed",
+                    "execution_id": Value::Null,
+                    "attempt_outcome": "RuntimeProcessFailed",
+                    "diagnostics": {
+                        "raw": format!("runtime process_once failed: {err}")
+                    },
+                })
+            }
         };
+        let serialized_raw_output =
+            serde_json::to_string(&raw_output).unwrap_or_else(|_| raw_output.to_string());
 
-        let last = attempts.last();
-        let succeeded = last
-            .map(|a| a.outcome == JobAttemptOutcome::Succeeded)
-            .unwrap_or(false);
-        let execution_id = last.and_then(|a| a.execution_id.clone());
-        let diagnostics = last
-            .and_then(|a| a.diagnostics.as_deref())
-            .map(|d| serde_json::from_str::<Value>(d).unwrap_or_else(|_| json!({ "raw": d })));
-
-        let _ = self
-            .event_tx
-            .send(TuiEvent::JobProcessed {
-                job_id: job_id.clone(),
-                succeeded,
-                execution_id: execution_id.clone(),
-            })
-            .await;
-
-        Ok(json!({
-            "job_id": job_id,
-            "status": if succeeded { "succeeded" } else { "failed" },
-            "execution_id": execution_id,
-            "diagnostics": diagnostics
-        }))
+        let output = maybe_compact_output_to_sttp(
+            self.name(),
+            &self.session_id,
+            raw_output,
+            &self.model_target,
+        )
+        .await?;
+        emit_compaction_observability(
+            &self.event_tx,
+            self.name(),
+            &output,
+            Some(serialized_raw_output.len()),
+        )
+        .await;
+        Ok(output)
     }
 }
 
@@ -840,11 +1019,23 @@ impl StasisTool for CognitionGraphemeExamplesTool {
 pub struct CognitionGraphemeCliRunTool {
     runtime: Arc<RuntimeComposition>,
     event_tx: mpsc::Sender<TuiEvent>,
+    session_id: String,
+    model_target: GraphemeCompactionModelTarget,
 }
 
 impl CognitionGraphemeCliRunTool {
-    pub fn new(runtime: Arc<RuntimeComposition>, event_tx: mpsc::Sender<TuiEvent>) -> Self {
-        Self { runtime, event_tx }
+    pub fn new(
+        runtime: Arc<RuntimeComposition>,
+        event_tx: mpsc::Sender<TuiEvent>,
+        session_id: String,
+        model_target: GraphemeCompactionModelTarget,
+    ) -> Self {
+        Self {
+            runtime,
+            event_tx,
+            session_id,
+            model_target,
+        }
     }
 }
 
@@ -914,7 +1105,20 @@ impl StasisTool for CognitionGraphemeCliRunTool {
             "Compatibility flags accepted but not used by runtime executor"
         ]);
 
-        Ok(result)
+        let serialized_raw_output =
+            serde_json::to_string(&result).unwrap_or_else(|_| result.to_string());
+
+        let output =
+            maybe_compact_output_to_sttp(self.name(), &self.session_id, result, &self.model_target)
+                .await?;
+        emit_compaction_observability(
+            &self.event_tx,
+            self.name(),
+            &output,
+            Some(serialized_raw_output.len()),
+        )
+        .await;
+        Ok(output)
     }
 }
 
@@ -1926,6 +2130,11 @@ pub async fn build_tui_runtime(
     let runtime = Arc::new(runtime_composition);
 
     let tool_registry = InMemoryToolRegistry::default();
+    let compaction_target = GraphemeCompactionModelTarget {
+        provider: resolved_provider.clone(),
+        model: resolved_model.clone(),
+        base_url: resolved_base_url.clone(),
+    };
     tool_registry.register_tool(CognitionJobEnqueueTool::new(
         runtime.clone(),
         event_tx.clone(),
@@ -1933,6 +2142,8 @@ pub async fn build_tui_runtime(
     tool_registry.register_tool(CognitionGraphemeRunTool::new(
         runtime.clone(),
         event_tx.clone(),
+        session_id.to_string(),
+        compaction_target.clone(),
     ))?;
     tool_registry.register_tool(CognitionMemoryStoreTool::new(
         memory_writer.clone(),
@@ -1950,6 +2161,8 @@ pub async fn build_tui_runtime(
     tool_registry.register_tool(CognitionGraphemeCliRunTool::new(
         runtime.clone(),
         event_tx.clone(),
+        session_id.to_string(),
+        compaction_target,
     ))?;
     tool_registry.register_tool(CognitionGraphemePromoteToJobTool::new(
         runtime.clone(),

@@ -17,13 +17,19 @@ pub(crate) fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
         TuiEvent::UiNotice(text) => {
             super::push_obs(state, text);
         }
-        TuiEvent::AgentChunk { delta } => {
+        TuiEvent::AgentChunk { turn_id, delta } => {
+            if !is_active_stream_turn(state, turn_id) {
+                return;
+            }
             if !delta.is_empty() {
                 state.pending_agent_chunk_delta.push_str(&delta);
                 state.pending_agent_chunk_count = state.pending_agent_chunk_count.saturating_add(1);
             }
         }
-        TuiEvent::AgentReasoningChunk { delta } => {
+        TuiEvent::AgentReasoningChunk { turn_id, delta } => {
+            if !is_active_stream_turn(state, turn_id) {
+                return;
+            }
             if !delta.is_empty() {
                 state.received_native_reasoning = true;
                 state.in_thinking_tag = false;
@@ -31,9 +37,17 @@ pub(crate) fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
                 super::push_thinking(state, delta);
             }
         }
-        TuiEvent::AgentResponse { text, tool_names } => {
+        TuiEvent::AgentResponse {
+            turn_id,
+            text,
+            tool_names,
+        } => {
+            if !is_active_stream_turn(state, turn_id) {
+                return;
+            }
             state.is_processing = false;
             state.active_request_task = None;
+            state.open_stream_turn_id = None;
             let (visible_text, thinking_chunks) = strip_thinking_tags(&text);
             if !state.received_native_reasoning {
                 for chunk in thinking_chunks {
@@ -89,16 +103,20 @@ pub(crate) fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
             }
             super::invalidate_markdown_cache(state);
         }
-        TuiEvent::AgentError(err) => {
+        TuiEvent::AgentError { turn_id, message } => {
+            if !is_active_stream_turn(state, turn_id) {
+                return;
+            }
             state.is_processing = false;
             state.active_request_task = None;
+            state.open_stream_turn_id = None;
             state.active_agent_stream_turn = None;
             state.in_thinking_tag = false;
             state.stream_tag_tail.clear();
             state.received_native_reasoning = false;
             super::flush_thinking_buffer(state);
             state.pending_response_verified = None;
-            super::push_obs(state, format!("⚠ {err}"));
+            super::push_obs(state, format!("⚠ {message}"));
         }
         TuiEvent::JobEnqueued { job_id, job_type } => {
             super::push_obs(state, format!("+ {job_type}"));
@@ -283,6 +301,10 @@ pub(crate) fn handle_tui_event(event: TuiEvent, state: &mut TuiState) {
             }
         }
     }
+}
+
+fn is_active_stream_turn(state: &TuiState, turn_id: u64) -> bool {
+    state.open_stream_turn_id == Some(turn_id)
 }
 
 fn trim_hash(hash: &str) -> &str {

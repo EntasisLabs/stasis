@@ -4,6 +4,7 @@ pub mod artifact_store;
 pub mod context_pack;
 pub mod daemon_api;
 pub mod events;
+pub mod grapheme_sttp_compaction;
 pub mod payload_receipt;
 pub mod session;
 pub mod settings_guard;

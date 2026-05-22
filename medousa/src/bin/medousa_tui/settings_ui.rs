@@ -2,11 +2,11 @@ use super::*;
 
 const SETTINGS_SECTIONS: [(&str, usize, usize); 6] = [
     ("Model", 0, 5),
-    ("Runtime", 6, 9),
-    ("Verifier", 10, 13),
-    ("Safety", 14, 17),
-    ("Routing", 18, 25),
-    ("Session", 26, 28),
+    ("Runtime", 6, 16),
+    ("Verifier", 17, 20),
+    ("Safety", 21, 24),
+    ("Routing", 25, 32),
+    ("Session", 33, 36),
 ];
 
 pub(crate) async fn handle_settings_key_event(
@@ -44,6 +44,9 @@ pub(crate) async fn handle_settings_key_event(
     }
 
     match code {
+        KeyCode::Char('t') | KeyCode::Char('T') => {
+            open_theme_menu(state, UiMode::Settings);
+        }
         KeyCode::Tab => {
             switch_settings_tab(state, true);
         }
@@ -72,12 +75,18 @@ pub(crate) async fn handle_settings_key_event(
             quick_adjust_setting(state, false);
         }
         KeyCode::Char('+') | KeyCode::Char('=') => {
-            if matches!(state.settings_selected, 7 | 9 | 10 | 11 | 12 | 13) {
+            if matches!(
+                state.settings_selected,
+                7 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
+            ) {
                 quick_adjust_setting(state, true);
             }
         }
         KeyCode::Char('-') => {
-            if matches!(state.settings_selected, 7 | 9 | 10 | 11 | 12 | 13) {
+            if matches!(
+                state.settings_selected,
+                7 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
+            ) {
                 quick_adjust_setting(state, false);
             }
         }
@@ -90,27 +99,28 @@ pub(crate) async fn handle_settings_key_event(
             state.settings_selected = state.settings_selected.saturating_add(1).min(end);
         }
         KeyCode::Enter => match state.settings_selected {
-            1..=5 | 19 | 20 => {
+            1..=5 | 26 | 27 => {
                 state.settings_editing = true;
             }
-            0 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 18 | 22 | 23 | 24 | 25 => {
+            0 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 25 | 29
+            | 30 | 31 | 32 => {
                 quick_adjust_setting(state, true);
             }
-            14 => {
+            21 => {
                 state.mode = UiMode::RuntimeEnv;
                 state.runtime_env_editing = true;
             }
-            15 => {
+            22 => {
                 emit_settings_validation_summary(state);
             }
-            16 => {
+            23 => {
                 state.settings_draft.api_key.clear();
                 push_obs(
                     state,
                     "✓ API key will be cleared when changes are applied".to_string(),
                 );
             }
-            17 => {
+            24 => {
                 let key = state.settings_draft.api_key.trim().to_string();
                 if key.is_empty() {
                     push_obs(state, "⚠ enter an API key before updating".to_string());
@@ -121,25 +131,28 @@ pub(crate) async fn handle_settings_key_event(
                     push_obs(state, "✓ API key updated".to_string());
                 }
             }
-            21 => {
+            28 => {
                 sync_all_route_targets_to_global(state);
             }
-            26 => {
+            33 => {
                 state.settings_draft = state.settings.clone();
                 state.stage_routing_draft = state.stage_routing.clone();
                 state.routing_editor_role_idx = 0;
                 state.settings_editing = false;
                 push_obs(state, "✓ changes reverted".to_string());
             }
-            27 => {
+            34 => {
                 super::apply_settings(state, tui_rt, event_tx).await;
                 state.mode = UiMode::Chat;
             }
-            28 => {
+            35 => {
                 state.settings_draft = state.settings.clone();
                 state.stage_routing_draft = state.stage_routing.clone();
                 state.routing_editor_role_idx = 0;
                 state.mode = UiMode::Chat;
+            }
+            36 => {
+                open_theme_menu(state, UiMode::Settings);
             }
             _ => {}
         },
@@ -151,45 +164,58 @@ pub(crate) async fn handle_settings_key_event(
 
 pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &mut TuiState) {
     let area = frame.area();
-    let popup = centered_rect(area, 76, 62);
+    let popup = centered_rect(area, 96, 92);
     frame.render_widget(Clear, popup);
 
     let mut lines: Vec<Line> = Vec::new();
     let has_pending_changes =
         state.settings_draft != state.settings || state.stage_routing_draft != state.stage_routing;
     let validation_errors = settings_validation_errors(&state.settings_draft);
-    let validation_line = if validation_errors.is_empty() {
-        " Status: ready to apply ".to_string()
+    let change_label = if has_pending_changes {
+        "Pending"
     } else {
-        format!(" Status: {} issue(s) to review ", validation_errors.len())
+        "Applied"
     };
+    let validation_label = if validation_errors.is_empty() {
+        "Ready"
+    } else {
+        "Needs review"
+    };
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!(" State: {change_label} "),
+            Style::default().fg(if has_pending_changes {
+                Color::Yellow
+            } else {
+                Color::Green
+            }),
+        ),
+        Span::styled("|", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!(" Validation: {validation_label} "),
+            Style::default().fg(if validation_errors.is_empty() {
+                Color::Green
+            } else {
+                Color::Red
+            }),
+        ),
+        Span::styled("|", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!(" Secure: {} ", api_key_storage_backend_label()),
+            Style::default().fg(Color::Cyan),
+        ),
+    ]));
     lines.push(Line::from(Span::styled(
-        if has_pending_changes {
-            " Changes not applied "
-        } else {
-            " All changes applied "
-        },
-        Style::default().fg(if has_pending_changes {
-            Color::Yellow
-        } else {
-            Color::Green
-        }),
-    )));
-    lines.push(Line::from(Span::styled(
-        format!(" Secure storage: {} ", api_key_storage_backend_label()),
-        Style::default().fg(Color::Cyan),
-    )));
-    lines.push(Line::from(Span::styled(
-        validation_line,
-        Style::default().fg(if validation_errors.is_empty() {
-            Color::Green
-        } else {
-            Color::Red
-        }),
-    )));
-    lines.push(Line::from(Span::styled(
-        " Up/Down: move  Enter: edit/action  Space/Left/Right: adjust  +/-: numbers  Tab/Shift+Tab: tab  PgUp/PgDn/Wheel: scroll  Ctrl+,/Esc: close ",
+        " Navigate: Up/Down  Edit: Enter  Adjust: Space/Left/Right +/-  Tabs: Tab/Shift+Tab  Theme: T  Close: Ctrl+,/Esc ",
         Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(
+            " Theme: {} ({})  |  Open picker: T ",
+            ui_theme_display_name(&state.settings.theme_id),
+            state.settings.theme_id
+        ),
+        Style::default().fg(Color::LightCyan),
     )));
     lines.push(Line::from(""));
 
@@ -214,6 +240,46 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &mut Tu
         section_help_text(active_section),
         Style::default().fg(Color::DarkGray),
     )));
+    let direct_chars = parse_usize_with_bounds(
+        &state
+            .settings_draft
+            .activation_direct_answer_max_prompt_chars,
+        320,
+        64,
+        4000,
+    );
+    let long_turns = parse_usize_with_bounds(
+        &state.settings_draft.activation_long_session_turn_threshold,
+        28,
+        8,
+        500,
+    );
+    let long_chars = parse_usize_with_bounds(
+        &state
+            .settings_draft
+            .activation_long_session_max_prompt_chars,
+        420,
+        64,
+        4000,
+    );
+    let hot_turns = parse_usize_with_bounds(&state.settings_draft.slice_hot_window_turns, 8, 2, 32);
+    let cold_turns =
+        parse_usize_with_bounds(&state.settings_draft.slice_cold_window_turns, 24, 4, 128)
+            .max(hot_turns);
+    let retry_max =
+        parse_usize_with_bounds(&state.settings_draft.retry_runtime_max_retries, 1, 0, 5);
+    let retry_rounds =
+        parse_usize_with_bounds(&state.settings_draft.retry_runtime_max_rounds, 3, 1, 10);
+    let policy_mode = policy_mode_label(
+        direct_chars,
+        long_turns,
+        long_chars,
+        hot_turns,
+        cold_turns,
+        retry_max,
+        retry_rounds,
+    );
+    let pressure = context_pressure_label(hot_turns, cold_turns, retry_max, retry_rounds);
     lines.push(Line::from(""));
 
     let selected_role = routing_editor_role(state);
@@ -264,6 +330,38 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &mut Tu
         format!(
             "Thinking Max Lines: {}  [number]",
             state.settings_draft.thinking_max_lines
+        ),
+        format!(
+            "Activation Direct Prompt Max Chars: {}  [number]",
+            state
+                .settings_draft
+                .activation_direct_answer_max_prompt_chars
+        ),
+        format!(
+            "Activation Long Session Turn Threshold: {}  [number]",
+            state.settings_draft.activation_long_session_turn_threshold
+        ),
+        format!(
+            "Activation Long Session Prompt Max Chars: {}  [number]",
+            state
+                .settings_draft
+                .activation_long_session_max_prompt_chars
+        ),
+        format!(
+            "Slice Hot Window Turns: {}  [number]",
+            state.settings_draft.slice_hot_window_turns
+        ),
+        format!(
+            "Slice Cold Window Turns: {}  [number]",
+            state.settings_draft.slice_cold_window_turns
+        ),
+        format!(
+            "Retry Runtime Max Retries: {}  [number]",
+            state.settings_draft.retry_runtime_max_retries
+        ),
+        format!(
+            "Retry Runtime Max Rounds: {}  [number]",
+            state.settings_draft.retry_runtime_max_rounds
         ),
         format!(
             "Verifier Min Citation Coverage: {}  [number]",
@@ -320,19 +418,45 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &mut Tu
         "Revert changes  [action]".to_string(),
         "Apply changes  [action]".to_string(),
         "Cancel  [action]".to_string(),
+        format!(
+            "Theme menu: {}  [open]",
+            ui_theme_display_name(&state.settings.theme_id)
+        ),
     ];
 
     let (start, end) = active_tab_bounds(state);
     let (tab_title, _, _) = SETTINGS_SECTIONS[active_section];
+    let tab_subtitle = match active_section {
+        0 => "Provider, model, and access",
+        1 => "Tool behavior and turn policy",
+        2 => "Evidence confidence thresholds",
+        3 => "Secrets and safety checks",
+        4 => "Role targets and fallback",
+        _ => "Commit or discard your draft",
+    };
     lines.push(Line::from(Span::styled(
         format!(" {tab_title} "),
         Style::default()
             .fg(ui_accent_primary())
             .add_modifier(Modifier::BOLD),
     )));
+    lines.push(Line::from(Span::styled(
+        format!(" {tab_subtitle} "),
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(Span::styled(
+        " ------------------------------------------------------------ ",
+        Style::default().fg(ui_border()),
+    )));
 
     let mut selected_line: Option<usize> = None;
     for idx in start..=end {
+        if idx > start {
+            lines.push(Line::from(Span::styled(
+                " ............................................................ ",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
         if idx == state.settings_selected {
             selected_line = Some(lines.len());
         }
@@ -345,7 +469,7 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &mut Tu
         let mut style = row_style_for_settings_index(idx, idx == state.settings_selected);
         if idx == state.settings_selected
             && state.settings_editing
-            && matches!(idx, 1..=5 | 19 | 20)
+            && matches!(idx, 1..=5 | 26 | 27)
         {
             style = style.add_modifier(Modifier::UNDERLINED);
         }
@@ -353,12 +477,27 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &mut Tu
     }
     lines.push(Line::from(""));
 
+    let container = Block::default()
+        .title(" Settings ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ui_accent_primary()))
+        .style(Style::default().bg(ui_modal_bg()));
+    frame.render_widget(container.clone(), popup);
+    let inner = container.inner(popup);
+    let columns = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            ratatui::layout::Constraint::Percentage(72),
+            ratatui::layout::Constraint::Percentage(28),
+        ])
+        .split(inner);
+    let left_area = columns[0];
+    let right_area = columns[1];
+
     let text = Text::from(lines);
-    let inner_width = popup.width.saturating_sub(2);
-    let visible_height = popup.height.saturating_sub(2);
-    let visual_lines = visual_line_count(&text, inner_width);
-    state.settings_max_scroll = visual_lines.saturating_sub(visible_height);
-    state.settings_scroll = state.settings_scroll.min(state.settings_max_scroll);
+    let inner_width = left_area.width;
+    let visible_height = left_area.height;
+    let visual_lines_left = visual_line_count(&text, inner_width);
 
     if let Some(line_idx) = selected_line {
         let visible_rows = visible_height as usize;
@@ -376,17 +515,199 @@ pub(crate) fn render_settings_overlay(frame: &mut ratatui::Frame, state: &mut Tu
     }
 
     let panel = Paragraph::new(text)
+        .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
+        .wrap(Wrap { trim: false })
+        .scroll((state.settings_scroll, 0));
+    frame.render_widget(panel, left_area);
+
+    let mut rail: Vec<Line> = Vec::new();
+    rail.push(Line::from(Span::styled(
+        " Quick View ",
+        Style::default()
+            .fg(ui_accent_primary())
+            .add_modifier(Modifier::BOLD),
+    )));
+    rail.push(Line::from(""));
+    rail.push(Line::from(vec![
+        Span::styled("Assistant Style: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(policy_mode.0, Style::default().fg(policy_mode.1)),
+    ]));
+    rail.push(Line::from(vec![
+        Span::styled("Context Load: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(pressure.0, Style::default().fg(pressure.1)),
+    ]));
+    rail.push(Line::from(vec![
+        Span::styled("Theme: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            ui_theme_display_name(&state.settings.theme_id),
+            Style::default().fg(Color::Cyan),
+        ),
+    ]));
+    rail.push(Line::from(""));
+
+    match active_section {
+        0 => {
+            rail.push(Line::from(Span::styled(
+                "Model",
+                Style::default().fg(Color::Cyan),
+            )));
+            rail.push(Line::from(format!(
+                "Provider: {}",
+                state.settings_draft.provider
+            )));
+            rail.push(Line::from(format!("Model: {}", state.settings_draft.model)));
+            rail.push(Line::from(format!(
+                "Base URL: {}",
+                if state.settings_draft.base_url.trim().is_empty() {
+                    "Auto".to_string()
+                } else {
+                    "Custom".to_string()
+                }
+            )));
+            rail.push(Line::from(format!(
+                "API key: {}",
+                if state.settings_draft.api_key.trim().is_empty() {
+                    "Not set"
+                } else {
+                    "Configured"
+                }
+            )));
+        }
+        1 => {
+            rail.push(Line::from(Span::styled(
+                "Activation",
+                Style::default().fg(Color::Cyan),
+            )));
+            rail.push(Line::from(format!(
+                "Direct answer under {} chars",
+                direct_chars
+            )));
+            rail.push(Line::from(format!(
+                "Long-session trigger after {} turns",
+                long_turns
+            )));
+            rail.push(Line::from(format!(
+                "Long-session prompt under {} chars",
+                long_chars
+            )));
+            rail.push(Line::from(""));
+            rail.push(Line::from(Span::styled(
+                "Window + Retry",
+                Style::default().fg(Color::Cyan),
+            )));
+            rail.push(Line::from(format!(
+                "History window: {} hot / {} cold",
+                hot_turns, cold_turns
+            )));
+            rail.push(Line::from(format!("Runtime retries: {} max", retry_max)));
+            rail.push(Line::from(format!("Retry rounds: {}", retry_rounds)));
+        }
+        2 => {
+            rail.push(Line::from(Span::styled(
+                "Verifier",
+                Style::default().fg(Color::Cyan),
+            )));
+            rail.push(Line::from(format!(
+                "Citation coverage: {}",
+                state.settings_draft.verifier_min_citation_coverage
+            )));
+            rail.push(Line::from(format!(
+                "Avg support: {}",
+                state.settings_draft.verifier_min_avg_support_strength
+            )));
+            rail.push(Line::from(format!(
+                "Supported claims: {}",
+                state.settings_draft.verifier_min_supported_claim_ratio
+            )));
+            rail.push(Line::from(format!(
+                "Claim support floor: {}",
+                state.settings_draft.verifier_min_claim_support_strength
+            )));
+        }
+        3 => {
+            rail.push(Line::from(Span::styled(
+                "Safety",
+                Style::default().fg(Color::Cyan),
+            )));
+            rail.push(Line::from(format!(
+                "Validation issues: {}",
+                validation_errors.len()
+            )));
+            rail.push(Line::from(format!(
+                "Env lines: {}",
+                state
+                    .settings_draft
+                    .env_overrides
+                    .lines()
+                    .filter(|line| {
+                        let trimmed = line.trim();
+                        !trimmed.is_empty() && !trimmed.starts_with('#')
+                    })
+                    .count()
+            )));
+            rail.push(Line::from("Use Review before Apply."));
+        }
+        4 => {
+            rail.push(Line::from(Span::styled(
+                "Routing",
+                Style::default().fg(Color::Cyan),
+            )));
+            rail.push(Line::from(format!("Role: {}", selected_role)));
+            rail.push(Line::from(format!(
+                "Target: {}:{}",
+                selected_route.provider, selected_route.model
+            )));
+            rail.push(Line::from(format!(
+                "Policy profile: {}",
+                selected_route.policy_profile
+            )));
+            rail.push(Line::from(format!(
+                "Fallback: {}",
+                selected_route.fallback_chain.join(" -> ")
+            )));
+        }
+        _ => {
+            rail.push(Line::from(Span::styled(
+                "Session",
+                Style::default().fg(Color::Cyan),
+            )));
+            rail.push(Line::from(format!(
+                "Draft changes: {}",
+                if has_pending_changes { "Yes" } else { "No" }
+            )));
+            rail.push(Line::from("Revert resets this draft."));
+            rail.push(Line::from("Apply writes runtime + defaults."));
+            rail.push(Line::from(format!(
+                "Theme: {}",
+                ui_theme_display_name(&state.settings.theme_id)
+            )));
+        }
+    }
+
+    rail.push(Line::from(""));
+    rail.push(Line::from(Span::styled(
+        "Tip",
+        Style::default().fg(Color::DarkGray),
+    )));
+    rail.push(Line::from("Tune one setting, then run."));
+
+    let rail_text = Text::from(rail);
+    let rail_visual_lines = visual_line_count(&rail_text, right_area.width.saturating_sub(1));
+    state.settings_max_scroll = visual_lines_left
+        .max(rail_visual_lines)
+        .saturating_sub(visible_height);
+    state.settings_scroll = state.settings_scroll.min(state.settings_max_scroll);
+
+    let rail_panel = Paragraph::new(rail_text)
         .block(
             Block::default()
-                .title(" Settings ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(ui_accent_primary()))
-                .style(Style::default().bg(ui_modal_bg())),
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(ui_border())),
         )
         .style(Style::default().fg(Color::White).bg(ui_modal_bg()))
         .wrap(Wrap { trim: false })
         .scroll((state.settings_scroll, 0));
-    frame.render_widget(panel, popup);
+    frame.render_widget(rail_panel, right_area);
 }
 
 pub(crate) fn handle_runtime_env_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
@@ -541,6 +862,114 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
             state.settings_draft.thinking_max_lines = next.to_string();
         }
         10 => {
+            let current = parse_usize_with_bounds(
+                &state
+                    .settings_draft
+                    .activation_direct_answer_max_prompt_chars,
+                320,
+                64,
+                4000,
+            );
+            let step = if current < 1000 { 32 } else { 128 };
+            let next = if forward {
+                current.saturating_add(step)
+            } else {
+                current.saturating_sub(step)
+            }
+            .clamp(64, 4000);
+            state
+                .settings_draft
+                .activation_direct_answer_max_prompt_chars = next.to_string();
+        }
+        11 => {
+            let current = parse_usize_with_bounds(
+                &state.settings_draft.activation_long_session_turn_threshold,
+                28,
+                8,
+                500,
+            );
+            let step = if current < 100 { 1 } else { 10 };
+            let next = if forward {
+                current.saturating_add(step)
+            } else {
+                current.saturating_sub(step)
+            }
+            .clamp(8, 500);
+            state.settings_draft.activation_long_session_turn_threshold = next.to_string();
+        }
+        12 => {
+            let current = parse_usize_with_bounds(
+                &state
+                    .settings_draft
+                    .activation_long_session_max_prompt_chars,
+                420,
+                64,
+                4000,
+            );
+            let step = if current < 1000 { 32 } else { 128 };
+            let next = if forward {
+                current.saturating_add(step)
+            } else {
+                current.saturating_sub(step)
+            }
+            .clamp(64, 4000);
+            state
+                .settings_draft
+                .activation_long_session_max_prompt_chars = next.to_string();
+        }
+        13 => {
+            let current =
+                parse_usize_with_bounds(&state.settings_draft.slice_hot_window_turns, 8, 2, 32);
+            let next = if forward {
+                current.saturating_add(1)
+            } else {
+                current.saturating_sub(1)
+            }
+            .clamp(2, 32);
+            state.settings_draft.slice_hot_window_turns = next.to_string();
+            let cold =
+                parse_usize_with_bounds(&state.settings_draft.slice_cold_window_turns, 24, 4, 128);
+            if cold < next {
+                state.settings_draft.slice_cold_window_turns = next.to_string();
+            }
+        }
+        14 => {
+            let hot =
+                parse_usize_with_bounds(&state.settings_draft.slice_hot_window_turns, 8, 2, 32);
+            let current =
+                parse_usize_with_bounds(&state.settings_draft.slice_cold_window_turns, 24, 4, 128);
+            let next = if forward {
+                current.saturating_add(1)
+            } else {
+                current.saturating_sub(1)
+            }
+            .clamp(4, 128)
+            .max(hot);
+            state.settings_draft.slice_cold_window_turns = next.to_string();
+        }
+        15 => {
+            let current =
+                parse_usize_with_bounds(&state.settings_draft.retry_runtime_max_retries, 1, 0, 5);
+            let next = if forward {
+                current.saturating_add(1)
+            } else {
+                current.saturating_sub(1)
+            }
+            .clamp(0, 5);
+            state.settings_draft.retry_runtime_max_retries = next.to_string();
+        }
+        16 => {
+            let current =
+                parse_usize_with_bounds(&state.settings_draft.retry_runtime_max_rounds, 3, 1, 10);
+            let next = if forward {
+                current.saturating_add(1)
+            } else {
+                current.saturating_sub(1)
+            }
+            .clamp(1, 10);
+            state.settings_draft.retry_runtime_max_rounds = next.to_string();
+        }
+        17 => {
             let current = parse_f32_with_bounds(
                 &state.settings_draft.verifier_min_citation_coverage,
                 0.60,
@@ -556,7 +985,7 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
             .clamp(0.0, 1.0);
             state.settings_draft.verifier_min_citation_coverage = format!("{next:.2}");
         }
-        11 => {
+        18 => {
             let current = parse_f32_with_bounds(
                 &state.settings_draft.verifier_min_avg_support_strength,
                 0.70,
@@ -572,7 +1001,7 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
             .clamp(0.0, 1.0);
             state.settings_draft.verifier_min_avg_support_strength = format!("{next:.2}");
         }
-        12 => {
+        19 => {
             let current = parse_f32_with_bounds(
                 &state.settings_draft.verifier_min_supported_claim_ratio,
                 0.60,
@@ -588,7 +1017,7 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
             .clamp(0.0, 1.0);
             state.settings_draft.verifier_min_supported_claim_ratio = format!("{next:.2}");
         }
-        13 => {
+        20 => {
             let current = parse_f32_with_bounds(
                 &state.settings_draft.verifier_min_claim_support_strength,
                 0.65,
@@ -604,7 +1033,7 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
             .clamp(0.0, 1.0);
             state.settings_draft.verifier_min_claim_support_strength = format!("{next:.2}");
         }
-        18 => {
+        25 => {
             let roles = medousa::stage_routing::StageRoutingMatrix::roles();
             if roles.is_empty() {
                 return;
@@ -617,7 +1046,7 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
                 state.routing_editor_role_idx - 1
             };
         }
-        22 => {
+        29 => {
             let role = routing_editor_role(state).to_string();
             if let Some(route) = state.stage_routing_draft.get_mut(&role) {
                 let presets = route_target_presets();
@@ -636,7 +1065,7 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
                 }
             }
         }
-        23 => {
+        30 => {
             let role = routing_editor_role(state).to_string();
             if let Some(route) = state.stage_routing_draft.get_mut(&role) {
                 let options = ["balanced", "strict", "analytical", "fast"];
@@ -654,7 +1083,7 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
                 route.policy_profile = options[next].to_string();
             }
         }
-        24 => {
+        31 => {
             let role = routing_editor_role(state).to_string();
             if let Some(route) = state.stage_routing_draft.get_mut(&role) {
                 let options = vec![
@@ -676,7 +1105,7 @@ fn quick_adjust_setting(state: &mut TuiState, forward: bool) {
                 route.fallback_chain = options[next].clone();
             }
         }
-        25 => {
+        32 => {
             let role = routing_editor_role(state).to_string();
             let defaults = medousa::stage_routing::StageRoutingMatrix::default_for(
                 &state.settings_draft.provider,
@@ -750,10 +1179,25 @@ fn selected_settings_field_mut(state: &mut TuiState) -> &mut String {
         7 => &mut state.settings_draft.max_tool_rounds,
         8 => &mut state.settings_draft.thinking_capture,
         9 => &mut state.settings_draft.thinking_max_lines,
-        10 => &mut state.settings_draft.verifier_min_citation_coverage,
-        11 => &mut state.settings_draft.verifier_min_avg_support_strength,
-        12 => &mut state.settings_draft.verifier_min_supported_claim_ratio,
-        13 => &mut state.settings_draft.verifier_min_claim_support_strength,
+        10 => {
+            &mut state
+                .settings_draft
+                .activation_direct_answer_max_prompt_chars
+        }
+        11 => &mut state.settings_draft.activation_long_session_turn_threshold,
+        12 => {
+            &mut state
+                .settings_draft
+                .activation_long_session_max_prompt_chars
+        }
+        13 => &mut state.settings_draft.slice_hot_window_turns,
+        14 => &mut state.settings_draft.slice_cold_window_turns,
+        15 => &mut state.settings_draft.retry_runtime_max_retries,
+        16 => &mut state.settings_draft.retry_runtime_max_rounds,
+        17 => &mut state.settings_draft.verifier_min_citation_coverage,
+        18 => &mut state.settings_draft.verifier_min_avg_support_strength,
+        19 => &mut state.settings_draft.verifier_min_supported_claim_ratio,
+        20 => &mut state.settings_draft.verifier_min_claim_support_strength,
         _ => &mut state.settings_draft.base_url,
     }
 }
@@ -762,8 +1206,8 @@ fn selected_route_field_mut(state: &mut TuiState) -> Option<&mut String> {
     let role = routing_editor_role(state).to_string();
     let route = state.stage_routing_draft.get_mut(&role)?;
     match state.settings_selected {
-        19 => Some(&mut route.provider),
-        20 => Some(&mut route.model),
+        26 => Some(&mut route.provider),
+        27 => Some(&mut route.model),
         _ => None,
     }
 }
@@ -810,12 +1254,13 @@ fn row_style_for_settings_index(idx: usize, selected: bool) -> Style {
             .add_modifier(Modifier::BOLD)
     } else {
         match idx {
-            15 => Style::default().fg(Color::Cyan),
-            27 => Style::default().fg(Color::Green),
-            28 => Style::default().fg(Color::LightRed),
-            16 => Style::default().fg(Color::LightYellow),
-            17 => Style::default().fg(Color::LightMagenta),
-            25 => Style::default().fg(Color::LightCyan),
+            22 => Style::default().fg(Color::Cyan),
+            34 => Style::default().fg(Color::Green),
+            35 => Style::default().fg(Color::LightRed),
+            36 => Style::default().fg(Color::Cyan),
+            23 => Style::default().fg(Color::LightYellow),
+            24 => Style::default().fg(Color::LightMagenta),
+            32 => Style::default().fg(Color::LightCyan),
             _ => Style::default().fg(Color::White),
         }
     };
@@ -834,7 +1279,67 @@ fn section_help_text(active_section: usize) -> &'static str {
         2 => " Verification thresholds for confidence and evidence gating.",
         3 => " Review configuration and key-related safety actions.",
         4 => " Stage routing role, manual provider/model, presets, policy, fallback, and reset.",
-        _ => " Revert, apply, or close without applying.",
+        _ => " Revert, apply, close, or open the theme picker.",
+    }
+}
+
+fn policy_mode_label(
+    direct_chars: usize,
+    long_turns: usize,
+    long_chars: usize,
+    hot_turns: usize,
+    cold_turns: usize,
+    retry_max: usize,
+    retry_rounds: usize,
+) -> (&'static str, Color) {
+    let mut score = 0isize;
+    if direct_chars >= 700 {
+        score += 1;
+    }
+    if long_turns >= 40 {
+        score += 1;
+    }
+    if long_chars >= 700 {
+        score += 1;
+    }
+    if hot_turns >= 12 {
+        score += 1;
+    }
+    if cold_turns >= 40 {
+        score += 1;
+    }
+    if retry_max >= 2 {
+        score += 1;
+    }
+    if retry_rounds >= 4 {
+        score += 1;
+    }
+
+    if score >= 5 {
+        ("Aggressive", Color::LightYellow)
+    } else if score <= 1 {
+        ("Conservative", Color::LightGreen)
+    } else {
+        ("Balanced", Color::LightCyan)
+    }
+}
+
+fn context_pressure_label(
+    hot_turns: usize,
+    cold_turns: usize,
+    retry_max: usize,
+    retry_rounds: usize,
+) -> (&'static str, Color) {
+    let pressure = hot_turns.saturating_add(cold_turns / 2)
+        + retry_max.saturating_mul(4)
+        + retry_rounds.saturating_mul(2);
+
+    if pressure >= 38 {
+        ("High", Color::LightRed)
+    } else if pressure >= 24 {
+        ("Medium", Color::Yellow)
+    } else {
+        ("Low", Color::LightGreen)
     }
 }
 

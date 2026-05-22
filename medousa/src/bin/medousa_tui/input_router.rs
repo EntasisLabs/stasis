@@ -87,6 +87,9 @@ pub(crate) async fn handle_key_event(
             state.runtime_env_editing = false;
             return EventOutcome::Continue;
         }
+        if state.mode == UiMode::ThemeMenu {
+            return super::handle_theme_menu_key_event(key.code, state);
+        }
         if state.mode == UiMode::GraphemeConsole {
             state.mode = UiMode::Chat;
             return EventOutcome::Continue;
@@ -207,6 +210,10 @@ pub(crate) async fn handle_key_event(
 
     if state.mode == UiMode::RuntimeEnv {
         return super::handle_runtime_env_key_event(key.code, state);
+    }
+
+    if state.mode == UiMode::ThemeMenu {
+        return super::handle_theme_menu_key_event(key.code, state);
     }
 
     if state.mode == UiMode::AllowlistPreview {

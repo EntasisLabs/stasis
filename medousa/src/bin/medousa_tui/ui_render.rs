@@ -7,12 +7,13 @@ use ratatui::{
 
 use super::{
     ConversationTurn, ObservabilityFilter, TuiState, UiMode, api_key_storage_backend_label,
-    centered_rect, command_preview_ui, settings_ui, ui_accent_primary, ui_accent_warn, ui_bg,
-    ui_border, ui_modal_bg, ui_panel_bg,
+    centered_rect, command_preview_ui, set_active_ui_theme, settings_ui, ui_accent_primary,
+    ui_accent_warn, ui_bg, ui_border, ui_modal_bg, ui_panel_bg,
 };
 use crate::markdown_cache::render_markdown_lines_cached;
 
 pub(crate) fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
+    set_active_ui_theme(&state.settings.theme_id);
     let area = frame.area();
     frame.render_widget(
         Block::default().style(Style::default().bg(ui_bg()).fg(Color::White)),
@@ -110,6 +111,8 @@ pub(crate) fn render(frame: &mut ratatui::Frame, state: &mut TuiState) {
         render_history_overlay(frame, state);
     } else if state.mode == UiMode::CommandPalette {
         render_command_palette_overlay(frame, state);
+    } else if state.mode == UiMode::ThemeMenu {
+        super::theme_ui::render_theme_menu_overlay(frame, state);
     } else if state.mode == UiMode::AllowlistPreview {
         render_allowlist_preview_overlay(frame, state);
     } else if state.mode == UiMode::Editor {

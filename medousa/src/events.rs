@@ -24,15 +24,16 @@ pub enum TuiEvent {
     },
     /// The tool loop returned a final agent response.
     AgentResponse {
+        turn_id: u64,
         text: String,
         tool_names: Vec<String>,
     },
     /// Partial assistant output chunk streamed from the model.
-    AgentChunk { delta: String },
+    AgentChunk { turn_id: u64, delta: String },
     /// Partial model reasoning chunk streamed from the model.
-    AgentReasoningChunk { delta: String },
+    AgentReasoningChunk { turn_id: u64, delta: String },
     /// The tool loop failed with an error.
-    AgentError(String),
+    AgentError { turn_id: u64, message: String },
     /// General UI notification emitted by background workers.
     UiNotice(String),
 }

@@ -3,6 +3,7 @@ use crate::settings_guard::{invalid_module_ids, parse_allowed_modules};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeSettings {
     pub backend: String,
+    pub theme_id: String,
     pub provider: String,
     pub model: String,
     pub base_url: String,
@@ -13,6 +14,13 @@ pub struct RuntimeSettings {
     pub max_tool_rounds: String,
     pub thinking_capture: String,
     pub thinking_max_lines: String,
+    pub activation_direct_answer_max_prompt_chars: String,
+    pub activation_long_session_turn_threshold: String,
+    pub activation_long_session_max_prompt_chars: String,
+    pub slice_hot_window_turns: String,
+    pub slice_cold_window_turns: String,
+    pub retry_runtime_max_retries: String,
+    pub retry_runtime_max_rounds: String,
     pub verifier_min_citation_coverage: String,
     pub verifier_min_avg_support_strength: String,
     pub verifier_min_supported_claim_ratio: String,
@@ -54,6 +62,68 @@ pub fn settings_validation_errors(settings: &RuntimeSettings) -> Vec<String> {
         &mut errors,
     );
 
+    validate_usize_range(
+        "activation direct-answer max prompt chars",
+        &settings.activation_direct_answer_max_prompt_chars,
+        64,
+        4000,
+        &mut errors,
+    );
+    validate_usize_range(
+        "activation long-session turn threshold",
+        &settings.activation_long_session_turn_threshold,
+        8,
+        500,
+        &mut errors,
+    );
+    validate_usize_range(
+        "activation long-session max prompt chars",
+        &settings.activation_long_session_max_prompt_chars,
+        64,
+        4000,
+        &mut errors,
+    );
+    validate_usize_range(
+        "slice hot-window turns",
+        &settings.slice_hot_window_turns,
+        2,
+        32,
+        &mut errors,
+    );
+    validate_usize_range(
+        "slice cold-window turns",
+        &settings.slice_cold_window_turns,
+        4,
+        128,
+        &mut errors,
+    );
+    validate_usize_range(
+        "retry runtime max retries",
+        &settings.retry_runtime_max_retries,
+        0,
+        5,
+        &mut errors,
+    );
+    validate_usize_range(
+        "retry runtime max rounds",
+        &settings.retry_runtime_max_rounds,
+        1,
+        10,
+        &mut errors,
+    );
+
+    let hot = settings.slice_hot_window_turns.trim().parse::<usize>().ok();
+    let cold = settings
+        .slice_cold_window_turns
+        .trim()
+        .parse::<usize>()
+        .ok();
+    if let (Some(hot), Some(cold)) = (hot, cold) {
+        if cold < hot {
+            errors.push("slice cold-window turns must be >= hot-window turns".to_string());
+        }
+    }
+
     errors
 }
 
@@ -65,6 +135,17 @@ fn validate_unit_interval(name: &str, value: &str, errors: &mut Vec<String>) {
     };
     if !(0.0..=1.0).contains(&parsed) {
         errors.push(format!("{name} must be in [0.0, 1.0]"));
+    }
+}
+
+fn validate_usize_range(name: &str, value: &str, min: usize, max: usize, errors: &mut Vec<String>) {
+    let trimmed = value.trim();
+    let Ok(parsed) = trimmed.parse::<usize>() else {
+        errors.push(format!("{name} must be a number in [{min}, {max}]"));
+        return;
+    };
+    if !(min..=max).contains(&parsed) {
+        errors.push(format!("{name} must be in [{min}, {max}]"));
     }
 }
 
@@ -123,6 +204,15 @@ pub fn resolve_backend_name(value: Option<&str>) -> String {
         "in-memory" => "in-memory".to_string(),
         "surreal-mem" => "surreal-mem".to_string(),
         _ => "surreal-mem".to_string(),
+    }
+}
+
+pub fn resolve_theme_id_name(value: Option<&str>) -> String {
+    let trimmed = value.unwrap_or("medousa-default").trim();
+    if trimmed.is_empty() {
+        "medousa-default".to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -240,6 +330,7 @@ mod tests {
     fn validates_allowed_module_format() {
         let settings = RuntimeSettings {
             backend: "surreal-mem".to_string(),
+            theme_id: "medousa-default".to_string(),
             provider: "openai".to_string(),
             model: "gpt-4o-mini".to_string(),
             base_url: String::new(),
@@ -250,6 +341,13 @@ mod tests {
             max_tool_rounds: "10".to_string(),
             thinking_capture: "true".to_string(),
             thinking_max_lines: "300".to_string(),
+            activation_direct_answer_max_prompt_chars: "320".to_string(),
+            activation_long_session_turn_threshold: "28".to_string(),
+            activation_long_session_max_prompt_chars: "420".to_string(),
+            slice_hot_window_turns: "8".to_string(),
+            slice_cold_window_turns: "24".to_string(),
+            retry_runtime_max_retries: "1".to_string(),
+            retry_runtime_max_rounds: "3".to_string(),
             verifier_min_citation_coverage: "0.6".to_string(),
             verifier_min_avg_support_strength: "0.7".to_string(),
             verifier_min_supported_claim_ratio: "0.6".to_string(),

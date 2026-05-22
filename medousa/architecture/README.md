@@ -16,11 +16,12 @@ Start here for product-level usage:
 ## Documents
 
 1. [system-overview.md](system-overview.md)
-2. [component-cli.md](component-cli.md)
-3. [component-tui.md](component-tui.md)
-4. [component-daemon.md](component-daemon.md)
-5. [interaction-and-state-model.md](interaction-and-state-model.md)
-6. [tui-performance-target-plan.md](tui-performance-target-plan.md)
+2. [enterprise-architecture-and-flow-guide.md](enterprise-architecture-and-flow-guide.md)
+3. [component-cli.md](component-cli.md)
+4. [component-tui.md](component-tui.md)
+5. [component-daemon.md](component-daemon.md)
+6. [interaction-and-state-model.md](interaction-and-state-model.md)
+7. [tui-performance-target-plan.md](tui-performance-target-plan.md)
 
 ## Primary Code Anchors
 

@@ -20,6 +20,7 @@ pub struct ConversationTurn {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TuiDefaults {
     pub backend: Option<String>,
+    pub theme_id: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub base_url: Option<String>,
@@ -29,6 +30,13 @@ pub struct TuiDefaults {
     pub max_tool_rounds: Option<usize>,
     pub thinking_capture: Option<bool>,
     pub thinking_max_lines: Option<usize>,
+    pub activation_direct_answer_max_prompt_chars: Option<usize>,
+    pub activation_long_session_turn_threshold: Option<usize>,
+    pub activation_long_session_max_prompt_chars: Option<usize>,
+    pub slice_hot_window_turns: Option<usize>,
+    pub slice_cold_window_turns: Option<usize>,
+    pub retry_runtime_max_retries: Option<usize>,
+    pub retry_runtime_max_rounds: Option<usize>,
     pub verifier_min_citation_coverage: Option<f32>,
     pub verifier_min_avg_support_strength: Option<f32>,
     pub verifier_min_supported_claim_ratio: Option<f32>,

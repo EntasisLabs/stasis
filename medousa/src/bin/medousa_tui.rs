@@ -12,7 +12,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
-    Terminal,
+    Terminal, TerminalOptions, Viewport,
     backend::CrosstermBackend,
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
@@ -40,7 +40,8 @@ use medousa::{
         RuntimeSettings, cycle_backend, cycle_tool_call_mode, env_overrides_validation_errors,
         parse_bool_with_default, parse_env_overrides, parse_f32_with_bounds,
         parse_usize_with_bounds, resolve_backend_name, resolve_bool_arg, resolve_f32_arg,
-        resolve_tool_call_mode_name, resolve_usize_arg, settings_validation_errors,
+        resolve_theme_id_name, resolve_tool_call_mode_name, resolve_usize_arg,
+        settings_validation_errors,
     },
 };
 #[path = "medousa_tui/agent_runtime.rs"]
@@ -67,6 +68,8 @@ mod settings_runtime;
 mod settings_ui;
 #[path = "medousa_tui/slash_commands.rs"]
 mod slash_commands;
+#[path = "medousa_tui/theme_ui.rs"]
+mod theme_ui;
 #[path = "medousa_tui/ui_helpers.rs"]
 mod ui_helpers;
 #[path = "medousa_tui/ui_render.rs"]
@@ -92,7 +95,8 @@ use settings_runtime::{
 };
 use slash_commands::handle_slash_command;
 use ui_helpers::{
-    centered_rect, ui_accent_primary, ui_accent_warn, ui_bg, ui_border, ui_modal_bg, ui_panel_bg,
+    centered_rect, set_active_ui_theme, ui_accent_primary, ui_accent_warn, ui_bg, ui_border,
+    ui_modal_bg, ui_panel_bg, ui_theme_display_name, ui_theme_ids,
 };
 use ui_render::render;
 use workers::{
@@ -115,11 +119,13 @@ Read it as policy memory, then follow it strictly during this conversation.
         tool_requirement(.99): "For current facts, you must use tools."
     },
     tool_distinction(.99): {
-        modules_search_scope(.99): "grapheme.modules.search is only for discovering module docs, examples, signatures, and usage patterns.",
+        
+        modules_search_scope(.99): "grapheme.modules.search is only for discovering module docs, examples, signatures, and usage patterns. If user intent is unclear, look at all available modules first and then offer possible solutions.",
         modules_search_not_web(.99): "grapheme.modules.search is not a web search tool and is not evidence for real-world facts.",
-        real_world_retrieval(.99): "Real-world retrieval must use a runtime script that calls web/http/websearch modules."
+        real_world_retrieval(.99): "Real-world retrieval must use a runtime script that calls either web/http/websearch modules. Most times you'll have to create complex scripts that make composite of websearch and http modules."
         complex_flows(.95): "Complex requests and workflows should utilize different grapheme modules to create composites."
         syntax_guidance(.999): "Grapheme uses a GraphQL style syntax with a mix of Elixir's piping. Always match example syntax before scripting. ALWAYS LOOK AT AVAILABLE MODULES BEFORE ATTEMPTING TO RUN A TOOL."
+        canonical_syntax(.9999): "import core from "grapheme/core\nquery HelloWorld {\nset { message: "LETS GO?!!!!!" }\n|> core.echo(message: $current.message)\n}"
     },
     workflow(.99): {
         step_1_classify_intent(.98): "If user asks for current/external facts, perform tool-based retrieval. If user asks for local transformation/coding, select relevant modules.",
@@ -142,6 +148,7 @@ Read it as policy memory, then follow it strictly during this conversation.
     style(.94): {
         brevity(.94): "Keep responses short and structured for small models but do not kill the momentum of the conversation. Match user's energy by interpreting their AVEC dimensions.",
         provenance_language(.93): "Use explicit source-of-truth language, e.g., Based on tool output."
+        vague_interactions(.95): "Whenever a user is vague about searching or looking something up. Never assume its a runtime environment. The user is not aware of the runtime. The runtime is for you. Ask for better clarification or assume its a websearch request."
     }
 } ⟩
 ⍉⟨ ⏣0{ rho: 0.97, kappa: 0.96, psi: 2.91, compression_avec: { stability: 0.89, friction: 0.25, logic: 0.94, autonomy: 0.82, psi: 2.90 } } ⟩"#;
@@ -169,6 +176,8 @@ struct TuiState {
     is_processing: bool,
     active_request_task: Option<tokio::task::JoinHandle<()>>,
     auto_scroll: bool,
+    active_agent_turn_id: u64,
+    open_stream_turn_id: Option<u64>,
     active_agent_stream_turn: Option<usize>,
     mode: UiMode,
     startup_selected: usize,
@@ -197,6 +206,12 @@ struct TuiState {
     settings_editing: bool,
     settings_scroll: u16,
     settings_max_scroll: u16,
+    theme_menu_selected: usize,
+    theme_menu_scroll: u16,
+    theme_menu_max_scroll: u16,
+    theme_menu_return_mode: UiMode,
+    theme_menu_original_theme_id: String,
+    theme_menu_original_draft_theme_id: String,
     routing_editor_role_idx: usize,
     runtime_env_editing: bool,
     provider_model: String,
@@ -254,6 +269,7 @@ struct MarkdownCacheKey {
 
 struct SettingsApplySnapshot {
     backend: String,
+    theme_id: String,
     provider: String,
     model: String,
     base_url: Option<String>,
@@ -263,6 +279,13 @@ struct SettingsApplySnapshot {
     max_tool_rounds: usize,
     thinking_capture: bool,
     thinking_max_lines: usize,
+    activation_direct_answer_max_prompt_chars: usize,
+    activation_long_session_turn_threshold: usize,
+    activation_long_session_max_prompt_chars: usize,
+    slice_hot_window_turns: usize,
+    slice_cold_window_turns: usize,
+    retry_runtime_max_retries: usize,
+    retry_runtime_max_rounds: usize,
     verifier_min_citation_coverage: f32,
     verifier_min_avg_support_strength: f32,
     verifier_min_supported_claim_ratio: f32,
@@ -286,6 +309,7 @@ enum UiMode {
     CommandPalette,
     Settings,
     RuntimeEnv,
+    ThemeMenu,
     ObservabilityPanel,
     AllowlistPreview,
     Editor,
@@ -324,6 +348,7 @@ async fn main() -> Result<()> {
     let resolved_provider = resolve_llm_provider(provider.or(defaults.provider.as_deref()));
     let resolved_model = resolve_llm_model(model.or(defaults.model.as_deref()));
     let resolved_backend = resolve_backend_name(backend.or(defaults.backend.as_deref()));
+    let resolved_theme_id = resolve_theme_id_name(defaults.theme_id.as_deref());
     let resolved_tool_call_mode =
         resolve_tool_call_mode_name(tool_call_mode.or(defaults.tool_call_mode.as_deref()));
     let resolved_max_tool_rounds = resolve_usize_arg(
@@ -340,6 +365,39 @@ async fn main() -> Result<()> {
         50,
         5000,
     );
+    let resolved_activation_direct_answer_max_prompt_chars = resolve_usize_arg(
+        None,
+        defaults
+            .activation_direct_answer_max_prompt_chars
+            .unwrap_or(320),
+        64,
+        4000,
+    );
+    let resolved_activation_long_session_turn_threshold = resolve_usize_arg(
+        None,
+        defaults
+            .activation_long_session_turn_threshold
+            .unwrap_or(28),
+        8,
+        500,
+    );
+    let resolved_activation_long_session_max_prompt_chars = resolve_usize_arg(
+        None,
+        defaults
+            .activation_long_session_max_prompt_chars
+            .unwrap_or(420),
+        64,
+        4000,
+    );
+    let resolved_slice_hot_window_turns =
+        resolve_usize_arg(None, defaults.slice_hot_window_turns.unwrap_or(8), 2, 32);
+    let resolved_slice_cold_window_turns =
+        resolve_usize_arg(None, defaults.slice_cold_window_turns.unwrap_or(24), 4, 128)
+            .max(resolved_slice_hot_window_turns);
+    let resolved_retry_runtime_max_retries =
+        resolve_usize_arg(None, defaults.retry_runtime_max_retries.unwrap_or(1), 0, 5);
+    let resolved_retry_runtime_max_rounds =
+        resolve_usize_arg(None, defaults.retry_runtime_max_rounds.unwrap_or(3), 1, 10);
     let resolved_verifier_min_citation_coverage = resolve_f32_arg(
         None,
         defaults.verifier_min_citation_coverage.unwrap_or(0.60),
@@ -418,11 +476,17 @@ async fn main() -> Result<()> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal = Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Fullscreen,
+        },
+    )?;
     terminal.hide_cursor()?;
 
     let initial_settings = RuntimeSettings {
         backend: resolved_backend.clone(),
+        theme_id: resolved_theme_id,
         provider: resolved_provider.clone(),
         model: resolved_model.clone(),
         base_url: resolved_base_url.clone().unwrap_or_default(),
@@ -433,6 +497,16 @@ async fn main() -> Result<()> {
         max_tool_rounds: resolved_max_tool_rounds.to_string(),
         thinking_capture: resolved_thinking_capture.to_string(),
         thinking_max_lines: resolved_thinking_max_lines.to_string(),
+        activation_direct_answer_max_prompt_chars:
+            resolved_activation_direct_answer_max_prompt_chars.to_string(),
+        activation_long_session_turn_threshold: resolved_activation_long_session_turn_threshold
+            .to_string(),
+        activation_long_session_max_prompt_chars: resolved_activation_long_session_max_prompt_chars
+            .to_string(),
+        slice_hot_window_turns: resolved_slice_hot_window_turns.to_string(),
+        slice_cold_window_turns: resolved_slice_cold_window_turns.to_string(),
+        retry_runtime_max_retries: resolved_retry_runtime_max_retries.to_string(),
+        retry_runtime_max_rounds: resolved_retry_runtime_max_rounds.to_string(),
         verifier_min_citation_coverage: format!("{:.2}", resolved_verifier_min_citation_coverage),
         verifier_min_avg_support_strength: format!(
             "{:.2}",
@@ -459,6 +533,8 @@ async fn main() -> Result<()> {
         is_processing: false,
         active_request_task: None,
         auto_scroll: true,
+        active_agent_turn_id: 0,
+        open_stream_turn_id: None,
         active_agent_stream_turn: None,
         mode: UiMode::Startup,
         startup_selected: 0,
@@ -487,6 +563,12 @@ async fn main() -> Result<()> {
         settings_editing: false,
         settings_scroll: 0,
         settings_max_scroll: 0,
+        theme_menu_selected: 0,
+        theme_menu_scroll: 0,
+        theme_menu_max_scroll: 0,
+        theme_menu_return_mode: UiMode::Chat,
+        theme_menu_original_theme_id: String::new(),
+        theme_menu_original_draft_theme_id: String::new(),
         routing_editor_role_idx: 0,
         runtime_env_editing: false,
         provider_model,
@@ -661,6 +743,14 @@ async fn handle_command_palette_key_event(
     command_preview_ui::handle_command_palette_key_event(code, state, tui_rt, event_tx).await
 }
 
+fn open_theme_menu(state: &mut TuiState, return_mode: UiMode) {
+    theme_ui::open_theme_menu(state, return_mode);
+}
+
+fn handle_theme_menu_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
+    theme_ui::handle_theme_menu_key_event(code, state)
+}
+
 fn handle_history_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome {
     match code {
         KeyCode::Char('v') | KeyCode::Char('V') => {
@@ -714,6 +804,7 @@ fn handle_history_key_event(code: KeyCode, state: &mut TuiState) -> EventOutcome
                 state.received_native_reasoning = false;
                 state.input_buffer.clear();
                 state.is_processing = false;
+                state.open_stream_turn_id = None;
                 state.active_agent_stream_turn = None;
                 state.auto_scroll = true;
                 state.conv_scroll = state.conv_max_scroll;
@@ -1022,6 +1113,7 @@ mod tests {
     fn test_settings() -> RuntimeSettings {
         RuntimeSettings {
             backend: "in-memory".to_string(),
+            theme_id: "medousa-default".to_string(),
             provider: "openai".to_string(),
             model: "gpt-4o-mini".to_string(),
             base_url: String::new(),
@@ -1032,6 +1124,13 @@ mod tests {
             max_tool_rounds: "10".to_string(),
             thinking_capture: "true".to_string(),
             thinking_max_lines: "300".to_string(),
+            activation_direct_answer_max_prompt_chars: "320".to_string(),
+            activation_long_session_turn_threshold: "28".to_string(),
+            activation_long_session_max_prompt_chars: "420".to_string(),
+            slice_hot_window_turns: "8".to_string(),
+            slice_cold_window_turns: "24".to_string(),
+            retry_runtime_max_retries: "1".to_string(),
+            retry_runtime_max_rounds: "3".to_string(),
             verifier_min_citation_coverage: "0.60".to_string(),
             verifier_min_avg_support_strength: "0.70".to_string(),
             verifier_min_supported_claim_ratio: "0.60".to_string(),
@@ -1052,6 +1151,8 @@ mod tests {
             is_processing: false,
             active_request_task: None,
             auto_scroll: true,
+            active_agent_turn_id: 0,
+            open_stream_turn_id: None,
             active_agent_stream_turn: None,
             mode: UiMode::Chat,
             startup_selected: 0,
@@ -1082,6 +1183,12 @@ mod tests {
             settings_editing: false,
             settings_scroll: 0,
             settings_max_scroll: 0,
+            theme_menu_selected: 0,
+            theme_menu_scroll: 0,
+            theme_menu_max_scroll: 0,
+            theme_menu_return_mode: UiMode::Chat,
+            theme_menu_original_theme_id: String::new(),
+            theme_menu_original_draft_theme_id: String::new(),
             routing_editor_role_idx: 0,
             runtime_env_editing: false,
             provider_model: "openai:gpt-4o-mini".to_string(),
