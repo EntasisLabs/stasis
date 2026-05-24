@@ -7,8 +7,8 @@ use genai::adapter::AdapterKind;
 use genai::chat::{ChatOptions, ChatRequest, ChatResponse, MessageContent, ToolCall, Usage};
 use tokio::sync::Mutex;
 
-use stasis::application::orchestration::agent_session_payload::PromptJobPayload;
-use stasis::application::orchestration::stasis_workflow_job_builder::StasisWorkflowJobBuilder;
+use stasis::application::orchestration::runtime_job_payloads::PromptJobPayload;
+use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
 use stasis::application::runtime::chat_client_middleware::ChatClientMiddleware;
 use stasis::application::runtime::default_chat_middlewares::{
     CHAT_CACHE_HIT_TOTAL, CHAT_CACHE_MISS_TOTAL, CHAT_DURATION_MS, CHAT_ERRORS_TOTAL,
@@ -214,7 +214,7 @@ async fn runtime_builder_chat_middleware_executes_in_registered_order() {
     };
 
     let job_id = "job-middleware-order-1".to_string();
-    let new_job = StasisWorkflowJobBuilder::for_prompt(job_id.clone(), &prompt_payload())
+    let new_job = RuntimeWorkflowJobBuilder::for_prompt(job_id.clone(), &prompt_payload())
         .expect("payload should serialize")
         .with_scheduled_at(now)
         .build();
@@ -277,7 +277,7 @@ async fn runtime_builder_chat_middleware_propagates_failures() {
     };
 
     let job_id = "job-middleware-failure-1".to_string();
-    let new_job = StasisWorkflowJobBuilder::for_prompt(job_id.clone(), &prompt_payload())
+    let new_job = RuntimeWorkflowJobBuilder::for_prompt(job_id.clone(), &prompt_payload())
         .expect("payload should serialize")
         .with_scheduled_at(now)
         .build();
@@ -349,7 +349,7 @@ async fn runtime_builder_cache_middleware_reuses_response_for_identical_requests
 
     for idx in 1..=2 {
         let job_id = format!("job-middleware-cache-{idx}");
-        let new_job = StasisWorkflowJobBuilder::for_prompt(job_id.clone(), &prompt_payload())
+        let new_job = RuntimeWorkflowJobBuilder::for_prompt(job_id.clone(), &prompt_payload())
             .expect("payload should serialize")
             .with_scheduled_at(now)
             .build();
@@ -404,7 +404,7 @@ async fn runtime_builder_telemetry_and_cache_middlewares_emit_metrics() {
 
     for idx in 1..=2 {
         let job_id = format!("job-middleware-metrics-{idx}");
-        let new_job = StasisWorkflowJobBuilder::for_prompt(job_id.clone(), &prompt_payload())
+        let new_job = RuntimeWorkflowJobBuilder::for_prompt(job_id.clone(), &prompt_payload())
             .expect("payload should serialize")
             .with_scheduled_at(now)
             .build();

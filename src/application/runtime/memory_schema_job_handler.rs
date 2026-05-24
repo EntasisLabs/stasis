@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::application::orchestration::agent_session_payload::MemorySchemaJobPayload;
+use crate::application::orchestration::runtime_job_payloads::MemorySchemaJobPayload;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;

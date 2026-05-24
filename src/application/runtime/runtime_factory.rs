@@ -4,6 +4,7 @@ use surrealdb::engine::local::{Db, Mem};
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
 use crate::application::runtime::surreal_runtime::SurrealRuntime;
 use crate::domain::errors::{Result, StasisError};
+use crate::infrastructure::memory::surreal_identity_memory_store::SurrealIdentityMemoryStore;
 
 #[derive(Clone, Debug)]
 pub enum RuntimeBackend {
@@ -34,6 +35,8 @@ impl RuntimeFactory {
                 db.use_ns(namespace).use_db(database).await.map_err(|e| {
                     StasisError::PortFailure(format!("select surreal namespace/database: {e}"))
                 })?;
+
+                SurrealIdentityMemoryStore::ensure_schema_for_db(&db).await?;
 
                 Ok(RuntimeComposition::Surreal(SurrealRuntime::new(db)))
             }

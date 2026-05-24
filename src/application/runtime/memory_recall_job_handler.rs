@@ -3,17 +3,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::application::orchestration::agent_session_payload::{
-    MemoryFallbackPolicyPayload, MemoryPolicyPayload, MemoryRecallJobPayload,
-    MemoryStrictnessModePayload,
+use crate::application::orchestration::runtime_job_payloads::{
+    MemoryPolicyPayload, MemoryRecallJobPayload,
 };
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::runtime::memory_recall_request_builder::build_memory_recall_request;
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
-use crate::ports::outbound::memory::memory_models::{
-    MemoryFallbackPolicy, MemoryRecallRequest, MemoryScope, MemoryStrictnessMode,
-};
+use crate::ports::outbound::memory::memory_models::MemoryRecallRequest;
 
 pub struct MemoryRecallJobHandler {
     reader: Arc<dyn MemoryContextReader>,
@@ -33,38 +31,7 @@ impl MemoryRecallJobHandler {
         correlation_id: &str,
         policy: Option<&MemoryPolicyPayload>,
     ) -> MemoryRecallRequest {
-        let mut request = MemoryRecallRequest::default();
-        request.scope = MemoryScope {
-            session_ids: policy
-                .and_then(|value| value.session_ids.clone())
-                .or_else(|| Some(vec![correlation_id.to_string()])),
-            tiers: policy.and_then(|value| value.tiers.clone()),
-            from_utc: policy.and_then(|value| value.from_utc),
-            to_utc: policy.and_then(|value| value.to_utc),
-        };
-        request.query_text = policy.and_then(|value| value.query_text.clone());
-        request.limit = policy
-            .and_then(|value| value.limit)
-            .unwrap_or(request.limit);
-        request.alpha = policy
-            .and_then(|value| value.alpha)
-            .unwrap_or(request.alpha);
-        request.beta = policy.and_then(|value| value.beta).unwrap_or(request.beta);
-        request.include_explain = policy
-            .and_then(|value| value.include_explain)
-            .unwrap_or(true);
-        request.fallback_policy = match policy.and_then(|value| value.fallback_policy.clone()) {
-            Some(MemoryFallbackPolicyPayload::Never) => MemoryFallbackPolicy::Never,
-            Some(MemoryFallbackPolicyPayload::Always) => MemoryFallbackPolicy::Always,
-            _ => MemoryFallbackPolicy::OnEmpty,
-        };
-        request.strictness = match policy.and_then(|value| value.strictness.clone()) {
-            Some(MemoryStrictnessModePayload::Precision) => MemoryStrictnessMode::Precision,
-            Some(MemoryStrictnessModePayload::Recall) => MemoryStrictnessMode::Recall,
-            _ => MemoryStrictnessMode::Balanced,
-        };
-
-        request
+        build_memory_recall_request(correlation_id, None, policy)
     }
 }
 

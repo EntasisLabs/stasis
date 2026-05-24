@@ -13,7 +13,7 @@ use surrealdb::Surreal;
 use surrealdb::engine::local::Mem;
 use tokio::sync::Mutex;
 
-use stasis::application::orchestration::agent_session_payload::{
+use stasis::application::orchestration::runtime_job_payloads::{
     AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode, AgentTurnJobPayload,
     ConcurrentBranchJobPayload, ConcurrentPatternJobPayload, HandoffPatternJobPayload,
     HandoffTurnJobPayload, MemoryAggregateJobPayload, MemoryRecallJobPayload,
@@ -28,7 +28,7 @@ use stasis::application::orchestration::agent_session_pipeline::{
 use stasis::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline,
 };
-use stasis::application::orchestration::stasis_workflow_job_builder::StasisWorkflowJobBuilder;
+use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
 use stasis::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolLoopPipeline};
 use stasis::application::orchestration::tool_registry::{InMemoryToolRegistry, StasisTool};
 use stasis::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
@@ -75,6 +75,12 @@ use stasis::ports::outbound::ai_chat_tool_interceptor::{
 };
 use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
+use stasis::ports::outbound::memory::identity_memory_models::{
+    AutonomyScope, EntityRef, GetIdentityContextRequest, GetIdentityContextResponse,
+    ListEntityHistoryRequest, ListEntityHistoryResponse, RelationshipEntity,
+    RelationshipStatus,
+};
+use stasis::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use stasis::ports::outbound::memory::memory_models::{
     MemoryAggregateRequest, MemoryAggregateResponse, MemoryRecallRequest, MemoryRecallResponse,
     MemoryRollupRequest, MemoryRollupResponse, MemorySchemaResponse, MemoryStoreRequest,
@@ -505,6 +511,97 @@ impl MemoryOperations for MockMemoryOperations {
     }
 }
 
+#[derive(Clone)]
+struct MockIdentityMemoryStore {
+    response: GetIdentityContextResponse,
+}
+
+#[async_trait]
+impl IdentityMemoryStore for MockIdentityMemoryStore {
+    async fn get_identity_context(
+        &self,
+        _request: &GetIdentityContextRequest,
+    ) -> Result<GetIdentityContextResponse> {
+        Ok(self.response.clone())
+    }
+
+    async fn propose_entity_update(
+        &self,
+        _request: &stasis::ports::outbound::memory::identity_memory_models::ProposeEntityUpdateRequest,
+    ) -> Result<
+        stasis::ports::outbound::memory::identity_memory_models::ProposeEntityUpdateResponse,
+    > {
+        Ok(Default::default())
+    }
+
+    async fn commit_entity_update(
+        &self,
+        _request: &stasis::ports::outbound::memory::identity_memory_models::CommitEntityUpdateRequest,
+    ) -> Result<
+        stasis::ports::outbound::memory::identity_memory_models::CommitEntityUpdateResponse,
+    > {
+        Ok(Default::default())
+    }
+
+    async fn list_entity_history(
+        &self,
+        _request: &ListEntityHistoryRequest,
+    ) -> Result<ListEntityHistoryResponse> {
+        Ok(Default::default())
+    }
+
+    async fn rollback_entity_version(
+        &self,
+        _request: &stasis::ports::outbound::memory::identity_memory_models::RollbackEntityVersionRequest,
+    ) -> Result<
+        stasis::ports::outbound::memory::identity_memory_models::RollbackEntityVersionResponse,
+    > {
+        Ok(Default::default())
+    }
+}
+
+fn replacement_trace_identity_context() -> GetIdentityContextResponse {
+    GetIdentityContextResponse {
+        persona: None,
+        user: None,
+        channel: None,
+        relationships: vec![RelationshipEntity {
+            relationship_id: "rel-new".to_string(),
+            source_entity_ref: EntityRef {
+                entity_type: "PersonaEntity".to_string(),
+                entity_id: "p1".to_string(),
+            },
+            target_entity_ref: EntityRef {
+                entity_type: "UserEntity".to_string(),
+                entity_id: "u1".to_string(),
+            },
+            relationship_kind: "assistant_user".to_string(),
+            status: RelationshipStatus::Active,
+            trust_level: 0.4,
+            confidence: 0.9,
+            strength_score: 0.8,
+            recency_score: 0.7,
+            autonomy_scope: AutonomyScope::default(),
+            approval_profile_id: None,
+            interruption_policy: Default::default(),
+            escalation_policy: Default::default(),
+            policy_tags: vec![],
+            provenance: stasis::ports::outbound::memory::identity_memory_models::UpdateSource::UserDirect,
+            parent_relationship_id: None,
+            governing_relationship_ids: vec![],
+            derived_from_relationship_id: Some("rel-old".to_string()),
+            last_transition_reason: Some("replacement".to_string()),
+            transition_receipt_id: Some("rcpt-replacement-1".to_string()),
+            version: 1,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }],
+        policy_profiles: vec![],
+        graph_depth_used: 1,
+        flattened_claims: vec![],
+    }
+}
+
 struct MockWebSearchTool;
 
 #[async_trait]
@@ -582,7 +679,7 @@ fn build_tool_loop_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_tool_loop(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_tool_loop(job_id.to_string(), payload)
         .expect("tool-loop payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -604,7 +701,7 @@ fn build_agent_turn_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_agent_turn(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_agent_turn(job_id.to_string(), payload)
         .expect("agent-turn payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -626,7 +723,7 @@ fn build_agent_session_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_agent_session(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_agent_session(job_id.to_string(), payload)
         .expect("agent-session payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -648,7 +745,7 @@ fn build_prompt_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_prompt(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_prompt(job_id.to_string(), payload)
         .expect("prompt payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -670,7 +767,7 @@ fn build_orchestration_sequential_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_orchestration_sequential(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_orchestration_sequential(job_id.to_string(), payload)
         .expect("orchestration-sequential payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -692,7 +789,7 @@ fn build_orchestration_concurrent_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_orchestration_concurrent(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_orchestration_concurrent(job_id.to_string(), payload)
         .expect("orchestration-concurrent payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -714,7 +811,7 @@ fn build_orchestration_handoff_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_orchestration_handoff(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_orchestration_handoff(job_id.to_string(), payload)
         .expect("orchestration-handoff payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -736,7 +833,7 @@ fn build_orchestration_orchestrator_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_orchestration_orchestrator(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_orchestration_orchestrator(job_id.to_string(), payload)
         .expect("orchestration-orchestrator payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -758,7 +855,7 @@ fn build_memory_recall_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_memory_recall(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_memory_recall(job_id.to_string(), payload)
         .expect("memory-recall payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -836,7 +933,7 @@ fn build_memory_aggregate_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_memory_aggregate(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_memory_aggregate(job_id.to_string(), payload)
         .expect("memory-aggregate payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -858,7 +955,7 @@ fn build_memory_transform_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_memory_transform(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_memory_transform(job_id.to_string(), payload)
         .expect("memory-transform payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -880,7 +977,7 @@ fn build_memory_rollup_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_memory_rollup(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_memory_rollup(job_id.to_string(), payload)
         .expect("memory-rollup payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -902,7 +999,7 @@ fn build_memory_schema_job(
     trace_id: &str,
     sttp_input_node_id: &str,
 ) -> NewJob {
-    StasisWorkflowJobBuilder::for_memory_schema(job_id.to_string(), payload)
+    RuntimeWorkflowJobBuilder::for_memory_schema(job_id.to_string(), payload)
         .expect("memory-schema payload should serialize")
         .with_idempotency_key(idempotency_key)
         .with_correlation_id(correlation_id)
@@ -1113,6 +1210,90 @@ async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_di
         lineage_events[0].event.retrieval_path.as_deref(),
         Some("Hybrid")
     );
+}
+
+#[tokio::test]
+async fn in_memory_prompt_job_handler_identity_trace_includes_replacement_continuity_receipt() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "prompt completion text".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse::default(),
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:prompt:identity-trace:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+    let identity_store = Arc::new(MockIdentityMemoryStore {
+        response: replacement_trace_identity_context(),
+    });
+
+    runtime
+        .register_handler(PromptChatJobHandler::new_with_memory_and_identity(
+            chat_client,
+            Some(memory_reader),
+            Some(memory_writer),
+            Some(identity_store),
+        ))
+        .expect("prompt handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-prompt-identity-trace-1".to_string();
+    let payload = PromptJobPayload {
+        user_prompt: "summarize rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+    };
+
+    runtime
+        .enqueue(build_prompt_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-prompt-identity-trace-1",
+            "corr-prompt-identity-trace-1",
+            "cause-prompt-identity-trace-1",
+            "trace-prompt-identity-trace-1",
+            "sttp:in:prompt:identity-trace:1",
+        ))
+        .await
+        .expect("prompt job should enqueue");
+
+    runtime
+        .process_once("default", "worker-prompt", now)
+        .await
+        .expect("prompt processing should succeed");
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+
+    assert_eq!(
+        diagnostics.pointer("/identity_context/attempted"),
+        Some(&json!(true))
+    );
+    let summary = diagnostics
+        .pointer("/identity_context/summary")
+        .and_then(|value| value.as_str())
+        .expect("identity summary should be present");
+    assert!(summary.contains("continuity_links=1"));
+    assert!(summary.contains("continuity_receipts=1"));
 }
 
 #[tokio::test]
@@ -1408,6 +1589,99 @@ async fn in_memory_tool_loop_job_handler_with_memory_persists_memory_node_id_and
         lineage_events[0].event.retrieval_path.as_deref(),
         Some("Hybrid")
     );
+}
+
+#[tokio::test]
+async fn in_memory_tool_loop_identity_trace_includes_replacement_continuity_receipt() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft analysis".to_string(),
+        "final answer grounded in tool evidence".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse::default(),
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:tool-loop:identity-trace:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+    let identity_store = Arc::new(MockIdentityMemoryStore {
+        response: replacement_trace_identity_context(),
+    });
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(ToolLoopJobHandler::new_with_memory_and_identity(
+            chat_client,
+            Arc::new(tool_registry),
+            Some(memory_reader),
+            Some(memory_writer),
+            Some(identity_store),
+        ))
+        .expect("tool loop handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-tool-loop-identity-trace-1".to_string();
+    let payload = ToolLoopJobPayload {
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": "latest rust trends" })),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_tool_loop_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-tool-loop-identity-trace-1",
+            "corr-tool-loop-identity-trace-1",
+            "cause-tool-loop-identity-trace-1",
+            "trace-tool-loop-identity-trace-1",
+            "sttp:in:tool-loop:identity-trace:1",
+        ))
+        .await
+        .expect("tool loop job should enqueue");
+
+    runtime
+        .process_once("default", "worker-tool-loop", now)
+        .await
+        .expect("tool loop processing should succeed");
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+
+    assert_eq!(
+        diagnostics.pointer("/identity_context/attempted"),
+        Some(&json!(true))
+    );
+    let summary = diagnostics
+        .pointer("/identity_context/summary")
+        .and_then(|value| value.as_str())
+        .expect("identity summary should be present");
+    assert!(summary.contains("continuity_links=1"));
+    assert!(summary.contains("continuity_receipts=1"));
 }
 
 #[tokio::test]
@@ -1707,6 +1981,101 @@ async fn in_memory_agent_turn_job_handler_with_memory_persists_memory_node_id_an
         lineage_events[0].event.retrieval_path.as_deref(),
         Some("Hybrid")
     );
+}
+
+#[tokio::test]
+async fn in_memory_agent_turn_identity_trace_includes_replacement_continuity_receipt() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft analysis".to_string(),
+        "agent final answer grounded in tool evidence".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse::default(),
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:agent-turn:identity-trace:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+    let identity_store = Arc::new(MockIdentityMemoryStore {
+        response: replacement_trace_identity_context(),
+    });
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(AgentTurnJobHandler::new_with_memory_and_identity(
+            chat_client,
+            Arc::new(tool_registry),
+            Some(memory_reader),
+            Some(memory_writer),
+            Some(identity_store),
+        ))
+        .expect("agent-turn handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-agent-turn-identity-trace-1".to_string();
+    let payload = AgentTurnJobPayload {
+        agent_id: "agent.researcher".to_string(),
+        thread_id: Some("thread-42".to_string()),
+        user_prompt: "latest rust trends".to_string(),
+        system_prompt: Some("be concise".to_string()),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+        tool_name: "stasis.web.search.mock".to_string(),
+        tool_input: Some(json!({ "query": "latest rust trends" })),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_agent_turn_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-agent-turn-identity-trace-1",
+            "corr-agent-turn-identity-trace-1",
+            "cause-agent-turn-identity-trace-1",
+            "trace-agent-turn-identity-trace-1",
+            "sttp:in:agent-turn:identity-trace:1",
+        ))
+        .await
+        .expect("agent-turn job should enqueue");
+
+    runtime
+        .process_once("default", "worker-agent-turn", now)
+        .await
+        .expect("agent-turn processing should succeed");
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+
+    assert_eq!(
+        diagnostics.pointer("/identity_context/attempted"),
+        Some(&json!(true))
+    );
+    let summary = diagnostics
+        .pointer("/identity_context/summary")
+        .and_then(|value| value.as_str())
+        .expect("identity summary should be present");
+    assert!(summary.contains("continuity_links=1"));
+    assert!(summary.contains("continuity_receipts=1"));
 }
 
 #[tokio::test]
@@ -2514,6 +2883,114 @@ async fn in_memory_agent_session_job_handler_with_memory_persists_memory_node_id
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:agent-session:1"))
     );
+}
+
+#[tokio::test]
+async fn in_memory_agent_session_identity_trace_includes_replacement_continuity_receipt() {
+    let runtime = InMemoryRuntime::new();
+    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+        "draft turn 1".to_string(),
+        "final turn 1".to_string(),
+        "draft turn 2".to_string(),
+        "final turn 2".to_string(),
+    ]));
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse::default(),
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:agent-session:identity-trace:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+    let identity_store = Arc::new(MockIdentityMemoryStore {
+        response: replacement_trace_identity_context(),
+    });
+    let tool_registry = InMemoryToolRegistry::default();
+    tool_registry
+        .register_tool(MockWebSearchTool)
+        .expect("tool should register");
+
+    runtime
+        .register_handler(AgentSessionJobHandler::new_with_memory_and_identity(
+            chat_client,
+            Arc::new(tool_registry),
+            Some(memory_reader),
+            Some(memory_writer),
+            Some(identity_store),
+        ))
+        .expect("agent-session handler should register");
+
+    let now = Utc::now();
+    let job_id = "job-agent-session-identity-trace-1".to_string();
+    let payload = AgentSessionJobPayload {
+        thread_id: Some("thread-session-identity-trace-1".to_string()),
+        initial_user_prompt: "Coordinate a short research answer".to_string(),
+        participants: vec![
+            AgentSessionParticipantPayload {
+                agent_id: "agent.alpha".to_string(),
+                system_prompt: Some("You are agent alpha".to_string()),
+                tool_name: "stasis.web.search.mock".to_string(),
+                tool_input: Some(json!({"query": "rust trends"})),
+            },
+            AgentSessionParticipantPayload {
+                agent_id: "agent.beta".to_string(),
+                system_prompt: Some("You are agent beta".to_string()),
+                tool_name: "stasis.web.search.mock".to_string(),
+                tool_input: Some(json!({"query": "rust trends"})),
+            },
+        ],
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        memory_policy: None,
+        max_turns: Some(2),
+        tool_call_mode: None,
+    };
+
+    runtime
+        .enqueue(build_agent_session_job(
+            &job_id,
+            &payload,
+            now,
+            "idem-agent-session-identity-trace-1",
+            "corr-agent-session-identity-trace-1",
+            "cause-agent-session-identity-trace-1",
+            "trace-agent-session-identity-trace-1",
+            "sttp:in:agent-session:identity-trace:1",
+        ))
+        .await
+        .expect("agent-session job should enqueue");
+
+    runtime
+        .process_once("default", "worker-agent-session", now)
+        .await
+        .expect("agent-session processing should succeed");
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id(&job_id)
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+
+    assert_eq!(
+        diagnostics.pointer("/identity_context/attempted"),
+        Some(&json!(true))
+    );
+    let summary = diagnostics
+        .pointer("/identity_context/summary")
+        .and_then(|value| value.as_str())
+        .expect("identity summary should be present");
+    assert!(summary.contains("continuity_links=1"));
+    assert!(summary.contains("continuity_receipts=1"));
 }
 
 #[tokio::test]
@@ -6307,7 +6784,7 @@ async fn lineage_investigator_queries_guardrail_failures() {
         .register_handler(GraphemeJobHandler::new(workflow_engine))
         .expect("grapheme handler should register");
 
-    let source = r#"import sql from "grapheme/sql"
+        let source = r#"import sql from "acme/sql"
 
 query Run {
   sql.query(connection: "local", sql: "select 1") {

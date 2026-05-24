@@ -21,7 +21,7 @@ pub mod prelude {
         RegisterDeliveryEndpointResponse, RunClusterHeartbeatSweepRequest,
         RunClusterHeartbeatSweepResponse, SetDeliveryEndpointEnabledRequest,
     };
-    pub use crate::application::orchestration::agent_session_payload::{
+    pub use crate::application::orchestration::runtime_job_payloads::{
         AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode,
         AgentTurnJobPayload, ConcurrentBranchJobPayload, ConcurrentPatternJobPayload,
         HandoffPatternJobPayload, HandoffTurnJobPayload, OrchestratorPatternJobPayload,
@@ -39,7 +39,10 @@ pub mod prelude {
         PromptExecutionContext, PromptExecutionPipeline, PromptExecutionRequest,
         PromptExecutionResponse,
     };
-    pub use crate::application::orchestration::stasis_workflow_job_builder::StasisWorkflowJobBuilder;
+    pub use crate::application::orchestration::tool_loop_pipeline::{
+        ToolCallMode, ToolInvocation, ToolLoopExecutionRequest, ToolLoopPipeline,
+    };
+    pub use crate::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
     pub use crate::application::orchestration::tool_registry::{
         InMemoryToolRegistry, StasisTool, ToolRegistry,
     };
@@ -75,6 +78,9 @@ pub mod prelude {
     pub use crate::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
     pub use crate::application::use_cases::investigate_runtime_lineage::{
         InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
+    };
+    pub use crate::application::use_cases::identity_memory_service::{
+        IdentityMemoryService, ProposeAndCommitRequest, ProposeAndCommitResponse,
     };
     pub use crate::application::use_cases::manage_cluster_nodes::{
         ForwardClusterControlCommand, HeartbeatClusterNode, InitiateCoordinatorFailover,
@@ -117,6 +123,7 @@ pub mod prelude {
     pub use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
     pub use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
     pub use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
+    pub use crate::infrastructure::memory::in_memory_identity_memory_store::InMemoryIdentityMemoryStore;
     pub use crate::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
     pub use crate::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
     pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
@@ -158,17 +165,31 @@ pub mod prelude {
     pub use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
     pub use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
     pub use crate::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
+    pub use crate::infrastructure::memory::surreal_identity_memory_store::SurrealIdentityMemoryStore;
     pub use crate::infrastructure::runtime::system_clock::SystemClock;
     pub use crate::infrastructure::runtime::tcp_socket_transport_publisher::TcpSocketTransportPublisher;
     pub use crate::infrastructure::runtime::tokio_channel_event_publisher::TokioChannelEventPublisher;
     pub use crate::ports::inbound::control_plane_commands::ControlPlaneCommands;
     pub use crate::ports::outbound::ai_chat_client::AiChatClient;
+    pub use crate::ports::outbound::ai_chat_client::StreamDelta;
     pub use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
     pub use crate::ports::outbound::ai_chat_tool_interceptor::{
         AiChatToolInterceptor, AiToolCallEnvelope,
     };
     pub use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
     pub use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
+    pub use crate::ports::outbound::memory::identity_memory_models::{
+        AutonomyScope, ChannelProfileEntity, CommitEntityUpdateRequest,
+        CommitEntityUpdateResponse, CommitOutcomeCode, EntityRef, EntityUpdateProposalRecord,
+        EscalationPolicy, FlattenedPolicyClaim, GetIdentityContextRequest,
+        GetIdentityContextResponse, IdentityEntityType, InterruptionPolicy,
+        ListEntityHistoryRequest, ListEntityHistoryResponse, PersonaEntity,
+        PolicyProfileEntity, ProposalState, ProposeEntityUpdateRequest,
+        ProposeEntityUpdateResponse, RelationshipEntity, RelationshipStatus,
+        RelationshipTransitionEvent, RollbackEntityVersionRequest,
+        RollbackEntityVersionResponse, UpdateSource, UpdateTier, UserEntity,
+    };
+    pub use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
     pub use crate::ports::outbound::memory::memory_models::{
         MemoryAggregateRequest, MemoryAggregateResponse, MemoryAvecState, MemoryFallbackPolicy,
         MemoryRecallRequest, MemoryRecallResponse, MemoryRollupRequest, MemoryRollupResponse,
@@ -194,6 +215,7 @@ pub mod prelude {
         WorkflowEngine, WorkflowExecutionOutput,
     };
     pub use crate::sdk::control_plane_sdk::ControlPlaneSdk;
+    pub use crate::sdk::runtime_sdk::{RuntimeSdk, RuntimeStatsSnapshot};
     pub use crate::sdk::stasis_sdk::StasisSdk;
     pub use genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatResponse};
 }

@@ -52,6 +52,7 @@ use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
 use crate::ports::outbound::ai_chat_tool_interceptor::AiChatToolInterceptor;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
+use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use crate::ports::outbound::memory::memory_operations::MemoryOperations;
 use crate::ports::outbound::runtime::cluster_node_store::ClusterNodeStore;
 use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
@@ -84,6 +85,7 @@ pub struct StasisRuntimeBuilder {
     chat_middlewares: Vec<Arc<dyn ChatClientMiddleware>>,
     memory_context_reader: Option<Arc<dyn MemoryContextReader>>,
     memory_context_writer: Option<Arc<dyn MemoryContextWriter>>,
+    identity_memory_store: Option<Arc<dyn IdentityMemoryStore>>,
     memory_operations: Option<Arc<dyn MemoryOperations>>,
     thread_store: Option<Arc<dyn ThreadStore>>,
     cluster_node_store: Option<Arc<dyn ClusterNodeStore>>,
@@ -112,6 +114,7 @@ impl StasisRuntimeBuilder {
             chat_middlewares: Vec::new(),
             memory_context_reader: None,
             memory_context_writer: None,
+            identity_memory_store: None,
             memory_operations: None,
             thread_store: None,
             cluster_node_store: None,
@@ -188,6 +191,14 @@ impl StasisRuntimeBuilder {
 
     pub fn with_locus_memory(mut self) -> Self {
         self.enable_locus_memory = true;
+        self
+    }
+
+    pub fn with_identity_memory_store(
+        mut self,
+        identity_memory_store: Arc<dyn IdentityMemoryStore>,
+    ) -> Self {
+        self.identity_memory_store = Some(identity_memory_store);
         self
     }
 
@@ -316,6 +327,7 @@ impl StasisRuntimeBuilder {
         let chat_client = Self::compose_chat_client(chat_client, &self.chat_middlewares);
         let mut memory_context_reader = self.memory_context_reader;
         let mut memory_context_writer = self.memory_context_writer;
+        let identity_memory_store = self.identity_memory_store;
         let mut memory_operations = self.memory_operations;
         let default_thread_store = self.thread_store.clone();
         let configured_cluster_store = self.cluster_node_store.clone();
@@ -394,34 +406,38 @@ impl StasisRuntimeBuilder {
                 }
 
                 if self.include_prompt_handler {
-                    rt.register_handler(PromptChatJobHandler::new_with_memory(
+                    rt.register_handler(PromptChatJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
                         memory_context_reader.clone(),
                         memory_context_writer.clone(),
+                        identity_memory_store.clone(),
                     ))?;
                 }
 
                 if self.include_tool_loop_handler {
-                    rt.register_handler(ToolLoopJobHandler::new_with_memory(
+                    rt.register_handler(ToolLoopJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
                         tool_registry.clone(),
                         memory_context_reader.clone(),
                         memory_context_writer.clone(),
+                        identity_memory_store.clone(),
                     ))?;
                 }
 
                 if self.include_agent_handlers {
-                    rt.register_handler(AgentTurnJobHandler::new_with_memory(
+                    rt.register_handler(AgentTurnJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
                         tool_registry.clone(),
                         memory_context_reader.clone(),
                         memory_context_writer.clone(),
+                        identity_memory_store.clone(),
                     ))?;
-                    rt.register_handler(AgentSessionJobHandler::new_with_memory(
+                    rt.register_handler(AgentSessionJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
                         tool_registry.clone(),
                         memory_context_reader.clone(),
                         memory_context_writer.clone(),
+                        identity_memory_store.clone(),
                     ))?;
                 }
 
@@ -517,34 +533,38 @@ impl StasisRuntimeBuilder {
                 }
 
                 if self.include_prompt_handler {
-                    rt.register_handler(PromptChatJobHandler::new_with_memory(
+                    rt.register_handler(PromptChatJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
                         memory_context_reader.clone(),
                         memory_context_writer.clone(),
+                        identity_memory_store.clone(),
                     ))?;
                 }
 
                 if self.include_tool_loop_handler {
-                    rt.register_handler(ToolLoopJobHandler::new_with_memory(
+                    rt.register_handler(ToolLoopJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
                         tool_registry.clone(),
                         memory_context_reader.clone(),
                         memory_context_writer.clone(),
+                        identity_memory_store.clone(),
                     ))?;
                 }
 
                 if self.include_agent_handlers {
-                    rt.register_handler(AgentTurnJobHandler::new_with_memory(
+                    rt.register_handler(AgentTurnJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
                         tool_registry.clone(),
                         memory_context_reader.clone(),
                         memory_context_writer.clone(),
+                        identity_memory_store.clone(),
                     ))?;
-                    rt.register_handler(AgentSessionJobHandler::new_with_memory(
+                    rt.register_handler(AgentSessionJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
                         tool_registry.clone(),
                         memory_context_reader.clone(),
                         memory_context_writer.clone(),
+                        identity_memory_store.clone(),
                     ))?;
                 }
 

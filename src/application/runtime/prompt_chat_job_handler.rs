@@ -7,10 +7,13 @@ use std::{
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::application::orchestration::agent_session_payload::{
-    MemoryFallbackPolicyPayload, MemoryPolicyPayload, MemoryStoreModePayload,
-    MemoryStrictnessModePayload, PromptJobPayload,
+use crate::application::orchestration::runtime_job_payloads::{
+    MemoryPolicyPayload, MemoryStoreModePayload, PromptJobPayload,
 };
+use crate::application::runtime::identity_context_compiler::{
+    load_identity_context_summary, prepend_identity_snapshot,
+};
+use crate::application::runtime::memory_recall_request_builder::build_memory_recall_request;
 use crate::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline, PromptExecutionRequest,
 };
@@ -18,22 +21,21 @@ use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHan
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::ai_chat_client::AiChatClient;
+use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
-use crate::ports::outbound::memory::memory_models::{
-    MemoryFallbackPolicy, MemoryRecallRequest, MemoryScope, MemoryStoreRequest,
-    MemoryStrictnessMode,
-};
+use crate::ports::outbound::memory::memory_models::{MemoryRecallRequest, MemoryStoreRequest};
 
 pub struct PromptChatJobHandler {
     pipeline: PromptExecutionPipeline,
     memory_reader: Option<Arc<dyn MemoryContextReader>>,
     memory_writer: Option<Arc<dyn MemoryContextWriter>>,
+    identity_memory_store: Option<Arc<dyn IdentityMemoryStore>>,
 }
 
 impl PromptChatJobHandler {
     pub fn new(chat_client: Arc<dyn AiChatClient>) -> Self {
-        Self::new_with_memory(chat_client, None, None)
+        Self::new_with_memory_and_identity(chat_client, None, None, None)
     }
 
     pub fn new_with_memory(
@@ -41,10 +43,20 @@ impl PromptChatJobHandler {
         memory_reader: Option<Arc<dyn MemoryContextReader>>,
         memory_writer: Option<Arc<dyn MemoryContextWriter>>,
     ) -> Self {
+        Self::new_with_memory_and_identity(chat_client, memory_reader, memory_writer, None)
+    }
+
+    pub fn new_with_memory_and_identity(
+        chat_client: Arc<dyn AiChatClient>,
+        memory_reader: Option<Arc<dyn MemoryContextReader>>,
+        memory_writer: Option<Arc<dyn MemoryContextWriter>>,
+        identity_memory_store: Option<Arc<dyn IdentityMemoryStore>>,
+    ) -> Self {
         Self {
             pipeline: PromptExecutionPipeline::new(chat_client),
             memory_reader,
             memory_writer,
+            identity_memory_store,
         }
     }
 
@@ -89,52 +101,6 @@ impl PromptChatJobHandler {
 ⍉⟨ {{ rho: 0.96, kappa: 0.94, psi: 2.60, compression_avec: {{ stability: 0.81, friction: 0.19, logic: 0.84, autonomy: 0.74, psi: 2.58 }} }} ⟩",
             chrono::Utc::now().to_rfc3339(),
         )
-    }
-
-    fn build_recall_request(
-        correlation_id: &str,
-        default_query_text: &str,
-        memory_policy: Option<&MemoryPolicyPayload>,
-    ) -> MemoryRecallRequest {
-        let mut request = MemoryRecallRequest::default();
-        request.scope = MemoryScope {
-            session_ids: memory_policy
-                .and_then(|policy| policy.session_ids.clone())
-                .or_else(|| Some(vec![correlation_id.to_string()])),
-            tiers: memory_policy.and_then(|policy| policy.tiers.clone()),
-            from_utc: memory_policy.and_then(|policy| policy.from_utc),
-            to_utc: memory_policy.and_then(|policy| policy.to_utc),
-        };
-        request.query_text = Some(
-            memory_policy
-                .and_then(|policy| policy.query_text.clone())
-                .unwrap_or_else(|| default_query_text.to_string()),
-        );
-        request.limit = memory_policy
-            .and_then(|policy| policy.limit)
-            .unwrap_or(request.limit);
-        request.alpha = memory_policy
-            .and_then(|policy| policy.alpha)
-            .unwrap_or(request.alpha);
-        request.beta = memory_policy
-            .and_then(|policy| policy.beta)
-            .unwrap_or(request.beta);
-        request.include_explain = memory_policy
-            .and_then(|policy| policy.include_explain)
-            .unwrap_or(true);
-        request.fallback_policy =
-            match memory_policy.and_then(|policy| policy.fallback_policy.clone()) {
-                Some(MemoryFallbackPolicyPayload::Never) => MemoryFallbackPolicy::Never,
-                Some(MemoryFallbackPolicyPayload::Always) => MemoryFallbackPolicy::Always,
-                _ => MemoryFallbackPolicy::OnEmpty,
-            };
-        request.strictness = match memory_policy.and_then(|policy| policy.strictness.clone()) {
-            Some(MemoryStrictnessModePayload::Precision) => MemoryStrictnessMode::Precision,
-            Some(MemoryStrictnessModePayload::Recall) => MemoryStrictnessMode::Recall,
-            _ => MemoryStrictnessMode::Balanced,
-        };
-
-        request
     }
 
     fn should_store(memory_policy: Option<&MemoryPolicyPayload>) -> bool {
@@ -215,11 +181,20 @@ impl JobHandler for PromptChatJobHandler {
         let mut input_memory_query_fingerprint = None;
 
         let memory_policy = payload.memory_policy.as_ref();
+        let (identity_summary, identity_error) = load_identity_context_summary(
+            self.identity_memory_store.as_ref(),
+            &job.correlation_id,
+            payload.policy_profile.as_deref(),
+        )
+        .await;
+
+        let effective_user_prompt =
+            prepend_identity_snapshot(&payload.user_prompt, identity_summary.as_deref());
 
         if let Some(reader) = &self.memory_reader {
-            let recall_request = Self::build_recall_request(
+            let recall_request = build_memory_recall_request(
                 &job.correlation_id,
-                &payload.user_prompt,
+                Some(&effective_user_prompt),
                 memory_policy,
             );
             input_memory_query_id =
@@ -239,7 +214,7 @@ impl JobHandler for PromptChatJobHandler {
             model_hint: payload.model_hint.clone(),
         };
 
-        let user_prompt = payload.user_prompt.clone();
+        let user_prompt = effective_user_prompt;
         let mut request = PromptExecutionRequest::from_user_prompt(user_prompt.clone())
             .with_context(context.clone());
         if let Some(system_prompt) = payload.system_prompt {
@@ -262,6 +237,11 @@ impl JobHandler for PromptChatJobHandler {
                             "memory_recall": {
                                 "attempted": self.memory_reader.is_some(),
                                 "error": memory_recall_error,
+                            },
+                            "identity_context": {
+                                "attempted": self.identity_memory_store.is_some(),
+                                "summary": identity_summary,
+                                "error": identity_error,
                             },
                         })
                         .to_string(),
@@ -331,6 +311,11 @@ impl JobHandler for PromptChatJobHandler {
                 "node_id": memory_store.as_ref().map(|value| value.node_id.clone()),
                 "valid": memory_store.as_ref().map(|value| value.valid).unwrap_or(false),
                 "error": memory_store_error,
+            },
+            "identity_context": {
+                "attempted": self.identity_memory_store.is_some(),
+                "summary": identity_summary,
+                "error": identity_error,
             },
         })
         .to_string();

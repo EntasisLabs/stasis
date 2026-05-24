@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [".", "medousa"]
+members = ["."]
 resolver = "2"
 
 [features]
@@ -27,8 +27,8 @@ rust-embed = "8"
 regex = "1"
 sha2 = "0.10"
 hex = "0.4"
-locus-core-rs = "0.2.1"
-locus-sdk = "0.1.1"
+locus-core-rs = "=0.2.1"
+locus-sdk = "=0.1.1"
 genai = "0.5.3"
 async-trait = "0.1"
 anyhow = "1"

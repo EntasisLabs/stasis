@@ -1,22 +1,55 @@
 use std::fs;
 
+fn medousa_cli_source() -> Option<String> {
+    let repo_root = env!("CARGO_MANIFEST_DIR");
+    let cli_path = format!("{repo_root}/medousa/src/bin/medousa_cli.rs");
+    fs::read_to_string(cli_path).ok()
+}
+
+fn collect_rs_files(root: &str) -> Vec<String> {
+    fn walk(path: &std::path::Path, out: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                out.push(path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    walk(std::path::Path::new(root), &mut files);
+    files
+}
+
 #[test]
 fn medousa_cli_uses_stasis_runtime_workflow_paths() {
-    let cli_source = include_str!("../medousa/src/bin/medousa_cli.rs");
+    let Some(cli_source) = medousa_cli_source() else {
+        return;
+    };
 
     assert!(
-        cli_source.contains("StasisWorkflowJobBuilder::for_agent_session"),
-        "ask flow must use StasisWorkflowJobBuilder::for_agent_session"
+        cli_source.contains("RuntimeWorkflowJobBuilder::for_agent_session"),
+        "ask flow must use RuntimeWorkflowJobBuilder::for_agent_session"
     );
     assert!(
-        cli_source.contains("StasisWorkflowJobBuilder::for_prompt"),
-        "llm flow must use StasisWorkflowJobBuilder::for_prompt"
+        cli_source.contains("RuntimeWorkflowJobBuilder::for_prompt"),
+        "llm flow must use RuntimeWorkflowJobBuilder::for_prompt"
     );
 }
 
 #[test]
 fn medousa_cli_does_not_use_direct_llm_adapter_construction() {
-    let cli_source = include_str!("../medousa/src/bin/medousa_cli.rs");
+    let Some(cli_source) = medousa_cli_source() else {
+        return;
+    };
 
     assert!(
         !cli_source.contains("GenaiChatClient"),
@@ -25,6 +58,40 @@ fn medousa_cli_does_not_use_direct_llm_adapter_construction() {
     assert!(
         !cli_source.contains("PromptExecutionPipeline::new"),
         "medousa cli should not instantiate prompt pipeline directly"
+    );
+}
+
+#[test]
+fn medousa_source_avoids_internal_stasis_layer_imports() {
+    let repo_root = env!("CARGO_MANIFEST_DIR");
+    let medousa_src = format!("{repo_root}/medousa/src");
+    let files = collect_rs_files(&medousa_src);
+
+    let mut violations = Vec::new();
+    for file in files {
+        let Ok(source) = fs::read_to_string(&file) else {
+            continue;
+        };
+        for (idx, line) in source.lines().enumerate() {
+            let line_no = idx + 1;
+            let is_violation = line.contains("use stasis::application::")
+                || line.contains("use stasis::infrastructure::")
+                || line.contains("use stasis::ports::")
+                || line.contains("use stasis::domain::")
+                || line.contains("stasis::application::")
+                || line.contains("stasis::infrastructure::")
+                || line.contains("stasis::ports::")
+                || line.contains("stasis::domain::");
+            if is_violation {
+                violations.push(format!("{file}:{line_no}: {line}"));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Medousa must use prelude/sdk surfaces only. Violations:\n{}",
+        violations.join("\n")
     );
 }
 

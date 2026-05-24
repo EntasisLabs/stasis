@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::application::orchestration::agent_session_payload::{
+use crate::application::orchestration::runtime_job_payloads::{
     AgentSessionJobPayload, AgentTurnJobPayload, ConcurrentPatternJobPayload,
     HandoffPatternJobPayload, MemoryAggregateJobPayload, MemoryRecallJobPayload,
     MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
@@ -25,7 +25,7 @@ const JOB_TYPE_ORCHESTRATION_HANDOFF: &str = "workflow.stasis.orchestration.hand
 const JOB_TYPE_ORCHESTRATION_ORCHESTRATOR: &str = "workflow.stasis.orchestration.orchestrator";
 
 #[derive(Clone, Debug)]
-pub struct StasisWorkflowJobBuilder {
+pub struct RuntimeWorkflowJobBuilder {
     id: String,
     job_type: String,
     payload_ref: String,
@@ -41,7 +41,7 @@ pub struct StasisWorkflowJobBuilder {
     backoff_policy: BackoffPolicy,
 }
 
-impl StasisWorkflowJobBuilder {
+impl RuntimeWorkflowJobBuilder {
     pub fn for_agent_session(
         id: impl Into<String>,
         payload: &AgentSessionJobPayload,

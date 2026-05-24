@@ -1,3 +1,4 @@
+pub mod identity_memory_service;
 pub mod investigate_runtime_lineage;
 pub mod invoke_agent;
 pub mod manage_cluster_nodes;
