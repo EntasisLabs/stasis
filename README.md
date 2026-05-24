@@ -76,6 +76,47 @@ Provider-specific overrides are supported:
 
 Runtime examples are available in [examples](examples).
 
+## Embedded Dashboard
+
+You can embed the dashboard into your existing Axum app behind an optional feature flag.
+
+Enable feature:
+
+```bash
+cargo add stasis --features dashboard-embedded
+```
+
+Mount dashboard routes in your app code:
+
+```rust
+use std::sync::Arc;
+
+use axum::Router;
+use stasis::dashboard::{DashboardRouterExt, RuntimeDashboardQueryService};
+
+fn app(service: Arc<RuntimeDashboardQueryService>) -> Router {
+    Router::new().add_dashboard_with(service, |state| {
+        state
+            .with_action_auth_bearer_token("replace-me")
+            .with_action_required_role("scheduler.admin")
+    })
+}
+```
+
+The standalone `stasis_dashboard` binary remains available for separate operations workflows.
+
+Dashboard runtime backend selection (for `stasis_dashboard`):
+
+- `STASIS_DASHBOARD_RUNTIME_BACKEND=in-memory|surreal-mem|surreal-ws|surreal-kv`
+- `STASIS_DASHBOARD_SURREAL_NAMESPACE` (default: `stasis`)
+- `STASIS_DASHBOARD_SURREAL_DATABASE` (default: `runtime`)
+- `STASIS_DASHBOARD_SURREAL_ENDPOINT` (required for `surreal-ws`)
+- `STASIS_DASHBOARD_SURREAL_KV_PATH` (required for `surreal-kv`)
+
+Demo seeding remains opt-in and only applies to in-memory mode:
+
+- `STASIS_DASHBOARD_DEMO_SEED=true`
+
 ## Documentation
 
 - Docs index: [docs/README.md](docs/README.md)

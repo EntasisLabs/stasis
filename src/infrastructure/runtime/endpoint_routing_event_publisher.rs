@@ -21,6 +21,7 @@ pub struct EndpointRoutingEventPublisher {
     transports: Vec<Arc<dyn EndpointTransportPublisher>>,
     routing_policy: Arc<dyn EndpointRoutingPolicy>,
     fail_on_unsupported_protocol: bool,
+    fail_fast_on_publish_error: bool,
 }
 
 impl EndpointRoutingEventPublisher {
@@ -31,6 +32,7 @@ impl EndpointRoutingEventPublisher {
             transports: Vec::new(),
             routing_policy: Arc::new(AllowAllEndpointRoutingPolicy),
             fail_on_unsupported_protocol: true,
+            fail_fast_on_publish_error: true,
         }
     }
 
@@ -54,6 +56,11 @@ impl EndpointRoutingEventPublisher {
 
     pub fn fail_on_unsupported_protocol(mut self, value: bool) -> Self {
         self.fail_on_unsupported_protocol = value;
+        self
+    }
+
+    pub fn fail_fast_on_publish_error(mut self, value: bool) -> Self {
+        self.fail_fast_on_publish_error = value;
         self
     }
 
@@ -105,23 +112,34 @@ impl EndpointRoutingEventPublisher {
 impl EventPublisher for EndpointRoutingEventPublisher {
     async fn publish(&self, event: &OutboxEvent) -> Result<()> {
         let endpoints = self.endpoint_store.list().await?;
+        let mut first_error: Option<StasisError> = None;
+
         for endpoint in endpoints
             .iter()
             .filter(|endpoint| endpoint.enabled)
             .filter(|endpoint| self.routing_policy.should_route(endpoint, event))
         {
             if let Err(err) = self.publish_to_endpoint(endpoint, event).await {
+                let err_message = err.to_string();
                 if let Some(store) = &self.status_store {
                     let _ = store
                         .record_failure(
                             &endpoint.endpoint_id,
                             &event.event_id,
-                            &err.to_string(),
+                            &err_message,
                             event.event.occurred_at,
                         )
                         .await;
                 }
-                return Err(err);
+
+                if self.fail_fast_on_publish_error {
+                    return Err(err);
+                }
+
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+                continue;
             }
 
             if let Some(store) = &self.status_store {
@@ -133,6 +151,10 @@ impl EventPublisher for EndpointRoutingEventPublisher {
                     )
                     .await?;
             }
+        }
+
+        if let Some(err) = first_error {
+            return Err(err);
         }
 
         Ok(())
@@ -184,6 +206,38 @@ mod tests {
                 crate::domain::errors::StasisError::PortFailure("calls lock poisoned".to_string())
             })?;
             calls.push(endpoint.endpoint_id.clone());
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct SelectiveFailTransport {
+        protocol: DeliveryProtocol,
+        fail_endpoint_id: String,
+        calls: Arc<RwLock<Vec<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl EndpointTransportPublisher for SelectiveFailTransport {
+        fn supports(&self, protocol: &DeliveryProtocol) -> bool {
+            protocol == &self.protocol
+        }
+
+        async fn publish_to_endpoint(
+            &self,
+            endpoint: &DeliveryEndpoint,
+            _event: &OutboxEvent,
+        ) -> crate::domain::errors::Result<()> {
+            let mut calls = self.calls.write().map_err(|_| {
+                crate::domain::errors::StasisError::PortFailure("calls lock poisoned".to_string())
+            })?;
+            calls.push(endpoint.endpoint_id.clone());
+            if endpoint.endpoint_id == self.fail_endpoint_id {
+                return Err(crate::domain::errors::StasisError::PortFailure(
+                    "synthetic endpoint failure".to_string(),
+                ));
+            }
+
             Ok(())
         }
     }
@@ -419,5 +473,203 @@ mod tests {
         assert_eq!(status.failure_count, 1);
         assert_eq!(status.last_event_id.as_deref(), Some("evt-1"));
         assert!(status.last_error.is_some());
+    }
+
+    #[tokio::test]
+    async fn fails_fast_on_first_endpoint_error_and_skips_remaining_endpoints() {
+        let store = InMemoryDeliveryEndpointStore::default();
+        let now = Utc::now();
+
+        store
+            .insert(NewDeliveryEndpoint {
+                endpoint_id: "endpoint.a.fail".to_string(),
+                name: "Webhook Fail First".to_string(),
+                protocol: DeliveryProtocol::HttpWebhook,
+                target: "https://example.com/fail-first".to_string(),
+                metadata: None,
+                created_at: now,
+            })
+            .await
+            .expect("insert should succeed");
+
+        store
+            .insert(NewDeliveryEndpoint {
+                endpoint_id: "endpoint.z.skip".to_string(),
+                name: "Webhook Should Skip".to_string(),
+                protocol: DeliveryProtocol::HttpWebhook,
+                target: "https://example.com/skip".to_string(),
+                metadata: None,
+                created_at: now,
+            })
+            .await
+            .expect("insert should succeed");
+
+        let status_store = InMemoryEndpointDeliveryStatusStore::default();
+        let calls = Arc::new(RwLock::new(Vec::new()));
+        let publisher = EndpointRoutingEventPublisher::new(Arc::new(store))
+            .with_transport(SelectiveFailTransport {
+                protocol: DeliveryProtocol::HttpWebhook,
+                fail_endpoint_id: "endpoint.a.fail".to_string(),
+                calls: Arc::clone(&calls),
+            })
+            .with_status_store(status_store.clone());
+
+        let result = publisher.publish(&sample_event()).await;
+        assert!(result.is_err());
+
+        let calls = calls.read().expect("calls read lock should succeed");
+        assert_eq!(calls.as_slice(), ["endpoint.a.fail"]);
+
+        let first_status = status_store
+            .get("endpoint.a.fail")
+            .await
+            .expect("status get should succeed")
+            .expect("failing endpoint status should exist");
+        assert_eq!(first_status.failure_count, 1);
+
+        let second_status = status_store
+            .get("endpoint.z.skip")
+            .await
+            .expect("status get should succeed");
+        assert!(second_status.is_none());
+    }
+
+    #[tokio::test]
+    async fn continue_on_publish_error_attempts_remaining_endpoints_and_records_mixed_status() {
+        let store = InMemoryDeliveryEndpointStore::default();
+        let now = Utc::now();
+
+        store
+            .insert(NewDeliveryEndpoint {
+                endpoint_id: "endpoint.a.fail".to_string(),
+                name: "Webhook Fail First".to_string(),
+                protocol: DeliveryProtocol::HttpWebhook,
+                target: "https://example.com/fail-first".to_string(),
+                metadata: None,
+                created_at: now,
+            })
+            .await
+            .expect("insert should succeed");
+
+        store
+            .insert(NewDeliveryEndpoint {
+                endpoint_id: "endpoint.z.success".to_string(),
+                name: "Webhook Success".to_string(),
+                protocol: DeliveryProtocol::HttpWebhook,
+                target: "https://example.com/success".to_string(),
+                metadata: None,
+                created_at: now,
+            })
+            .await
+            .expect("insert should succeed");
+
+        let status_store = InMemoryEndpointDeliveryStatusStore::default();
+        let calls = Arc::new(RwLock::new(Vec::new()));
+        let publisher = EndpointRoutingEventPublisher::new(Arc::new(store))
+            .with_transport(SelectiveFailTransport {
+                protocol: DeliveryProtocol::HttpWebhook,
+                fail_endpoint_id: "endpoint.a.fail".to_string(),
+                calls: Arc::clone(&calls),
+            })
+            .with_status_store(status_store.clone())
+            .fail_fast_on_publish_error(false);
+
+        let result = publisher.publish(&sample_event()).await;
+        assert!(result.is_err());
+
+        let calls = calls.read().expect("calls read lock should succeed");
+        assert_eq!(calls.as_slice(), ["endpoint.a.fail", "endpoint.z.success"]);
+
+        let failed_status = status_store
+            .get("endpoint.a.fail")
+            .await
+            .expect("status get should succeed")
+            .expect("failed endpoint status should exist");
+        assert_eq!(failed_status.failure_count, 1);
+        assert_eq!(failed_status.success_count, 0);
+
+        let success_status = status_store
+            .get("endpoint.z.success")
+            .await
+            .expect("status get should succeed")
+            .expect("successful endpoint status should exist");
+        assert_eq!(success_status.failure_count, 0);
+        assert_eq!(success_status.success_count, 1);
+    }
+
+    #[tokio::test]
+    async fn continue_on_publish_error_does_not_starve_healthy_endpoint_across_repeated_events() {
+        let store = InMemoryDeliveryEndpointStore::default();
+        let now = Utc::now();
+
+        store
+            .insert(NewDeliveryEndpoint {
+                endpoint_id: "endpoint.a.fail".to_string(),
+                name: "Webhook Fail First".to_string(),
+                protocol: DeliveryProtocol::HttpWebhook,
+                target: "https://example.com/fail-first".to_string(),
+                metadata: None,
+                created_at: now,
+            })
+            .await
+            .expect("insert should succeed");
+
+        store
+            .insert(NewDeliveryEndpoint {
+                endpoint_id: "endpoint.z.success".to_string(),
+                name: "Webhook Success".to_string(),
+                protocol: DeliveryProtocol::HttpWebhook,
+                target: "https://example.com/success".to_string(),
+                metadata: None,
+                created_at: now,
+            })
+            .await
+            .expect("insert should succeed");
+
+        let status_store = InMemoryEndpointDeliveryStatusStore::default();
+        let calls = Arc::new(RwLock::new(Vec::new()));
+        let publisher = EndpointRoutingEventPublisher::new(Arc::new(store))
+            .with_transport(SelectiveFailTransport {
+                protocol: DeliveryProtocol::HttpWebhook,
+                fail_endpoint_id: "endpoint.a.fail".to_string(),
+                calls: Arc::clone(&calls),
+            })
+            .with_status_store(status_store.clone())
+            .fail_fast_on_publish_error(false);
+
+        let first_result = publisher.publish(&sample_event()).await;
+        assert!(first_result.is_err());
+
+        let mut second_event = sample_event();
+        second_event.event_id = "evt-2".to_string();
+        let second_result = publisher.publish(&second_event).await;
+        assert!(second_result.is_err());
+
+        let calls = calls.read().expect("calls read lock should succeed");
+        assert_eq!(
+            calls.as_slice(),
+            [
+                "endpoint.a.fail",
+                "endpoint.z.success",
+                "endpoint.a.fail",
+                "endpoint.z.success",
+            ]
+        );
+
+        let failed_status = status_store
+            .get("endpoint.a.fail")
+            .await
+            .expect("status get should succeed")
+            .expect("failed endpoint status should exist");
+        assert_eq!(failed_status.failure_count, 2);
+        assert_eq!(failed_status.success_count, 0);
+
+        let success_status = status_store
+            .get("endpoint.z.success")
+            .await
+            .expect("status get should succeed")
+            .expect("successful endpoint status should exist");
+        assert_eq!(success_status.failure_count, 0);
+        assert_eq!(success_status.success_count, 2);
     }
 }

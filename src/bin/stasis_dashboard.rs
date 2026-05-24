@@ -5,10 +5,13 @@ use chrono::{Duration, Utc};
 use stasis::application::dto::{
     HeartbeatClusterNodeRequest, RegisterClusterNodeRequest, RegisterDeliveryEndpointRequest,
 };
+use stasis::application::runtime::runtime_factory::{
+    RuntimeBackend, RuntimeComposition, RuntimeFactory,
+};
 use stasis::application::runtime::in_memory_runtime::{
     InMemoryRuntime, JobExecutionOutcome, JobHandler,
 };
-use stasis::dashboard::{DashboardState, InMemoryDashboardQueryService, router};
+use stasis::dashboard::{DashboardState, RuntimeDashboardQueryService, router};
 use stasis::domain::errors::Result;
 use stasis::domain::runtime::cluster_node::ClusterNodeRole;
 use stasis::domain::runtime::job::Job;
@@ -228,20 +231,73 @@ async fn seed_control_plane_data(
 
 #[tokio::main]
 async fn main() {
-    let runtime = Arc::new(InMemoryRuntime::new());
-    seed_runtime_data(runtime.as_ref()).await;
+    let seed_demo_data = std::env::var("STASIS_DASHBOARD_DEMO_SEED")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .map(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
 
-    let endpoint_store = InMemoryDeliveryEndpointStore::default();
-    let cluster_store = InMemoryClusterNodeStore::default();
-    let endpoint_status_store = Arc::new(InMemoryEndpointDeliveryStatusStore::default());
-    let control_store = CompositeControlPlaneStore::new(endpoint_store, cluster_store);
-    let control_plane =
-        ControlPlaneSdk::new_with_status_store(control_store, endpoint_status_store.clone());
+    let backend = resolve_dashboard_runtime_backend();
+    let runtime = RuntimeFactory::build(backend)
+        .await
+        .expect("build dashboard runtime composition");
 
-    seed_control_plane_data(&control_plane, endpoint_status_store).await;
+    let service: Arc<RuntimeDashboardQueryService> = match runtime {
+        RuntimeComposition::InMemory(runtime) => {
+            let runtime = Arc::new(runtime);
+            if seed_demo_data {
+                seed_runtime_data(runtime.as_ref()).await;
+            }
 
-    let service = Arc::new(InMemoryDashboardQueryService::new(runtime, control_plane));
-    let app = router(DashboardState::new(service));
+            let endpoint_store = InMemoryDeliveryEndpointStore::default();
+            let cluster_store = InMemoryClusterNodeStore::default();
+            let endpoint_status_store = Arc::new(InMemoryEndpointDeliveryStatusStore::default());
+            let control_store = CompositeControlPlaneStore::new(endpoint_store, cluster_store);
+            let control_plane =
+                ControlPlaneSdk::new_with_status_store(control_store, endpoint_status_store.clone());
+
+            if seed_demo_data {
+                seed_control_plane_data(&control_plane, endpoint_status_store).await;
+            }
+
+            Arc::new(RuntimeDashboardQueryService::new(runtime, control_plane))
+        }
+        RuntimeComposition::Surreal(runtime) => {
+            if seed_demo_data {
+                println!(
+                    "dashboard demo seed mode is ignored for surreal runtime backends"
+                );
+            }
+
+            Arc::new(RuntimeDashboardQueryService::from_runtime_composition(
+                RuntimeComposition::Surreal(runtime),
+            ))
+        }
+    };
+
+    let mut state = DashboardState::new(service);
+    if let Some(token) = std::env::var("STASIS_DASHBOARD_ACTION_AUTH_BEARER")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        state = state.with_action_auth_bearer_token(token);
+    }
+    if let Some(required_role) = std::env::var("STASIS_DASHBOARD_ACTION_REQUIRED_ROLE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        state = state.with_action_required_role(required_role);
+    }
+    if let Some(role_claim_header) = std::env::var("STASIS_DASHBOARD_ACTION_ROLE_CLAIM_HEADER")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        state = state.with_action_role_claim_header(role_claim_header);
+    }
+    let app = router(state);
 
     let addr: SocketAddr = std::env::var("STASIS_DASHBOARD_ADDR")
         .ok()
@@ -257,8 +313,72 @@ async fn main() {
         .expect("bind dashboard listener");
 
     println!("stasis dashboard listening on http://{}", addr);
+    if seed_demo_data {
+        println!("dashboard demo seed mode enabled via STASIS_DASHBOARD_DEMO_SEED");
+    }
 
     axum::serve(listener, app)
         .await
         .expect("run dashboard server");
+}
+
+fn resolve_dashboard_runtime_backend() -> RuntimeBackend {
+    let backend = std::env::var("STASIS_DASHBOARD_RUNTIME_BACKEND")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "in-memory".to_string());
+
+    match backend.as_str() {
+        "in-memory" | "inmemory" => RuntimeBackend::InMemory,
+        "surreal-mem" | "mem" => RuntimeBackend::SurrealMem {
+            namespace: dashboard_surreal_namespace(),
+            database: dashboard_surreal_database(),
+        },
+        "surreal-ws" | "ws" => RuntimeBackend::SurrealWs {
+            endpoint: std::env::var("STASIS_DASHBOARD_SURREAL_ENDPOINT")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .expect(
+                    "STASIS_DASHBOARD_SURREAL_ENDPOINT is required when STASIS_DASHBOARD_RUNTIME_BACKEND=surreal-ws",
+                ),
+            namespace: dashboard_surreal_namespace(),
+            database: dashboard_surreal_database(),
+        },
+        "surreal-kv" | "kv" => RuntimeBackend::SurrealKv {
+            path: std::env::var("STASIS_DASHBOARD_SURREAL_KV_PATH")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .expect(
+                    "STASIS_DASHBOARD_SURREAL_KV_PATH is required when STASIS_DASHBOARD_RUNTIME_BACKEND=surreal-kv",
+                ),
+            namespace: dashboard_surreal_namespace(),
+            database: dashboard_surreal_database(),
+        },
+        other => {
+            println!(
+                "unknown STASIS_DASHBOARD_RUNTIME_BACKEND='{}', falling back to in-memory",
+                other
+            );
+            RuntimeBackend::InMemory
+        }
+    }
+}
+
+fn dashboard_surreal_namespace() -> String {
+    std::env::var("STASIS_DASHBOARD_SURREAL_NAMESPACE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "stasis".to_string())
+}
+
+fn dashboard_surreal_database() -> String {
+    std::env::var("STASIS_DASHBOARD_SURREAL_DATABASE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "runtime".to_string())
 }

@@ -4,9 +4,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::application::dto::{
+    ClusterNodeHealthRow, EndpointDiagnosticsReadModelRow,
     ListClusterNodeHealthRequest, ListEndpointDiagnosticsReadModelRequest,
     ListEndpointFailureRateTrendsRequest,
 };
+use crate::application::runtime::runtime_factory::RuntimeComposition;
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
 use crate::dashboard::dto::{
     AttemptInspectorDto, ClusterMapDto, DashboardDto, EndpointRowDto, EventInspectorDto,
@@ -23,6 +25,10 @@ use crate::domain::runtime::outbox::OutboxEvent;
 use crate::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
 use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
 use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
+use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
+use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
+use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
+use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
 use crate::sdk::control_plane_sdk::ControlPlaneSdk;
@@ -30,6 +36,15 @@ use crate::sdk::control_plane_sdk::ControlPlaneSdk;
 type DashboardControlStore =
     CompositeControlPlaneStore<InMemoryDeliveryEndpointStore, InMemoryClusterNodeStore>;
 type DashboardControlPlane = ControlPlaneSdk<DashboardControlStore>;
+type DashboardSurrealControlStore =
+    CompositeControlPlaneStore<SurrealDeliveryEndpointStore, SurrealClusterNodeStore>;
+type DashboardSurrealControlPlane = ControlPlaneSdk<DashboardSurrealControlStore>;
+
+#[derive(Clone)]
+enum DashboardControlPlaneKind {
+    InMemory(DashboardControlPlane),
+    Surreal(DashboardSurrealControlPlane),
+}
 
 #[derive(Clone, Debug)]
 pub enum InspectEntity {
@@ -60,16 +75,131 @@ pub trait DashboardQueryService: Send + Sync {
 }
 
 #[derive(Clone)]
-pub struct InMemoryDashboardQueryService {
-    runtime: Arc<InMemoryRuntime>,
-    control_plane: DashboardControlPlane,
+pub struct RuntimeDashboardQueryService {
+    runtime: RuntimeComposition,
+    control_plane: DashboardControlPlaneKind,
 }
 
-impl InMemoryDashboardQueryService {
+impl RuntimeDashboardQueryService {
     pub fn new(runtime: Arc<InMemoryRuntime>, control_plane: DashboardControlPlane) -> Self {
         Self {
-            runtime,
-            control_plane,
+            runtime: RuntimeComposition::InMemory(runtime.as_ref().clone()),
+            control_plane: DashboardControlPlaneKind::InMemory(control_plane),
+        }
+    }
+
+    pub fn from_runtime_composition(runtime: RuntimeComposition) -> Self {
+        match &runtime {
+            RuntimeComposition::InMemory(_) => {
+                let endpoint_store = InMemoryDeliveryEndpointStore::default();
+                let cluster_store = InMemoryClusterNodeStore::default();
+                let status_store = Arc::new(InMemoryEndpointDeliveryStatusStore::default());
+                let control_store = CompositeControlPlaneStore::new(endpoint_store, cluster_store);
+                let control_plane =
+                    ControlPlaneSdk::new_with_status_store(control_store, status_store);
+
+                Self {
+                    runtime,
+                    control_plane: DashboardControlPlaneKind::InMemory(control_plane),
+                }
+            }
+            RuntimeComposition::Surreal(rt) => {
+                let endpoint_store = SurrealDeliveryEndpointStore::new(rt.job_store.db());
+                let cluster_store = SurrealClusterNodeStore::new(rt.job_store.db());
+                let status_store = Arc::new(SurrealEndpointDeliveryStatusStore::new(rt.job_store.db()));
+                let control_store = CompositeControlPlaneStore::new(endpoint_store, cluster_store);
+                let control_plane =
+                    ControlPlaneSdk::new_with_status_store(control_store, status_store);
+
+                Self {
+                    runtime,
+                    control_plane: DashboardControlPlaneKind::Surreal(control_plane),
+                }
+            }
+        }
+    }
+
+    async fn list_cluster_node_health_rows(&self) -> Result<Vec<ClusterNodeHealthRow>> {
+        let request = ListClusterNodeHealthRequest {
+            role: None,
+            region: None,
+            capability_tag: None,
+            queue: None,
+            health: None,
+            offset: 0,
+            limit: Some(200),
+        };
+
+        match &self.control_plane {
+            DashboardControlPlaneKind::InMemory(control_plane) => {
+                control_plane.list_cluster_node_health(request).await
+            }
+            DashboardControlPlaneKind::Surreal(control_plane) => {
+                control_plane.list_cluster_node_health(request).await
+            }
+        }
+    }
+
+    async fn list_endpoint_diagnostics_rows(
+        &self,
+        endpoint_ids: Option<Vec<String>>,
+        limit: Option<usize>,
+    ) -> Result<Vec<EndpointDiagnosticsReadModelRow>> {
+        let request = ListEndpointDiagnosticsReadModelRequest {
+            endpoint_ids,
+            protocol: None,
+            min_failure_count: None,
+            stale_after_seconds: None,
+            unhealthy_only: false,
+            include_disabled: true,
+            offset: 0,
+            limit,
+        };
+
+        match &self.control_plane {
+            DashboardControlPlaneKind::InMemory(control_plane) => {
+                control_plane.list_endpoint_diagnostics_read_model(request).await
+            }
+            DashboardControlPlaneKind::Surreal(control_plane) => {
+                control_plane.list_endpoint_diagnostics_read_model(request).await
+            }
+        }
+    }
+
+    async fn list_endpoint_failure_rate_trends(&self) -> Vec<crate::application::dto::EndpointFailureRateTrendRow> {
+        let request = ListEndpointFailureRateTrendsRequest {
+            protocol: None,
+            include_disabled: true,
+            min_total_attempts: None,
+            limit: 100,
+        };
+
+        match &self.control_plane {
+            DashboardControlPlaneKind::InMemory(control_plane) => control_plane
+                .list_endpoint_failure_rate_trends(request)
+                .await
+                .unwrap_or_default(),
+            DashboardControlPlaneKind::Surreal(control_plane) => control_plane
+                .list_endpoint_failure_rate_trends(request)
+                .await
+                .unwrap_or_default(),
+        }
+    }
+
+    async fn list_job_attempts(&self, job_id: &str) -> Result<Vec<crate::domain::runtime::job_attempt::JobAttempt>> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.list_job_attempts(job_id).await,
+            RuntimeComposition::Surreal(rt) => rt.list_job_attempts(job_id).await,
+        }
+    }
+
+    async fn list_lineage_events_by_job(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<OutboxEvent>> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.list_lineage_events(job_id).await,
+            RuntimeComposition::Surreal(rt) => rt.list_lineage_events(job_id).await,
         }
     }
 
@@ -86,7 +216,11 @@ impl InMemoryDashboardQueryService {
 
         let mut jobs = Vec::new();
         for state in states {
-            jobs.extend(self.runtime.job_store.list_by_state(state).await?);
+            let mut by_state = match &self.runtime {
+                RuntimeComposition::InMemory(rt) => rt.job_store.list_by_state(state).await?,
+                RuntimeComposition::Surreal(rt) => rt.job_store.list_by_state(state).await?,
+            };
+            jobs.append(&mut by_state);
         }
 
         jobs.sort_by(|left, right| {
@@ -104,7 +238,7 @@ impl InMemoryDashboardQueryService {
         let mut out = Vec::new();
 
         for job in jobs {
-            for event in self.runtime.list_lineage_events(&job.id).await? {
+            for event in self.list_lineage_events_by_job(&job.id).await? {
                 if seen.insert(event.event_id.clone()) {
                     out.push(event);
                 }
@@ -123,7 +257,7 @@ impl InMemoryDashboardQueryService {
 }
 
 #[async_trait]
-impl DashboardQueryService for InMemoryDashboardQueryService {
+impl DashboardQueryService for RuntimeDashboardQueryService {
     async fn dashboard(&self, inspect: Option<InspectEntity>) -> Result<DashboardDto> {
         let jobs = self.jobs_stream().await?;
         let outbox = self.outbox_stream().await?;
@@ -176,16 +310,7 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
             .filter(|event| event.delivery_state == "failed")
             .count();
 
-        let endpoint_trends = self
-            .control_plane
-            .list_endpoint_failure_rate_trends(ListEndpointFailureRateTrendsRequest {
-                protocol: None,
-                include_disabled: true,
-                min_total_attempts: None,
-                limit: 100,
-            })
-            .await
-            .unwrap_or_default();
+        let endpoint_trends = self.list_endpoint_failure_rate_trends().await;
 
         let avg_failure_rate = if endpoint_trends.is_empty() {
             0.0
@@ -249,19 +374,7 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
     }
 
     async fn endpoint_stream(&self) -> Result<UiListPanel<EndpointRowDto>> {
-        let rows = self
-            .control_plane
-            .list_endpoint_diagnostics_read_model(ListEndpointDiagnosticsReadModelRequest {
-                endpoint_ids: None,
-                protocol: None,
-                min_failure_count: None,
-                stale_after_seconds: None,
-                unhealthy_only: false,
-                include_disabled: true,
-                offset: 0,
-                limit: Some(200),
-            })
-            .await?;
+        let rows = self.list_endpoint_diagnostics_rows(None, Some(200)).await?;
 
         let mapped = rows.iter().map(map_endpoint_row).collect::<Vec<_>>();
 
@@ -273,7 +386,10 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
     }
 
     async fn recurring_stream(&self) -> Result<UiListPanel<RecurringDefinitionRowDto>> {
-        let definitions = self.runtime.recurring_store.list().await?;
+        let definitions = match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.recurring_store.list().await?,
+            RuntimeComposition::Surreal(rt) => rt.recurring_store.list().await?,
+        };
         let mut rows = definitions
             .iter()
             .map(map_recurring_definition_row)
@@ -293,18 +409,7 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
     }
 
     async fn cluster_stream(&self) -> Result<ClusterMapDto> {
-        let rows = self
-            .control_plane
-            .list_cluster_node_health(ListClusterNodeHealthRequest {
-                role: None,
-                region: None,
-                capability_tag: None,
-                queue: None,
-                health: None,
-                offset: 0,
-                limit: Some(200),
-            })
-            .await?;
+        let rows = self.list_cluster_node_health_rows().await?;
 
         let nodes = rows.iter().map(map_cluster_health_row).collect();
 
@@ -312,7 +417,10 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
     }
 
     async fn scheduler_materialize_now(&self, scheduler_id: &str) -> Result<usize> {
-        self.runtime.materialize_recurring_now(scheduler_id).await
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.materialize_recurring_now(scheduler_id).await,
+            RuntimeComposition::Surreal(rt) => rt.materialize_recurring_now(scheduler_id).await,
+        }
     }
 
     async fn scheduler_process_queue_once(
@@ -320,15 +428,24 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
         queue: &str,
         worker_id: &str,
     ) -> Result<Option<String>> {
-        self.runtime.process_once_now(queue, worker_id).await
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.process_once_now(queue, worker_id).await,
+            RuntimeComposition::Surreal(rt) => rt.process_once_now(queue, worker_id).await,
+        }
     }
 
     async fn scheduler_publish_pending_now(&self, limit: usize) -> Result<usize> {
-        self.runtime.publish_pending_events_now(limit).await
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.publish_pending_events_now(limit).await,
+            RuntimeComposition::Surreal(rt) => rt.publish_pending_events_now(limit).await,
+        }
     }
 
     async fn scheduler_replay_dead_letter_now(&self, job_id: &str) -> Result<bool> {
-        self.runtime.replay_dead_letter_now(job_id).await
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.replay_dead_letter_now(job_id).await,
+            RuntimeComposition::Surreal(rt) => rt.replay_dead_letter_now(job_id).await,
+        }
     }
 
     async fn inspect(&self, entity: InspectEntity) -> Result<InspectorView> {
@@ -353,7 +470,7 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
                 let jobs = self.list_all_jobs().await?;
                 let mut found = None;
                 for job in jobs {
-                    for attempt in self.runtime.list_job_attempts(&job.id).await? {
+                    for attempt in self.list_job_attempts(&job.id).await? {
                         if attempt.attempt_id == id {
                             found = Some(attempt);
                             break;
@@ -379,18 +496,7 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
                 })
             }
             InspectEntity::Node(id) => {
-                let rows = self
-                    .control_plane
-                    .list_cluster_node_health(ListClusterNodeHealthRequest {
-                        role: None,
-                        region: None,
-                        capability_tag: None,
-                        queue: None,
-                        health: None,
-                        offset: 0,
-                        limit: Some(200),
-                    })
-                    .await?;
+                let rows = self.list_cluster_node_health_rows().await?;
 
                 let Some(node) = rows.iter().find(|row| row.snapshot.node.node_id == id) else {
                     return Ok(InspectorView::None);
@@ -399,17 +505,7 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
             }
             InspectEntity::Endpoint(id) => {
                 let rows = self
-                    .control_plane
-                    .list_endpoint_diagnostics_read_model(ListEndpointDiagnosticsReadModelRequest {
-                        endpoint_ids: Some(vec![id.clone()]),
-                        protocol: None,
-                        min_failure_count: None,
-                        stale_after_seconds: None,
-                        unhealthy_only: false,
-                        include_disabled: true,
-                        offset: 0,
-                        limit: Some(1),
-                    })
+                    .list_endpoint_diagnostics_rows(Some(vec![id.clone()]), Some(1))
                     .await?;
 
                 let Some(endpoint) = rows.first() else {
@@ -437,3 +533,6 @@ impl DashboardQueryService for InMemoryDashboardQueryService {
         Ok(inspector)
     }
 }
+
+/// Backward-compatible alias retained for existing callers while naming transitions to runtime-agnostic service.
+pub type InMemoryDashboardQueryService = RuntimeDashboardQueryService;

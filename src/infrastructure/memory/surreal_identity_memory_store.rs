@@ -1786,16 +1786,16 @@ impl IdentityMemoryStore for SurrealIdentityMemoryStore {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
+    use chrono::{Duration, Utc};
     use serde_json::json;
     use surrealdb::engine::any::Any;
     use surrealdb::Surreal;
 
     use super::SurrealIdentityMemoryStore;
     use crate::ports::outbound::memory::identity_memory_models::{
-        CommitEntityUpdateRequest, EntityRef, GetIdentityContextRequest, IdentityEntityType,
-        PersonaEntity, ProposeEntityUpdateRequest, RelationshipEntity, RelationshipStatus,
-        UpdateSource, UserEntity,
+        CommitEntityUpdateRequest, CommitOutcomeCode, EntityRef, GetIdentityContextRequest,
+        IdentityEntityType, ListEntityHistoryRequest, PersonaEntity, ProposeEntityUpdateRequest,
+        ProposalState, RelationshipEntity, RelationshipStatus, UpdateSource, UserEntity,
     };
     use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 
@@ -1812,6 +1812,24 @@ mod tests {
             .await
             .expect("schema bootstrap should succeed");
         SurrealIdentityMemoryStore::new(db)
+    }
+
+    async fn relationship_version_count(
+        store: &SurrealIdentityMemoryStore,
+        relationship_id: &str,
+    ) -> usize {
+        let mut resp = store
+            .db
+            .query("SELECT * FROM type::table($table) WHERE relationship_id = $relationship_id")
+            .bind(("table", store.relationship_version_table.clone()))
+            .bind(("relationship_id", relationship_id.to_string()))
+            .await
+            .expect("relationship version query should succeed");
+
+        let rows: Vec<serde_json::Value> = resp
+            .take(0)
+            .expect("relationship version decode should succeed");
+        rows.len()
     }
 
     #[tokio::test]
@@ -1981,6 +1999,370 @@ mod tests {
 
         assert_eq!(context.relationships.len(), 1);
         assert_eq!(context.relationships[0].version, 3);
+    }
+
+    #[tokio::test]
+    async fn surreal_commit_returns_stale_state_on_version_conflict() {
+        let store = new_store().await;
+
+        store
+            .upsert_relationship(RelationshipEntity {
+                relationship_id: "rel-stale-surreal".to_string(),
+                source_entity_ref: EntityRef {
+                    entity_type: "PersonaEntity".to_string(),
+                    entity_id: "p1".to_string(),
+                },
+                target_entity_ref: EntityRef {
+                    entity_type: "UserEntity".to_string(),
+                    entity_id: "u1".to_string(),
+                },
+                relationship_kind: "assistant_user".to_string(),
+                status: RelationshipStatus::Active,
+                trust_level: 0.5,
+                confidence: 0.8,
+                strength_score: 0.8,
+                recency_score: 0.8,
+                autonomy_scope: Default::default(),
+                approval_profile_id: None,
+                interruption_policy: Default::default(),
+                escalation_policy: Default::default(),
+                policy_tags: vec![],
+                provenance: UpdateSource::UserDirect,
+                parent_relationship_id: None,
+                governing_relationship_ids: vec![],
+                derived_from_relationship_id: None,
+                last_transition_reason: None,
+                transition_receipt_id: None,
+                version: 2,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+            .await
+            .expect("seed relationship should work");
+
+        let proposed = store
+            .propose_entity_update(&ProposeEntityUpdateRequest {
+                entity_type: IdentityEntityType::RelationshipEntity,
+                entity_id: "rel-stale-surreal".to_string(),
+                patch: json!({ "recency_score": 0.9 }),
+                source: UpdateSource::ModelInferred,
+                confidence: 0.8,
+                reason: "stale test".to_string(),
+                actor: "model".to_string(),
+                receipt_id: None,
+                expires_at: None,
+            })
+            .await
+            .expect("proposal should work");
+
+        let commit = store
+            .commit_entity_update(&CommitEntityUpdateRequest {
+                proposal_id: proposed.proposal_ids[0].clone(),
+                expected_version: 1,
+                approver: None,
+            })
+            .await
+            .expect("commit call should succeed");
+
+        assert!(!commit.committed);
+        assert_eq!(commit.code, Some(CommitOutcomeCode::StaleState));
+
+        let history = store
+            .list_entity_history(&ListEntityHistoryRequest {
+                entity_type: IdentityEntityType::RelationshipEntity,
+                entity_id: "rel-stale-surreal".to_string(),
+                limit: 10,
+            })
+            .await
+            .expect("entity history should load");
+        assert_eq!(history.proposals.len(), 1);
+        assert_eq!(history.proposals[0].state, ProposalState::Rejected);
+    }
+
+    #[tokio::test]
+    async fn surreal_commit_requires_approval_for_privileged_patch_without_approver() {
+        let store = new_store().await;
+
+        store
+            .upsert_relationship(RelationshipEntity {
+                relationship_id: "rel-approval-surreal".to_string(),
+                source_entity_ref: EntityRef {
+                    entity_type: "PersonaEntity".to_string(),
+                    entity_id: "p1".to_string(),
+                },
+                target_entity_ref: EntityRef {
+                    entity_type: "UserEntity".to_string(),
+                    entity_id: "u1".to_string(),
+                },
+                relationship_kind: "assistant_user".to_string(),
+                status: RelationshipStatus::Active,
+                trust_level: 0.5,
+                confidence: 0.8,
+                strength_score: 0.8,
+                recency_score: 0.8,
+                autonomy_scope: Default::default(),
+                approval_profile_id: None,
+                interruption_policy: Default::default(),
+                escalation_policy: Default::default(),
+                policy_tags: vec![],
+                provenance: UpdateSource::UserDirect,
+                parent_relationship_id: None,
+                governing_relationship_ids: vec![],
+                derived_from_relationship_id: None,
+                last_transition_reason: None,
+                transition_receipt_id: None,
+                version: 1,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+            .await
+            .expect("seed relationship should work");
+
+        let proposed = store
+            .propose_entity_update(&ProposeEntityUpdateRequest {
+                entity_type: IdentityEntityType::RelationshipEntity,
+                entity_id: "rel-approval-surreal".to_string(),
+                patch: json!({ "autonomy_scope.allow": ["external_posting"] }),
+                source: UpdateSource::ModelInferred,
+                confidence: 0.7,
+                reason: "privileged".to_string(),
+                actor: "model".to_string(),
+                receipt_id: None,
+                expires_at: None,
+            })
+            .await
+            .expect("proposal should work");
+
+        let commit = store
+            .commit_entity_update(&CommitEntityUpdateRequest {
+                proposal_id: proposed.proposal_ids[0].clone(),
+                expected_version: 1,
+                approver: None,
+            })
+            .await
+            .expect("commit call should succeed");
+
+        assert!(!commit.committed);
+        assert_eq!(commit.code, Some(CommitOutcomeCode::ApprovalRequired));
+
+        let context = store
+            .get_identity_context(&GetIdentityContextRequest {
+                user_id: "u1".to_string(),
+                persona_id: "p1".to_string(),
+                channel_id: "none".to_string(),
+                relationship_limit: 10,
+            })
+            .await
+            .expect("identity context should load");
+
+        let rel = context
+            .relationships
+            .iter()
+            .find(|value| value.relationship_id == "rel-approval-surreal")
+            .expect("relationship should exist");
+        assert_eq!(rel.version, 1);
+    }
+
+    #[tokio::test]
+    async fn surreal_commit_returns_not_found_for_unknown_proposal_id() {
+        let store = new_store().await;
+
+        let commit = store
+            .commit_entity_update(&CommitEntityUpdateRequest {
+                proposal_id: "proposal-does-not-exist".to_string(),
+                expected_version: 1,
+                approver: None,
+            })
+            .await
+            .expect("commit call should succeed");
+
+        assert!(!commit.committed);
+        assert_eq!(commit.code, Some(CommitOutcomeCode::NotFound));
+    }
+
+    #[tokio::test]
+    async fn surreal_commit_returns_expired_proposal_when_commit_happens_after_expiry() {
+        let store = new_store().await;
+
+        store
+            .upsert_relationship(RelationshipEntity {
+                relationship_id: "rel-expired-surreal".to_string(),
+                source_entity_ref: EntityRef {
+                    entity_type: "PersonaEntity".to_string(),
+                    entity_id: "p1".to_string(),
+                },
+                target_entity_ref: EntityRef {
+                    entity_type: "UserEntity".to_string(),
+                    entity_id: "u1".to_string(),
+                },
+                relationship_kind: "assistant_user".to_string(),
+                status: RelationshipStatus::Active,
+                trust_level: 0.5,
+                confidence: 0.8,
+                strength_score: 0.8,
+                recency_score: 0.8,
+                autonomy_scope: Default::default(),
+                approval_profile_id: None,
+                interruption_policy: Default::default(),
+                escalation_policy: Default::default(),
+                policy_tags: vec![],
+                provenance: UpdateSource::UserDirect,
+                parent_relationship_id: None,
+                governing_relationship_ids: vec![],
+                derived_from_relationship_id: None,
+                last_transition_reason: None,
+                transition_receipt_id: None,
+                version: 1,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+            .await
+            .expect("seed relationship should work");
+
+        let versions_before = relationship_version_count(&store, "rel-expired-surreal").await;
+
+        let proposed = store
+            .propose_entity_update(&ProposeEntityUpdateRequest {
+                entity_type: IdentityEntityType::RelationshipEntity,
+                entity_id: "rel-expired-surreal".to_string(),
+                patch: json!({ "recency_score": 0.9 }),
+                source: UpdateSource::ModelInferred,
+                confidence: 0.8,
+                reason: "expired test".to_string(),
+                actor: "model".to_string(),
+                receipt_id: None,
+                expires_at: Some(Utc::now() - Duration::seconds(1)),
+            })
+            .await
+            .expect("proposal should work");
+
+        let commit = store
+            .commit_entity_update(&CommitEntityUpdateRequest {
+                proposal_id: proposed.proposal_ids[0].clone(),
+                expected_version: 1,
+                approver: None,
+            })
+            .await
+            .expect("commit call should succeed");
+
+        assert!(!commit.committed);
+        assert_eq!(commit.code, Some(CommitOutcomeCode::ExpiredProposal));
+
+        let context = store
+            .get_identity_context(&GetIdentityContextRequest {
+                user_id: "u1".to_string(),
+                persona_id: "p1".to_string(),
+                channel_id: "none".to_string(),
+                relationship_limit: 10,
+            })
+            .await
+            .expect("identity context should load");
+
+        let rel = context
+            .relationships
+            .iter()
+            .find(|value| value.relationship_id == "rel-expired-surreal")
+            .expect("relationship should exist");
+        assert_eq!(rel.version, 1);
+        assert!((rel.recency_score - 0.8).abs() < f32::EPSILON);
+
+        let history = store
+            .list_entity_history(&ListEntityHistoryRequest {
+                entity_type: IdentityEntityType::RelationshipEntity,
+                entity_id: "rel-expired-surreal".to_string(),
+                limit: 10,
+            })
+            .await
+            .expect("entity history should load");
+        assert_eq!(history.proposals.len(), 1);
+        assert_eq!(history.proposals[0].state, ProposalState::Expired);
+
+        let versions_after = relationship_version_count(&store, "rel-expired-surreal").await;
+        assert_eq!(versions_before, versions_after);
+    }
+
+    #[tokio::test]
+    async fn surreal_commit_returns_policy_denied_and_does_not_mutate_relationship() {
+        let store = new_store().await;
+
+        store
+            .upsert_relationship(RelationshipEntity {
+                relationship_id: "rel-policy-denied-surreal".to_string(),
+                source_entity_ref: EntityRef {
+                    entity_type: "PersonaEntity".to_string(),
+                    entity_id: "p1".to_string(),
+                },
+                target_entity_ref: EntityRef {
+                    entity_type: "UserEntity".to_string(),
+                    entity_id: "u1".to_string(),
+                },
+                relationship_kind: "assistant_user".to_string(),
+                status: RelationshipStatus::Revoked,
+                trust_level: 0.1,
+                confidence: 0.8,
+                strength_score: 0.8,
+                recency_score: 0.8,
+                autonomy_scope: Default::default(),
+                approval_profile_id: None,
+                interruption_policy: Default::default(),
+                escalation_policy: Default::default(),
+                policy_tags: vec![],
+                provenance: UpdateSource::UserDirect,
+                parent_relationship_id: None,
+                governing_relationship_ids: vec![],
+                derived_from_relationship_id: None,
+                last_transition_reason: None,
+                transition_receipt_id: None,
+                version: 1,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+            .await
+            .expect("seed relationship should work");
+
+        let versions_before = relationship_version_count(&store, "rel-policy-denied-surreal").await;
+
+        let proposed = store
+            .propose_entity_update(&ProposeEntityUpdateRequest {
+                entity_type: IdentityEntityType::RelationshipEntity,
+                entity_id: "rel-policy-denied-surreal".to_string(),
+                patch: json!({ "status": "active" }),
+                source: UpdateSource::UserDirect,
+                confidence: 1.0,
+                reason: "attempt reactivate".to_string(),
+                actor: "user".to_string(),
+                receipt_id: None,
+                expires_at: None,
+            })
+            .await
+            .expect("proposal should work");
+
+        let commit = store
+            .commit_entity_update(&CommitEntityUpdateRequest {
+                proposal_id: proposed.proposal_ids[0].clone(),
+                expected_version: 1,
+                approver: Some("owner".to_string()),
+            })
+            .await
+            .expect("commit call should succeed");
+
+        assert!(!commit.committed);
+        assert_eq!(commit.code, Some(CommitOutcomeCode::PolicyDenied));
+
+        let history = store
+            .list_entity_history(&ListEntityHistoryRequest {
+                entity_type: IdentityEntityType::RelationshipEntity,
+                entity_id: "rel-policy-denied-surreal".to_string(),
+                limit: 20,
+            })
+            .await
+            .expect("entity history should load");
+        assert_eq!(history.proposals.len(), 1);
+        assert_eq!(history.proposals[0].state, ProposalState::Rejected);
+        assert_eq!(history.transitions.len(), 0);
+
+        let versions_after = relationship_version_count(&store, "rel-policy-denied-surreal").await;
+        assert_eq!(versions_before, versions_after);
     }
 
     #[tokio::test]

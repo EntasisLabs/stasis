@@ -5,6 +5,8 @@ use askama::Template;
 use axum::Router;
 use axum::extract::{Json, Path, Query, State};
 use axum::http::{HeaderValue, StatusCode};
+use axum::middleware::{self, Next};
+use axum::extract::Request;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use chrono::Utc;
@@ -20,15 +22,51 @@ use crate::dashboard::service::{DashboardQueryService, InspectEntity};
 #[derive(Clone)]
 pub struct DashboardState {
     service: Arc<dyn DashboardQueryService>,
+    action_auth_bearer_token: Option<String>,
+    action_required_role: Option<String>,
+    action_role_claim_header: String,
 }
 
 impl DashboardState {
     pub fn new(service: Arc<dyn DashboardQueryService>) -> Self {
-        Self { service }
+        Self {
+            service,
+            action_auth_bearer_token: None,
+            action_required_role: None,
+            action_role_claim_header: "x-stasis-role".to_string(),
+        }
+    }
+
+    pub fn with_action_auth_bearer_token(mut self, token: impl Into<String>) -> Self {
+        self.action_auth_bearer_token = Some(token.into());
+        self
+    }
+
+    pub fn with_action_required_role(mut self, role: impl Into<String>) -> Self {
+        self.action_required_role = Some(role.into());
+        self
+    }
+
+    pub fn with_action_role_claim_header(mut self, header_name: impl Into<String>) -> Self {
+        self.action_role_claim_header = header_name.into();
+        self
     }
 }
 
 pub fn router(state: DashboardState) -> Router {
+    let action_routes = Router::new()
+        .route("/scheduler/materialize", post(action_scheduler_materialize))
+        .route("/scheduler/process", post(action_scheduler_process_queue))
+        .route("/scheduler/publish", post(action_scheduler_publish_pending))
+        .route("/scheduler/replay", post(action_scheduler_replay_deadletter))
+        .route("/workflows/save", post(action_workflow_save))
+        .route("/workflows/execute", post(action_workflow_execute))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_action_authorization,
+        ))
+        .with_state(state.clone());
+
     Router::new()
         .route("/", get(root))
         .route("/dashboard", get(dashboard))
@@ -41,26 +79,75 @@ pub fn router(state: DashboardState) -> Router {
         .route("/inspect/node/{id}", get(inspect_node))
         .route("/inspect/endpoint/{id}", get(inspect_endpoint))
         .route("/inspect/event/{id}", get(inspect_event))
-        .route(
-            "/action/scheduler/materialize",
-            post(action_scheduler_materialize),
-        )
-        .route(
-            "/action/scheduler/process",
-            post(action_scheduler_process_queue),
-        )
-        .route(
-            "/action/scheduler/publish",
-            post(action_scheduler_publish_pending),
-        )
-        .route(
-            "/action/scheduler/replay",
-            post(action_scheduler_replay_deadletter),
-        )
-        .route("/action/workflows/save", post(action_workflow_save))
-        .route("/action/workflows/execute", post(action_workflow_execute))
+        .nest("/action", action_routes)
         .route("/assets/{name}", get(asset))
         .with_state(state)
+}
+
+async fn require_action_authorization(
+    State(state): State<DashboardState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let expected_token = state.action_auth_bearer_token.as_deref();
+    let required_role = state.action_required_role.as_deref();
+
+    if expected_token.is_none() && required_role.is_none() {
+        return next.run(request).await;
+    }
+
+    let provided = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+
+    if expected_token.is_some() && provided != expected_token {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "dashboard action authorization required",
+        )
+            .into_response();
+    }
+
+    if let Some(required_role) = required_role
+        && !request_has_required_role(
+            request.headers(),
+            state.action_role_claim_header.as_str(),
+            required_role,
+        )
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            "dashboard action role authorization required",
+        )
+            .into_response();
+    }
+
+    next.run(request).await
+}
+
+fn request_has_required_role(
+    headers: &axum::http::HeaderMap,
+    role_header_name: &str,
+    required_role: &str,
+) -> bool {
+    let normalized_required = required_role.trim();
+    if normalized_required.is_empty() {
+        return true;
+    }
+
+    headers
+        .get(role_header_name)
+        .and_then(|value| value.to_str().ok())
+        .map(|roles| {
+            roles
+                .split([',', ' '])
+                .map(str::trim)
+                .filter(|role| !role.is_empty())
+                .any(|role| role.eq_ignore_ascii_case(normalized_required))
+        })
+        .unwrap_or(false)
 }
 
 async fn root() -> Redirect {
@@ -757,6 +844,419 @@ fn internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
         StatusCode::INTERNAL_SERVER_ERROR,
         format!("dashboard error: {err}"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode, header};
+    use tower::ServiceExt;
+
+    use crate::dashboard::dto::{
+        ClusterMapDto, DashboardDto, EndpointRowDto, InspectorView, JobRowDto, OutboxEventRowDto,
+        RecurringDefinitionRowDto, SystemKpiDto, UiListPanel,
+    };
+    use crate::dashboard::service::{DashboardQueryService, InspectEntity};
+    use crate::domain::errors::{Result, StasisError};
+
+    use super::{DashboardState, router};
+
+    #[derive(Clone)]
+    struct MockDashboardService {
+        materialize_calls: Arc<AtomicUsize>,
+        process_calls: Arc<AtomicUsize>,
+    }
+
+    impl MockDashboardService {
+        fn unsupported<T>() -> Result<T> {
+            Err(StasisError::PortFailure("unsupported in test".to_string()))
+        }
+    }
+
+    #[async_trait]
+    impl DashboardQueryService for MockDashboardService {
+        async fn dashboard(&self, _inspect: Option<InspectEntity>) -> Result<DashboardDto> {
+            Ok(DashboardDto {
+                kpis: SystemKpiDto {
+                    succeeded_jobs: 0,
+                    failed_jobs: 0,
+                    enqueued_jobs: 0,
+                    running_jobs: 0,
+                    pending_outbox: 0,
+                    failed_outbox: 0,
+                    healthy_nodes: 0,
+                    degraded_nodes: 0,
+                    offline_nodes: 0,
+                    endpoint_failure_rate: "0.0%".to_string(),
+                },
+                job_stream: UiListPanel::<JobRowDto> {
+                    items: vec![],
+                    total: Some(0),
+                    cursor: None,
+                },
+                outbox_stream: UiListPanel::<OutboxEventRowDto> {
+                    items: vec![],
+                    total: Some(0),
+                    cursor: None,
+                },
+                cluster_map: ClusterMapDto { nodes: vec![] },
+                inspector: InspectorView::None,
+            })
+        }
+
+        async fn jobs_stream(&self) -> Result<UiListPanel<JobRowDto>> {
+            Self::unsupported()
+        }
+
+        async fn outbox_stream(&self) -> Result<UiListPanel<OutboxEventRowDto>> {
+            Self::unsupported()
+        }
+
+        async fn endpoint_stream(&self) -> Result<UiListPanel<EndpointRowDto>> {
+            Self::unsupported()
+        }
+
+        async fn recurring_stream(&self) -> Result<UiListPanel<RecurringDefinitionRowDto>> {
+            Self::unsupported()
+        }
+
+        async fn cluster_stream(&self) -> Result<ClusterMapDto> {
+            Self::unsupported()
+        }
+
+        async fn scheduler_materialize_now(&self, _scheduler_id: &str) -> Result<usize> {
+            self.materialize_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(1)
+        }
+
+        async fn scheduler_process_queue_once(
+            &self,
+            _queue: &str,
+            _worker_id: &str,
+        ) -> Result<Option<String>> {
+            self.process_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(None)
+        }
+
+        async fn scheduler_publish_pending_now(&self, _limit: usize) -> Result<usize> {
+            Self::unsupported()
+        }
+
+        async fn scheduler_replay_dead_letter_now(&self, _job_id: &str) -> Result<bool> {
+            Self::unsupported()
+        }
+
+        async fn inspect(&self, _entity: InspectEntity) -> Result<InspectorView> {
+            Self::unsupported()
+        }
+    }
+
+    #[tokio::test]
+    async fn action_route_rejects_missing_bearer_and_skips_side_effects() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls: Arc::clone(&materialize_calls),
+            process_calls,
+        };
+
+        let app = router(
+            DashboardState::new(Arc::new(service)).with_action_auth_bearer_token("test-token"),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/scheduler/materialize")
+                    .method("POST")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(materialize_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn action_route_accepts_valid_bearer_and_executes_scheduler_action() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls: Arc::clone(&materialize_calls),
+            process_calls,
+        };
+
+        let app = router(
+            DashboardState::new(Arc::new(service)).with_action_auth_bearer_token("test-token"),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/scheduler/materialize")
+                    .method("POST")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(materialize_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn action_route_rejects_invalid_bearer_and_skips_side_effects() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls: Arc::clone(&materialize_calls),
+            process_calls,
+        };
+
+        let app = router(
+            DashboardState::new(Arc::new(service)).with_action_auth_bearer_token("test-token"),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/scheduler/materialize")
+                    .method("POST")
+                    .header(header::AUTHORIZATION, "Bearer wrong-token")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(materialize_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn action_route_allows_requests_when_auth_token_is_not_configured() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls: Arc::clone(&materialize_calls),
+            process_calls,
+        };
+
+        let app = router(DashboardState::new(Arc::new(service)));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/scheduler/materialize")
+                    .method("POST")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(materialize_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn malformed_queue_payload_is_rejected_without_processing_side_effect() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls,
+            process_calls: Arc::clone(&process_calls),
+        };
+
+        let app = router(
+            DashboardState::new(Arc::new(service)).with_action_auth_bearer_token("test-token"),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/scheduler/process")
+                    .method("POST")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"queue":"   "}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(process_calls.load(Ordering::SeqCst), 0);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should decode");
+        let body_text = String::from_utf8(body.to_vec()).expect("body should be utf8");
+        assert!(body_text.contains("queue is required"));
+    }
+
+    #[tokio::test]
+    async fn non_action_route_is_not_guarded_by_action_bearer_auth() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls,
+            process_calls,
+        };
+
+        let app = router(
+            DashboardState::new(Arc::new(service)).with_action_auth_bearer_token("test-token"),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/dashboard")
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn action_route_rejects_missing_required_role_and_skips_side_effects() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls: Arc::clone(&materialize_calls),
+            process_calls,
+        };
+
+        let app = router(
+            DashboardState::new(Arc::new(service))
+                .with_action_auth_bearer_token("test-token")
+                .with_action_required_role("scheduler.admin"),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/scheduler/materialize")
+                    .method("POST")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(materialize_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn action_route_rejects_non_matching_required_role_and_skips_side_effects() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls: Arc::clone(&materialize_calls),
+            process_calls,
+        };
+
+        let app = router(
+            DashboardState::new(Arc::new(service))
+                .with_action_auth_bearer_token("test-token")
+                .with_action_required_role("scheduler.admin"),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/scheduler/materialize")
+                    .method("POST")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .header("x-stasis-role", "scheduler.viewer")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(materialize_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn action_route_accepts_matching_required_role_and_executes_action() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls: Arc::clone(&materialize_calls),
+            process_calls,
+        };
+
+        let app = router(
+            DashboardState::new(Arc::new(service))
+                .with_action_auth_bearer_token("test-token")
+                .with_action_required_role("scheduler.admin"),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/scheduler/materialize")
+                    .method("POST")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .header("x-stasis-role", "scheduler.viewer, scheduler.admin")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(materialize_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn action_route_accepts_matching_required_role_from_custom_header() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls: Arc::clone(&materialize_calls),
+            process_calls,
+        };
+
+        let app = router(
+            DashboardState::new(Arc::new(service))
+                .with_action_auth_bearer_token("test-token")
+                .with_action_required_role("scheduler.admin")
+                .with_action_role_claim_header("x-dashboard-role"),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/scheduler/materialize")
+                    .method("POST")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .header("x-dashboard-role", "scheduler.admin")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(materialize_calls.load(Ordering::SeqCst), 1);
+    }
 }
 
 fn render_template<T: Template>(template: T) -> Result<Html<String>, (StatusCode, String)> {

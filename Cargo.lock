@@ -6257,6 +6257,7 @@ dependencies = [
  "surrealdb",
  "surrealdb-types",
  "tokio",
+ "tower",
 ]
 
 [[package]]

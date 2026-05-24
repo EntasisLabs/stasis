@@ -997,7 +997,7 @@ impl OutboxStore for InMemoryOutboxStore {
             .cloned()
             .collect();
 
-        pending.sort_by_key(|evt| evt.event.occurred_at);
+        pending.sort_by_key(|evt| evt.next_attempt_at.unwrap_or(evt.event.occurred_at));
         pending.truncate(limit);
         Ok(pending)
     }
@@ -1487,6 +1487,210 @@ mod tests {
             .await
             .expect("pending list should succeed");
         assert!(pending_after.is_empty());
+    }
+
+    #[tokio::test]
+    async fn due_outbox_event_is_not_starved_by_future_retry_when_limit_is_low() {
+        let runtime = InMemoryRuntime::new();
+        runtime
+            .register_handler(AlwaysSuccessHandler)
+            .expect("handler should register");
+        runtime
+            .configure_outbox_publish_policy(OutboxPublishPolicy {
+                max_attempts: 3,
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            })
+            .expect("policy should configure");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        runtime
+            .register_event_publisher(FlakyPublisher {
+                failures_before_success: 1,
+                calls: Arc::clone(&calls),
+            })
+            .expect("publisher should register");
+
+        let now = Utc::now();
+        runtime
+            .enqueue(NewJob {
+                id: "job-fairness-1".to_string(),
+                queue: "default".to_string(),
+                job_type: "test.success".to_string(),
+                payload_ref: "payload:fairness-1".to_string(),
+                priority: 100,
+                max_attempts: 1,
+                idempotency_key: "idem-fairness-1".to_string(),
+                correlation_id: "corr-fairness-1".to_string(),
+                causation_id: "cause-fairness-1".to_string(),
+                trace_id: "trace-fairness-1".to_string(),
+                sttp_input_node_id: "sttp:in:fairness-1".to_string(),
+                scheduled_at: now,
+                backoff_policy: crate::domain::runtime::job::BackoffPolicy::default(),
+            })
+            .await
+            .expect("first job should enqueue");
+        runtime
+            .enqueue(NewJob {
+                id: "job-fairness-2".to_string(),
+                queue: "default".to_string(),
+                job_type: "test.success".to_string(),
+                payload_ref: "payload:fairness-2".to_string(),
+                priority: 100,
+                max_attempts: 1,
+                idempotency_key: "idem-fairness-2".to_string(),
+                correlation_id: "corr-fairness-2".to_string(),
+                causation_id: "cause-fairness-2".to_string(),
+                trace_id: "trace-fairness-2".to_string(),
+                sttp_input_node_id: "sttp:in:fairness-2".to_string(),
+                scheduled_at: now,
+                backoff_policy: crate::domain::runtime::job::BackoffPolicy::default(),
+            })
+            .await
+            .expect("second job should enqueue");
+
+        runtime
+            .process_once("default", "worker-1", now)
+            .await
+            .expect("first processing should succeed");
+        runtime
+            .process_once("default", "worker-1", now + Duration::milliseconds(1))
+            .await
+            .expect("second processing should succeed");
+
+        let first_attempt = runtime
+            .publish_pending_events(1, now + Duration::milliseconds(2))
+            .await
+            .expect("first publish attempt should complete");
+        assert_eq!(first_attempt, 0);
+
+        let second_attempt = runtime
+            .publish_pending_events(1, now + Duration::milliseconds(2))
+            .await
+            .expect("second publish attempt should complete");
+        assert_eq!(second_attempt, 1);
+
+        let pending_after_second = runtime
+            .outbox_store
+            .list_pending(10)
+            .await
+            .expect("pending list should succeed");
+        assert_eq!(pending_after_second.len(), 1);
+        assert_eq!(pending_after_second[0].publish_attempts, 1);
+        assert_eq!(
+            pending_after_second[0].next_attempt_at,
+            Some(now + Duration::milliseconds(2) + Duration::seconds(1))
+        );
+
+        let third_attempt = runtime
+            .publish_pending_events(1, now + Duration::seconds(1) + Duration::milliseconds(2))
+            .await
+            .expect("third publish attempt should complete");
+        assert_eq!(third_attempt, 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+
+        let pending_final = runtime
+            .outbox_store
+            .list_pending(10)
+            .await
+            .expect("pending list should succeed");
+        assert!(pending_final.is_empty());
+    }
+
+    #[tokio::test]
+    async fn outbox_backlog_completes_within_bounded_ticks_under_mixed_failures() {
+        let runtime = InMemoryRuntime::new();
+        runtime
+            .register_handler(AlwaysSuccessHandler)
+            .expect("handler should register");
+        runtime
+            .configure_outbox_publish_policy(OutboxPublishPolicy {
+                max_attempts: 5,
+                base_delay_seconds: 1,
+                max_delay_seconds: 8,
+            })
+            .expect("policy should configure");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        runtime
+            .register_event_publisher(FlakyPublisher {
+                failures_before_success: 3,
+                calls: Arc::clone(&calls),
+            })
+            .expect("publisher should register");
+
+        let now = Utc::now();
+        let mut job_ids = Vec::new();
+        for idx in 0..12 {
+            let job_id = format!("job-backlog-{idx}");
+            runtime
+                .enqueue(NewJob {
+                    id: job_id.clone(),
+                    queue: "default".to_string(),
+                    job_type: "test.success".to_string(),
+                    payload_ref: format!("payload:backlog-{idx}"),
+                    priority: 100,
+                    max_attempts: 1,
+                    idempotency_key: format!("idem-backlog-{idx}"),
+                    correlation_id: format!("corr-backlog-{idx}"),
+                    causation_id: format!("cause-backlog-{idx}"),
+                    trace_id: format!("trace-backlog-{idx}"),
+                    sttp_input_node_id: format!("sttp:in:backlog-{idx}"),
+                    scheduled_at: now,
+                    backoff_policy: crate::domain::runtime::job::BackoffPolicy::default(),
+                })
+                .await
+                .expect("job should enqueue");
+            job_ids.push(job_id);
+        }
+
+        for idx in 0..job_ids.len() {
+            runtime
+                .process_once("default", "worker-1", now + Duration::milliseconds(idx as i64))
+                .await
+                .expect("processing should succeed");
+        }
+
+        let mut total_published = 0usize;
+        for tick in 0..20 {
+            total_published += runtime
+                .publish_pending_events(3, now + Duration::seconds(tick))
+                .await
+                .expect("publish sweep should succeed");
+
+            let pending = runtime
+                .outbox_store
+                .list_pending(50)
+                .await
+                .expect("pending list should succeed");
+            if pending.is_empty() {
+                break;
+            }
+        }
+
+        let pending_final = runtime
+            .outbox_store
+            .list_pending(50)
+            .await
+            .expect("pending list should succeed");
+        assert!(
+            pending_final.is_empty(),
+            "expected backlog to drain within bounded ticks"
+        );
+        assert_eq!(total_published, job_ids.len());
+
+        for job_id in job_ids {
+            let events = runtime
+                .outbox_store
+                .list_by_job_id(&job_id)
+                .await
+                .expect("outbox list by job should succeed");
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].status, OutboxStatus::Published);
+            assert!(events[0].publish_attempts >= 1);
+        }
+
+        assert_eq!(calls.load(Ordering::SeqCst), 15);
     }
 
     #[tokio::test]

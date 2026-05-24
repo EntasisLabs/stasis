@@ -195,7 +195,7 @@ impl OutboxStore for SurrealOutboxStore {
             .filter(|evt| evt.status == OutboxStatus::Pending)
             .collect();
 
-        events.sort_by_key(|evt| evt.event.occurred_at);
+        events.sort_by_key(|evt| evt.next_attempt_at.unwrap_or(evt.event.occurred_at));
         events.truncate(limit);
         Ok(events)
     }
