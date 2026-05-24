@@ -29,13 +29,13 @@ impl ThreadStore for InMemoryThreadStore {
             )));
         }
 
-        if let Some(parent_thread_id) = &thread.parent_thread_id {
-            if !threads.contains_key(parent_thread_id) {
-                return Err(StasisError::PortFailure(format!(
-                    "parent thread not found: {}",
-                    parent_thread_id
-                )));
-            }
+        if let Some(parent_thread_id) = &thread.parent_thread_id
+            && !threads.contains_key(parent_thread_id)
+        {
+            return Err(StasisError::PortFailure(format!(
+                "parent thread not found: {}",
+                parent_thread_id
+            )));
         }
 
         let record = ThreadRecord {

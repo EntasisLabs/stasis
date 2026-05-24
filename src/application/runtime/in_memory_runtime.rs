@@ -285,7 +285,7 @@ impl InMemoryRuntime {
                 continue;
             }
 
-            let id = format!("{}", self.id_generator.next_id(&definition.id));
+            let id = self.id_generator.next_id(&definition.id).to_string();
 
             let scheduled_at = now + Duration::seconds(definition.jitter_seconds.max(0));
 
@@ -432,7 +432,7 @@ impl InMemoryRuntime {
                     self.metrics.incr_counter(METRIC_JOB_DEAD_LETTER_TOTAL, 1);
                 } else {
                     job.state = JobState::Enqueued;
-                    let exponent = (job.attempts - 1) as u32;
+                    let exponent = job.attempts - 1;
                     let mut delay = job
                         .backoff_policy
                         .base_delay_seconds
@@ -615,7 +615,7 @@ impl InMemoryRuntime {
                         event.status = OutboxStatus::Failed;
                         event.next_attempt_at = None;
                     } else {
-                        let exponent = (event.publish_attempts - 1) as u32;
+                        let exponent = event.publish_attempts - 1;
                         let mut delay = policy
                             .base_delay_seconds
                             .saturating_mul(2_i64.saturating_pow(exponent));
@@ -634,6 +634,7 @@ impl InMemoryRuntime {
         Ok(published)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn append_outbox(
         &self,
         event_type: RuntimeEventType,
@@ -680,6 +681,7 @@ impl InMemoryRuntime {
         self.outbox_store.insert(event).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn append_job_attempt(
         &self,
         job: &Job,

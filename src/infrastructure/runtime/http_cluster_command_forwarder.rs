@@ -134,9 +134,7 @@ impl HttpClusterCommandForwarder {
         let now = Instant::now();
 
         let mut cache = self.dedupe_cache.write().ok()?;
-        let Some(entry) = cache.get(&key).cloned() else {
-            return None;
-        };
+        let entry = cache.get(&key).cloned()?;
 
         if now.duration_since(entry.observed_at) > self.idempotency_ttl {
             cache.remove(&key);
@@ -221,7 +219,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
             );
             self.record_outcome(&command, false, 0, Some(err_msg.clone()))
                 .await;
-            return Err(StasisError::PortFailure(format!("{}", err_msg)));
+            return Err(StasisError::PortFailure(err_msg));
         };
 
         let request_body = ForwardCommandPayload {
@@ -273,7 +271,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                         );
                         self.record_outcome(&command, false, attempt, Some(err_msg.clone()))
                             .await;
-                        return Err(StasisError::PortFailure(format!("{}", err_msg)));
+                        return Err(StasisError::PortFailure(err_msg));
                     }
 
                     if let Some(metrics) = &self.metrics {
@@ -297,7 +295,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                     );
                     self.record_outcome(&command, false, attempt, Some(err_msg.clone()))
                         .await;
-                    return Err(StasisError::PortFailure(format!("{}", err_msg)));
+                    return Err(StasisError::PortFailure(err_msg));
                 }
                 Err(err) => {
                     if attempt == self.max_attempts {
@@ -314,7 +312,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                         );
                         self.record_outcome(&command, false, attempt, Some(err_msg.clone()))
                             .await;
-                        return Err(StasisError::PortFailure(format!("{}", err_msg)));
+                        return Err(StasisError::PortFailure(err_msg));
                     }
 
                     if let Some(metrics) = &self.metrics {

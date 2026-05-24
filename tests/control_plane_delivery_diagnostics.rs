@@ -2,15 +2,25 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
-use stasis::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
-use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
-use stasis::prelude::{
-    BackoffPolicy, ControlPlaneSdk, DeliveryEndpoint, DeliveryEndpointStore, DeliveryProtocol,
-    EndpointRoutingEventPublisher, EndpointTransportPublisher, JobExecutionOutcome, JobHandler,
-    ListEndpointDiagnosticsReadModelRequest, NewDeliveryEndpoint, NewJob, OutboxEvent,
-    RuntimeBackend, RuntimeComposition, StasisRuntimeBuilder, SurrealClusterNodeStore,
-    SurrealDeliveryEndpointStore, SurrealEndpointDeliveryStatusStore,
+use stasis::application::dto::ListEndpointDiagnosticsReadModelRequest;
+use stasis::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use stasis::application::runtime::runtime_factory::{RuntimeBackend, RuntimeComposition};
+use stasis::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
+use stasis::domain::errors::{Result, StasisError};
+use stasis::domain::runtime::delivery_endpoint::{
+    DeliveryEndpoint, DeliveryProtocol, NewDeliveryEndpoint,
 };
+use stasis::domain::runtime::job::{BackoffPolicy, NewJob};
+use stasis::domain::runtime::outbox::OutboxEvent;
+use stasis::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
+use stasis::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
+use stasis::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
+use stasis::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
+use stasis::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
+use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
+use stasis::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
+use stasis::ports::outbound::runtime::endpoint_transport_publisher::EndpointTransportPublisher;
+use stasis::sdk::control_plane_sdk::ControlPlaneSdk;
 
 #[derive(Clone)]
 struct SuccessHandler;
@@ -24,7 +34,7 @@ impl JobHandler for SuccessHandler {
     async fn execute(
         &self,
         _job: &stasis::domain::runtime::job::Job,
-    ) -> stasis::prelude::Result<JobExecutionOutcome> {
+    ) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
             sttp_output_node_id: "sttp:out:surreal-e2e".to_string(),
             execution_id: Some("exec:surreal-e2e".to_string()),
@@ -48,10 +58,11 @@ impl EndpointTransportPublisher for RecordingTransport {
         &self,
         endpoint: &DeliveryEndpoint,
         _event: &OutboxEvent,
-    ) -> stasis::prelude::Result<()> {
-        let mut calls = self.calls.write().map_err(|_| {
-            stasis::prelude::StasisError::PortFailure("calls lock poisoned".to_string())
-        })?;
+    ) -> Result<()> {
+        let mut calls = self
+            .calls
+            .write()
+            .map_err(|_| StasisError::PortFailure("calls lock poisoned".to_string()))?;
         calls.push(endpoint.endpoint_id.clone());
         Ok(())
     }
@@ -149,10 +160,12 @@ async fn surreal_runtime_persists_endpoint_delivery_status_and_control_plane_que
             .collect::<Vec<_>>()
     );
 
-    let calls = calls.read().expect("calls read lock should succeed");
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0], "endpoint.surreal.webhook");
-    drop(calls);
+    let (call_len, first_call) = {
+        let calls = calls.read().expect("calls read lock should succeed");
+        (calls.len(), calls.first().cloned())
+    };
+    assert_eq!(call_len, 1);
+    assert_eq!(first_call.as_deref(), Some("endpoint.surreal.webhook"));
 
     let control_plane = ControlPlaneSdk::new_with_status_store(
         CompositeControlPlaneStore::new(

@@ -98,10 +98,8 @@ impl IdentityMemoryService {
                 })
                 .await?;
 
-            if commit.committed {
-                if let Some(new_version) = commit.new_version {
-                    expected_version = new_version;
-                }
+            if commit.committed && let Some(new_version) = commit.new_version {
+                expected_version = new_version;
             }
 
             commits.push(commit);

@@ -1,8 +1,14 @@
-use stasis::prelude::{
-    LocusContextReader, LocusContextWriter, LocusMemoryOperations, LocusNodeStoreFactory,
-    MemoryAggregateRequest, MemoryContextReader, MemoryContextWriter, MemoryOperations,
-    MemoryRecallRequest, MemoryScope, MemoryStoreRequest, MemoryTransformRequest,
+use stasis::infrastructure::memory::locus_context_reader::LocusContextReader;
+use stasis::infrastructure::memory::locus_context_writer::LocusContextWriter;
+use stasis::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
+use stasis::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
+use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
+use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
+use stasis::ports::outbound::memory::memory_models::{
+    MemoryAggregateRequest, MemoryRecallRequest, MemoryRollupRequest, MemoryScope,
+    MemoryStoreRequest, MemoryTransformRequest,
 };
+use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
 
 #[tokio::test]
 async fn locus_node_store_factory_in_memory_initializes_store() {
@@ -73,7 +79,7 @@ async fn locus_memory_operations_schema_aggregate_rollup_work_on_empty_store() {
     assert_eq!(aggregate.total_groups, 0);
 
     let rollup = operations
-        .rollup(&stasis::prelude::MemoryRollupRequest {
+        .rollup(&MemoryRollupRequest {
             scope: MemoryScope {
                 session_ids: Some(vec!["session-rollup-empty".to_string()]),
                 ..Default::default()
@@ -104,7 +110,7 @@ async fn locus_memory_transform_requires_provider_registry() {
         .await;
 
     assert!(result.is_err(), "transform without providers should fail");
-    let message = result.err().expect("error should exist").to_string();
+    let message = result.expect_err("error should exist").to_string();
     assert!(
         message.contains("requires ai provider registry"),
         "unexpected error message: {message}"

@@ -158,8 +158,7 @@ impl GraphemeTextOpsJobHandler {
     fn build_inline_source(message: &str) -> String {
         let cleaned = message
             .replace('"', "'")
-            .replace('\n', " ")
-            .replace('\r', " ");
+            .replace(['\n', '\r'], " ");
 
         format!(
             "import core from \"grapheme/core\"\n\nquery TextOps {{\n  core.echo(message: \"{}\") {{\n    state {{ current }}\n  }}\n}}\n",

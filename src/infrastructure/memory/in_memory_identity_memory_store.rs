@@ -214,9 +214,7 @@ impl InMemoryIdentityMemoryStore {
             return Some("relationship_status_transition".to_string());
         }
 
-        let Some(map) = patch.as_object() else {
-            return None;
-        };
+        let map = patch.as_object()?;
 
         let has_material_patch = map.keys().any(|key| {
             matches!(
@@ -326,16 +324,13 @@ impl InMemoryIdentityMemoryStore {
     }
 
     fn trust_delta_max_for_relationship(&self, relationship: &RelationshipEntity) -> f32 {
-        if let Some(profile_id) = relationship.approval_profile_id.as_ref() {
-            if let Ok(policies) = self.policies.read() {
-                if let Some(profile) = policies.get(profile_id) {
-                    if profile.trust_delta_max_per_window.is_finite()
-                        && profile.trust_delta_max_per_window > 0.0
-                    {
-                        return profile.trust_delta_max_per_window;
-                    }
-                }
-            }
+        if let Some(profile_id) = relationship.approval_profile_id.as_ref()
+            && let Ok(policies) = self.policies.read()
+            && let Some(profile) = policies.get(profile_id)
+            && profile.trust_delta_max_per_window.is_finite()
+            && profile.trust_delta_max_per_window > 0.0
+        {
+            return profile.trust_delta_max_per_window;
         }
         DEFAULT_TRUST_DELTA_MAX_PER_WINDOW
     }
@@ -587,12 +582,11 @@ impl IdentityMemoryStore for InMemoryIdentityMemoryStore {
 
         let mut policy_profiles = Vec::new();
         for rel in &relationships {
-            if let Some(policy_id) = rel.approval_profile_id.as_ref() {
-                if let Some(profile) = policies.get(policy_id) {
-                    if profile.status == "active" {
-                        policy_profiles.push(profile.clone());
-                    }
-                }
+            if let Some(policy_id) = rel.approval_profile_id.as_ref()
+                && let Some(profile) = policies.get(policy_id)
+                && profile.status == "active"
+            {
+                policy_profiles.push(profile.clone());
             }
         }
 
@@ -695,17 +689,17 @@ impl IdentityMemoryStore for InMemoryIdentityMemoryStore {
             });
         }
 
-        if let Some(expires_at) = proposal.expires_at {
-            if Utc::now() > expires_at {
-                proposal.state = ProposalState::Expired;
-                proposal.updated_at = Utc::now();
-                return Ok(CommitEntityUpdateResponse {
-                    committed: false,
-                    code: Some(CommitOutcomeCode::ExpiredProposal),
-                    rationale: Some("proposal expired".to_string()),
-                    ..Default::default()
-                });
-            }
+        if let Some(expires_at) = proposal.expires_at
+            && Utc::now() > expires_at
+        {
+            proposal.state = ProposalState::Expired;
+            proposal.updated_at = Utc::now();
+            return Ok(CommitEntityUpdateResponse {
+                committed: false,
+                code: Some(CommitOutcomeCode::ExpiredProposal),
+                rationale: Some("proposal expired".to_string()),
+                ..Default::default()
+            });
         }
 
         if Self::patch_requires_approval(proposal.tier) && request.approver.is_none() {
@@ -853,8 +847,8 @@ impl IdentityMemoryStore for InMemoryIdentityMemoryStore {
             .filter(|proposal| {
                 proposal.entity_type == request.entity_type && proposal.entity_id == request.entity_id
             })
-            .cloned()
             .take(request.limit.max(1))
+            .cloned()
             .collect::<Vec<_>>();
 
         let transitions = if request.entity_type == IdentityEntityType::RelationshipEntity {
@@ -865,8 +859,8 @@ impl IdentityMemoryStore for InMemoryIdentityMemoryStore {
                 })?
                 .iter()
                 .filter(|event| event.relationship_id == request.entity_id)
-                .cloned()
                 .take(request.limit.max(1))
+                .cloned()
                 .collect::<Vec<_>>()
         } else {
             Vec::new()

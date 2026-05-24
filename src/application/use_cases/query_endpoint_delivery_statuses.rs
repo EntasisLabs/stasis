@@ -142,16 +142,16 @@ where
                 continue;
             }
 
-            if let Some(ids) = &requested_ids {
-                if !ids.contains(&endpoint.endpoint_id) {
-                    continue;
-                }
+            if let Some(ids) = &requested_ids
+                && !ids.contains(&endpoint.endpoint_id)
+            {
+                continue;
             }
 
-            if let Some(protocol) = &request.protocol {
-                if &endpoint.protocol != protocol {
-                    continue;
-                }
+            if let Some(protocol) = &request.protocol
+                && &endpoint.protocol != protocol
+            {
+                continue;
             }
 
             let status = status_by_endpoint.get(&endpoint.endpoint_id);
@@ -160,10 +160,10 @@ where
             let last_success_at = status.and_then(|s| s.last_success_at);
             let last_failure_at = status.and_then(|s| s.last_failure_at);
 
-            if let Some(min_failures) = request.min_failure_count {
-                if failure_count < min_failures {
-                    continue;
-                }
+            if let Some(min_failures) = request.min_failure_count
+                && failure_count < min_failures
+            {
+                continue;
             }
 
             let unhealthy = is_unhealthy(last_success_at, last_failure_at, stale_cutoff);
@@ -285,10 +285,10 @@ where
                 continue;
             }
 
-            if let Some(protocol) = &request.protocol {
-                if &endpoint.protocol != protocol {
-                    continue;
-                }
+            if let Some(protocol) = &request.protocol
+                && &endpoint.protocol != protocol
+            {
+                continue;
             }
 
             let Some(status) = status_by_endpoint.get(&endpoint.endpoint_id) else {
@@ -296,10 +296,10 @@ where
             };
 
             let total_attempts = status.success_count.saturating_add(status.failure_count);
-            if let Some(min_total_attempts) = request.min_total_attempts {
-                if total_attempts < min_total_attempts {
-                    continue;
-                }
+            if let Some(min_total_attempts) = request.min_total_attempts
+                && total_attempts < min_total_attempts
+            {
+                continue;
             }
 
             let failure_rate = if total_attempts == 0 {

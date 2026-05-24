@@ -669,6 +669,7 @@ fn test_backoff_policy() -> BackoffPolicy {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_tool_loop_job(
     job_id: &str,
     payload: &ToolLoopJobPayload,
@@ -691,6 +692,7 @@ fn build_tool_loop_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_agent_turn_job(
     job_id: &str,
     payload: &AgentTurnJobPayload,
@@ -713,6 +715,7 @@ fn build_agent_turn_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_agent_session_job(
     job_id: &str,
     payload: &AgentSessionJobPayload,
@@ -735,6 +738,7 @@ fn build_agent_session_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_prompt_job(
     job_id: &str,
     payload: &PromptJobPayload,
@@ -757,6 +761,7 @@ fn build_prompt_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_orchestration_sequential_job(
     job_id: &str,
     payload: &SequentialPatternJobPayload,
@@ -779,6 +784,7 @@ fn build_orchestration_sequential_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_orchestration_concurrent_job(
     job_id: &str,
     payload: &ConcurrentPatternJobPayload,
@@ -801,6 +807,7 @@ fn build_orchestration_concurrent_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_orchestration_handoff_job(
     job_id: &str,
     payload: &HandoffPatternJobPayload,
@@ -823,6 +830,7 @@ fn build_orchestration_handoff_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_orchestration_orchestrator_job(
     job_id: &str,
     payload: &OrchestratorPatternJobPayload,
@@ -845,6 +853,7 @@ fn build_orchestration_orchestrator_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_memory_recall_job(
     job_id: &str,
     payload: &MemoryRecallJobPayload,
@@ -923,6 +932,7 @@ fn assert_orchestration_policy_violation_diagnostics(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_memory_aggregate_job(
     job_id: &str,
     payload: &MemoryAggregateJobPayload,
@@ -945,6 +955,7 @@ fn build_memory_aggregate_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_memory_transform_job(
     job_id: &str,
     payload: &MemoryTransformJobPayload,
@@ -967,6 +978,7 @@ fn build_memory_transform_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_memory_rollup_job(
     job_id: &str,
     payload: &MemoryRollupJobPayload,
@@ -989,6 +1001,7 @@ fn build_memory_rollup_job(
         .build()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_memory_schema_job(
     job_id: &str,
     payload: &MemorySchemaJobPayload,

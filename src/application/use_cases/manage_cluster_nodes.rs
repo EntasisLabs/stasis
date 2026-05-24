@@ -574,10 +574,10 @@ where
             let health = classify_health(&node, now);
 
             for queue in &node.queue_ownership {
-                if let Some(prefix) = &request.queue_prefix {
-                    if !queue.starts_with(prefix) {
-                        continue;
-                    }
+                if let Some(prefix) = &request.queue_prefix
+                    && !queue.starts_with(prefix)
+                {
+                    continue;
                 }
 
                 let row =

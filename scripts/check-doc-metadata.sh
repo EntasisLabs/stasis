@@ -12,10 +12,9 @@ files=(
   "docs/design/stasis-framework-rfc.md"
   "docs/adr/README.md"
   "docs-book/src/architecture-overview.md"
-  "docs-book/src/runtime-v1-draft.md"
+  "docs-book/src/runtime-builder.md"
   "docs-book/src/runtime-job-design.md"
   "docs-book/src/surrealdb-schema.md"
-  "docs-book/src/stasis-framework-rfc.md"
   "docs-book/src/adr.md"
 )
 

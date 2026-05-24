@@ -104,10 +104,10 @@ impl GenaiChatClient {
 
     fn resolve_auth_data(adapter_kind: AdapterKind) -> Option<AuthData> {
         for env_name in Self::auth_env_candidates(adapter_kind) {
-            if let Ok(value) = std::env::var(&env_name) {
-                if !value.trim().is_empty() {
-                    return Some(AuthData::from_single(value));
-                }
+            if let Ok(value) = std::env::var(&env_name)
+                && !value.trim().is_empty()
+            {
+                return Some(AuthData::from_single(value));
             }
         }
         None
@@ -214,10 +214,10 @@ impl AiChatClient for GenaiChatClient {
                     }
                 }
                 ChatStreamEvent::ThoughtSignatureChunk(chunk) => {
-                    if !chunk.content.is_empty() {
-                        if let Some(tx) = chunk_tx {
-                            let _ = tx.send(StreamDelta::ThoughtSignature(chunk.content));
-                        }
+                    if !chunk.content.is_empty()
+                        && let Some(tx) = chunk_tx
+                    {
+                        let _ = tx.send(StreamDelta::ThoughtSignature(chunk.content));
                     }
                 }
                 ChatStreamEvent::End(end) => {

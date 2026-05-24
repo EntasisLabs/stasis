@@ -21,6 +21,5 @@
 
 - Runtime phase plan and Grapheme track: [design/runtime-phase-plan.md](design/runtime-phase-plan.md)
 - Runtime demo program plan: [design/runtime-demo-plan.md](design/runtime-demo-plan.md)
-- Medousa product roadmap: [design/medousa-roadmap.md](design/medousa-roadmap.md)
 - Stasis framework implementation plan: [design/stasis-framework-implementation-plan.md](design/stasis-framework-implementation-plan.md)
 - Locus integration RFC and delivery plan: [design/locus-integration-rfc-plan.md](design/locus-integration-rfc-plan.md)

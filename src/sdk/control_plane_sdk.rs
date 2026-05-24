@@ -41,6 +41,7 @@ use crate::ports::outbound::runtime::cluster_node_store::ClusterNodeStore;
 use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
 use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
 
+/// High-level facade for delivery endpoint and cluster control-plane operations.
 #[derive(Clone)]
 pub struct ControlPlaneSdk<S>
 where
@@ -83,6 +84,7 @@ impl<S> ControlPlaneSdk<S>
 where
     S: DeliveryEndpointStore + ClusterNodeStore + Clone,
 {
+    /// Builds a control-plane facade from a store implementing endpoint and cluster persistence.
     pub fn new(store: S) -> Self {
         let list_delivery_store = store.clone();
         let register_cluster_store = store.clone();
@@ -113,6 +115,7 @@ where
         }
     }
 
+    /// Builds a control-plane facade with cluster heartbeat sweep event publication enabled.
     pub fn new_with_cluster_event_sink(
         store: S,
         cluster_event_sink: Arc<dyn ClusterControlEventSink>,

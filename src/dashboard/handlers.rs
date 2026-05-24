@@ -233,7 +233,6 @@ async fn view_section(
                         health: node.health,
                         queue_ownership_count: node.queue_ownership_count,
                         capability_count: node.capability_count,
-                        lease_expires_at: node.lease_expires_at.to_rfc3339(),
                         load_index,
                         memory_index,
                     }
@@ -402,10 +401,10 @@ async fn view_section(
                 })
                 .collect::<Vec<_>>();
 
-            if let Some(state_filter) = query.state.as_ref() {
-                if state_filter != "all" {
-                    events.retain(|event| &event.delivery_state == state_filter);
-                }
+            if let Some(state_filter) = query.state.as_ref()
+                && state_filter != "all"
+            {
+                events.retain(|event| &event.delivery_state == state_filter);
             }
 
             if let Some(text) = query
@@ -918,7 +917,6 @@ struct ClusterTelemetryNodeDto {
     health: String,
     queue_ownership_count: usize,
     capability_count: usize,
-    lease_expires_at: String,
     load_index: i32,
     memory_index: i32,
 }

@@ -38,10 +38,10 @@ impl CoordinatorFailoverJobHandler {
             return Err("coordinator_node_id must not be empty".to_string());
         }
 
-        if let Some(target) = &payload.failover_to_node_id {
-            if target.trim().is_empty() {
-                return Err("failover_to_node_id must not be empty when provided".to_string());
-            }
+        if let Some(target) = &payload.failover_to_node_id
+            && target.trim().is_empty()
+        {
+            return Err("failover_to_node_id must not be empty when provided".to_string());
         }
 
         Ok(payload)

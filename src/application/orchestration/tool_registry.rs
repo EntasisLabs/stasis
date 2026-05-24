@@ -146,13 +146,13 @@ impl InMemoryToolRegistry {
                     Self::assert_json_type(key, value, expected)?;
                 }
 
-                if let Some(choices) = schema_entry.get("enum").and_then(|v| v.as_array()) {
-                    if !choices.iter().any(|choice| choice == value) {
-                        return Err(StasisError::PortFailure(format!(
-                            "policy violation: tool input field '{}' must match one of enum values",
-                            key
-                        )));
-                    }
+                if let Some(choices) = schema_entry.get("enum").and_then(|v| v.as_array())
+                    && !choices.iter().any(|choice| choice == value)
+                {
+                    return Err(StasisError::PortFailure(format!(
+                        "policy violation: tool input field '{}' must match one of enum values",
+                        key
+                    )));
                 }
             }
 

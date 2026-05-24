@@ -176,9 +176,7 @@ impl SurrealIdentityMemoryStore {
             return Some("relationship_status_transition".to_string());
         }
 
-        let Some(map) = patch.as_object() else {
-            return None;
-        };
+        let map = patch.as_object()?;
         let has_material_patch = map.keys().any(|key| {
             matches!(
                 key.as_str(),
@@ -315,14 +313,12 @@ impl SurrealIdentityMemoryStore {
     }
 
     async fn trust_delta_max_for_relationship(&self, relationship: &RelationshipEntity) -> f32 {
-        if let Some(profile_id) = relationship.approval_profile_id.as_ref() {
-            if let Ok(Some(profile)) = self.load_policy_profile(profile_id).await {
-                if profile.trust_delta_max_per_window.is_finite()
-                    && profile.trust_delta_max_per_window > 0.0
-                {
-                    return profile.trust_delta_max_per_window;
-                }
-            }
+        if let Some(profile_id) = relationship.approval_profile_id.as_ref()
+            && let Ok(Some(profile)) = self.load_policy_profile(profile_id).await
+            && profile.trust_delta_max_per_window.is_finite()
+            && profile.trust_delta_max_per_window > 0.0
+        {
+            return profile.trust_delta_max_per_window;
         }
         DEFAULT_TRUST_DELTA_MAX_PER_WINDOW
     }
@@ -1357,12 +1353,11 @@ impl IdentityMemoryStore for SurrealIdentityMemoryStore {
 
         let mut policy_profiles = Vec::new();
         for rel in &relationships {
-            if let Some(policy_id) = rel.approval_profile_id.as_ref() {
-                if let Some(profile) = self.load_policy_profile(policy_id).await? {
-                    if profile.status == "active" {
-                        policy_profiles.push(profile);
-                    }
-                }
+            if let Some(policy_id) = rel.approval_profile_id.as_ref()
+                && let Some(profile) = self.load_policy_profile(policy_id).await?
+                && profile.status == "active"
+            {
+                policy_profiles.push(profile);
             }
         }
 
@@ -1476,25 +1471,25 @@ impl IdentityMemoryStore for SurrealIdentityMemoryStore {
             });
         }
 
-        if let Some(expires_at) = proposal.expires_at {
-            if Utc::now() > expires_at {
-                proposal.state = ProposalState::Expired;
-                proposal.updated_at = Utc::now();
-                self.db
-                    .query("UPSERT type::record($table, $id) CONTENT $data")
-                    .bind(("table", self.proposal_table.clone()))
-                    .bind(("id", proposal.proposal_id.clone()))
-                    .bind(("data", ProposalRow::from(proposal)))
-                    .await
-                    .map_err(|e| Self::port_err("expire identity proposal", e))?;
+        if let Some(expires_at) = proposal.expires_at
+            && Utc::now() > expires_at
+        {
+            proposal.state = ProposalState::Expired;
+            proposal.updated_at = Utc::now();
+            self.db
+                .query("UPSERT type::record($table, $id) CONTENT $data")
+                .bind(("table", self.proposal_table.clone()))
+                .bind(("id", proposal.proposal_id.clone()))
+                .bind(("data", ProposalRow::from(proposal)))
+                .await
+                .map_err(|e| Self::port_err("expire identity proposal", e))?;
 
-                return Ok(CommitEntityUpdateResponse {
-                    committed: false,
-                    code: Some(CommitOutcomeCode::ExpiredProposal),
-                    rationale: Some("proposal expired".to_string()),
-                    ..Default::default()
-                });
-            }
+            return Ok(CommitEntityUpdateResponse {
+                committed: false,
+                code: Some(CommitOutcomeCode::ExpiredProposal),
+                rationale: Some("proposal expired".to_string()),
+                ..Default::default()
+            });
         }
 
         if Self::patch_requires_approval(proposal.tier) && request.approver.is_none() {

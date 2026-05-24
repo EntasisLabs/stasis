@@ -2,32 +2,22 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
 pub enum IdentityEntityType {
     PersonaEntity,
     UserEntity,
     ChannelProfileEntity,
     PolicyProfileEntity,
+    #[default]
     RelationshipEntity,
 }
 
-impl Default for IdentityEntityType {
-    fn default() -> Self {
-        Self::RelationshipEntity
-    }
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Eq, PartialEq, Hash)]
 pub enum UpdateTier {
+    #[default]
     AutoCommit,
     ConfirmRequired,
     ApprovalRequired,
-}
-
-impl Default for UpdateTier {
-    fn default() -> Self {
-        Self::AutoCommit
-    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -38,32 +28,22 @@ pub enum ProposalState {
     Expired,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
 pub enum UpdateSource {
     UserDirect,
+    #[default]
     ModelInferred,
     SystemEvent,
 }
 
-impl Default for UpdateSource {
-    fn default() -> Self {
-        Self::ModelInferred
-    }
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
 pub enum RelationshipStatus {
+    #[default]
     Proposed,
     Active,
     Suspended,
     Deprecated,
     Revoked,
-}
-
-impl Default for RelationshipStatus {
-    fn default() -> Self {
-        Self::Proposed
-    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]

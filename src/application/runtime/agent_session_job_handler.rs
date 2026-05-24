@@ -339,17 +339,17 @@ impl JobHandler for AgentSessionJobHandler {
 
         let mut memory_store = None;
         let mut memory_store_error = None;
-        if Self::should_store(memory_policy) {
-            if let Some(writer) = &self.memory_writer {
-                let store_request = MemoryStoreRequest {
-                    session_id: job.correlation_id.clone(),
-                    raw_node: Self::render_sttp_node(&job.correlation_id, &summary_text),
-                };
+        if Self::should_store(memory_policy)
+            && let Some(writer) = &self.memory_writer
+        {
+            let store_request = MemoryStoreRequest {
+                session_id: job.correlation_id.clone(),
+                raw_node: Self::render_sttp_node(&job.correlation_id, &summary_text),
+            };
 
-                match writer.store_context(&store_request).await {
-                    Ok(stored) => memory_store = Some(stored),
-                    Err(err) => memory_store_error = Some(err.to_string()),
-                }
+            match writer.store_context(&store_request).await {
+                Ok(stored) => memory_store = Some(stored),
+                Err(err) => memory_store_error = Some(err.to_string()),
             }
         }
 

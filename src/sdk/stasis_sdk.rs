@@ -8,6 +8,7 @@ use crate::ports::inbound::agent_commands::AgentCommands;
 use crate::ports::outbound::agent_repository::AgentRepository;
 use crate::ports::outbound::llm_gateway::LlmGateway;
 
+/// High-level SDK facade for core agent registration and invocation flows.
 #[derive(Clone)]
 pub struct StasisSdk<R, L>
 where
@@ -23,6 +24,7 @@ where
     R: AgentRepository + Clone,
     L: LlmGateway + Clone,
 {
+    /// Creates a new SDK facade backed by the provided repository and LLM gateway.
     pub fn new(repository: R, llm: L) -> Self {
         Self {
             register_agent: RegisterAgent::new(repository.clone()),
@@ -30,10 +32,12 @@ where
         }
     }
 
+    /// Registers an agent profile that can later be invoked by id.
     pub async fn register_agent(&self, request: RegisterAgentRequest) -> Result<()> {
         self.register_agent.execute(request).await
     }
 
+    /// Invokes an existing agent and returns the generated completion payload.
     pub async fn invoke_agent(&self, request: InvokeAgentRequest) -> Result<InvokeAgentResponse> {
         self.invoke_agent.execute(request).await
     }

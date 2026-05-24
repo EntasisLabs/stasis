@@ -133,6 +133,12 @@ impl GraphemeSdkWorkflowEngine {
     }
 }
 
+impl Default for GraphemeSdkWorkflowEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl WorkflowEngine for GraphemeSdkWorkflowEngine {
     async fn execute_grapheme_source(&self, source: &str) -> Result<WorkflowExecutionOutput> {

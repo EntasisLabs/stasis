@@ -2,15 +2,24 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use chrono::{Duration, Utc};
-use stasis::dashboard::{DashboardState, InMemoryDashboardQueryService, router};
-use stasis::domain::runtime::job::Job;
-use stasis::prelude::{
-    BackoffPolicy, ClusterNodeRole, CompositeControlPlaneStore, ControlPlaneSdk, DeliveryProtocol,
-    EndpointDeliveryStatusStore, HeartbeatClusterNodeRequest, InMemoryClusterNodeStore,
-    InMemoryDeliveryEndpointStore, InMemoryEndpointDeliveryStatusStore, InMemoryRuntime,
-    JobExecutionOutcome, JobHandler, NewJob, RegisterClusterNodeRequest,
-    RegisterDeliveryEndpointRequest,
+use stasis::application::dto::{
+    HeartbeatClusterNodeRequest, RegisterClusterNodeRequest, RegisterDeliveryEndpointRequest,
 };
+use stasis::application::runtime::in_memory_runtime::{
+    InMemoryRuntime, JobExecutionOutcome, JobHandler,
+};
+use stasis::dashboard::{DashboardState, InMemoryDashboardQueryService, router};
+use stasis::domain::errors::Result;
+use stasis::domain::runtime::cluster_node::ClusterNodeRole;
+use stasis::domain::runtime::job::Job;
+use stasis::domain::runtime::delivery_endpoint::DeliveryProtocol;
+use stasis::domain::runtime::job::{BackoffPolicy, NewJob};
+use stasis::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
+use stasis::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
+use stasis::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
+use stasis::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
+use stasis::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
+use stasis::sdk::control_plane_sdk::ControlPlaneSdk;
 
 #[derive(Clone)]
 struct DemoSuccessHandler;
@@ -21,7 +30,7 @@ impl JobHandler for DemoSuccessHandler {
         "demo.success"
     }
 
-    async fn execute(&self, _job: &Job) -> stasis::prelude::Result<JobExecutionOutcome> {
+    async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
             sttp_output_node_id: "sttp:out:demo-success".to_string(),
             execution_id: Some("exec-demo-success".to_string()),
@@ -39,7 +48,7 @@ impl JobHandler for DemoFatalHandler {
         "demo.fatal"
     }
 
-    async fn execute(&self, _job: &Job) -> stasis::prelude::Result<JobExecutionOutcome> {
+    async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::FatalFailure {
             message: "demo fatal crash".to_string(),
             execution_id: Some("exec-demo-fatal".to_string()),
