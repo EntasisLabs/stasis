@@ -7,6 +7,9 @@ use crate::application::orchestration::runtime_job_payloads::{
     MemoryTransformJobPayload, MemoryTransformOperationPayload,
 };
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::runtime::memory_operation_job_outcome_helpers::{
+    operation_failure, operation_success, policy_violation_failure,
+};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::memory::memory_models::{
@@ -39,21 +42,7 @@ impl JobHandler for MemoryTransformJobHandler {
     async fn execute(&self, job: &Job) -> Result<JobExecutionOutcome> {
         let payload = match Self::parse_payload(&job.payload_ref) {
             Ok(payload) => payload,
-            Err(message) => {
-                return Ok(JobExecutionOutcome::FatalFailure {
-                    message: message.clone(),
-                    execution_id: None,
-                    diagnostics: Some(
-                        json!({
-                            "provider": "stasis-memory-transform",
-                            "status": "failure",
-                            "guardrail_code": "POLICY_VIOLATION",
-                            "policy_reason": message,
-                        })
-                        .to_string(),
-                    ),
-                });
-            }
+            Err(message) => return Ok(policy_violation_failure("stasis-memory-transform", message)),
         };
 
         let request = MemoryTransformRequest {
@@ -77,33 +66,18 @@ impl JobHandler for MemoryTransformJobHandler {
         };
 
         match self.operations.transform(&request).await {
-            Ok(result) => Ok(JobExecutionOutcome::Success {
-                sttp_output_node_id: format!("sttp:memory-transform:{}", job.id),
-                execution_id: None,
-                diagnostics: Some(
-                    json!({
-                        "provider": "stasis-memory-transform",
-                        "status": "success",
-                        "scanned": result.scanned,
-                        "selected": result.selected,
-                        "updated": result.updated,
-                        "failed": result.failed,
-                    })
-                    .to_string(),
-                ),
-            }),
-            Err(err) => Ok(JobExecutionOutcome::FatalFailure {
-                message: err.to_string(),
-                execution_id: None,
-                diagnostics: Some(
-                    json!({
-                        "provider": "stasis-memory-transform",
-                        "status": "failure",
-                        "error": err.to_string(),
-                    })
-                    .to_string(),
-                ),
-            }),
+            Ok(result) => Ok(operation_success(
+                "stasis-memory-transform",
+                "memory-transform",
+                &job.id,
+                json!({
+                    "scanned": result.scanned,
+                    "selected": result.selected,
+                    "updated": result.updated,
+                    "failed": result.failed,
+                }),
+            )),
+            Err(err) => Ok(operation_failure("stasis-memory-transform", err.to_string())),
         }
     }
 }

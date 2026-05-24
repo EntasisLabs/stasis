@@ -5,6 +5,9 @@ use serde_json::json;
 
 use crate::application::orchestration::runtime_job_payloads::MemoryAggregateJobPayload;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::runtime::memory_operation_job_outcome_helpers::{
+    operation_failure, operation_success, policy_violation_failure,
+};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::memory::memory_models::{MemoryAggregateRequest, MemoryScope};
@@ -35,21 +38,7 @@ impl JobHandler for MemoryAggregateJobHandler {
     async fn execute(&self, job: &Job) -> Result<JobExecutionOutcome> {
         let payload = match Self::parse_payload(&job.payload_ref) {
             Ok(payload) => payload,
-            Err(message) => {
-                return Ok(JobExecutionOutcome::FatalFailure {
-                    message: message.clone(),
-                    execution_id: None,
-                    diagnostics: Some(
-                        json!({
-                            "provider": "stasis-memory-aggregate",
-                            "status": "failure",
-                            "guardrail_code": "POLICY_VIOLATION",
-                            "policy_reason": message,
-                        })
-                        .to_string(),
-                    ),
-                });
-            }
+            Err(message) => return Ok(policy_violation_failure("stasis-memory-aggregate", message)),
         };
 
         let request = MemoryAggregateRequest {
@@ -64,31 +53,16 @@ impl JobHandler for MemoryAggregateJobHandler {
         };
 
         match self.operations.aggregate(&request).await {
-            Ok(result) => Ok(JobExecutionOutcome::Success {
-                sttp_output_node_id: format!("sttp:memory-aggregate:{}", job.id),
-                execution_id: None,
-                diagnostics: Some(
-                    json!({
-                        "provider": "stasis-memory-aggregate",
-                        "status": "success",
-                        "total_groups": result.total_groups,
-                        "scanned_nodes": result.scanned_nodes,
-                    })
-                    .to_string(),
-                ),
-            }),
-            Err(err) => Ok(JobExecutionOutcome::FatalFailure {
-                message: err.to_string(),
-                execution_id: None,
-                diagnostics: Some(
-                    json!({
-                        "provider": "stasis-memory-aggregate",
-                        "status": "failure",
-                        "error": err.to_string(),
-                    })
-                    .to_string(),
-                ),
-            }),
+            Ok(result) => Ok(operation_success(
+                "stasis-memory-aggregate",
+                "memory-aggregate",
+                &job.id,
+                json!({
+                    "total_groups": result.total_groups,
+                    "scanned_nodes": result.scanned_nodes,
+                }),
+            )),
+            Err(err) => Ok(operation_failure("stasis-memory-aggregate", err.to_string())),
         }
     }
 }

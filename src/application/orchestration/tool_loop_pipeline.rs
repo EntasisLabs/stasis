@@ -70,8 +70,7 @@ impl ToolLoopPipeline {
         &self,
         request: ToolLoopExecutionRequest,
     ) -> Result<ToolLoopExecutionResponse> {
-        self.execute_internal(request, Vec::new(), None, DEFAULT_MAX_TOOL_ROUNDS)
-            .await
+        self.execute_with_defaults(request, Vec::new(), None).await
     }
 
     pub async fn execute_with_prior_messages(
@@ -79,8 +78,7 @@ impl ToolLoopPipeline {
         request: ToolLoopExecutionRequest,
         prior_messages: Vec<ChatMessage>,
     ) -> Result<ToolLoopExecutionResponse> {
-        self.execute_internal(request, prior_messages, None, DEFAULT_MAX_TOOL_ROUNDS)
-            .await
+        self.execute_with_defaults(request, prior_messages, None).await
     }
 
     pub async fn execute_with_stream(
@@ -88,8 +86,7 @@ impl ToolLoopPipeline {
         request: ToolLoopExecutionRequest,
         chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<ToolLoopExecutionResponse> {
-        self.execute_internal(request, Vec::new(), chunk_tx, DEFAULT_MAX_TOOL_ROUNDS)
-            .await
+        self.execute_with_defaults(request, Vec::new(), chunk_tx).await
     }
 
     pub async fn execute_with_stream_prior_messages(
@@ -98,7 +95,7 @@ impl ToolLoopPipeline {
         prior_messages: Vec<ChatMessage>,
         chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<ToolLoopExecutionResponse> {
-        self.execute_internal(request, prior_messages, chunk_tx, DEFAULT_MAX_TOOL_ROUNDS)
+        self.execute_with_defaults(request, prior_messages, chunk_tx)
             .await
     }
 
@@ -110,6 +107,16 @@ impl ToolLoopPipeline {
         max_tool_rounds: usize,
     ) -> Result<ToolLoopExecutionResponse> {
         self.execute_internal(request, prior_messages, chunk_tx, max_tool_rounds)
+            .await
+    }
+
+    async fn execute_with_defaults(
+        &self,
+        request: ToolLoopExecutionRequest,
+        prior_messages: Vec<ChatMessage>,
+        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
+    ) -> Result<ToolLoopExecutionResponse> {
+        self.execute_internal(request, prior_messages, chunk_tx, DEFAULT_MAX_TOOL_ROUNDS)
             .await
     }
 

@@ -41,112 +41,52 @@ pub struct RuntimeWorkflowJobBuilder {
     backoff_policy: BackoffPolicy,
 }
 
+macro_rules! define_payload_builder {
+    ($fn_name:ident, $payload_ty:ty, $job_type:expr) => {
+        pub fn $fn_name(id: impl Into<String>, payload: &$payload_ty) -> Result<Self> {
+            Self::new(id.into(), $job_type, payload.to_payload_ref()?)
+        }
+    };
+}
+
 impl RuntimeWorkflowJobBuilder {
-    pub fn for_agent_session(
-        id: impl Into<String>,
-        payload: &AgentSessionJobPayload,
-    ) -> Result<Self> {
-        Self::new(id.into(), JOB_TYPE_AGENT_SESSION, payload.to_payload_ref()?)
-    }
-
-    pub fn for_agent_turn(id: impl Into<String>, payload: &AgentTurnJobPayload) -> Result<Self> {
-        Self::new(id.into(), JOB_TYPE_AGENT_TURN, payload.to_payload_ref()?)
-    }
-
-    pub fn for_tool_loop(id: impl Into<String>, payload: &ToolLoopJobPayload) -> Result<Self> {
-        Self::new(id.into(), JOB_TYPE_TOOL_LOOP, payload.to_payload_ref()?)
-    }
-
-    pub fn for_prompt(id: impl Into<String>, payload: &PromptJobPayload) -> Result<Self> {
-        Self::new(id.into(), JOB_TYPE_PROMPT, payload.to_payload_ref()?)
-    }
-
-    pub fn for_memory_recall(
-        id: impl Into<String>,
-        payload: &MemoryRecallJobPayload,
-    ) -> Result<Self> {
-        Self::new(id.into(), JOB_TYPE_MEMORY_RECALL, payload.to_payload_ref()?)
-    }
-
-    pub fn for_memory_aggregate(
-        id: impl Into<String>,
-        payload: &MemoryAggregateJobPayload,
-    ) -> Result<Self> {
-        Self::new(
-            id.into(),
-            JOB_TYPE_MEMORY_AGGREGATE,
-            payload.to_payload_ref()?,
-        )
-    }
-
-    pub fn for_memory_transform(
-        id: impl Into<String>,
-        payload: &MemoryTransformJobPayload,
-    ) -> Result<Self> {
-        Self::new(
-            id.into(),
-            JOB_TYPE_MEMORY_TRANSFORM,
-            payload.to_payload_ref()?,
-        )
-    }
-
-    pub fn for_memory_rollup(
-        id: impl Into<String>,
-        payload: &MemoryRollupJobPayload,
-    ) -> Result<Self> {
-        Self::new(id.into(), JOB_TYPE_MEMORY_ROLLUP, payload.to_payload_ref()?)
-    }
-
-    pub fn for_memory_schema(
-        id: impl Into<String>,
-        payload: &MemorySchemaJobPayload,
-    ) -> Result<Self> {
-        Self::new(id.into(), JOB_TYPE_MEMORY_SCHEMA, payload.to_payload_ref()?)
-    }
-
-    pub fn for_orchestration_sequential(
-        id: impl Into<String>,
-        payload: &SequentialPatternJobPayload,
-    ) -> Result<Self> {
-        Self::new(
-            id.into(),
-            JOB_TYPE_ORCHESTRATION_SEQUENTIAL,
-            payload.to_payload_ref()?,
-        )
-    }
-
-    pub fn for_orchestration_concurrent(
-        id: impl Into<String>,
-        payload: &ConcurrentPatternJobPayload,
-    ) -> Result<Self> {
-        Self::new(
-            id.into(),
-            JOB_TYPE_ORCHESTRATION_CONCURRENT,
-            payload.to_payload_ref()?,
-        )
-    }
-
-    pub fn for_orchestration_handoff(
-        id: impl Into<String>,
-        payload: &HandoffPatternJobPayload,
-    ) -> Result<Self> {
-        Self::new(
-            id.into(),
-            JOB_TYPE_ORCHESTRATION_HANDOFF,
-            payload.to_payload_ref()?,
-        )
-    }
-
-    pub fn for_orchestration_orchestrator(
-        id: impl Into<String>,
-        payload: &OrchestratorPatternJobPayload,
-    ) -> Result<Self> {
-        Self::new(
-            id.into(),
-            JOB_TYPE_ORCHESTRATION_ORCHESTRATOR,
-            payload.to_payload_ref()?,
-        )
-    }
+    define_payload_builder!(for_agent_session, AgentSessionJobPayload, JOB_TYPE_AGENT_SESSION);
+    define_payload_builder!(for_agent_turn, AgentTurnJobPayload, JOB_TYPE_AGENT_TURN);
+    define_payload_builder!(for_tool_loop, ToolLoopJobPayload, JOB_TYPE_TOOL_LOOP);
+    define_payload_builder!(for_prompt, PromptJobPayload, JOB_TYPE_PROMPT);
+    define_payload_builder!(for_memory_recall, MemoryRecallJobPayload, JOB_TYPE_MEMORY_RECALL);
+    define_payload_builder!(
+        for_memory_aggregate,
+        MemoryAggregateJobPayload,
+        JOB_TYPE_MEMORY_AGGREGATE
+    );
+    define_payload_builder!(
+        for_memory_transform,
+        MemoryTransformJobPayload,
+        JOB_TYPE_MEMORY_TRANSFORM
+    );
+    define_payload_builder!(for_memory_rollup, MemoryRollupJobPayload, JOB_TYPE_MEMORY_ROLLUP);
+    define_payload_builder!(for_memory_schema, MemorySchemaJobPayload, JOB_TYPE_MEMORY_SCHEMA);
+    define_payload_builder!(
+        for_orchestration_sequential,
+        SequentialPatternJobPayload,
+        JOB_TYPE_ORCHESTRATION_SEQUENTIAL
+    );
+    define_payload_builder!(
+        for_orchestration_concurrent,
+        ConcurrentPatternJobPayload,
+        JOB_TYPE_ORCHESTRATION_CONCURRENT
+    );
+    define_payload_builder!(
+        for_orchestration_handoff,
+        HandoffPatternJobPayload,
+        JOB_TYPE_ORCHESTRATION_HANDOFF
+    );
+    define_payload_builder!(
+        for_orchestration_orchestrator,
+        OrchestratorPatternJobPayload,
+        JOB_TYPE_ORCHESTRATION_ORCHESTRATOR
+    );
 
     fn new(id: String, job_type: &'static str, payload_ref: String) -> Result<Self> {
         Ok(Self {

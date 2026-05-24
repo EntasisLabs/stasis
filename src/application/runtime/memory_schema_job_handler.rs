@@ -5,6 +5,9 @@ use serde_json::json;
 
 use crate::application::orchestration::runtime_job_payloads::MemorySchemaJobPayload;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::runtime::memory_operation_job_outcome_helpers::{
+    operation_failure, operation_success, policy_violation_failure,
+};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::memory::memory_operations::MemoryOperations;
@@ -32,47 +35,20 @@ impl JobHandler for MemorySchemaJobHandler {
 
     async fn execute(&self, job: &Job) -> Result<JobExecutionOutcome> {
         if let Err(message) = Self::parse_payload(&job.payload_ref) {
-            return Ok(JobExecutionOutcome::FatalFailure {
-                message: message.clone(),
-                execution_id: None,
-                diagnostics: Some(
-                    json!({
-                        "provider": "stasis-memory-schema",
-                        "status": "failure",
-                        "guardrail_code": "POLICY_VIOLATION",
-                        "policy_reason": message,
-                    })
-                    .to_string(),
-                ),
-            });
+            return Ok(policy_violation_failure("stasis-memory-schema", message));
         }
 
         match self.operations.schema().await {
-            Ok(result) => Ok(JobExecutionOutcome::Success {
-                sttp_output_node_id: format!("sttp:memory-schema:{}", job.id),
-                execution_id: None,
-                diagnostics: Some(
-                    json!({
-                        "provider": "stasis-memory-schema",
-                        "status": "success",
-                        "schema_version": result.schema_version,
-                        "transform_operations": result.transform_operations,
-                    })
-                    .to_string(),
-                ),
-            }),
-            Err(err) => Ok(JobExecutionOutcome::FatalFailure {
-                message: err.to_string(),
-                execution_id: None,
-                diagnostics: Some(
-                    json!({
-                        "provider": "stasis-memory-schema",
-                        "status": "failure",
-                        "error": err.to_string(),
-                    })
-                    .to_string(),
-                ),
-            }),
+            Ok(result) => Ok(operation_success(
+                "stasis-memory-schema",
+                "memory-schema",
+                &job.id,
+                json!({
+                    "schema_version": result.schema_version,
+                    "transform_operations": result.transform_operations,
+                }),
+            )),
+            Err(err) => Ok(operation_failure("stasis-memory-schema", err.to_string())),
         }
     }
 }

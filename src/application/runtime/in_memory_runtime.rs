@@ -951,6 +951,27 @@ pub struct InMemoryJobAttemptStore {
     attempts: Arc<RwLock<HashMap<String, Vec<JobAttempt>>>>,
 }
 
+impl InMemoryJobAttemptStore {
+    fn list_filtered_attempts<F>(&self, predicate: F) -> Result<Vec<JobAttempt>>
+    where
+        F: Fn(&JobAttempt) -> bool,
+    {
+        let state = self
+            .attempts
+            .read()
+            .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
+
+        let mut attempts: Vec<JobAttempt> = state
+            .values()
+            .flat_map(|attempts| attempts.iter())
+            .filter(|attempt| predicate(attempt))
+            .cloned()
+            .collect();
+        attempts.sort_by_key(|attempt| attempt.attempt_number);
+        Ok(attempts)
+    }
+}
+
 #[async_trait]
 impl JobAttemptStore for InMemoryJobAttemptStore {
     async fn insert(&self, attempt: JobAttempt) -> Result<()> {
@@ -978,37 +999,15 @@ impl JobAttemptStore for InMemoryJobAttemptStore {
     }
 
     async fn list_by_guardrail_code(&self, guardrail_code: &str) -> Result<Vec<JobAttempt>> {
-        let state = self
-            .attempts
-            .read()
-            .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
-
-        let mut attempts: Vec<JobAttempt> = state
-            .values()
-            .flat_map(|attempts| attempts.iter())
-            .filter(|attempt| attempt.guardrail_code.as_deref() == Some(guardrail_code))
-            .cloned()
-            .collect();
-
-        attempts.sort_by_key(|attempt| attempt.attempt_number);
-        Ok(attempts)
+        self.list_filtered_attempts(|attempt| {
+            attempt.guardrail_code.as_deref() == Some(guardrail_code)
+        })
     }
 
     async fn list_by_execution_id(&self, execution_id: &str) -> Result<Vec<JobAttempt>> {
-        let state = self
-            .attempts
-            .read()
-            .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
-
-        let mut attempts: Vec<JobAttempt> = state
-            .values()
-            .flat_map(|attempts| attempts.iter())
-            .filter(|attempt| attempt.execution_id.as_deref() == Some(execution_id))
-            .cloned()
-            .collect();
-
-        attempts.sort_by_key(|attempt| attempt.attempt_number);
-        Ok(attempts)
+        self.list_filtered_attempts(|attempt| {
+            attempt.execution_id.as_deref() == Some(execution_id)
+        })
     }
 
     async fn prune_finished_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {

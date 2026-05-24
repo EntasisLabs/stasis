@@ -106,6 +106,33 @@ pub struct StasisRuntimeBuilder {
     extra_handlers: Vec<Arc<dyn JobHandler>>,
 }
 
+macro_rules! define_arc_option_setter {
+    ($fn_name:ident, $field:ident, $ty:ty) => {
+        pub fn $fn_name(mut self, value: Arc<$ty>) -> Self {
+            self.$field = Some(value);
+            self
+        }
+    };
+}
+
+macro_rules! define_enable_flag_setter {
+    ($fn_name:ident, $field:ident) => {
+        pub fn $fn_name(mut self) -> Self {
+            self.$field = true;
+            self
+        }
+    };
+}
+
+macro_rules! define_disable_flag_setter {
+    ($fn_name:ident, $field:ident) => {
+        pub fn $fn_name(mut self) -> Self {
+            self.$field = false;
+            self
+        }
+    };
+}
+
 impl StasisRuntimeBuilder {
     pub fn new(backend: RuntimeBackend) -> Self {
         Self {
@@ -136,10 +163,7 @@ impl StasisRuntimeBuilder {
         }
     }
 
-    pub fn with_chat_client(mut self, chat_client: Arc<dyn AiChatClient>) -> Self {
-        self.chat_client = Some(chat_client);
-        self
-    }
+    define_arc_option_setter!(with_chat_client, chat_client, dyn AiChatClient);
 
     pub fn with_chat_middleware<M: ChatClientMiddleware + 'static>(
         mut self,
@@ -173,68 +197,35 @@ impl StasisRuntimeBuilder {
         self.with_chat_middleware(ToolCallInterceptionChatMiddleware::new(interceptor))
     }
 
-    pub fn with_memory_context_reader(
-        mut self,
-        memory_context_reader: Arc<dyn MemoryContextReader>,
-    ) -> Self {
-        self.memory_context_reader = Some(memory_context_reader);
-        self
-    }
-
-    pub fn with_memory_context_writer(
-        mut self,
-        memory_context_writer: Arc<dyn MemoryContextWriter>,
-    ) -> Self {
-        self.memory_context_writer = Some(memory_context_writer);
-        self
-    }
-
-    pub fn with_locus_memory(mut self) -> Self {
-        self.enable_locus_memory = true;
-        self
-    }
-
-    pub fn with_identity_memory_store(
-        mut self,
-        identity_memory_store: Arc<dyn IdentityMemoryStore>,
-    ) -> Self {
-        self.identity_memory_store = Some(identity_memory_store);
-        self
-    }
-
-    pub fn with_memory_operations(mut self, memory_operations: Arc<dyn MemoryOperations>) -> Self {
-        self.memory_operations = Some(memory_operations);
-        self
-    }
-
-    pub fn with_thread_store(mut self, thread_store: Arc<dyn ThreadStore>) -> Self {
-        self.thread_store = Some(thread_store);
-        self
-    }
-
-    pub fn with_cluster_node_store(
-        mut self,
-        cluster_node_store: Arc<dyn ClusterNodeStore>,
-    ) -> Self {
-        self.cluster_node_store = Some(cluster_node_store);
-        self
-    }
-
-    pub fn with_delivery_endpoint_store(
-        mut self,
-        delivery_endpoint_store: Arc<dyn DeliveryEndpointStore>,
-    ) -> Self {
-        self.delivery_endpoint_store = Some(delivery_endpoint_store);
-        self
-    }
-
-    pub fn with_endpoint_delivery_status_store(
-        mut self,
-        status_store: Arc<dyn EndpointDeliveryStatusStore>,
-    ) -> Self {
-        self.endpoint_delivery_status_store = Some(status_store);
-        self
-    }
+    define_arc_option_setter!(
+        with_memory_context_reader,
+        memory_context_reader,
+        dyn MemoryContextReader
+    );
+    define_arc_option_setter!(
+        with_memory_context_writer,
+        memory_context_writer,
+        dyn MemoryContextWriter
+    );
+    define_enable_flag_setter!(with_locus_memory, enable_locus_memory);
+    define_arc_option_setter!(
+        with_identity_memory_store,
+        identity_memory_store,
+        dyn IdentityMemoryStore
+    );
+    define_arc_option_setter!(with_memory_operations, memory_operations, dyn MemoryOperations);
+    define_arc_option_setter!(with_thread_store, thread_store, dyn ThreadStore);
+    define_arc_option_setter!(with_cluster_node_store, cluster_node_store, dyn ClusterNodeStore);
+    define_arc_option_setter!(
+        with_delivery_endpoint_store,
+        delivery_endpoint_store,
+        dyn DeliveryEndpointStore
+    );
+    define_arc_option_setter!(
+        with_endpoint_delivery_status_store,
+        endpoint_delivery_status_store,
+        dyn EndpointDeliveryStatusStore
+    );
 
     pub fn with_endpoint_transport_publisher<P: EndpointTransportPublisher + 'static>(
         mut self,
@@ -252,10 +243,7 @@ impl StasisRuntimeBuilder {
         self
     }
 
-    pub fn with_endpoint_routing_delivery(mut self) -> Self {
-        self.enable_endpoint_routing_delivery = true;
-        self
-    }
+    define_enable_flag_setter!(with_endpoint_routing_delivery, enable_endpoint_routing_delivery);
 
     pub fn with_endpoint_routing_policy<P: EndpointRoutingPolicy + 'static>(
         mut self,
@@ -265,13 +253,11 @@ impl StasisRuntimeBuilder {
         self
     }
 
-    pub fn with_endpoint_routing_policy_arc(
-        mut self,
-        policy: Arc<dyn EndpointRoutingPolicy>,
-    ) -> Self {
-        self.endpoint_routing_policy = Some(policy);
-        self
-    }
+    define_arc_option_setter!(
+        with_endpoint_routing_policy_arc,
+        endpoint_routing_policy,
+        dyn EndpointRoutingPolicy
+    );
 
     pub fn with_tool<T: StasisTool + 'static>(self, tool: T) -> Result<Self> {
         self.tool_registry.register_tool(tool)?;
@@ -283,40 +269,19 @@ impl StasisRuntimeBuilder {
         self
     }
 
-    pub fn without_grapheme_handlers(mut self) -> Self {
-        self.include_grapheme_handlers = false;
-        self
-    }
-
-    pub fn without_prompt_handler(mut self) -> Self {
-        self.include_prompt_handler = false;
-        self
-    }
-
-    pub fn without_tool_loop_handler(mut self) -> Self {
-        self.include_tool_loop_handler = false;
-        self
-    }
-
-    pub fn without_agent_handlers(mut self) -> Self {
-        self.include_agent_handlers = false;
-        self
-    }
-
-    pub fn without_memory_operation_handlers(mut self) -> Self {
-        self.include_memory_operation_handlers = false;
-        self
-    }
-
-    pub fn without_orchestration_pattern_handlers(mut self) -> Self {
-        self.include_orchestration_pattern_handlers = false;
-        self
-    }
-
-    pub fn without_cluster_control_handlers(mut self) -> Self {
-        self.include_cluster_control_handlers = false;
-        self
-    }
+    define_disable_flag_setter!(without_grapheme_handlers, include_grapheme_handlers);
+    define_disable_flag_setter!(without_prompt_handler, include_prompt_handler);
+    define_disable_flag_setter!(without_tool_loop_handler, include_tool_loop_handler);
+    define_disable_flag_setter!(without_agent_handlers, include_agent_handlers);
+    define_disable_flag_setter!(
+        without_memory_operation_handlers,
+        include_memory_operation_handlers
+    );
+    define_disable_flag_setter!(
+        without_orchestration_pattern_handlers,
+        include_orchestration_pattern_handlers
+    );
+    define_disable_flag_setter!(without_cluster_control_handlers, include_cluster_control_handlers);
 
     pub async fn build(self) -> Result<RuntimeComposition> {
         let runtime = RuntimeFactory::build(self.backend).await?;

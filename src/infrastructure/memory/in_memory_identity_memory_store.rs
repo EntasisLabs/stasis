@@ -8,6 +8,9 @@ use chrono::Utc;
 use serde_json::{Map, Value};
 
 use crate::domain::errors::{Result, StasisError};
+use crate::infrastructure::memory::identity_memory_store_shared::{
+    compute_graph_depth_with_cap, render_sttp_bridge_node,
+};
 use crate::ports::outbound::memory::identity_memory_models::{
     ChannelProfileEntity, CommitEntityUpdateRequest, CommitEntityUpdateResponse, CommitOutcomeCode,
     EntityUpdateProposalRecord, GetIdentityContextRequest, GetIdentityContextResponse,
@@ -238,89 +241,6 @@ impl InMemoryIdentityMemoryStore {
         } else {
             None
         }
-    }
-
-    fn render_sttp_bridge_node(
-        relationship: &RelationshipEntity,
-        proposal: &EntityUpdateProposalRecord,
-        bridge_reason: &str,
-        from_status: Option<RelationshipStatus>,
-        to_status: Option<RelationshipStatus>,
-    ) -> String {
-        let from_status = from_status
-            .map(|value| format!("{value:?}"))
-            .unwrap_or_else(|| "none".to_string());
-        let to_status = to_status
-            .map(|value| format!("{value:?}"))
-            .unwrap_or_else(|| "none".to_string());
-        let patch = proposal.patch.to_string().replace('"', "\\\"");
-
-        format!(
-            "⊕⟨ {{ trigger: identity_transition, response_format: temporal_node, origin_session: \"{}\", compression_depth: 1, parent_node: null, prime: {{ attractor_config: {{ stability: 0.88, friction: 0.32, logic: 0.86, autonomy: 0.62 }}, context_summary: \"identity bridge {}\", relevant_tier: summary, retrieval_budget: 10 }} }} ⟩\n\
-⦿⟨ {{ timestamp: \"{}\", tier: summary, session_id: \"{}\", schema_version: \"sttp-1.0\" }} ⟩\n\
-◈⟨ {{ relationship_id(.95): \"{}\", from_status(.88): \"{}\", to_status(.88): \"{}\", patch(.90): \"{}\" }} ⟩\n\
-⍉⟨ {{ rho: 0.91, kappa: 0.90, psi: 2.66 }} ⟩",
-            proposal.actor,
-            bridge_reason,
-            Utc::now().to_rfc3339(),
-            proposal.actor,
-            relationship.relationship_id,
-            from_status,
-            to_status,
-            patch,
-        )
-    }
-
-    fn compute_graph_depth_with_cap(
-        relationships: &[RelationshipEntity],
-    ) -> (usize, Vec<crate::ports::outbound::memory::identity_memory_models::FlattenedPolicyClaim>) {
-        let map = relationships
-            .iter()
-            .map(|rel| (rel.relationship_id.clone(), rel))
-            .collect::<HashMap<_, _>>();
-
-        let mut max_depth = 0usize;
-        for rel in relationships {
-            let mut stack = vec![(rel.relationship_id.clone(), 0usize)];
-            let mut seen = std::collections::HashSet::new();
-            while let Some((id, depth)) = stack.pop() {
-                if !seen.insert(id.clone()) {
-                    continue;
-                }
-                max_depth = max_depth.max(depth);
-                if let Some(node) = map.get(&id) {
-                    for parent in &node.governing_relationship_ids {
-                        if map.contains_key(parent) {
-                            stack.push((parent.clone(), depth + 1));
-                        }
-                    }
-                }
-            }
-        }
-
-        if max_depth <= DEFAULT_GRAPH_MAX_DEPTH {
-            return (max_depth, Vec::new());
-        }
-
-        let mut claims = Vec::new();
-        for rel in relationships {
-            if rel.governing_relationship_ids.is_empty() {
-                continue;
-            }
-            claims.push(
-                crate::ports::outbound::memory::identity_memory_models::FlattenedPolicyClaim {
-                    claim_id: next_id("claim"),
-                    source_relationship_ids: std::iter::once(rel.relationship_id.clone())
-                        .chain(rel.governing_relationship_ids.clone())
-                        .collect::<Vec<_>>(),
-                    summary: "flattened governance chain due to graph depth cap".to_string(),
-                    confidence: rel.confidence,
-                    timestamp: Utc::now(),
-                },
-            );
-        }
-
-        (DEFAULT_GRAPH_MAX_DEPTH, claims)
     }
 
     fn trust_delta_max_for_relationship(&self, relationship: &RelationshipEntity) -> f32 {
@@ -590,8 +510,11 @@ impl IdentityMemoryStore for InMemoryIdentityMemoryStore {
             }
         }
 
-        let (graph_depth_used, flattened_claims) =
-            Self::compute_graph_depth_with_cap(&relationships);
+        let (graph_depth_used, flattened_claims) = compute_graph_depth_with_cap(
+            &relationships,
+            DEFAULT_GRAPH_MAX_DEPTH,
+            || next_id("claim"),
+        );
 
         Ok(GetIdentityContextResponse {
             persona: personas.get(&request.persona_id).cloned(),
@@ -802,9 +725,10 @@ impl IdentityMemoryStore for InMemoryIdentityMemoryStore {
                 let bridge_reason =
                     Self::material_bridge_reason(&proposal.patch, from_status, to_status);
                 let sttp_bridge_node = bridge_reason.as_ref().map(|reason| {
-                    Self::render_sttp_bridge_node(
-                        relationship,
-                        proposal,
+                    render_sttp_bridge_node(
+                        &relationship.relationship_id,
+                        &proposal.actor,
+                        &proposal.patch,
                         reason,
                         from_status,
                         to_status,

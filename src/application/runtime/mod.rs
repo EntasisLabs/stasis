@@ -12,6 +12,8 @@ pub mod handoff_pattern_job_handler;
 pub mod identity_context_compiler;
 pub mod in_memory_runtime;
 pub mod memory_aggregate_job_handler;
+pub mod memory_operation_job_outcome_helpers;
+pub mod memory_persistence_helpers;
 pub mod memory_recall_request_builder;
 pub mod memory_recall_job_handler;
 pub mod memory_rollup_job_handler;
