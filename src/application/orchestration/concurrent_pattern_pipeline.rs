@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline, PromptExecutionRequest,
 };
@@ -44,6 +46,30 @@ pub struct ConcurrentPatternPipeline {
     prompt_pipeline: PromptExecutionPipeline,
 }
 
+#[derive(Clone)]
+struct ConcurrentSharedInputs {
+    initial_input: Arc<str>,
+    trace_id: Arc<Option<String>>,
+    correlation_id: Arc<Option<String>>,
+    default_policy_profile: Arc<Option<String>>,
+    default_model_hint: Arc<Option<String>>,
+}
+
+impl ConcurrentSharedInputs {
+    fn build_context(
+        &self,
+        policy_profile: Option<String>,
+        model_hint: Option<String>,
+    ) -> PromptExecutionContext {
+        PromptExecutionContext {
+            trace_id: (*self.trace_id).clone(),
+            correlation_id: (*self.correlation_id).clone(),
+            policy_profile: policy_profile.or_else(|| (*self.default_policy_profile).clone()),
+            model_hint: model_hint.or_else(|| (*self.default_model_hint).clone()),
+        }
+    }
+}
+
 impl ConcurrentPatternPipeline {
     pub fn new(prompt_pipeline: PromptExecutionPipeline) -> Self {
         Self { prompt_pipeline }
@@ -64,16 +90,19 @@ impl ConcurrentPatternPipeline {
         } = request;
 
         let merge_strategy = merge_strategy.unwrap_or_else(|| "join_with_headers".to_string());
+        let shared_inputs = ConcurrentSharedInputs {
+            initial_input: Arc::<str>::from(initial_user_prompt),
+            trace_id: Arc::new(trace_id),
+            correlation_id: Arc::new(correlation_id),
+            default_policy_profile: Arc::new(policy_profile),
+            default_model_hint: Arc::new(model_hint),
+        };
 
         let mut join_set: JoinSet<Result<ConcurrentPatternBranchResult>> = JoinSet::new();
 
         for branch in branches {
             let pipeline = self.prompt_pipeline.clone();
-            let trace_id = trace_id.clone();
-            let correlation_id = correlation_id.clone();
-            let default_policy_profile = policy_profile.clone();
-            let default_model_hint = model_hint.clone();
-            let initial_input = initial_user_prompt.clone();
+            let shared_inputs = shared_inputs.clone();
 
             join_set.spawn(async move {
                 let ConcurrentPatternBranch {
@@ -85,15 +114,10 @@ impl ConcurrentPatternPipeline {
                 } = branch;
 
                 let rendered_prompt = user_prompt_template
-                    .replace("{{input}}", &initial_input)
-                    .replace("{input}", &initial_input);
+                    .replace("{{input}}", &shared_inputs.initial_input)
+                    .replace("{input}", &shared_inputs.initial_input);
 
-                let context = PromptExecutionContext {
-                    trace_id,
-                    correlation_id,
-                    policy_profile: policy_profile.or(default_policy_profile),
-                    model_hint: model_hint.or(default_model_hint),
-                };
+                let context = shared_inputs.build_context(policy_profile, model_hint);
 
                 let mut prompt_request =
                     PromptExecutionRequest::from_user_prompt(rendered_prompt.clone())

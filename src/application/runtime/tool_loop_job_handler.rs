@@ -15,13 +15,19 @@ use crate::application::runtime::memory_persistence_helpers::{
 };
 use crate::application::runtime::memory_recall_request_builder::build_memory_recall_request;
 use crate::application::orchestration::prompt_pipeline::{
-    PromptExecutionContext, PromptExecutionPipeline,
+    PromptExecutionPipeline,
 };
 use crate::application::orchestration::tool_loop_pipeline::{
     ToolCallMode, ToolLoopExecutionRequest, ToolLoopPipeline,
 };
 use crate::application::orchestration::tool_registry::ToolRegistry;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::runtime::runtime_diagnostics_helpers::{
+    build_runtime_failure_identity_context_section, build_runtime_failure_memory_recall_section,
+    build_runtime_memory_diagnostics_bundle, RuntimeIdentityDiagnosticsInput,
+    RuntimeMemoryRecallDiagnosticsInput, RuntimeMemoryStoreDiagnosticsInput,
+};
+use crate::application::runtime::runtime_handler_execution_context::RuntimeHandlerExecutionContext;
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::ai_chat_client::AiChatClient;
@@ -96,7 +102,7 @@ impl ToolLoopJobHandler {
             "provider": "stasis-tool-loop",
             "status": "failure",
             "guardrail_code": "POLICY_VIOLATION",
-            "policy_reason": message.clone(),
+            "policy_reason": &message,
         })
         .to_string();
 
@@ -121,16 +127,24 @@ impl JobHandler for ToolLoopJobHandler {
             Err(message) => return Ok(Self::build_failure(message)),
         };
 
-        let user_prompt = payload.user_prompt.clone();
+        let execution_context = RuntimeHandlerExecutionContext::new(
+            job,
+            payload.policy_profile.clone(),
+            payload.model_hint.clone(),
+            self.memory_reader.is_some(),
+            self.memory_writer.is_some(),
+            self.identity_memory_store.is_some(),
+        );
+
         let memory_policy = payload.memory_policy.as_ref();
         let (identity_summary, identity_error) = load_identity_context_summary(
             self.identity_memory_store.as_ref(),
-            &job.correlation_id,
-            payload.policy_profile.as_deref(),
+            execution_context.correlation_id(),
+            execution_context.policy_profile(),
         )
         .await;
         let effective_user_prompt =
-            prepend_identity_snapshot(&user_prompt, identity_summary.as_deref());
+            prepend_identity_snapshot(&payload.user_prompt, identity_summary.as_deref());
 
         let mut memory_recall = None;
         let mut memory_recall_error = None;
@@ -138,11 +152,14 @@ impl JobHandler for ToolLoopJobHandler {
         let mut input_memory_query_fingerprint = None;
         if let Some(reader) = &self.memory_reader {
             let recall_request = build_memory_recall_request(
-                &job.correlation_id,
+                execution_context.correlation_id(),
                 Some(&effective_user_prompt),
                 memory_policy,
             );
-            input_memory_query_id = Some(memory_query_id(&job.correlation_id, &recall_request));
+            input_memory_query_id = Some(memory_query_id(
+                execution_context.correlation_id(),
+                &recall_request,
+            ));
             input_memory_query_fingerprint = Some(memory_query_fingerprint(&recall_request));
 
             match reader.recall(&recall_request).await {
@@ -151,12 +168,7 @@ impl JobHandler for ToolLoopJobHandler {
             }
         }
 
-        let context = PromptExecutionContext {
-            trace_id: Some(job.trace_id.clone()),
-            correlation_id: Some(job.correlation_id.clone()),
-            policy_profile: payload.policy_profile,
-            model_hint: payload.model_hint,
-        };
+        let context = execution_context.prompt_context_clone();
 
         let request = ToolLoopExecutionRequest {
             user_prompt: effective_user_prompt,
@@ -188,15 +200,15 @@ impl JobHandler for ToolLoopJobHandler {
                         "provider": "stasis-tool-loop",
                         "status": "failure",
                         "error": error_text,
-                        "memory_recall": {
-                            "attempted": self.memory_reader.is_some(),
-                            "error": memory_recall_error,
-                        },
-                        "identity_context": {
-                            "attempted": self.identity_memory_store.is_some(),
-                            "summary": identity_summary,
-                            "error": identity_error,
-                        },
+                        "memory_recall": build_runtime_failure_memory_recall_section(
+                            execution_context.memory_reader_enabled(),
+                            memory_recall_error,
+                        ),
+                        "identity_context": build_runtime_failure_identity_context_section(
+                            execution_context.identity_enabled(),
+                            identity_summary,
+                            identity_error,
+                        ),
                     })
                     .to_string()
                 };
@@ -221,9 +233,9 @@ impl JobHandler for ToolLoopJobHandler {
             && let Some(writer) = &self.memory_writer
         {
             let store_request = MemoryStoreRequest {
-                session_id: job.correlation_id.clone(),
+                session_id: execution_context.correlation_id().to_string(),
                 raw_node: render_prompt_response_sttp_node(
-                    &job.correlation_id,
+                    execution_context.correlation_id(),
                     &response.tool_name,
                     &response.text,
                     SttpPromptNodeFormat::TaggedSchema,
@@ -238,7 +250,29 @@ impl JobHandler for ToolLoopJobHandler {
 
         let sttp_output_node_id =
             resolve_sttp_output_node_id(memory_store.as_ref(), format!("sttp:tool-loop:{}", job.id));
-        let memory_scope_hash = memory_scope_hash(&job.correlation_id, memory_policy);
+        let memory_scope_hash = memory_scope_hash(execution_context.correlation_id(), memory_policy);
+        let input_memory_query_id_for_top_level = input_memory_query_id.clone();
+        let input_memory_query_fingerprint_for_top_level =
+            input_memory_query_fingerprint.clone();
+        let diagnostics_bundle = build_runtime_memory_diagnostics_bundle(
+            RuntimeMemoryRecallDiagnosticsInput {
+                attempted: execution_context.memory_reader_enabled(),
+                response: memory_recall,
+                query_id: input_memory_query_id,
+                query_fingerprint: input_memory_query_fingerprint,
+                error: memory_recall_error,
+            },
+            RuntimeMemoryStoreDiagnosticsInput {
+                attempted: execution_context.memory_writer_enabled(),
+                response: memory_store,
+                error: memory_store_error,
+            },
+            RuntimeIdentityDiagnosticsInput {
+                attempted: execution_context.identity_enabled(),
+                summary: identity_summary,
+                error: identity_error,
+            },
+        );
 
         let diagnostics = json!({
             "provider": "stasis-tool-loop",
@@ -252,37 +286,19 @@ impl JobHandler for ToolLoopJobHandler {
             "policy_profile": response.metadata.policy_profile,
             "model_hint": response.metadata.model_hint,
             "output_preview": response.text.chars().take(160).collect::<String>(),
-            "memory_retrieved_count": memory_recall.as_ref().map(|value| value.retrieved).unwrap_or_default(),
-            "memory_retrieval_path": memory_recall.as_ref().and_then(|value| value.retrieval_path.clone()),
-            "memory_fallback_triggered": memory_recall.as_ref().map(|value| value.fallback_triggered).unwrap_or(false),
-            "memory_fallback_reason": memory_recall.as_ref().and_then(|value| value.fallback_reason.clone()),
+            "memory_retrieved_count": diagnostics_bundle.retrieved_count,
+            "memory_retrieval_path": diagnostics_bundle.retrieval_path,
+            "memory_fallback_triggered": diagnostics_bundle.fallback_triggered,
+            "memory_fallback_reason": diagnostics_bundle.fallback_reason,
             "memory_scope_hash": memory_scope_hash,
-            "memory_store_valid": memory_store.as_ref().map(|value| value.valid).unwrap_or(false),
-            "memory_store_node_id": memory_store.as_ref().map(|value| value.node_id.clone()),
-            "input_memory_query_id": input_memory_query_id.clone(),
-            "input_memory_query_fingerprint": input_memory_query_fingerprint.clone(),
-            "output_memory_node_id": memory_store.as_ref().map(|value| value.node_id.clone()),
-            "memory_recall": {
-                "attempted": self.memory_reader.is_some(),
-                "query_id": input_memory_query_id,
-                "query_fingerprint": input_memory_query_fingerprint,
-                "retrieved": memory_recall.as_ref().map(|value| value.retrieved).unwrap_or_default(),
-                "retrieval_path": memory_recall.as_ref().and_then(|value| value.retrieval_path.clone()),
-                "fallback_triggered": memory_recall.as_ref().map(|value| value.fallback_triggered).unwrap_or(false),
-                "fallback_reason": memory_recall.as_ref().and_then(|value| value.fallback_reason.clone()),
-                "error": memory_recall_error,
-            },
-            "identity_context": {
-                "attempted": self.identity_memory_store.is_some(),
-                "summary": identity_summary,
-                "error": identity_error,
-            },
-            "memory_store": {
-                "attempted": self.memory_writer.is_some(),
-                "node_id": memory_store.as_ref().map(|value| value.node_id.clone()),
-                "valid": memory_store.as_ref().map(|value| value.valid).unwrap_or(false),
-                "error": memory_store_error,
-            },
+            "memory_store_valid": diagnostics_bundle.store_valid,
+            "memory_store_node_id": diagnostics_bundle.store_node_id,
+            "input_memory_query_id": input_memory_query_id_for_top_level,
+            "input_memory_query_fingerprint": input_memory_query_fingerprint_for_top_level,
+            "output_memory_node_id": diagnostics_bundle.store_node_id,
+            "memory_recall": diagnostics_bundle.memory_recall,
+            "identity_context": diagnostics_bundle.identity_context,
+            "memory_store": diagnostics_bundle.memory_store,
         })
         .to_string();
 

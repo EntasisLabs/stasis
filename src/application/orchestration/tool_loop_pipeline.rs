@@ -55,6 +55,26 @@ pub struct ToolLoopPipeline {
     tool_registry: Arc<dyn ToolRegistry>,
 }
 
+#[derive(Clone)]
+struct ToolLoopSharedInputs {
+    user_prompt: Arc<str>,
+    system_prompt: Option<Arc<str>>,
+    context: Arc<PromptExecutionContext>,
+    selected_tool_name: Arc<str>,
+    tool_input: Arc<Value>,
+    tool_call_mode: ToolCallMode,
+}
+
+impl ToolLoopSharedInputs {
+    fn context_clone(&self) -> PromptExecutionContext {
+        (*self.context).clone()
+    }
+
+    fn selected_tool_name(&self) -> &str {
+        &self.selected_tool_name
+    }
+}
+
 impl ToolLoopPipeline {
     pub fn new(
         prompt_pipeline: PromptExecutionPipeline,
@@ -137,22 +157,29 @@ impl ToolLoopPipeline {
         } = request;
 
         let max_tool_rounds = max_tool_rounds.max(1);
-        let selected_tool_name = tool_name;
-        let has_selected_tool = !selected_tool_name.trim().is_empty();
+        let shared_inputs = ToolLoopSharedInputs {
+            user_prompt: Arc::<str>::from(user_prompt),
+            system_prompt: system_prompt.map(Arc::<str>::from),
+            context: Arc::new(context),
+            selected_tool_name: Arc::<str>::from(tool_name),
+            tool_input: Arc::new(tool_input),
+            tool_call_mode,
+        };
+        let has_selected_tool = !shared_inputs.selected_tool_name().trim().is_empty();
 
         let mut messages = Vec::with_capacity(2 + prior_messages.len());
-        if let Some(system_prompt) = system_prompt.as_ref() {
-            messages.push(ChatMessage::system(system_prompt.clone()));
+        if let Some(system_prompt) = shared_inputs.system_prompt.as_ref() {
+            messages.push(ChatMessage::system(system_prompt.to_string()));
         }
         messages.extend(prior_messages);
-        messages.push(ChatMessage::user(user_prompt.clone()));
+        messages.push(ChatMessage::user(shared_inputs.user_prompt.to_string()));
 
         let mut tools = self.tool_registry.list_tools().await?;
         if has_selected_tool {
-            let selected_sanitized = sanitize_tool_name_for_model(&selected_tool_name);
+            let selected_sanitized = sanitize_tool_name_for_model(shared_inputs.selected_tool_name());
             let selected_prefix = format!("{selected_sanitized}_");
             tools.retain(|tool| {
-                tool.name == selected_tool_name
+                tool.name == shared_inputs.selected_tool_name()
                     || tool.name == selected_sanitized
                     || tool.name.starts_with(&selected_prefix)
             });
@@ -169,12 +196,12 @@ impl ToolLoopPipeline {
                 let completion = match chunk_tx {
                     Some(tx) => {
                         self.prompt_pipeline
-                            .complete_chat_stream(chat_request, context.clone(), Some(tx))
+                            .complete_chat_stream(chat_request, shared_inputs.context_clone(), Some(tx))
                             .await?
                     }
                     None => {
                         self.prompt_pipeline
-                            .complete_chat(chat_request, context.clone())
+                            .complete_chat(chat_request, shared_inputs.context_clone())
                             .await?
                     }
                 };
@@ -187,7 +214,7 @@ impl ToolLoopPipeline {
 
                 if tool_calls.is_empty() {
                     if invocations.is_empty() && has_selected_tool {
-                        if tool_call_mode == ToolCallMode::Strict {
+                        if shared_inputs.tool_call_mode == ToolCallMode::Strict {
                             return Err(StasisError::PortFailure(
                                 "policy violation: strict tool-call mode expected model tool call but none was returned"
                                     .to_string(),
@@ -201,14 +228,14 @@ impl ToolLoopPipeline {
 
                     if let Some(text) = maybe_text {
                         let last = invocations.last().cloned().unwrap_or(ToolInvocation {
-                            tool_name: selected_tool_name.clone(),
-                            tool_input: tool_input.clone(),
+                            tool_name: shared_inputs.selected_tool_name().to_string(),
+                            tool_input: (*shared_inputs.tool_input).clone(),
                             tool_output: Value::Null,
                         });
 
                         return Ok(ToolLoopExecutionResponse {
                             text,
-                            metadata: context,
+                            metadata: shared_inputs.context_clone(),
                             tool_name: last.tool_name,
                             tool_output: last.tool_output,
                             tool_invocations: invocations,
@@ -259,42 +286,43 @@ impl ToolLoopPipeline {
             text
         } else {
             let mut first_request =
-                PromptExecutionRequest::from_user_prompt(user_prompt.clone()).with_context(context.clone());
-            if let Some(system_prompt) = system_prompt.as_ref() {
-                first_request = first_request.with_system_prompt(system_prompt);
+                PromptExecutionRequest::from_user_prompt(shared_inputs.user_prompt.to_string())
+                    .with_context(shared_inputs.context_clone());
+            if let Some(system_prompt) = shared_inputs.system_prompt.as_ref() {
+                first_request = first_request.with_system_prompt(system_prompt.to_string());
             }
             self.prompt_pipeline.execute(first_request).await?.text
         };
         let tool_output = self
             .tool_registry
-            .invoke_tool(&selected_tool_name, tool_input.clone())
+            .invoke_tool(shared_inputs.selected_tool_name(), (*shared_inputs.tool_input).clone())
             .await?;
 
         let synthesis_prompt = build_fallback_synthesis_prompt(
-            &user_prompt,
+            &shared_inputs.user_prompt,
             &draft_text,
-            &selected_tool_name,
+            shared_inputs.selected_tool_name(),
             &tool_output,
         );
 
         let mut final_request = PromptExecutionRequest::from_user_prompt(synthesis_prompt)
-            .with_context(context.clone());
-        if let Some(system_prompt) = system_prompt {
-            final_request = final_request.with_system_prompt(system_prompt);
+            .with_context(shared_inputs.context_clone());
+        if let Some(system_prompt) = shared_inputs.system_prompt.as_ref() {
+            final_request = final_request.with_system_prompt(system_prompt.to_string());
         }
 
         let final_response = self.prompt_pipeline.execute(final_request).await?;
 
         let fallback_invocation = ToolInvocation {
-            tool_name: selected_tool_name.clone(),
-            tool_input,
+            tool_name: shared_inputs.selected_tool_name().to_string(),
+            tool_input: (*shared_inputs.tool_input).clone(),
             tool_output: tool_output.clone(),
         };
 
         Ok(ToolLoopExecutionResponse {
             text: final_response.text,
             metadata: final_response.metadata,
-            tool_name: selected_tool_name,
+            tool_name: shared_inputs.selected_tool_name().to_string(),
             tool_output,
             tool_invocations: vec![fallback_invocation],
             rounds_executed,

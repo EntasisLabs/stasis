@@ -33,7 +33,7 @@ impl GraphemeEchoJobHandler {
             "provider": "grapheme-sdk",
             "status": "failure",
             "guardrail_code": "POLICY_VIOLATION",
-            "policy_reason": message.clone(),
+            "policy_reason": &message,
         })
         .to_string();
 

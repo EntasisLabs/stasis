@@ -95,6 +95,28 @@ pub struct AgentSessionPipeline {
     tool_loop_pipeline: ToolLoopPipeline,
 }
 
+#[derive(Clone)]
+struct SessionSharedInputs {
+    thread_id: Arc<Option<String>>,
+    context: Arc<PromptExecutionContext>,
+    policy: Arc<AgentTurnExecutionPolicy>,
+    participants_by_id: Arc<HashMap<String, Arc<AgentParticipant>>>,
+}
+
+impl SessionSharedInputs {
+    fn thread_id_clone(&self) -> Option<String> {
+        (*self.thread_id).clone()
+    }
+
+    fn context_clone(&self) -> PromptExecutionContext {
+        (*self.context).clone()
+    }
+
+    fn policy_clone(&self) -> AgentTurnExecutionPolicy {
+        (*self.policy).clone()
+    }
+}
+
 impl AgentSessionPipeline {
     pub fn new(tool_loop_pipeline: ToolLoopPipeline) -> Self {
         Self { tool_loop_pipeline }
@@ -274,10 +296,16 @@ impl AgentSessionCoordinator {
             .iter()
             .map(|participant| participant.agent_id.clone())
             .collect();
-        let participants_by_id: HashMap<&str, &AgentParticipant> = participants
+        let participants_by_id = participants
             .iter()
-            .map(|participant| (participant.agent_id.as_str(), participant))
-            .collect();
+            .map(|participant| (participant.agent_id.clone(), Arc::new(participant.clone())))
+            .collect::<HashMap<_, _>>();
+        let shared_inputs = SessionSharedInputs {
+            thread_id: Arc::new(thread_id.clone()),
+            context: Arc::new(context),
+            policy: Arc::new(policy),
+            participants_by_id: Arc::new(participants_by_id),
+        };
 
         let mut transcript = Vec::with_capacity(max_turns_cap + 1);
         let mut transcript_text = String::with_capacity(initial_user_prompt.len() + 32);
@@ -291,13 +319,14 @@ impl AgentSessionCoordinator {
         for turn_index in 0..max_turns_cap {
             let selected_agent_id = self.selection_strategy.select_next_agent(
                 &participant_ids,
-                thread_id.as_deref(),
+                shared_inputs.thread_id.as_deref(),
                 &transcript,
             )?;
 
-            let participant = participants_by_id
-                .get(selected_agent_id.as_str())
-                .copied()
+            let participant = shared_inputs
+                .participants_by_id
+                .get(&selected_agent_id)
+                .cloned()
                 .ok_or_else(|| {
                     StasisError::PortFailure(format!(
                         "policy violation: selected participant '{}' not found in session",
@@ -308,14 +337,14 @@ impl AgentSessionCoordinator {
             let turn_request = AgentTurnExecutionRequest {
                 identity: AgentIdentity {
                     agent_id: selected_agent_id.clone(),
-                    thread_id: thread_id.clone(),
+                    thread_id: shared_inputs.thread_id_clone(),
                 },
                 user_prompt: last_prompt.clone(),
                 system_prompt: participant.system_prompt.clone(),
-                context: context.clone(),
+                context: shared_inputs.context_clone(),
                 tool_name: participant.tool_name.clone(),
                 tool_input: participant.tool_input.clone(),
-                policy: policy.clone(),
+                policy: shared_inputs.policy_clone(),
             };
 
             let turn_response = self.pipeline.execute_turn(turn_request).await?;
