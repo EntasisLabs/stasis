@@ -124,28 +124,80 @@ pub fn build_runtime_failure_identity_context_section(
     })
 }
 
-pub fn extract_diagnostics_fields(
-    diagnostics: Option<&str>,
-) -> (Option<String>, Option<String>, Option<u64>) {
+#[derive(Clone, Debug, Default)]
+pub struct RuntimeDiagnosticsEnvelope {
+    pub guardrail_code: Option<String>,
+    pub policy_reason: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub input_memory_query_id: Option<String>,
+    pub input_memory_query_fingerprint: Option<String>,
+    pub output_memory_node_id: Option<String>,
+    pub retrieval_path: Option<String>,
+    pub thread_id: Option<String>,
+}
+
+pub fn extract_runtime_diagnostics_envelope(diagnostics: Option<&str>) -> RuntimeDiagnosticsEnvelope {
     let Some(raw) = diagnostics else {
-        return (None, None, None);
+        return RuntimeDiagnosticsEnvelope::default();
     };
 
     let Ok(json) = serde_json::from_str::<JsonValue>(raw) else {
-        return (None, None, None);
+        return RuntimeDiagnosticsEnvelope::default();
     };
 
-    let guardrail_code = json
-        .get("guardrail_code")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned);
-    let policy_reason = json
-        .get("policy_reason")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned);
-    let duration_ms = json.get("duration_ms").and_then(|v| v.as_u64());
+    RuntimeDiagnosticsEnvelope {
+        guardrail_code: json
+            .get("guardrail_code")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        policy_reason: json
+            .get("policy_reason")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        duration_ms: json.get("duration_ms").and_then(|v| v.as_u64()),
+        input_memory_query_id: json
+            .get("input_memory_query_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        input_memory_query_fingerprint: json
+            .get("input_memory_query_fingerprint")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .or_else(|| {
+                json.get("memory_recall")
+                    .and_then(|v| v.get("query_fingerprint"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+            }),
+        output_memory_node_id: json
+            .get("output_memory_node_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .or_else(|| {
+                json.get("memory_store_node_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+            }),
+        retrieval_path: json
+            .get("memory_retrieval_path")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        thread_id: json
+            .get("thread_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+    }
+}
 
-    (guardrail_code, policy_reason, duration_ms)
+pub fn extract_diagnostics_fields(
+    diagnostics: Option<&str>,
+) -> (Option<String>, Option<String>, Option<u64>) {
+    let envelope = extract_runtime_diagnostics_envelope(diagnostics);
+    (
+        envelope.guardrail_code,
+        envelope.policy_reason,
+        envelope.duration_ms,
+    )
 }
 
 pub fn extract_memory_lineage_fields(
@@ -156,55 +208,16 @@ pub fn extract_memory_lineage_fields(
     Option<String>,
     Option<String>,
 ) {
-    let Some(raw) = diagnostics else {
-        return (None, None, None, None);
-    };
-
-    let Ok(json) = serde_json::from_str::<JsonValue>(raw) else {
-        return (None, None, None, None);
-    };
-
-    let input_memory_query_id = json
-        .get("input_memory_query_id")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned);
-
-    let input_memory_query_fingerprint = json
-        .get("input_memory_query_fingerprint")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-        .or_else(|| {
-            json.get("memory_recall")
-                .and_then(|v| v.get("query_fingerprint"))
-                .and_then(|v| v.as_str())
-                .map(str::to_owned)
-        });
-
-    let output_memory_node_id = json
-        .get("output_memory_node_id")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-        .or_else(|| {
-            json.get("memory_store_node_id")
-                .and_then(|v| v.as_str())
-                .map(str::to_owned)
-        });
-
-    let retrieval_path = json
-        .get("memory_retrieval_path")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned);
+    let envelope = extract_runtime_diagnostics_envelope(diagnostics);
 
     (
-        input_memory_query_id,
-        input_memory_query_fingerprint,
-        output_memory_node_id,
-        retrieval_path,
+        envelope.input_memory_query_id,
+        envelope.input_memory_query_fingerprint,
+        envelope.output_memory_node_id,
+        envelope.retrieval_path,
     )
 }
 
 pub fn extract_thread_id(diagnostics: Option<&str>) -> Option<String> {
-    let raw = diagnostics?;
-    let json = serde_json::from_str::<JsonValue>(raw).ok()?;
-    json.get("thread_id").and_then(|v| v.as_str()).map(str::to_owned)
+    extract_runtime_diagnostics_envelope(diagnostics).thread_id
 }

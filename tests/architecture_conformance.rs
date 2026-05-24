@@ -30,6 +30,120 @@ fn collect_rs_files(root: &str) -> Vec<String> {
 }
 
 #[test]
+fn domain_source_avoids_surreal_dependencies() {
+    let repo_root = env!("CARGO_MANIFEST_DIR");
+    let domain_src = format!("{repo_root}/src/domain");
+    let files = collect_rs_files(&domain_src);
+
+    let mut violations = Vec::new();
+    for file in files {
+        let Ok(source) = fs::read_to_string(&file) else {
+            continue;
+        };
+
+        for (idx, line) in source.lines().enumerate() {
+            let line_no = idx + 1;
+            let is_violation = line.contains("use surrealdb::")
+                || line.contains("use surrealdb_types::")
+                || line.contains("surrealdb::")
+                || line.contains("surrealdb_types::");
+
+            if is_violation {
+                violations.push(format!("{file}:{line_no}: {line}"));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Domain must remain persistence-agnostic and avoid Surreal dependencies. Violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn application_runtime_source_avoids_infrastructure_imports_except_allowed_files() {
+    let repo_root = env!("CARGO_MANIFEST_DIR");
+    let files = [
+        format!("{repo_root}/src/application/runtime/stasis_runtime_builder.rs"),
+        format!("{repo_root}/src/application/runtime/runtime_factory.rs"),
+    ];
+    let mut violations = Vec::new();
+
+    for file in files {
+        let Ok(source) = fs::read_to_string(&file) else {
+            continue;
+        };
+
+        let mut in_cfg_test_tail = false;
+        for (idx, line) in source.lines().enumerate() {
+            let line_no = idx + 1;
+            if line.contains("#[cfg(test)]") {
+                in_cfg_test_tail = true;
+            }
+            if in_cfg_test_tail {
+                continue;
+            }
+            if line.contains("use crate::infrastructure::") {
+                violations.push(format!("{file}:{line_no}: {line}"));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Application runtime layer must avoid direct infrastructure imports outside allowed files. Violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn application_source_avoids_infrastructure_imports_outside_composition_and_runtime_cores() {
+    let repo_root = env!("CARGO_MANIFEST_DIR");
+    let application_src = format!("{repo_root}/src/application");
+    let files = collect_rs_files(&application_src);
+
+    let allowed_suffixes = [
+        "src/application/composition/runtime_composition.rs",
+        "src/application/runtime/in_memory_runtime.rs",
+        "src/application/runtime/surreal_runtime.rs",
+        "src/application/runtime/runtime_factory.rs",
+    ];
+    let mut violations = Vec::new();
+
+    for file in files {
+        if allowed_suffixes.iter().any(|suffix| file.ends_with(suffix)) {
+            continue;
+        }
+
+        let Ok(source) = fs::read_to_string(&file) else {
+            continue;
+        };
+
+        let mut in_cfg_test_tail = false;
+        for (idx, line) in source.lines().enumerate() {
+            let line_no = idx + 1;
+            if line.contains("#[cfg(test)]") {
+                in_cfg_test_tail = true;
+            }
+            if in_cfg_test_tail {
+                continue;
+            }
+
+            if line.contains("use crate::infrastructure::") {
+                violations.push(format!("{file}:{line_no}: {line}"));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Application source must avoid direct infrastructure imports outside composition/runtime core allowlist. Violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
 fn medousa_cli_uses_stasis_runtime_workflow_paths() {
     let Some(cli_source) = medousa_cli_source() else {
         return;
@@ -230,5 +344,58 @@ fn default_chat_middlewares_depend_on_ports_not_runtime_infrastructure() {
     assert!(
         !middleware_source.contains("infrastructure::runtime::"),
         "chat middleware must not import runtime infrastructure implementations directly"
+    );
+}
+
+#[test]
+fn thread_record_alias_usage_isolated_to_domain_compatibility_declaration() {
+    let repo_root = env!("CARGO_MANIFEST_DIR");
+    let files = collect_rs_files(&format!("{repo_root}/src"));
+
+    let allowed_path = format!("{repo_root}/src/domain/runtime/thread.rs");
+    let allowed_line_fragment = "pub type ThreadRecord = ThreadSnapshot;";
+
+    let contains_thread_record_symbol = |line: &str| {
+        line.match_indices("ThreadRecord").any(|(start, _)| {
+            let end = start + "ThreadRecord".len();
+            let before_ok = start == 0
+                || !line
+                    .chars()
+                    .nth(start.saturating_sub(1))
+                    .map(|c| c.is_ascii_alphanumeric() || c == '_')
+                    .unwrap_or(false);
+            let after_ok = end >= line.len()
+                || !line
+                    .chars()
+                    .nth(end)
+                    .map(|c| c.is_ascii_alphanumeric() || c == '_')
+                    .unwrap_or(false);
+            before_ok && after_ok
+        })
+    };
+
+    let mut violations = Vec::new();
+    for file in files {
+        let Ok(source) = fs::read_to_string(&file) else {
+            continue;
+        };
+
+        for (idx, line) in source.lines().enumerate() {
+            let line_no = idx + 1;
+            if !contains_thread_record_symbol(line) {
+                continue;
+            }
+
+            let is_allowed_alias = file == allowed_path && line.contains(allowed_line_fragment);
+            if !is_allowed_alias {
+                violations.push(format!("{file}:{line_no}: {line}"));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "ThreadRecord must remain a transitional alias only. Violations:\n{}",
+        violations.join("\n")
     );
 }

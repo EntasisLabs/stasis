@@ -5,18 +5,20 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::{Result, StasisError};
-use crate::domain::runtime::thread::{NewThread, NewThreadEvent, ThreadEvent, ThreadRecord};
+use crate::domain::runtime::thread::{
+    NewThread, NewThreadEvent, ThreadEvent, ThreadSnapshot,
+};
 use crate::ports::outbound::runtime::thread_store::ThreadStore;
 
 #[derive(Clone, Default)]
 pub struct InMemoryThreadStore {
-    threads: Arc<RwLock<HashMap<String, ThreadRecord>>>,
+    threads: Arc<RwLock<HashMap<String, ThreadSnapshot>>>,
     events: Arc<RwLock<HashMap<String, Vec<ThreadEvent>>>>,
 }
 
 #[async_trait]
 impl ThreadStore for InMemoryThreadStore {
-    async fn create_thread(&self, thread: NewThread) -> Result<ThreadRecord> {
+    async fn create_thread(&self, thread: NewThread) -> Result<ThreadSnapshot> {
         let mut threads = self
             .threads
             .write()
@@ -38,7 +40,7 @@ impl ThreadStore for InMemoryThreadStore {
             )));
         }
 
-        let record = ThreadRecord {
+        let record = ThreadSnapshot {
             thread_id: thread.thread_id,
             parent_thread_id: thread.parent_thread_id,
             branch_label: thread.branch_label,
@@ -49,7 +51,7 @@ impl ThreadStore for InMemoryThreadStore {
         Ok(record)
     }
 
-    async fn get_thread(&self, thread_id: &str) -> Result<Option<ThreadRecord>> {
+    async fn get_thread(&self, thread_id: &str) -> Result<Option<ThreadSnapshot>> {
         let threads = self
             .threads
             .read()
@@ -108,7 +110,7 @@ impl ThreadStore for InMemoryThreadStore {
         child_thread_id: &str,
         branch_label: Option<String>,
         created_at: DateTime<Utc>,
-    ) -> Result<ThreadRecord> {
+    ) -> Result<ThreadSnapshot> {
         self.create_thread(NewThread {
             thread_id: child_thread_id.to_string(),
             parent_thread_id: Some(parent_thread_id.to_string()),
@@ -118,7 +120,7 @@ impl ThreadStore for InMemoryThreadStore {
         .await
     }
 
-    async fn list_lineage(&self, thread_id: &str) -> Result<Vec<ThreadRecord>> {
+    async fn list_lineage(&self, thread_id: &str) -> Result<Vec<ThreadSnapshot>> {
         let threads = self
             .threads
             .read()

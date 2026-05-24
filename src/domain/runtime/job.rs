@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb_types::SurrealValue;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JobState {
@@ -13,7 +12,7 @@ pub enum JobState {
     Canceled,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BackoffPolicy {
     pub base_delay_seconds: i64,
     pub max_delay_seconds: i64,

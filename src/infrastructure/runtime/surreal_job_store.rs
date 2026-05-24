@@ -8,6 +8,30 @@ use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job::{BackoffPolicy, Job, JobState};
 use crate::ports::outbound::runtime::job_store::JobStore;
 
+#[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
+struct BackoffPolicyRecord {
+    base_delay_seconds: i64,
+    max_delay_seconds: i64,
+}
+
+impl From<BackoffPolicy> for BackoffPolicyRecord {
+    fn from(value: BackoffPolicy) -> Self {
+        Self {
+            base_delay_seconds: value.base_delay_seconds,
+            max_delay_seconds: value.max_delay_seconds,
+        }
+    }
+}
+
+impl From<BackoffPolicyRecord> for BackoffPolicy {
+    fn from(value: BackoffPolicyRecord) -> Self {
+        Self {
+            base_delay_seconds: value.base_delay_seconds,
+            max_delay_seconds: value.max_delay_seconds,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SurrealJobStore {
     db: Surreal<Db>,
@@ -48,7 +72,7 @@ struct JobRecord {
     priority: i32,
     attempts: u32,
     max_attempts: u32,
-    backoff_policy: BackoffPolicy,
+    backoff_policy: BackoffPolicyRecord,
     idempotency_key: String,
     correlation_id: String,
     causation_id: String,
@@ -90,7 +114,7 @@ impl From<Job> for JobRecord {
             priority: job.priority,
             attempts: job.attempts,
             max_attempts: job.max_attempts,
-            backoff_policy: job.backoff_policy,
+            backoff_policy: job.backoff_policy.into(),
             idempotency_key: job.idempotency_key,
             correlation_id: job.correlation_id,
             causation_id: job.causation_id,
@@ -136,7 +160,7 @@ impl TryFrom<JobRecord> for Job {
             priority: record.priority,
             attempts: record.attempts,
             max_attempts: record.max_attempts,
-            backoff_policy: record.backoff_policy,
+            backoff_policy: record.backoff_policy.into(),
             idempotency_key: record.idempotency_key,
             correlation_id: record.correlation_id,
             causation_id: record.causation_id,

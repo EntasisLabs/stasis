@@ -26,6 +26,7 @@ pub mod replay_report;
 pub mod retention;
 pub mod runtime_diagnostics_helpers;
 pub mod runtime_handler_execution_context;
+pub mod runtime_job_identity_context;
 pub mod runtime_factory;
 pub mod sequential_pattern_job_handler;
 pub mod stasis_runtime_builder;

@@ -5,7 +5,9 @@ use surrealdb::{Surreal, engine::local::Db};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
-use crate::domain::runtime::thread::{NewThread, NewThreadEvent, ThreadEvent, ThreadRecord};
+use crate::domain::runtime::thread::{
+    NewThread, NewThreadEvent, ThreadEvent, ThreadSnapshot,
+};
 use crate::ports::outbound::runtime::thread_store::ThreadStore;
 
 #[derive(Clone)]
@@ -47,7 +49,7 @@ struct ThreadEventRow {
     occurred_at: DateTime<Utc>,
 }
 
-impl From<ThreadRecordRow> for ThreadRecord {
+impl From<ThreadRecordRow> for ThreadSnapshot {
     fn from(row: ThreadRecordRow) -> Self {
         Self {
             thread_id: row.thread_id,
@@ -73,7 +75,7 @@ impl From<ThreadEventRow> for ThreadEvent {
 
 #[async_trait]
 impl ThreadStore for SurrealThreadStore {
-    async fn create_thread(&self, thread: NewThread) -> Result<ThreadRecord> {
+    async fn create_thread(&self, thread: NewThread) -> Result<ThreadSnapshot> {
         if let Some(parent_thread_id) = &thread.parent_thread_id {
             let parent = self.get_thread(parent_thread_id).await?;
             if parent.is_none() {
@@ -103,7 +105,7 @@ impl ThreadStore for SurrealThreadStore {
         Ok(row.into())
     }
 
-    async fn get_thread(&self, thread_id: &str) -> Result<Option<ThreadRecord>> {
+    async fn get_thread(&self, thread_id: &str) -> Result<Option<ThreadSnapshot>> {
         let mut response = self
             .db
             .query("SELECT * FROM type::record($table, $id)")
@@ -116,7 +118,7 @@ impl ThreadStore for SurrealThreadStore {
             .take(0)
             .map_err(|e| Self::port_err("decode thread", e))?;
 
-        Ok(row.map(ThreadRecord::from))
+        Ok(row.map(ThreadSnapshot::from))
     }
 
     async fn append_event(&self, event: NewThreadEvent) -> Result<ThreadEvent> {
@@ -185,7 +187,7 @@ impl ThreadStore for SurrealThreadStore {
         child_thread_id: &str,
         branch_label: Option<String>,
         created_at: DateTime<Utc>,
-    ) -> Result<ThreadRecord> {
+    ) -> Result<ThreadSnapshot> {
         self.create_thread(NewThread {
             thread_id: child_thread_id.to_string(),
             parent_thread_id: Some(parent_thread_id.to_string()),
@@ -195,7 +197,7 @@ impl ThreadStore for SurrealThreadStore {
         .await
     }
 
-    async fn list_lineage(&self, thread_id: &str) -> Result<Vec<ThreadRecord>> {
+    async fn list_lineage(&self, thread_id: &str) -> Result<Vec<ThreadSnapshot>> {
         let mut lineage = Vec::new();
         let mut cursor = self.get_thread(thread_id).await?;
 

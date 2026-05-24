@@ -10,11 +10,12 @@ use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHan
 use crate::application::runtime::replay_report::ReplayReport;
 use crate::application::runtime::retention::{RetentionPolicy, RetentionPruneReport};
 use crate::application::runtime::runtime_diagnostics_helpers;
+use crate::application::runtime::runtime_job_identity_context::RuntimeJobIdentityContext;
 use crate::application::use_cases::investigate_runtime_lineage::{
     InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
 };
 use crate::domain::errors::{Result, StasisError};
-use crate::domain::runtime::job::{Job, JobState, NewJob};
+use crate::domain::runtime::job::{JobState, NewJob};
 use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
 use crate::domain::runtime::outbox::{
     OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
@@ -312,6 +313,7 @@ impl SurrealRuntime {
         job.state = JobState::Running;
         job.started_at = job.started_at.or(Some(now));
         job.heartbeat_at = Some(now);
+        let job_identity = RuntimeJobIdentityContext::from(&job);
         self.job_store.save(job.clone()).await?;
         let processing_started = Instant::now();
 
@@ -342,27 +344,29 @@ impl SurrealRuntime {
                 execution_id,
                 diagnostics,
             } => {
+                let diagnostics_envelope =
+                    Self::extract_diagnostics_envelope(diagnostics.as_deref());
                 job.state = JobState::Succeeded;
                 job.sttp_output_node_id = Some(sttp_output_node_id.clone());
                 job.finished_at = Some(now);
                 job.lease_owner = None;
                 job.lease_expires_at = None;
                 job.heartbeat_at = None;
-                self.job_store.save(job.clone()).await?;
+                self.job_store.save(job).await?;
 
                 self.append_outbox(
                     RuntimeEventType::JobSucceeded,
-                    &job,
+                    &job_identity,
                     Some(sttp_output_node_id.clone()),
                     None,
                     now,
                     execution_id.clone(),
-                    diagnostics.as_deref(),
+                    &diagnostics_envelope,
                 )
                 .await?;
 
                 self.append_job_attempt(
-                    &job,
+                    &job_identity.job_id,
                     worker_id,
                     attempt_number,
                     attempt_started_at,
@@ -371,6 +375,7 @@ impl SurrealRuntime {
                     None,
                     Some(sttp_output_node_id),
                     execution_id,
+                    &diagnostics_envelope,
                     diagnostics,
                 )
                 .await?;
@@ -386,6 +391,8 @@ impl SurrealRuntime {
                 execution_id,
                 diagnostics,
             } => {
+                let diagnostics_envelope =
+                    Self::extract_diagnostics_envelope(diagnostics.as_deref());
                 let guardrail_failure = diagnostics
                     .as_deref()
                     .map(|v| v.contains("\"guardrail_code\""))
@@ -401,12 +408,12 @@ impl SurrealRuntime {
                     job.finished_at = Some(now);
                     self.append_outbox(
                         RuntimeEventType::JobDeadLettered,
-                        &job,
+                        &job_identity,
                         None,
                         Some(message.clone()),
                         now,
                         execution_id.clone(),
-                        diagnostics.as_deref(),
+                        &diagnostics_envelope,
                     )
                     .await?;
 
@@ -423,12 +430,12 @@ impl SurrealRuntime {
 
                     self.append_outbox(
                         RuntimeEventType::JobRetryScheduled,
-                        &job,
+                        &job_identity,
                         None,
                         Some(message.clone()),
                         now,
                         execution_id.clone(),
-                        diagnostics.as_deref(),
+                        &diagnostics_envelope,
                     )
                     .await?;
 
@@ -436,10 +443,10 @@ impl SurrealRuntime {
                         .incr_counter(METRIC_JOB_RETRY_SCHEDULED_TOTAL, 1);
                 }
 
-                self.job_store.save(job.clone()).await?;
+                self.job_store.save(job).await?;
 
                 self.append_job_attempt(
-                    &job,
+                    &job_identity.job_id,
                     worker_id,
                     attempt_number,
                     attempt_started_at,
@@ -448,6 +455,7 @@ impl SurrealRuntime {
                     Some(message),
                     None,
                     execution_id,
+                    &diagnostics_envelope,
                     diagnostics,
                 )
                 .await?;
@@ -468,6 +476,8 @@ impl SurrealRuntime {
                 execution_id,
                 diagnostics,
             } => {
+                let diagnostics_envelope =
+                    Self::extract_diagnostics_envelope(diagnostics.as_deref());
                 let guardrail_failure = diagnostics
                     .as_deref()
                     .map(|v| v.contains("\"guardrail_code\""))
@@ -479,21 +489,21 @@ impl SurrealRuntime {
                 job.lease_owner = None;
                 job.lease_expires_at = None;
                 job.heartbeat_at = None;
-                self.job_store.save(job.clone()).await?;
+                self.job_store.save(job).await?;
 
                 self.append_outbox(
                     RuntimeEventType::JobDeadLettered,
-                    &job,
+                    &job_identity,
                     None,
                     Some(message.clone()),
                     now,
                     execution_id.clone(),
-                    diagnostics.as_deref(),
+                    &diagnostics_envelope,
                 )
                 .await?;
 
                 self.append_job_attempt(
-                    &job,
+                    &job_identity.job_id,
                     worker_id,
                     attempt_number,
                     attempt_started_at,
@@ -502,6 +512,7 @@ impl SurrealRuntime {
                     Some(message),
                     None,
                     execution_id,
+                    &diagnostics_envelope,
                     diagnostics,
                 )
                 .await?;
@@ -519,7 +530,7 @@ impl SurrealRuntime {
             }
         }
 
-        Ok(Some(job.id))
+        Ok(Some(job_identity.job_id))
     }
 
     pub async fn replay_dead_letter(&self, job_id: &str, now: DateTime<Utc>) -> Result<bool> {
@@ -619,22 +630,17 @@ impl SurrealRuntime {
     async fn append_outbox(
         &self,
         event_type: RuntimeEventType,
-        job: &Job,
+        job_identity: &RuntimeJobIdentityContext,
         sttp_output_node_id: Option<String>,
         message: Option<String>,
         now: DateTime<Utc>,
         execution_id: Option<String>,
-        diagnostics: Option<&str>,
+        diagnostics: &runtime_diagnostics_helpers::RuntimeDiagnosticsEnvelope,
     ) -> Result<()> {
-        let (
-            input_memory_query_id,
-            input_memory_query_fingerprint,
-            output_memory_node_id,
-            retrieval_path,
-        ) = Self::extract_memory_lineage_fields(diagnostics);
-        let thread_id = Self::extract_thread_id(diagnostics);
         let event = OutboxEvent {
-            event_id: self.id_generator.next_id(&format!("evt-{}", job.id)),
+            event_id: self
+                .id_generator
+                .next_id(&format!("evt-{}", job_identity.job_id)),
             status: OutboxStatus::Pending,
             publish_attempts: 0,
             published_at: None,
@@ -642,18 +648,20 @@ impl SurrealRuntime {
             last_publish_error: None,
             event: RuntimeEvent {
                 event_type,
-                job_id: job.id.clone(),
-                thread_id,
-                correlation_id: job.correlation_id.clone(),
-                causation_id: job.causation_id.clone(),
-                trace_id: job.trace_id.clone(),
-                sttp_input_node_id: job.sttp_input_node_id.clone(),
+                job_id: job_identity.job_id.clone(),
+                thread_id: diagnostics.thread_id.clone(),
+                correlation_id: job_identity.correlation_id.clone(),
+                causation_id: job_identity.causation_id.clone(),
+                trace_id: job_identity.trace_id.clone(),
+                sttp_input_node_id: job_identity.sttp_input_node_id.clone(),
                 sttp_output_node_id,
                 execution_id,
-                input_memory_query_id,
-                input_memory_query_fingerprint,
-                output_memory_node_id,
-                retrieval_path,
+                input_memory_query_id: diagnostics.input_memory_query_id.clone(),
+                input_memory_query_fingerprint: diagnostics
+                    .input_memory_query_fingerprint
+                    .clone(),
+                output_memory_node_id: diagnostics.output_memory_node_id.clone(),
+                retrieval_path: diagnostics.retrieval_path.clone(),
                 occurred_at: now,
                 message,
             },
@@ -665,7 +673,7 @@ impl SurrealRuntime {
     #[allow(clippy::too_many_arguments)]
     async fn append_job_attempt(
         &self,
-        job: &Job,
+        job_id: &str,
         worker_id: &str,
         attempt_number: u32,
         started_at: DateTime<Utc>,
@@ -674,14 +682,12 @@ impl SurrealRuntime {
         error_message: Option<String>,
         sttp_output_node_id: Option<String>,
         execution_id: Option<String>,
+        diagnostics_envelope: &runtime_diagnostics_helpers::RuntimeDiagnosticsEnvelope,
         diagnostics: Option<String>,
     ) -> Result<()> {
-        let (guardrail_code, policy_reason, duration_ms) =
-            Self::extract_diagnostics_fields(diagnostics.as_deref());
-
         let attempt = JobAttempt {
-            attempt_id: self.id_generator.next_id(&format!("attempt-{}", job.id)),
-            job_id: job.id.clone(),
+            attempt_id: self.id_generator.next_id(&format!("attempt-{job_id}")),
+            job_id: job_id.to_string(),
             attempt_number,
             worker_id: worker_id.to_string(),
             started_at,
@@ -690,33 +696,19 @@ impl SurrealRuntime {
             error_message,
             sttp_output_node_id,
             execution_id,
-            guardrail_code,
-            policy_reason,
-            duration_ms,
+            guardrail_code: diagnostics_envelope.guardrail_code.clone(),
+            policy_reason: diagnostics_envelope.policy_reason.clone(),
+            duration_ms: diagnostics_envelope.duration_ms,
             diagnostics,
         };
 
         self.job_attempt_store.insert(attempt).await
     }
 
-    fn extract_diagnostics_fields(
+    fn extract_diagnostics_envelope(
         diagnostics: Option<&str>,
-    ) -> (Option<String>, Option<String>, Option<u64>) {
-        runtime_diagnostics_helpers::extract_diagnostics_fields(diagnostics)
+    ) -> runtime_diagnostics_helpers::RuntimeDiagnosticsEnvelope {
+        runtime_diagnostics_helpers::extract_runtime_diagnostics_envelope(diagnostics)
     }
 
-    fn extract_memory_lineage_fields(
-        diagnostics: Option<&str>,
-    ) -> (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    ) {
-        runtime_diagnostics_helpers::extract_memory_lineage_fields(diagnostics)
-    }
-
-    fn extract_thread_id(diagnostics: Option<&str>) -> Option<String> {
-        runtime_diagnostics_helpers::extract_thread_id(diagnostics)
-    }
 }

@@ -32,21 +32,6 @@ use crate::application::runtime::runtime_factory::{
 use crate::application::runtime::sequential_pattern_job_handler::SequentialPatternJobHandler;
 use crate::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
 use crate::domain::errors::Result;
-use crate::infrastructure::llm::genai_chat_client::GenaiChatClient;
-use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
-use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
-use crate::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
-use crate::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
-use crate::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
-use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
-use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
-use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
-use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
-use crate::infrastructure::runtime::in_memory_thread_store::InMemoryThreadStore;
-use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
-use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
-use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
-use crate::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
 use crate::ports::outbound::ai_chat_client::AiChatClient;
 use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
 use crate::ports::outbound::ai_chat_tool_interceptor::AiChatToolInterceptor;
@@ -285,15 +270,20 @@ impl StasisRuntimeBuilder {
 
     pub async fn build(self) -> Result<RuntimeComposition> {
         let runtime = RuntimeFactory::build(self.backend).await?;
-        let workflow_engine = Arc::new(GraphemeSdkWorkflowEngine::new());
+        let workflow_engine = RuntimeFactory::default_workflow_engine();
         let chat_client = self
             .chat_client
-            .unwrap_or_else(|| Arc::new(GenaiChatClient::from_env()));
+            .unwrap_or_else(RuntimeFactory::default_chat_client);
         let chat_client = Self::compose_chat_client(chat_client, &self.chat_middlewares);
-        let mut memory_context_reader = self.memory_context_reader;
-        let mut memory_context_writer = self.memory_context_writer;
+        let (memory_context_reader, memory_context_writer, memory_operations) =
+            RuntimeFactory::ensure_locus_memory_adapters(
+                self.enable_locus_memory,
+                self.memory_context_reader,
+                self.memory_context_writer,
+                self.memory_operations,
+            )
+            .await?;
         let identity_memory_store = self.identity_memory_store;
-        let mut memory_operations = self.memory_operations;
         let default_thread_store = self.thread_store.clone();
         let configured_cluster_store = self.cluster_node_store.clone();
         let configured_endpoint_store = self.delivery_endpoint_store.clone();
@@ -301,62 +291,33 @@ impl StasisRuntimeBuilder {
         let configured_endpoint_transports = self.endpoint_transport_publishers.clone();
         let configured_endpoint_routing_policy = self.endpoint_routing_policy.clone();
 
-        if self.enable_locus_memory
-            && (memory_context_reader.is_none()
-                || memory_context_writer.is_none()
-                || memory_operations.is_none())
-        {
-            let store = LocusNodeStoreFactory::in_memory().await?;
-            if memory_context_reader.is_none() {
-                memory_context_reader = Some(Arc::new(LocusContextReader::new(store.clone())));
-            }
-            if memory_context_writer.is_none() {
-                memory_context_writer = Some(Arc::new(LocusContextWriter::new(store.clone())));
-            }
-            if memory_operations.is_none() {
-                memory_operations = Some(Arc::new(LocusMemoryOperations::new(store, None)));
-            }
-        }
-
         let tool_registry = Arc::new(self.tool_registry);
 
         match &runtime {
             RuntimeComposition::InMemory(rt) => {
-                let thread_store = default_thread_store
-                    .clone()
-                    .unwrap_or_else(|| Arc::new(InMemoryThreadStore::default()));
-                let cluster_store = configured_cluster_store
-                    .clone()
-                    .unwrap_or_else(|| Arc::new(InMemoryClusterNodeStore::default()));
+                let thread_store =
+                    RuntimeFactory::resolve_thread_store(&runtime, default_thread_store.clone());
+                let cluster_store = RuntimeFactory::resolve_cluster_node_store(
+                    &runtime,
+                    configured_cluster_store.clone(),
+                );
 
                 if self.enable_endpoint_routing_delivery {
-                    let endpoint_store = configured_endpoint_store
-                        .clone()
-                        .unwrap_or_else(|| Arc::new(InMemoryDeliveryEndpointStore::default()));
-                    let status_store =
-                        configured_endpoint_status_store.clone().unwrap_or_else(|| {
-                            Arc::new(InMemoryEndpointDeliveryStatusStore::default())
-                        });
+                    let endpoint_store = RuntimeFactory::resolve_delivery_endpoint_store(
+                        &runtime,
+                        configured_endpoint_store.clone(),
+                    );
+                    let status_store = RuntimeFactory::resolve_endpoint_delivery_status_store(
+                        &runtime,
+                        configured_endpoint_status_store.clone(),
+                    );
 
-                    let mut routing_publisher = EndpointRoutingEventPublisher::new(endpoint_store)
-                        .fail_on_unsupported_protocol(false);
-
-                    if configured_endpoint_transports.is_empty() {
-                        routing_publisher = routing_publisher
-                            .with_http_webhook_transport()
-                            .with_tcp_socket_transport();
-                    } else {
-                        for transport in &configured_endpoint_transports {
-                            routing_publisher =
-                                routing_publisher.with_transport_arc(transport.clone());
-                        }
-                    }
-
-                    if let Some(policy) = configured_endpoint_routing_policy.clone() {
-                        routing_publisher = routing_publisher.with_routing_policy_arc(policy);
-                    }
-
-                    routing_publisher = routing_publisher.with_status_store_arc(status_store);
+                    let routing_publisher = RuntimeFactory::build_endpoint_routing_publisher(
+                        endpoint_store,
+                        status_store,
+                        &configured_endpoint_transports,
+                        configured_endpoint_routing_policy.clone(),
+                    );
 
                     rt.register_event_publisher(routing_publisher)?;
                 }
@@ -449,41 +410,29 @@ impl StasisRuntimeBuilder {
                 }
             }
             RuntimeComposition::Surreal(rt) => {
-                let thread_store = default_thread_store
-                    .clone()
-                    .unwrap_or_else(|| Arc::new(SurrealThreadStore::new(rt.job_store.db())));
-                let cluster_store = configured_cluster_store
-                    .clone()
-                    .unwrap_or_else(|| Arc::new(SurrealClusterNodeStore::new(rt.job_store.db())));
+                let thread_store =
+                    RuntimeFactory::resolve_thread_store(&runtime, default_thread_store.clone());
+                let cluster_store = RuntimeFactory::resolve_cluster_node_store(
+                    &runtime,
+                    configured_cluster_store.clone(),
+                );
 
                 if self.enable_endpoint_routing_delivery {
-                    let endpoint_store = configured_endpoint_store.clone().unwrap_or_else(|| {
-                        Arc::new(SurrealDeliveryEndpointStore::new(rt.job_store.db()))
-                    });
-                    let status_store =
-                        configured_endpoint_status_store.clone().unwrap_or_else(|| {
-                            Arc::new(SurrealEndpointDeliveryStatusStore::new(rt.job_store.db()))
-                        });
+                    let endpoint_store = RuntimeFactory::resolve_delivery_endpoint_store(
+                        &runtime,
+                        configured_endpoint_store.clone(),
+                    );
+                    let status_store = RuntimeFactory::resolve_endpoint_delivery_status_store(
+                        &runtime,
+                        configured_endpoint_status_store.clone(),
+                    );
 
-                    let mut routing_publisher = EndpointRoutingEventPublisher::new(endpoint_store)
-                        .fail_on_unsupported_protocol(false);
-
-                    if configured_endpoint_transports.is_empty() {
-                        routing_publisher = routing_publisher
-                            .with_http_webhook_transport()
-                            .with_tcp_socket_transport();
-                    } else {
-                        for transport in &configured_endpoint_transports {
-                            routing_publisher =
-                                routing_publisher.with_transport_arc(transport.clone());
-                        }
-                    }
-
-                    if let Some(policy) = configured_endpoint_routing_policy.clone() {
-                        routing_publisher = routing_publisher.with_routing_policy_arc(policy);
-                    }
-
-                    routing_publisher = routing_publisher.with_status_store_arc(status_store);
+                    let routing_publisher = RuntimeFactory::build_endpoint_routing_publisher(
+                        endpoint_store,
+                        status_store,
+                        &configured_endpoint_transports,
+                        configured_endpoint_routing_policy.clone(),
+                    );
 
                     rt.register_event_publisher(routing_publisher)?;
                 }

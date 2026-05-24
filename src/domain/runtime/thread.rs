@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewThread {
     pub thread_id: String,
     pub parent_thread_id: Option<String>,
@@ -9,8 +9,8 @@ pub struct NewThread {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ThreadRecord {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadSnapshot {
     pub thread_id: String,
     pub parent_thread_id: Option<String>,
     pub branch_label: Option<String>,
@@ -18,7 +18,10 @@ pub struct ThreadRecord {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[deprecated(note = "Use ThreadSnapshot instead")]
+pub type ThreadRecord = ThreadSnapshot;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewThreadEvent {
     pub event_id: String,
     pub thread_id: String,
@@ -27,7 +30,7 @@ pub struct NewThreadEvent {
     pub occurred_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ThreadEvent {
     pub event_id: String,
     pub thread_id: String,
