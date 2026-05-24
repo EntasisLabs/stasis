@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::{Surreal, engine::local::Db};
+use surrealdb::{engine::any::Any, Surreal};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
@@ -10,19 +10,19 @@ use crate::ports::outbound::runtime::recurring_store::RecurringStore;
 
 #[derive(Clone)]
 pub struct SurrealRecurringStore {
-    db: Surreal<Db>,
+    db: Surreal<Any>,
     table: String,
 }
 
 impl SurrealRecurringStore {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: Surreal<Any>) -> Self {
         Self {
             db,
             table: "recurring_definition".to_string(),
         }
     }
 
-    pub fn with_table(db: Surreal<Db>, table: impl Into<String>) -> Self {
+    pub fn with_table(db: Surreal<Any>, table: impl Into<String>) -> Self {
         Self {
             db,
             table: table.into(),

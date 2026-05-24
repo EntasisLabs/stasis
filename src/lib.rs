@@ -89,7 +89,7 @@ pub mod sdk_prelude {
     pub use crate::application::runtime::runtime_factory::{RuntimeBackend, RuntimeFactory};
     pub use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
     pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
-    pub use crate::sdk::runtime_sdk::RuntimeSdk;
+    pub use crate::sdk::runtime_sdk::{RuntimeSdk, StasisRuntime};
     pub use crate::sdk::stasis_sdk::StasisSdk;
 }
 

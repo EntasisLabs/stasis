@@ -26,7 +26,7 @@ This reference covers:
 1. Control-plane command contracts.
 2. Delivery endpoint registry model.
 3. Endpoint persistence ports and built-in adapters.
-4. Event-publisher routing direction and phased rollout.
+4. Event-publisher routing model and transport extensibility.
 
 ## Scope
 
@@ -39,7 +39,7 @@ In scope:
 Out of scope:
 
 - full dashboard UI implementation.
-- complete transport matrix (Kafka, RabbitMQ, TCP runtime adapters are planned).
+- complete transport matrix (Kafka, RabbitMQ, TCP runtime adapters are supported as extension points, but not all are built-in).
 - multi-cluster membership and scheduler federation internals.
 
 ## Forwarded Command Durability and Guardrails
@@ -104,28 +104,28 @@ Current built-in adapter:
 
 1. `HttpWebhookEventPublisher` posts normalized runtime event payloads to configured webhook URLs.
 
-Planned adapter set:
+Transport extension targets:
 
 1. TCP publisher.
 2. Kafka publisher.
 3. RabbitMQ publisher.
 
-## Delivery Flow (Current and Next)
+## Delivery Flow
 
 Current flow:
 
 1. Runtime commits durable outbox events.
 2. Event publisher sends to configured external subscriber implementation.
 
-Target flow:
+Extended flow model:
 
 1. Control plane manages protocol endpoints in the endpoint registry.
 2. Routing policy selects endpoint sets by event/job criteria.
 3. Publisher adapters fan out events with retry-aware outbox coordination.
 
-## Rollout Plan
+## Implementation Status
 
-### Phase 1 (Implemented)
+Implemented in current runtime:
 
 1. Endpoint model and store port.
 2. Inbound control-plane contract.
@@ -133,17 +133,11 @@ Target flow:
 4. In-memory and Surreal endpoint store adapters.
 5. Control-plane SDK wiring.
 
-### Phase 2 (Next)
+Future evolution areas:
 
 1. Routing policy and dispatcher integration.
-2. Protocol adapter expansion (TCP, Kafka, RabbitMQ).
-3. Delivery diagnostics enrichment per endpoint attempt.
-
-### Phase 3
-
-1. Distributed cluster coordination for control-plane operations.
-2. Regional/edge execution with upstream summary sync.
-3. Command-center API and dashboard surfaces.
+2. Additional transport adapters.
+3. Distributed coordination and command-center APIs.
 
 ## Operational Guidance
 

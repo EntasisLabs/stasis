@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::{Surreal, engine::local::Db};
+use surrealdb::{engine::any::Any, Surreal};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
@@ -10,12 +10,12 @@ use crate::ports::outbound::runtime::cluster_forward_outcome_store::ClusterForwa
 
 #[derive(Clone)]
 pub struct SurrealClusterForwardOutcomeStore {
-    db: Surreal<Db>,
+    db: Surreal<Any>,
     table: String,
 }
 
 impl SurrealClusterForwardOutcomeStore {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: Surreal<Any>) -> Self {
         Self {
             db,
             table: "cluster_forward_outcome".to_string(),
@@ -118,7 +118,7 @@ impl ClusterForwardOutcomeStore for SurrealClusterForwardOutcomeStore {
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, Utc};
-    use surrealdb::{Surreal, engine::local::Mem};
+    use surrealdb::{engine::any::Any, Surreal};
 
     use crate::domain::runtime::cluster_node::ClusterForwardOutcome;
     use crate::ports::outbound::runtime::cluster_forward_outcome_store::ClusterForwardOutcomeStore;
@@ -126,7 +126,8 @@ mod tests {
     use super::SurrealClusterForwardOutcomeStore;
 
     async fn store() -> SurrealClusterForwardOutcomeStore {
-        let db = Surreal::new::<Mem>(())
+        let db = Surreal::<Any>::init();
+        db.connect("mem://")
             .await
             .expect("surreal mem db should initialize");
         db.use_ns("stasis")

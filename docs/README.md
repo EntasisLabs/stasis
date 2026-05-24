@@ -19,7 +19,13 @@
 
 ## Internal Planning
 
-- Runtime phase plan and Grapheme track: [design/runtime-phase-plan.md](design/runtime-phase-plan.md)
-- Runtime demo program plan: [design/runtime-demo-plan.md](design/runtime-demo-plan.md)
-- Stasis framework implementation plan: [design/stasis-framework-implementation-plan.md](design/stasis-framework-implementation-plan.md)
+- Distributed command center plan: [design/distributed-command-center-phase-plan.md](design/distributed-command-center-phase-plan.md)
+- API and SDK layer design: [design/stasis-api-sdk-layer-design.md](design/stasis-api-sdk-layer-design.md)
+- Unified SDK surface proposal: [design/unified-sdk-surface-proposal.md](design/unified-sdk-surface-proposal.md)
 - Locus integration RFC and delivery plan: [design/locus-integration-rfc-plan.md](design/locus-integration-rfc-plan.md)
+
+## Internal Testing Environment Variables
+
+- `STASIS_TEST_SURREAL_WS_ENDPOINT`
+	- Used only by the runtime backend parity test that validates `RuntimeBackend::SurrealWs` with Locus memory wiring.
+	- When unset, that websocket compatibility test exits early so local and CI runs can stay deterministic without a running SurrealDB websocket endpoint.

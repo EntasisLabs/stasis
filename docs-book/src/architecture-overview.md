@@ -284,13 +284,9 @@ flowchart TD
 
 ## Related Documents
 
-- Runtime draft: [Runtime V1 Draft](./runtime-v1-draft.md)
 - Job runtime design: [Job Runtime Design](./runtime-job-design.md)
+- Runtime builder and wiring: [Runtime Builder and Wiring Guide](./runtime-builder.md)
+- Extension points and ports: [Extension Points and Port Contracts](./extension-points.md)
 - Control plane and endpoint routing: [Control Plane and Endpoint Routing](./control-plane-endpoint-routing.md)
 - Database schema: [SurrealDB Schema](./surrealdb-schema.md)
-- Stasis framework RFC: [Stasis Framework RFC](./stasis-framework-rfc.md)
-- Stasis implementation plan: [Stasis Framework Implementation Plan](./stasis-framework-implementation-plan.md)
-- Locus integration plan: [Locus Integration RFC and Plan](./locus-integration-rfc-plan.md)
-- Microsoft-stack parity roadmap: [Microsoft-Stack Parity Roadmap](./microsoft-stack-parity-roadmap.md)
-- Microsoft-stack compatibility matrix: [Microsoft-Stack Compatibility Matrix](./microsoft-stack-compatibility-matrix.md)
 - ADR index: [Architecture Decision Records](./adr.md)

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::{Surreal, engine::local::Db};
+use surrealdb::{engine::any::Any, Surreal};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
@@ -12,12 +12,12 @@ use crate::ports::outbound::runtime::cluster_node_store::ClusterNodeStore;
 
 #[derive(Clone)]
 pub struct SurrealClusterNodeStore {
-    db: Surreal<Db>,
+    db: Surreal<Any>,
     table: String,
 }
 
 impl SurrealClusterNodeStore {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: Surreal<Any>) -> Self {
         Self {
             db,
             table: "cluster_node".to_string(),

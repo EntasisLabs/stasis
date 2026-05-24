@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use surrealdb::{Surreal, engine::local::Db};
+use surrealdb::{engine::any::Any, Surreal};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
@@ -44,7 +44,7 @@ const IDENTITY_SCHEMA_STATEMENTS: &[&str] = &[
 
 #[derive(Clone)]
 pub struct SurrealIdentityMemoryStore {
-    db: Surreal<Db>,
+    db: Surreal<Any>,
     persona_table: String,
     user_table: String,
     channel_table: String,
@@ -56,7 +56,7 @@ pub struct SurrealIdentityMemoryStore {
 }
 
 impl SurrealIdentityMemoryStore {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: Surreal<Any>) -> Self {
         Self {
             db,
             persona_table: "identity_persona".to_string(),
@@ -74,7 +74,7 @@ impl SurrealIdentityMemoryStore {
         Self::ensure_schema_for_db(&self.db).await
     }
 
-    pub async fn ensure_schema_for_db(db: &Surreal<Db>) -> Result<()> {
+    pub async fn ensure_schema_for_db(db: &Surreal<Any>) -> Result<()> {
         for statement in IDENTITY_SCHEMA_STATEMENTS {
             if let Err(err) = db.query(*statement).await {
                 let text = err.to_string();
@@ -1706,8 +1706,8 @@ impl IdentityMemoryStore for SurrealIdentityMemoryStore {
 mod tests {
     use chrono::Utc;
     use serde_json::json;
+    use surrealdb::engine::any::Any;
     use surrealdb::Surreal;
-    use surrealdb::engine::local::Mem;
 
     use super::SurrealIdentityMemoryStore;
     use crate::ports::outbound::memory::identity_memory_models::{
@@ -1718,7 +1718,10 @@ mod tests {
     use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 
     async fn new_store() -> SurrealIdentityMemoryStore {
-        let db = Surreal::new::<Mem>(()).await.expect("surreal mem should initialize");
+        let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
         db.use_ns("test")
             .use_db("identity")
             .await
@@ -1731,7 +1734,10 @@ mod tests {
 
     #[tokio::test]
     async fn surreal_identity_schema_bootstrap_is_idempotent() {
-        let db = Surreal::new::<Mem>(()).await.expect("surreal mem should initialize");
+        let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
         db.use_ns("test")
             .use_db("identity_schema_bootstrap")
             .await

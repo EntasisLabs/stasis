@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3f437709.js";
+            window.path_to_searchindex_js = "searchindex-0c0f251d.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-efbb9846.js"></script>
+        <script src="toc-de86f825.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -183,8 +183,11 @@
 <li>Last Verified: 2026-05-15</li>
 <li>Verified Against:
 <ul>
-<li>src/application/runtime/stasis_runtime_builder.rs</li>
-<li>src/application/runtime/runtime_factory.rs</li>
+<li>src/application/runtime/stasis_runtime_builder.rs
+<ul>
+<li>src/application/composition/runtime_composition.rs</li>
+</ul>
+</li>
 <li>src/infrastructure/runtime/in_memory_thread_store.rs</li>
 <li>src/infrastructure/runtime/surreal_thread_store.rs</li>
 <li>src/infrastructure/memory/locus_node_store_factory.rs</li>
@@ -213,7 +216,7 @@
 </thead>
 <tbody>
 <tr><td><code>RuntimeBackend::InMemory</code></td><td>In-process store. No persistence across restarts. Use for testing and development.</td></tr>
-<tr><td><code>RuntimeBackend::Surreal</code></td><td>SurrealDB-backed durable store. Use for production.</td></tr>
+<tr><td><code>RuntimeBackend::SurrealMem { namespace, database }</code></td><td>Surreal in-memory engine with explicit namespace/database. Useful for integration tests and durable-runtime behavior validation.</td></tr>
 </tbody>
 </table>
 </div>
@@ -224,8 +227,11 @@
 // Development / testing
 let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory);
 
-// Production
-let builder = StasisRuntimeBuilder::new(RuntimeBackend::Surreal);
+// Surreal-backed behavior tests
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+    namespace: "stasis".to_string(),
+    database: "runtime".to_string(),
+});
 <span class="boring">}</span></code></pre>
 <hr>
 <h2 id="minimal-working-setup"><a class="header" href="#minimal-working-setup">Minimal Working Setup</a></h2>
@@ -309,7 +315,10 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
 <p>Provide custom implementations for any combination of the three memory ports:</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::Surreal)
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+    namespace: "stasis".to_string(),
+    database: "runtime".to_string(),
+})
     .with_memory_context_reader(Arc::new(my_reader))
     .with_memory_context_writer(Arc::new(my_writer))
     .with_memory_operations(Arc::new(my_ops))
@@ -319,10 +328,13 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
 <p>If <code>.with_locus_memory()</code> is also set, explicit ports take precedence over auto-bootstrapped ones.</p>
 <hr>
 <h2 id="thread-store"><a class="header" href="#thread-store">Thread Store</a></h2>
-<p>Thread records track execution continuity for orchestration patterns and agent sessions. If not provided, <code>InMemoryThreadStore</code> is used for <code>InMemory</code> backends and <code>SurrealThreadStore</code> for <code>Surreal</code> backends.</p>
+<p>Thread records track execution continuity for orchestration patterns and agent sessions. If not provided, <code>InMemoryThreadStore</code> is used for <code>InMemory</code> backends and <code>SurrealThreadStore</code> for <code>Surreal</code> runtime compositions.</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::Surreal)
+</span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+    namespace: "stasis".to_string(),
+    database: "runtime".to_string(),
+})
     .with_thread_store(Arc::new(SurrealThreadStore::new(db.clone())))
     .build()
     .await?;
@@ -361,14 +373,19 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
 <p><code>build()</code> returns <code>RuntimeComposition</code>, which carries the assembled runtime and all wired dependencies:</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>let composition = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+</span>use stasis::prelude::RuntimeSdk;
+
+let composition = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
     .build()
     .await?;
 
-// Start the job processing loop
-composition.runtime.start().await?;
+let runtime = RuntimeSdk::new(composition); // StasisRuntime public naming
+
+// Process one queue tick
+let processed = runtime.process_once("default", "worker-1").await?;
+println!("processed={:?}", processed);
 <span class="boring">}</span></code></pre>
-<p><code>RuntimeComposition</code> exposes the underlying <code>InMemoryRuntime</code> or <code>SurrealRuntime</code> depending on the backend selected.</p>
+<p><code>RuntimeComposition</code> exposes the underlying <code>InMemoryRuntime</code> or <code>SurrealRuntime</code> depending on the backend selected, while <code>StasisRuntime</code> (currently implemented by <code>RuntimeSdk</code>) provides the backend-agnostic operational facade.</p>
 <hr>
 <h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
 <ul>

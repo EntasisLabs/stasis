@@ -2,6 +2,8 @@
 
 Stasis is an agentic framework SDK with a durable job orchestration runtime.
 
+If you are new to Stasis, start with [Getting Started](./getting-started.md) before diving into architecture details.
+
 This book is the architecture reference for the runtime and covers:
 
 1. System architecture and decision boundaries.
@@ -11,10 +13,11 @@ This book is the architecture reference for the runtime and covers:
 
 ## How to Read This Book
 
-1. Start with Architecture Overview for context and execution flow.
-2. Read Runtime Draft and Job Runtime Design for implementation behavior.
-3. Use SurrealDB Schema as the source of truth for data contracts.
-4. Review ADRs for rationale and tradeoffs.
+1. Start with Getting Started for a first end-to-end run.
+2. Read Runtime Builder and Job Runtime Design for runtime behavior.
+3. Read Architecture Overview to understand system boundaries and flow.
+4. Use SurrealDB Schema as the source of truth for data contracts.
+5. Review Extension Points for integration contracts and ADRs for rationale.
 
 ## Scope
 

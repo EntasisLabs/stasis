@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3f437709.js";
+            window.path_to_searchindex_js = "searchindex-0c0f251d.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-efbb9846.js"></script>
+        <script src="toc-de86f825.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -425,8 +425,8 @@ pub trait EventPublisher: Send + Sync {
 </span><span class="boring">fn main() {
 </span>#[async_trait]
 pub trait ThreadStore: Send + Sync {
-    async fn create_thread(&amp;self, thread: NewThread) -&gt; Result&lt;ThreadRecord&gt;;
-    async fn get_thread(&amp;self, thread_id: &amp;str) -&gt; Result&lt;Option&lt;ThreadRecord&gt;&gt;;
+    async fn create_thread(&amp;self, thread: NewThread) -&gt; Result&lt;ThreadSnapshot&gt;;
+    async fn get_thread(&amp;self, thread_id: &amp;str) -&gt; Result&lt;Option&lt;ThreadSnapshot&gt;&gt;;
     async fn append_event(&amp;self, event: NewThreadEvent) -&gt; Result&lt;ThreadEvent&gt;;
     async fn list_events(&amp;self, thread_id: &amp;str) -&gt; Result&lt;Vec&lt;ThreadEvent&gt;&gt;;
     async fn fork_thread(
@@ -435,13 +435,13 @@ pub trait ThreadStore: Send + Sync {
         child_thread_id: &amp;str,
         branch_label: Option&lt;String&gt;,
         created_at: DateTime&lt;Utc&gt;,
-    ) -&gt; Result&lt;ThreadRecord&gt;;
-    async fn list_lineage(&amp;self, thread_id: &amp;str) -&gt; Result&lt;Vec&lt;ThreadRecord&gt;&gt;;
+    ) -&gt; Result&lt;ThreadSnapshot&gt;;
+    async fn list_lineage(&amp;self, thread_id: &amp;str) -&gt; Result&lt;Vec&lt;ThreadSnapshot&gt;&gt;;
 }
 <span class="boring">}</span></code></pre>
 <p><strong>Stasis guarantees:</strong></p>
 <ul>
-<li><code>fork_thread</code> creates a child <code>ThreadRecord</code> with <code>parent_thread_id</code> set — used by concurrent pattern to track branches.</li>
+<li><code>fork_thread</code> creates a child <code>ThreadSnapshot</code> with <code>parent_thread_id</code> set — used by concurrent pattern to track branches.</li>
 <li><code>list_lineage</code> returns the full ancestry chain from the given thread ID back to the root.</li>
 <li><code>list_events</code> returns events in store order for the given thread.</li>
 </ul>

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use surrealdb::engine::local::{Db, Mem};
+use surrealdb::engine::any::Any;
 use surrealdb::Surreal;
 
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
@@ -38,6 +38,16 @@ use crate::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 pub enum RuntimeBackend {
     InMemory,
     SurrealMem { namespace: String, database: String },
+    SurrealWs {
+        endpoint: String,
+        namespace: String,
+        database: String,
+    },
+    SurrealKv {
+        path: String,
+        namespace: String,
+        database: String,
+    },
 }
 
 #[derive(Clone)]
@@ -49,29 +59,53 @@ pub enum RuntimeComposition {
 pub struct RuntimeFactory;
 
 impl RuntimeFactory {
+    async fn connect_surreal_any(
+        endpoint: &str,
+        namespace: String,
+        database: String,
+    ) -> Result<RuntimeComposition> {
+        let db = Surreal::<Any>::init();
+        db.connect(endpoint)
+            .await
+            .map_err(|e| StasisError::PortFailure(format!("connect surreal db ({endpoint}): {e}")))?;
+
+        db.use_ns(namespace).use_db(database).await.map_err(|e| {
+            StasisError::PortFailure(format!("select surreal namespace/database: {e}"))
+        })?;
+
+        SurrealIdentityMemoryStore::ensure_schema_for_db(&db).await?;
+
+        Ok(RuntimeComposition::Surreal(SurrealRuntime::new(db)))
+    }
+
     pub async fn build(config: RuntimeBackend) -> Result<RuntimeComposition> {
         match config {
             RuntimeBackend::InMemory => Ok(RuntimeComposition::InMemory(InMemoryRuntime::new())),
             RuntimeBackend::SurrealMem {
                 namespace,
                 database,
+            } => Self::connect_surreal_any("mem://", namespace, database).await,
+            RuntimeBackend::SurrealWs {
+                endpoint,
+                namespace,
+                database,
+            } => Self::connect_surreal_any(&endpoint, namespace, database).await,
+            RuntimeBackend::SurrealKv {
+                path,
+                namespace,
+                database,
             } => {
-                let db = Surreal::new::<Mem>(())
-                    .await
-                    .map_err(|e| StasisError::PortFailure(format!("create surreal mem db: {e}")))?;
-
-                db.use_ns(namespace).use_db(database).await.map_err(|e| {
-                    StasisError::PortFailure(format!("select surreal namespace/database: {e}"))
-                })?;
-
-                SurrealIdentityMemoryStore::ensure_schema_for_db(&db).await?;
-
-                Ok(RuntimeComposition::Surreal(SurrealRuntime::new(db)))
+                let endpoint = if path.starts_with("surrealkv://") {
+                    path
+                } else {
+                    format!("surrealkv://{path}")
+                };
+                Self::connect_surreal_any(&endpoint, namespace, database).await
             }
         }
     }
 
-    pub fn from_db(db: Surreal<Db>) -> RuntimeComposition {
+    pub fn from_db(db: Surreal<Any>) -> RuntimeComposition {
         RuntimeComposition::Surreal(SurrealRuntime::new(db))
     }
 

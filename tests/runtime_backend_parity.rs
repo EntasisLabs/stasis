@@ -1,7 +1,10 @@
+use std::env;
+use std::fs;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration as StdDuration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -10,7 +13,7 @@ use genai::adapter::AdapterKind;
 use genai::chat::{ChatOptions, ChatRequest, ChatResponse, MessageContent, ToolCall, Usage};
 use serde_json::{Value as JsonValue, json};
 use surrealdb::Surreal;
-use surrealdb::engine::local::Mem;
+use surrealdb::engine::any::Any;
 use tokio::sync::Mutex;
 
 use stasis::application::orchestration::runtime_job_payloads::{
@@ -1311,9 +1314,10 @@ async fn in_memory_prompt_job_handler_identity_trace_includes_replacement_contin
 
 #[tokio::test]
 async fn surreal_prompt_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_prompt_memory_parity")
         .await
@@ -1699,9 +1703,10 @@ async fn in_memory_tool_loop_identity_trace_includes_replacement_continuity_rece
 
 #[tokio::test]
 async fn surreal_tool_loop_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_tool_loop_memory_parity")
         .await
@@ -2093,9 +2098,10 @@ async fn in_memory_agent_turn_identity_trace_includes_replacement_continuity_rec
 
 #[tokio::test]
 async fn surreal_agent_turn_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_agent_turn_memory_parity")
         .await
@@ -2668,9 +2674,10 @@ async fn in_memory_agent_session_job_handler_executes_session() {
 
 #[tokio::test]
 async fn surreal_agent_session_job_handler_executes_session() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_agent_session_parity")
         .await
@@ -3008,9 +3015,10 @@ async fn in_memory_agent_session_identity_trace_includes_replacement_continuity_
 
 #[tokio::test]
 async fn surreal_agent_session_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_agent_session_memory_parity")
         .await
@@ -3375,9 +3383,10 @@ async fn in_memory_memory_workflow_handlers_execute_and_emit_diagnostics() {
 
 #[tokio::test]
 async fn surreal_memory_recall_job_handler_executes_and_emits_diagnostics() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_memory_recall_parity")
         .await
@@ -3637,6 +3646,146 @@ async fn in_memory_runtime_builder_with_locus_memory_registers_memory_schema_han
         Some(&json!("stasis-memory-schema"))
     );
     assert_eq!(diagnostics.get("status"), Some(&json!("success")));
+}
+
+#[tokio::test]
+async fn surreal_kv_runtime_builder_with_locus_memory_registers_memory_schema_handler() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock should be after epoch")
+        .as_nanos();
+    let path = env::temp_dir().join(format!("stasis-locus-kv-{nanos}"));
+    let path_str = path.to_string_lossy().into_owned();
+
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
+        path: path_str,
+        namespace: "test".to_string(),
+        database: format!("runtime_backend_parity_locus_kv_{nanos}"),
+    })
+    .with_chat_client(Arc::new(ScriptedChatClient::new(vec![])))
+    .with_locus_memory()
+    .without_grapheme_handlers()
+    .without_prompt_handler()
+    .without_tool_loop_handler()
+    .without_agent_handlers()
+    .build()
+    .await
+    .expect("runtime should build successfully");
+
+    let RuntimeComposition::Surreal(runtime) = runtime else {
+        panic!("expected surreal runtime composition");
+    };
+
+    let now = Utc::now();
+    let schema_payload = MemorySchemaJobPayload::default();
+    runtime
+        .enqueue(build_memory_schema_job(
+            "job-builder-locus-memory-schema-surreal-kv-1",
+            &schema_payload,
+            now,
+            "idem-builder-locus-memory-schema-surreal-kv-1",
+            "corr-builder-locus-memory-schema-surreal-kv-1",
+            "cause-builder-locus-memory-schema-surreal-kv-1",
+            "trace-builder-locus-memory-schema-surreal-kv-1",
+            "sttp:in:builder:locus:memory:schema:surreal-kv:1",
+        ))
+        .await
+        .expect("memory schema job should enqueue");
+
+    runtime
+        .process_once("default", "worker-builder-locus-memory-surreal-kv", now)
+        .await
+        .expect("memory schema processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get("job-builder-locus-memory-schema-surreal-kv-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-builder-locus-memory-schema-surreal-kv-1")
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(
+        diagnostics.get("provider"),
+        Some(&json!("stasis-memory-schema"))
+    );
+    assert_eq!(diagnostics.get("status"), Some(&json!("success")));
+
+    drop(runtime);
+    let _ = fs::remove_dir_all(path);
+}
+
+#[tokio::test]
+async fn surreal_ws_runtime_builder_with_locus_memory_registers_memory_schema_handler_if_configured(
+) {
+    let Some(endpoint) = env::var("STASIS_TEST_SURREAL_WS_ENDPOINT").ok() else {
+        return;
+    };
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock should be after epoch")
+        .as_nanos();
+
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
+        endpoint,
+        namespace: "test".to_string(),
+        database: format!("runtime_backend_parity_locus_ws_{nanos}"),
+    })
+    .with_chat_client(Arc::new(ScriptedChatClient::new(vec![])))
+    .with_locus_memory()
+    .without_grapheme_handlers()
+    .without_prompt_handler()
+    .without_tool_loop_handler()
+    .without_agent_handlers()
+    .build()
+    .await
+    .expect("runtime should build successfully");
+
+    let RuntimeComposition::Surreal(runtime) = runtime else {
+        panic!("expected surreal runtime composition");
+    };
+
+    let now = Utc::now();
+    let schema_payload = MemorySchemaJobPayload::default();
+    runtime
+        .enqueue(build_memory_schema_job(
+            "job-builder-locus-memory-schema-surreal-ws-1",
+            &schema_payload,
+            now,
+            "idem-builder-locus-memory-schema-surreal-ws-1",
+            "corr-builder-locus-memory-schema-surreal-ws-1",
+            "cause-builder-locus-memory-schema-surreal-ws-1",
+            "trace-builder-locus-memory-schema-surreal-ws-1",
+            "sttp:in:builder:locus:memory:schema:surreal-ws:1",
+        ))
+        .await
+        .expect("memory schema job should enqueue");
+
+    runtime
+        .process_once("default", "worker-builder-locus-memory-surreal-ws", now)
+        .await
+        .expect("memory schema processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get("job-builder-locus-memory-schema-surreal-ws-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
 }
 
 #[tokio::test]
@@ -5018,9 +5167,10 @@ async fn in_memory_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
 
 #[tokio::test]
 async fn surreal_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_tool_loop_schema_violation")
         .await
@@ -5199,9 +5349,10 @@ async fn in_memory_runtime_emits_runtime_metrics_for_job_and_outbox_flow() {
 
 #[tokio::test]
 async fn surreal_runtime_matches_core_flow_and_recurring_materialization() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_backend_parity")
         .await
@@ -5345,9 +5496,10 @@ async fn in_memory_thread_store_supports_create_append_fork_and_lineage() {
 
 #[tokio::test]
 async fn surreal_thread_store_supports_create_append_fork_and_lineage() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_thread_store_parity")
         .await
@@ -5433,9 +5585,10 @@ async fn in_memory_thread_store_rejects_event_append_for_unknown_thread() {
 
 #[tokio::test]
 async fn surreal_runtime_replays_dead_letter_and_retries_outbox_publish() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_retry_replay")
         .await
@@ -5591,9 +5744,10 @@ async fn tokio_channel_publisher_adapter_receives_outbox_events() {
 
 #[tokio::test]
 async fn surreal_job_leasing_allows_only_one_winner_under_contention() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_lease_contention")
         .await
@@ -5623,9 +5777,10 @@ async fn surreal_job_leasing_allows_only_one_winner_under_contention() {
 
 #[tokio::test]
 async fn surreal_job_lease_expiry_allows_recovery_by_another_worker() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_lease_recovery")
         .await
@@ -5937,9 +6092,10 @@ async fn in_memory_grapheme_healthcheck_workflow_executes_successfully() {
 
 #[tokio::test]
 async fn surreal_grapheme_healthcheck_workflow_executes_successfully() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_grapheme_healthcheck")
         .await
@@ -6046,9 +6202,10 @@ async fn in_memory_grapheme_echo_workflow_executes_successfully() {
 
 #[tokio::test]
 async fn surreal_grapheme_echo_workflow_executes_successfully() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_grapheme_echo")
         .await
@@ -6212,9 +6369,10 @@ async fn in_memory_grapheme_textops_workflow_executes_successfully() {
 
 #[tokio::test]
 async fn surreal_grapheme_textops_workflow_executes_successfully() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_grapheme_textops")
         .await
@@ -6555,9 +6713,10 @@ async fn in_memory_runtime_retention_prunes_terminal_records() {
 
 #[tokio::test]
 async fn surreal_runtime_retention_prunes_terminal_records() {
-    let db = Surreal::new::<Mem>(())
-        .await
-        .expect("surreal mem should initialize");
+    let db = Surreal::<Any>::init();
+        db.connect("mem://")
+            .await
+            .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_retention_prune")
         .await

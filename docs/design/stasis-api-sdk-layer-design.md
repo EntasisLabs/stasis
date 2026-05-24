@@ -38,11 +38,11 @@ This document is the concrete companion to RFC migration phases B/C.
 
 1. `StasisSdk`: agent registration/invocation use cases.
 2. `ControlPlaneSdk`: endpoint/cluster control-plane use cases.
-3. `RuntimeSdk`: backend-agnostic runtime operations facade.
+3. `StasisRuntime` (implemented as `RuntimeSdk` alias): backend-agnostic runtime operations facade.
 
 ### 2. Runtime SDK (new facade)
 
-`RuntimeSdk` is the canonical consumer entry point for operational runtime actions:
+`StasisRuntime` is the canonical consumer entry point for operational runtime actions:
 
 1. `enqueue(NewJob)`
 2. `register_recurring(RecurringDefinition)`
@@ -96,13 +96,13 @@ Not allowed for Medousa core paths after split:
 
 ### Stage A: SDK Facade Introduction (completed in this slice)
 
-1. Add `RuntimeSdk` facade and export via prelude.
+1. Add runtime facade and export via prelude.
 2. Define `RuntimeStatsSnapshot` to replace direct store counting logic.
 
 ### Stage B: Medousa Consumer Refactor
 
-1. Completed: replaced direct `RuntimeComposition` operational calls in Medousa daemon with `RuntimeSdk`.
-2. Completed: replaced direct store trait imports (`JobStore`, `OutboxStore`, `RecurringStore`) with `RuntimeSdk` methods.
+1. Completed: replaced direct `RuntimeComposition` operational calls in Medousa daemon with runtime facade methods.
+2. Completed: replaced direct store trait imports (`JobStore`, `OutboxStore`, `RecurringStore`) with runtime facade methods.
 3. Completed: behavior parity validated with conformance/parity suites.
 
 ### Stage C: Internal Import Elimination
@@ -127,12 +127,12 @@ Not allowed for Medousa core paths after split:
 ## Split Readiness Exit Criteria
 
 1. No Medousa imports from `stasis::application::*`, `stasis::infrastructure::*`, or `stasis::ports::*` in core execution paths.
-2. Medousa runtime operations are performed through `RuntimeSdk`/stable surfaces.
+2. Medousa runtime operations are performed through `StasisRuntime`/stable surfaces.
 3. Medousa builds and tests pass with Stasis as external dependency.
 4. Architecture conformance tests enforce boundary rules automatically.
 
 ## Immediate Next Implementation Slice
 
-1. Completed: migrated `medousa/src/bin/medousa_daemon.rs` stats and scheduler operations to `RuntimeSdk`.
+1. Completed: migrated `medousa/src/bin/medousa_daemon.rs` stats and scheduler operations to runtime facade methods.
 2. Completed: removed direct runtime store trait imports from daemon (`JobStore`, `OutboxStore`, `RecurringStore`).
 3. Completed: added a boundary conformance check for forbidden Medousa import prefixes and migrated remaining offending imports to prelude-safe surfaces.

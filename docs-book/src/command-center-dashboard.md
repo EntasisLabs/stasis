@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This page starts the Phase 4 UI direction with an operator-facing command center surface.
+This page documents an operator-facing command center surface for runtime control and observability.
 
-It is intentionally a prototype slice focused on:
+It is intentionally a concept slice focused on:
 
 1. cluster situational awareness.
 2. forwarded command outcomes and quick replay entry points.
@@ -19,7 +19,7 @@ It is intentionally a prototype slice focused on:
       <h2>Distributed Command Center</h2>
     </div>
     <div class="cc-badges">
-      <span>phase 4 preview</span>
+      <span>reference concept</span>
       <span>operator mode</span>
     </div>
   </header>
@@ -94,7 +94,7 @@ It is intentionally a prototype slice focused on:
         <li><span>dlq</span><strong>node-a</strong></li>
         <li><span>memory-ops</span><strong>node-c</strong></li>
       </ul>
-      <p class="cc-footnote">Next step: bind this panel to ListQueueOwnershipHealth + conflict tracing events.</p>
+      <p class="cc-footnote">This panel is intended to bind to queue ownership health and conflict tracing events.</p>
     </article>
   </section>
 </div>

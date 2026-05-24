@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3f437709.js";
+            window.path_to_searchindex_js = "searchindex-0c0f251d.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-efbb9846.js"></script>
+        <script src="toc-de86f825.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -202,7 +202,7 @@
 <li>Control-plane command contracts.</li>
 <li>Delivery endpoint registry model.</li>
 <li>Endpoint persistence ports and built-in adapters.</li>
-<li>Event-publisher routing direction and phased rollout.</li>
+<li>Event-publisher routing model and transport extensibility.</li>
 </ol>
 <h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
 <p>In scope:</p>
@@ -214,7 +214,7 @@
 <p>Out of scope:</p>
 <ul>
 <li>full dashboard UI implementation.</li>
-<li>complete transport matrix (Kafka, RabbitMQ, TCP runtime adapters are planned).</li>
+<li>complete transport matrix (Kafka, RabbitMQ, TCP runtime adapters are supported as extension points, but not all are built-in).</li>
 <li>multi-cluster membership and scheduler federation internals.</li>
 </ul>
 <h2 id="forwarded-command-durability-and-guardrails"><a class="header" href="#forwarded-command-durability-and-guardrails">Forwarded Command Durability and Guardrails</a></h2>
@@ -270,26 +270,26 @@
 <ol>
 <li><code>HttpWebhookEventPublisher</code> posts normalized runtime event payloads to configured webhook URLs.</li>
 </ol>
-<p>Planned adapter set:</p>
+<p>Transport extension targets:</p>
 <ol>
 <li>TCP publisher.</li>
 <li>Kafka publisher.</li>
 <li>RabbitMQ publisher.</li>
 </ol>
-<h2 id="delivery-flow-current-and-next"><a class="header" href="#delivery-flow-current-and-next">Delivery Flow (Current and Next)</a></h2>
+<h2 id="delivery-flow"><a class="header" href="#delivery-flow">Delivery Flow</a></h2>
 <p>Current flow:</p>
 <ol>
 <li>Runtime commits durable outbox events.</li>
 <li>Event publisher sends to configured external subscriber implementation.</li>
 </ol>
-<p>Target flow:</p>
+<p>Extended flow model:</p>
 <ol>
 <li>Control plane manages protocol endpoints in the endpoint registry.</li>
 <li>Routing policy selects endpoint sets by event/job criteria.</li>
 <li>Publisher adapters fan out events with retry-aware outbox coordination.</li>
 </ol>
-<h2 id="rollout-plan"><a class="header" href="#rollout-plan">Rollout Plan</a></h2>
-<h3 id="phase-1-implemented"><a class="header" href="#phase-1-implemented">Phase 1 (Implemented)</a></h3>
+<h2 id="implementation-status"><a class="header" href="#implementation-status">Implementation Status</a></h2>
+<p>Implemented in current runtime:</p>
 <ol>
 <li>Endpoint model and store port.</li>
 <li>Inbound control-plane contract.</li>
@@ -297,17 +297,11 @@
 <li>In-memory and Surreal endpoint store adapters.</li>
 <li>Control-plane SDK wiring.</li>
 </ol>
-<h3 id="phase-2-next"><a class="header" href="#phase-2-next">Phase 2 (Next)</a></h3>
+<p>Future evolution areas:</p>
 <ol>
 <li>Routing policy and dispatcher integration.</li>
-<li>Protocol adapter expansion (TCP, Kafka, RabbitMQ).</li>
-<li>Delivery diagnostics enrichment per endpoint attempt.</li>
-</ol>
-<h3 id="phase-3"><a class="header" href="#phase-3">Phase 3</a></h3>
-<ol>
-<li>Distributed cluster coordination for control-plane operations.</li>
-<li>Regional/edge execution with upstream summary sync.</li>
-<li>Command-center API and dashboard surfaces.</li>
+<li>Additional transport adapters.</li>
+<li>Distributed coordination and command-center APIs.</li>
 </ol>
 <h2 id="operational-guidance"><a class="header" href="#operational-guidance">Operational Guidance</a></h2>
 <ol>

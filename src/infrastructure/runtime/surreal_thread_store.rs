@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::{Surreal, engine::local::Db};
+use surrealdb::{engine::any::Any, Surreal};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
@@ -12,13 +12,13 @@ use crate::ports::outbound::runtime::thread_store::ThreadStore;
 
 #[derive(Clone)]
 pub struct SurrealThreadStore {
-    db: Surreal<Db>,
+    db: Surreal<Any>,
     thread_table: String,
     event_table: String,
 }
 
 impl SurrealThreadStore {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: Surreal<Any>) -> Self {
         Self {
             db,
             thread_table: "thread".to_string(),

@@ -1,5 +1,7 @@
 use chrono::Utc;
 
+use crate::application::runtime::runtime_factory::RuntimeBackend;
+use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
 use crate::application::runtime::runtime_factory::RuntimeComposition;
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::{JobState, NewJob};
@@ -26,10 +28,64 @@ pub struct RuntimeSdk {
     runtime: RuntimeComposition,
 }
 
+/// Preferred public runtime naming.
+pub type StasisRuntime = RuntimeSdk;
+
 impl RuntimeSdk {
     /// Creates a new facade over a pre-built runtime composition.
     pub fn new(runtime: RuntimeComposition) -> Self {
         Self { runtime }
+    }
+
+    /// Builds an in-memory runtime facade with default wiring.
+    pub async fn in_memory() -> Result<Self> {
+        Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::InMemory)).await
+    }
+
+    /// Builds a surreal-mem runtime facade with default wiring.
+    pub async fn surreal_mem(
+        namespace: impl Into<String>,
+        database: impl Into<String>,
+    ) -> Result<Self> {
+        Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+            namespace: namespace.into(),
+            database: database.into(),
+        }))
+        .await
+    }
+
+    /// Builds a remote websocket surreal runtime facade with default wiring.
+    pub async fn surreal_ws(
+        endpoint: impl Into<String>,
+        namespace: impl Into<String>,
+        database: impl Into<String>,
+    ) -> Result<Self> {
+        Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
+            endpoint: endpoint.into(),
+            namespace: namespace.into(),
+            database: database.into(),
+        }))
+        .await
+    }
+
+    /// Builds an embedded surreal-kv runtime facade with default wiring.
+    pub async fn surreal_kv(
+        path: impl Into<String>,
+        namespace: impl Into<String>,
+        database: impl Into<String>,
+    ) -> Result<Self> {
+        Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
+            path: path.into(),
+            namespace: namespace.into(),
+            database: database.into(),
+        }))
+        .await
+    }
+
+    /// Builds a runtime facade from a fully configured runtime builder.
+    pub async fn from_builder(builder: StasisRuntimeBuilder) -> Result<Self> {
+        let runtime = builder.build().await?;
+        Ok(Self::new(runtime))
     }
 
     /// Returns a shared reference to the underlying runtime composition.
@@ -122,5 +178,62 @@ impl RuntimeSdk {
             RuntimeComposition::Surreal(rt) => rt.recurring_store.list().await?,
         };
         Ok(definitions.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use crate::application::runtime::runtime_factory::RuntimeComposition;
+
+    use super::RuntimeSdk;
+
+    #[tokio::test]
+    async fn runtime_sdk_in_memory_constructor_builds() {
+        let runtime = RuntimeSdk::in_memory()
+            .await
+            .expect("in-memory runtime should build");
+        let stats = runtime
+            .stats_snapshot(10)
+            .await
+            .expect("stats snapshot should succeed");
+        assert_eq!(stats.enqueued_jobs, 0);
+    }
+
+    #[tokio::test]
+    async fn runtime_sdk_surreal_mem_constructor_builds() {
+        let runtime = RuntimeSdk::surreal_mem("stasis", "runtime")
+            .await
+            .expect("surreal-mem runtime should build");
+        assert!(matches!(runtime.runtime(), RuntimeComposition::Surreal(_)));
+    }
+
+    #[tokio::test]
+    async fn runtime_sdk_surreal_ws_constructor_rejects_invalid_endpoint() {
+        let result = RuntimeSdk::surreal_ws("not-a-valid-endpoint", "stasis", "runtime").await;
+        assert!(result.is_err(), "invalid websocket endpoint should fail");
+        let err = result.err().expect("result should contain an error");
+        assert!(err.to_string().contains("connect surreal db"));
+    }
+
+    #[tokio::test]
+    async fn runtime_sdk_surreal_kv_constructor_builds() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let path = env::temp_dir().join(format!("stasis-surrealkv-{nanos}"));
+        let path_str = path.to_string_lossy().into_owned();
+
+        let runtime = RuntimeSdk::surreal_kv(path_str, "stasis", "runtime")
+            .await
+            .expect("surreal-kv runtime should build");
+        assert!(matches!(runtime.runtime(), RuntimeComposition::Surreal(_)));
+
+        drop(runtime);
+        let _ = fs::remove_dir_all(path);
     }
 }

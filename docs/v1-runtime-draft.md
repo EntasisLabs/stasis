@@ -163,5 +163,6 @@ Tracing fields:
 
 ## Implementation Checkpoint
 
-For current status against P0-P3 and the first-class Grapheme integration track, see:
-- [design/runtime-phase-plan.md](design/runtime-phase-plan.md)
+For current status and implementation direction, see:
+- [design/distributed-command-center-phase-plan.md](design/distributed-command-center-phase-plan.md)
+- [design/stasis-api-sdk-layer-design.md](design/stasis-api-sdk-layer-design.md)

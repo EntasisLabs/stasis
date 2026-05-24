@@ -529,6 +529,12 @@ impl StasisRuntimeBuilder {
         Ok(runtime)
     }
 
+    /// Builds and returns the primary runtime facade.
+    pub async fn build_stasis_runtime(self) -> Result<crate::sdk::runtime_sdk::StasisRuntime> {
+        let composition = self.build().await?;
+        Ok(crate::sdk::runtime_sdk::RuntimeSdk::new(composition))
+    }
+
     fn compose_chat_client(
         chat_client: Arc<dyn AiChatClient>,
         middlewares: &[Arc<dyn ChatClientMiddleware>],

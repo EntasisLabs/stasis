@@ -8,7 +8,7 @@
 - Last Verified: 2026-05-15
 - Verified Against:
   - src/application/runtime/stasis_runtime_builder.rs
-  - src/application/runtime/runtime_factory.rs
+    - src/application/composition/runtime_composition.rs
   - src/infrastructure/runtime/in_memory_thread_store.rs
   - src/infrastructure/runtime/surreal_thread_store.rs
   - src/infrastructure/memory/locus_node_store_factory.rs
@@ -36,7 +36,9 @@ Document the `StasisRuntimeBuilder` API — the single composition point for wir
 | Variant | Description |
 |---|---|
 | `RuntimeBackend::InMemory` | In-process store. No persistence across restarts. Use for testing and development. |
-| `RuntimeBackend::Surreal` | SurrealDB-backed durable store. Use for production. |
+| `RuntimeBackend::SurrealMem { namespace, database }` | Surreal in-memory engine with explicit namespace/database. Useful for integration tests and durable-runtime behavior validation. |
+| `RuntimeBackend::SurrealWs { endpoint, namespace, database }` | Remote SurrealDB over websocket. Use for shared/dev/staging environments where runtime state is centralized. |
+| `RuntimeBackend::SurrealKv { path, namespace, database }` | Embedded SurrealKV on local disk. Use for durable single-node deployments without a remote Surreal service. |
 
 ```rust
 use stasis::prelude::*;
@@ -44,8 +46,25 @@ use stasis::prelude::*;
 // Development / testing
 let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory);
 
-// Production
-let builder = StasisRuntimeBuilder::new(RuntimeBackend::Surreal);
+// Surreal-backed behavior tests
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+    namespace: "stasis".to_string(),
+    database: "runtime".to_string(),
+});
+
+// Remote websocket backend
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
+    endpoint: "ws://127.0.0.1:8000/rpc".to_string(),
+    namespace: "stasis".to_string(),
+    database: "runtime".to_string(),
+});
+
+// Embedded SurrealKV backend
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
+    path: "./data/stasis-runtime".to_string(),
+    namespace: "stasis".to_string(),
+    database: "runtime".to_string(),
+});
 ```
 
 ---
@@ -61,6 +80,27 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
 ```
 
 All handler groups are active. No middleware is applied beyond the chat client itself.
+
+---
+
+## Production Environment Variables
+
+When using the default chat client (`GenaiChatClient::from_env()`), configure provider and model routing via environment variables:
+
+```bash
+export STASIS_LLM_PROVIDER=openai
+export STASIS_LLM_MODEL=gpt-4o-mini
+```
+
+Then provide credentials using either the generic fallback key or provider-specific keys:
+
+```bash
+export STASIS_LLM_API_KEY=...
+# or one of:
+export STASIS_OPENAI_API_KEY=...
+export STASIS_ANTHROPIC_API_KEY=...
+export STASIS_OLLAMA_API_KEY=...
+```
 
 ---
 
@@ -144,7 +184,10 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
 Provide custom implementations for any combination of the three memory ports:
 
 ```rust
-let runtime = StasisRuntimeBuilder::new(RuntimeBackend::Surreal)
+let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+    namespace: "stasis".to_string(),
+    database: "runtime".to_string(),
+})
     .with_memory_context_reader(Arc::new(my_reader))
     .with_memory_context_writer(Arc::new(my_writer))
     .with_memory_operations(Arc::new(my_ops))
@@ -158,10 +201,13 @@ If `.with_locus_memory()` is also set, explicit ports take precedence over auto-
 
 ## Thread Store
 
-Thread records track execution continuity for orchestration patterns and agent sessions. If not provided, `InMemoryThreadStore` is used for `InMemory` backends and `SurrealThreadStore` for `Surreal` backends.
+Thread records track execution continuity for orchestration patterns and agent sessions. If not provided, `InMemoryThreadStore` is used for `InMemory` backends and `SurrealThreadStore` for `Surreal` runtime compositions.
 
 ```rust
-let runtime = StasisRuntimeBuilder::new(RuntimeBackend::Surreal)
+let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
+    namespace: "stasis".to_string(),
+    database: "runtime".to_string(),
+})
     .with_thread_store(Arc::new(SurrealThreadStore::new(db.clone())))
     .build()
     .await?;
@@ -204,15 +250,20 @@ Custom handlers must implement `JobHandler`. They are registered after all built
 `build()` returns `RuntimeComposition`, which carries the assembled runtime and all wired dependencies:
 
 ```rust
+use stasis::prelude::RuntimeSdk;
+
 let composition = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
     .build()
     .await?;
 
-// Start the job processing loop
-composition.runtime.start().await?;
+let runtime = RuntimeSdk::new(composition); // StasisRuntime public naming
+
+// Process one queue tick
+let processed = runtime.process_once("default", "worker-1").await?;
+println!("processed={:?}", processed);
 ```
 
-`RuntimeComposition` exposes the underlying `InMemoryRuntime` or `SurrealRuntime` depending on the backend selected.
+`RuntimeComposition` exposes the underlying `InMemoryRuntime` or `SurrealRuntime` depending on the backend selected, while `StasisRuntime` (currently implemented by `RuntimeSdk`) provides the backend-agnostic operational facade.
 
 ---
 

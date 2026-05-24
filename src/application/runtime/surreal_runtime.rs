@@ -3,8 +3,8 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use chrono::{DateTime, Duration, Utc};
+use surrealdb::engine::any::Any;
 use surrealdb::Surreal;
-use surrealdb::engine::local::Db;
 
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::replay_report::ReplayReport;
@@ -63,7 +63,7 @@ pub struct SurrealRuntime {
 }
 
 impl SurrealRuntime {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: Surreal<Any>) -> Self {
         Self::with_dependencies_and_metrics(
             db,
             Arc::new(SystemClock),
@@ -73,7 +73,7 @@ impl SurrealRuntime {
     }
 
     pub fn with_dependencies(
-        db: Surreal<Db>,
+        db: Surreal<Any>,
         clock: Arc<dyn Clock>,
         id_generator: Arc<dyn IdGenerator>,
     ) -> Self {
@@ -81,7 +81,7 @@ impl SurrealRuntime {
     }
 
     pub fn with_dependencies_and_metrics(
-        db: Surreal<Db>,
+        db: Surreal<Any>,
         clock: Arc<dyn Clock>,
         id_generator: Arc<dyn IdGenerator>,
         metrics: Arc<dyn RuntimeMetrics>,

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::{Surreal, engine::local::Db};
+use surrealdb::{engine::any::Any, Surreal};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
@@ -34,26 +34,26 @@ impl From<BackoffPolicyRecord> for BackoffPolicy {
 
 #[derive(Clone)]
 pub struct SurrealJobStore {
-    db: Surreal<Db>,
+    db: Surreal<Any>,
     table: String,
 }
 
 impl SurrealJobStore {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: Surreal<Any>) -> Self {
         Self {
             db,
             table: "job".to_string(),
         }
     }
 
-    pub fn with_table(db: Surreal<Db>, table: impl Into<String>) -> Self {
+    pub fn with_table(db: Surreal<Any>, table: impl Into<String>) -> Self {
         Self {
             db,
             table: table.into(),
         }
     }
 
-    pub fn db(&self) -> Surreal<Db> {
+    pub fn db(&self) -> Surreal<Any> {
         self.db.clone()
     }
 

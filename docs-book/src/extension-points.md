@@ -242,8 +242,8 @@ Manages execution continuity records for orchestration patterns and agent sessio
 ```rust
 #[async_trait]
 pub trait ThreadStore: Send + Sync {
-    async fn create_thread(&self, thread: NewThread) -> Result<ThreadRecord>;
-    async fn get_thread(&self, thread_id: &str) -> Result<Option<ThreadRecord>>;
+    async fn create_thread(&self, thread: NewThread) -> Result<ThreadSnapshot>;
+    async fn get_thread(&self, thread_id: &str) -> Result<Option<ThreadSnapshot>>;
     async fn append_event(&self, event: NewThreadEvent) -> Result<ThreadEvent>;
     async fn list_events(&self, thread_id: &str) -> Result<Vec<ThreadEvent>>;
     async fn fork_thread(
@@ -252,13 +252,13 @@ pub trait ThreadStore: Send + Sync {
         child_thread_id: &str,
         branch_label: Option<String>,
         created_at: DateTime<Utc>,
-    ) -> Result<ThreadRecord>;
-    async fn list_lineage(&self, thread_id: &str) -> Result<Vec<ThreadRecord>>;
+    ) -> Result<ThreadSnapshot>;
+    async fn list_lineage(&self, thread_id: &str) -> Result<Vec<ThreadSnapshot>>;
 }
 ```
 
 **Stasis guarantees:**
-- `fork_thread` creates a child `ThreadRecord` with `parent_thread_id` set — used by concurrent pattern to track branches.
+- `fork_thread` creates a child `ThreadSnapshot` with `parent_thread_id` set — used by concurrent pattern to track branches.
 - `list_lineage` returns the full ancestry chain from the given thread ID back to the root.
 - `list_events` returns events in store order for the given thread.
 
