@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, SRE, Architect
 - Stability: Evolving
-- Last Verified: 2026-05-15
+- Last Verified: 2026-05-24
 - Verified Against:
   - src/infrastructure/runtime/surreal_job_store.rs
   - src/infrastructure/runtime/surreal_job_attempt_store.rs
@@ -13,6 +13,7 @@
   - src/infrastructure/runtime/surreal_recurring_store.rs
   - src/infrastructure/runtime/surreal_thread_store.rs
   - src/infrastructure/runtime/surreal_cluster_forward_outcome_store.rs
+  - src/infrastructure/memory/surreal_identity_memory_store.rs
   - tests/runtime_backend_parity.rs
 
 ## Purpose
@@ -45,6 +46,121 @@ DEFINE INDEX idx_cluster_forward_outcome_completed_at
   ON TABLE cluster_forward_outcome COLUMNS completed_at;
 DEFINE INDEX idx_cluster_forward_outcome_corr
   ON TABLE cluster_forward_outcome COLUMNS correlation_id;
+```
+
+## Identity Memory Tables
+
+Identity persistence uses schemafull Surreal tables for persona, user, channel, policy profiles, relationship graph state, proposal workflow, and transition/version history.
+
+```sql
+DEFINE TABLE identity_persona SCHEMAFULL;
+DEFINE FIELD persona_id ON TABLE identity_persona TYPE string;
+DEFINE FIELD display_name ON TABLE identity_persona TYPE string;
+DEFINE FIELD status ON TABLE identity_persona TYPE string;
+DEFINE FIELD version ON TABLE identity_persona TYPE int;
+DEFINE FIELD updated_at ON TABLE identity_persona TYPE datetime;
+
+DEFINE TABLE identity_user SCHEMAFULL;
+DEFINE FIELD user_id ON TABLE identity_user TYPE string;
+DEFINE FIELD timezone ON TABLE identity_user TYPE string;
+DEFINE FIELD language_variant ON TABLE identity_user TYPE option<string>;
+DEFINE FIELD status ON TABLE identity_user TYPE string;
+DEFINE FIELD version ON TABLE identity_user TYPE int;
+DEFINE FIELD updated_at ON TABLE identity_user TYPE datetime;
+
+DEFINE TABLE identity_channel_profile SCHEMAFULL;
+DEFINE FIELD channel_id ON TABLE identity_channel_profile TYPE string;
+DEFINE FIELD channel_type ON TABLE identity_channel_profile TYPE string;
+DEFINE FIELD proactive_allowed ON TABLE identity_channel_profile TYPE bool;
+DEFINE FIELD status ON TABLE identity_channel_profile TYPE string;
+DEFINE FIELD version ON TABLE identity_channel_profile TYPE int;
+DEFINE FIELD updated_at ON TABLE identity_channel_profile TYPE datetime;
+
+DEFINE TABLE identity_policy_profile SCHEMAFULL;
+DEFINE FIELD policy_profile_id ON TABLE identity_policy_profile TYPE string;
+DEFINE FIELD graph_max_depth ON TABLE identity_policy_profile TYPE int;
+DEFINE FIELD trust_delta_max_per_window ON TABLE identity_policy_profile TYPE float;
+DEFINE FIELD status ON TABLE identity_policy_profile TYPE string;
+DEFINE FIELD version ON TABLE identity_policy_profile TYPE int;
+DEFINE FIELD updated_at ON TABLE identity_policy_profile TYPE datetime;
+
+DEFINE TABLE identity_relationship SCHEMAFULL;
+DEFINE FIELD relationship_id ON TABLE identity_relationship TYPE string;
+DEFINE FIELD source_entity_type ON TABLE identity_relationship TYPE string;
+DEFINE FIELD source_entity_id ON TABLE identity_relationship TYPE string;
+DEFINE FIELD target_entity_type ON TABLE identity_relationship TYPE string;
+DEFINE FIELD target_entity_id ON TABLE identity_relationship TYPE string;
+DEFINE FIELD relationship_kind ON TABLE identity_relationship TYPE string;
+DEFINE FIELD status ON TABLE identity_relationship TYPE string;
+DEFINE FIELD trust_level ON TABLE identity_relationship TYPE float;
+DEFINE FIELD confidence ON TABLE identity_relationship TYPE float;
+DEFINE FIELD strength_score ON TABLE identity_relationship TYPE float;
+DEFINE FIELD recency_score ON TABLE identity_relationship TYPE float;
+DEFINE FIELD autonomy_scope_allow ON TABLE identity_relationship TYPE array<string>;
+DEFINE FIELD autonomy_scope_deny ON TABLE identity_relationship TYPE array<string>;
+DEFINE FIELD autonomy_scope_approval_required ON TABLE identity_relationship TYPE array<string>;
+DEFINE FIELD approval_profile_id ON TABLE identity_relationship TYPE option<string>;
+DEFINE FIELD interruption_quiet_hours ON TABLE identity_relationship TYPE option<string>;
+DEFINE FIELD interruption_allow_urgent_only ON TABLE identity_relationship TYPE option<bool>;
+DEFINE FIELD interruption_urgent_threshold ON TABLE identity_relationship TYPE option<float>;
+DEFINE FIELD escalation_mode ON TABLE identity_relationship TYPE option<string>;
+DEFINE FIELD escalation_fallback ON TABLE identity_relationship TYPE option<string>;
+DEFINE FIELD policy_tags ON TABLE identity_relationship TYPE array<string>;
+DEFINE FIELD provenance ON TABLE identity_relationship TYPE string;
+DEFINE FIELD parent_relationship_id ON TABLE identity_relationship TYPE option<string>;
+DEFINE FIELD governing_relationship_ids ON TABLE identity_relationship TYPE array<string>;
+DEFINE FIELD derived_from_relationship_id ON TABLE identity_relationship TYPE option<string>;
+DEFINE FIELD last_transition_reason ON TABLE identity_relationship TYPE option<string>;
+DEFINE FIELD transition_receipt_id ON TABLE identity_relationship TYPE option<string>;
+DEFINE FIELD version ON TABLE identity_relationship TYPE int;
+DEFINE FIELD created_at ON TABLE identity_relationship TYPE datetime;
+DEFINE FIELD updated_at ON TABLE identity_relationship TYPE datetime;
+
+DEFINE TABLE identity_relationship_version SCHEMAFULL;
+DEFINE FIELD version_id ON TABLE identity_relationship_version TYPE string;
+DEFINE FIELD relationship_id ON TABLE identity_relationship_version TYPE string;
+DEFINE FIELD version ON TABLE identity_relationship_version TYPE int;
+DEFINE FIELD snapshot ON TABLE identity_relationship_version TYPE object;
+DEFINE FIELD created_at ON TABLE identity_relationship_version TYPE datetime;
+
+DEFINE TABLE identity_entity_update_proposal SCHEMAFULL;
+DEFINE FIELD proposal_id ON TABLE identity_entity_update_proposal TYPE string;
+DEFINE FIELD entity_type ON TABLE identity_entity_update_proposal TYPE string;
+DEFINE FIELD entity_id ON TABLE identity_entity_update_proposal TYPE string;
+DEFINE FIELD patch_json ON TABLE identity_entity_update_proposal TYPE string;
+DEFINE FIELD tier ON TABLE identity_entity_update_proposal TYPE string;
+DEFINE FIELD source ON TABLE identity_entity_update_proposal TYPE string;
+DEFINE FIELD confidence ON TABLE identity_entity_update_proposal TYPE float;
+DEFINE FIELD reason ON TABLE identity_entity_update_proposal TYPE string;
+DEFINE FIELD state ON TABLE identity_entity_update_proposal TYPE string;
+DEFINE FIELD approver ON TABLE identity_entity_update_proposal TYPE option<string>;
+DEFINE FIELD actor ON TABLE identity_entity_update_proposal TYPE string;
+DEFINE FIELD receipt_id ON TABLE identity_entity_update_proposal TYPE option<string>;
+DEFINE FIELD expires_at ON TABLE identity_entity_update_proposal TYPE option<datetime>;
+DEFINE FIELD created_at ON TABLE identity_entity_update_proposal TYPE datetime;
+DEFINE FIELD updated_at ON TABLE identity_entity_update_proposal TYPE datetime;
+
+DEFINE TABLE identity_relationship_transition SCHEMAFULL;
+DEFINE FIELD event_id ON TABLE identity_relationship_transition TYPE string;
+DEFINE FIELD relationship_id ON TABLE identity_relationship_transition TYPE string;
+DEFINE FIELD from_status ON TABLE identity_relationship_transition TYPE option<string>;
+DEFINE FIELD to_status ON TABLE identity_relationship_transition TYPE string;
+DEFINE FIELD reason ON TABLE identity_relationship_transition TYPE string;
+DEFINE FIELD actor ON TABLE identity_relationship_transition TYPE string;
+DEFINE FIELD receipt_id ON TABLE identity_relationship_transition TYPE option<string>;
+DEFINE FIELD occurred_at ON TABLE identity_relationship_transition TYPE datetime;
+DEFINE FIELD metadata_json ON TABLE identity_relationship_transition TYPE option<string>;
+
+DEFINE INDEX idx_identity_relationship_status
+  ON TABLE identity_relationship COLUMNS status;
+DEFINE INDEX idx_identity_relationship_endpoints
+  ON TABLE identity_relationship COLUMNS source_entity_type, source_entity_id, target_entity_type, target_entity_id;
+DEFINE INDEX idx_identity_relationship_kind_status
+  ON TABLE identity_relationship COLUMNS relationship_kind, status;
+DEFINE INDEX idx_identity_proposal_lookup
+  ON TABLE identity_entity_update_proposal COLUMNS entity_type, entity_id, state;
+DEFINE INDEX idx_identity_transition_rel_time
+  ON TABLE identity_relationship_transition COLUMNS relationship_id, occurred_at;
 ```
 
 ## Logical Entity Relationship
