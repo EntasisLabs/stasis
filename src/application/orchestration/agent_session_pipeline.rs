@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -103,16 +104,27 @@ impl AgentSessionPipeline {
         &self,
         request: AgentTurnExecutionRequest,
     ) -> Result<AgentTurnExecutionResponse> {
-        let agent_id = request.identity.agent_id.clone();
-        let thread_id = request.identity.thread_id.clone();
+        let AgentTurnExecutionRequest {
+            identity,
+            user_prompt,
+            system_prompt,
+            context,
+            tool_name,
+            tool_input,
+            policy,
+        } = request;
+        let AgentIdentity {
+            agent_id,
+            thread_id,
+        } = identity;
 
         let loop_request = ToolLoopExecutionRequest {
-            user_prompt: request.user_prompt,
-            system_prompt: request.system_prompt,
-            context: request.context,
-            tool_name: request.tool_name,
-            tool_input: request.tool_input,
-            tool_call_mode: request.policy.tool_call_mode,
+            user_prompt,
+            system_prompt,
+            context,
+            tool_name,
+            tool_input,
+            tool_call_mode: policy.tool_call_mode,
         };
 
         let response = self.tool_loop_pipeline.execute(loop_request).await?;
@@ -236,40 +248,56 @@ impl AgentSessionCoordinator {
         &self,
         request: AgentSessionRunRequest,
     ) -> Result<AgentSessionRunResponse> {
-        if request.participants.is_empty() {
+        let AgentSessionRunRequest {
+            thread_id,
+            initial_user_prompt,
+            participants,
+            context,
+            max_turns_cap,
+            policy,
+        } = request;
+
+        if participants.is_empty() {
             return Err(StasisError::PortFailure(
                 "policy violation: agent session requires at least one participant".to_string(),
             ));
         }
 
-        if request.initial_user_prompt.trim().is_empty() {
+        if initial_user_prompt.trim().is_empty() {
             return Err(StasisError::PortFailure(
                 "policy violation: agent session initial_user_prompt must be non-empty".to_string(),
             ));
         }
 
-        let max_turns_cap = request.max_turns_cap.max(1);
-        let participant_ids: Vec<String> = request
-            .participants
+        let max_turns_cap = max_turns_cap.max(1);
+        let participant_ids: Vec<String> = participants
             .iter()
             .map(|participant| participant.agent_id.clone())
             .collect();
-        let mut transcript = vec![format!("user: {}", request.initial_user_prompt)];
-        let mut last_prompt = request.initial_user_prompt.clone();
+        let participants_by_id: HashMap<&str, &AgentParticipant> = participants
+            .iter()
+            .map(|participant| (participant.agent_id.as_str(), participant))
+            .collect();
+
+        let mut transcript = Vec::with_capacity(max_turns_cap + 1);
+        let mut transcript_text = String::with_capacity(initial_user_prompt.len() + 32);
+        transcript_text.push_str("user: ");
+        transcript_text.push_str(&initial_user_prompt);
+        transcript.push(transcript_text.clone());
+        let mut last_prompt = initial_user_prompt.clone();
         let mut turns = Vec::new();
         let mut terminated = false;
 
         for turn_index in 0..max_turns_cap {
             let selected_agent_id = self.selection_strategy.select_next_agent(
                 &participant_ids,
-                request.thread_id.as_deref(),
+                thread_id.as_deref(),
                 &transcript,
             )?;
 
-            let participant = request
-                .participants
-                .iter()
-                .find(|candidate| candidate.agent_id == selected_agent_id)
+            let participant = participants_by_id
+                .get(selected_agent_id.as_str())
+                .copied()
                 .ok_or_else(|| {
                     StasisError::PortFailure(format!(
                         "policy violation: selected participant '{}' not found in session",
@@ -280,34 +308,35 @@ impl AgentSessionCoordinator {
             let turn_request = AgentTurnExecutionRequest {
                 identity: AgentIdentity {
                     agent_id: selected_agent_id.clone(),
-                    thread_id: request.thread_id.clone(),
+                    thread_id: thread_id.clone(),
                 },
                 user_prompt: last_prompt.clone(),
                 system_prompt: participant.system_prompt.clone(),
-                context: request.context.clone(),
+                context: context.clone(),
                 tool_name: participant.tool_name.clone(),
                 tool_input: participant.tool_input.clone(),
-                policy: request.policy.clone(),
+                policy: policy.clone(),
             };
 
             let turn_response = self.pipeline.execute_turn(turn_request).await?;
-            transcript.push(format!("{}: {}", selected_agent_id, turn_response.text));
-            last_prompt = format!(
-                "Session transcript so far:\n{}\n\nContinue the collaboration from your role.",
-                transcript.join("\n")
-            );
+            let response_text = turn_response.text;
+            let transcript_line = format!("{}: {}", selected_agent_id, response_text);
+            transcript_text.push('\n');
+            transcript_text.push_str(&transcript_line);
+            transcript.push(transcript_line);
+            last_prompt = build_session_continue_prompt(&transcript_text);
 
             let record = AgentTurnRecord {
                 turn_number: turn_index + 1,
                 agent_id: selected_agent_id,
-                response_text: turn_response.text.clone(),
+                response_text,
                 tool_name: turn_response.tool_name,
                 rounds_executed: turn_response.rounds_executed,
                 termination_reason: turn_response.termination_reason,
             };
             let should_terminate = self
                 .termination_strategy
-                .should_terminate(turn_index + 1, &turn_response.text)?;
+                .should_terminate(turn_index + 1, &record.response_text)?;
             turns.push(record);
 
             if should_terminate {
@@ -317,10 +346,18 @@ impl AgentSessionCoordinator {
         }
 
         Ok(AgentSessionRunResponse {
-            thread_id: request.thread_id,
+            thread_id,
             turns,
             transcript,
             terminated,
         })
     }
+}
+
+fn build_session_continue_prompt(transcript: &str) -> String {
+    let mut prompt = String::with_capacity(transcript.len() + 96);
+    prompt.push_str("Session transcript so far:\n");
+    prompt.push_str(transcript);
+    prompt.push_str("\n\nContinue the collaboration from your role.");
+    prompt
 }

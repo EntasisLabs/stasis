@@ -127,24 +127,34 @@ impl ToolLoopPipeline {
         chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
         max_tool_rounds: usize,
     ) -> Result<ToolLoopExecutionResponse> {
+        let ToolLoopExecutionRequest {
+            user_prompt,
+            system_prompt,
+            context,
+            tool_name,
+            tool_input,
+            tool_call_mode,
+        } = request;
+
         let max_tool_rounds = max_tool_rounds.max(1);
-        let context = request.context.clone();
-        let selected_tool_name = request.tool_name.clone();
+        let selected_tool_name = tool_name;
+        let has_selected_tool = !selected_tool_name.trim().is_empty();
 
         let mut messages = Vec::with_capacity(2 + prior_messages.len());
-        if let Some(system_prompt) = request.system_prompt.clone() {
-            messages.push(ChatMessage::system(system_prompt));
+        if let Some(system_prompt) = system_prompt.as_ref() {
+            messages.push(ChatMessage::system(system_prompt.clone()));
         }
         messages.extend(prior_messages);
-        messages.push(ChatMessage::user(request.user_prompt.clone()));
+        messages.push(ChatMessage::user(user_prompt.clone()));
 
         let mut tools = self.tool_registry.list_tools().await?;
-        if !selected_tool_name.trim().is_empty() {
+        if has_selected_tool {
             let selected_sanitized = sanitize_tool_name_for_model(&selected_tool_name);
+            let selected_prefix = format!("{selected_sanitized}_");
             tools.retain(|tool| {
                 tool.name == selected_tool_name
                     || tool.name == selected_sanitized
-                    || tool.name.starts_with(&format!("{selected_sanitized}_"))
+                    || tool.name.starts_with(&selected_prefix)
             });
         }
 
@@ -176,8 +186,8 @@ impl ToolLoopPipeline {
                 let tool_calls = response.clone().into_tool_calls();
 
                 if tool_calls.is_empty() {
-                    if invocations.is_empty() && !selected_tool_name.trim().is_empty() {
-                        if request.tool_call_mode == ToolCallMode::Strict {
+                    if invocations.is_empty() && has_selected_tool {
+                        if tool_call_mode == ToolCallMode::Strict {
                             return Err(StasisError::PortFailure(
                                 "policy violation: strict tool-call mode expected model tool call but none was returned"
                                     .to_string(),
@@ -192,7 +202,7 @@ impl ToolLoopPipeline {
                     if let Some(text) = maybe_text {
                         let last = invocations.last().cloned().unwrap_or(ToolInvocation {
                             tool_name: selected_tool_name.clone(),
-                            tool_input: request.tool_input.clone(),
+                            tool_input: tool_input.clone(),
                             tool_output: Value::Null,
                         });
 
@@ -249,47 +259,70 @@ impl ToolLoopPipeline {
             text
         } else {
             let mut first_request =
-                PromptExecutionRequest::from_user_prompt(request.user_prompt.clone())
-                    .with_context(context.clone());
-            if let Some(system_prompt) = request.system_prompt.clone() {
+                PromptExecutionRequest::from_user_prompt(user_prompt.clone()).with_context(context.clone());
+            if let Some(system_prompt) = system_prompt.as_ref() {
                 first_request = first_request.with_system_prompt(system_prompt);
             }
             self.prompt_pipeline.execute(first_request).await?.text
         };
         let tool_output = self
             .tool_registry
-            .invoke_tool(&request.tool_name, request.tool_input.clone())
+            .invoke_tool(&selected_tool_name, tool_input.clone())
             .await?;
 
-        let synthesis_prompt = format!(
-            "User request:\n{}\n\nDraft analysis:\n{}\n\nTool '{}' output JSON:\n{}\n\nProduce final answer grounded in the tool output.",
-            request.user_prompt, draft_text, request.tool_name, tool_output
+        let synthesis_prompt = build_fallback_synthesis_prompt(
+            &user_prompt,
+            &draft_text,
+            &selected_tool_name,
+            &tool_output,
         );
 
         let mut final_request = PromptExecutionRequest::from_user_prompt(synthesis_prompt)
             .with_context(context.clone());
-        if let Some(system_prompt) = request.system_prompt {
+        if let Some(system_prompt) = system_prompt {
             final_request = final_request.with_system_prompt(system_prompt);
         }
 
         let final_response = self.prompt_pipeline.execute(final_request).await?;
 
         let fallback_invocation = ToolInvocation {
-            tool_name: request.tool_name.clone(),
-            tool_input: request.tool_input,
+            tool_name: selected_tool_name.clone(),
+            tool_input,
             tool_output: tool_output.clone(),
         };
 
         Ok(ToolLoopExecutionResponse {
             text: final_response.text,
             metadata: final_response.metadata,
-            tool_name: request.tool_name,
+            tool_name: selected_tool_name,
             tool_output,
             tool_invocations: vec![fallback_invocation],
             rounds_executed,
             termination_reason: "legacy_fallback_no_model_tool_call".to_string(),
         })
     }
+}
+
+fn build_fallback_synthesis_prompt(
+    user_prompt: &str,
+    draft_text: &str,
+    tool_name: &str,
+    tool_output: &Value,
+) -> String {
+    let tool_output_text = tool_output.to_string();
+    let mut prompt = String::with_capacity(
+        user_prompt.len() + draft_text.len() + tool_name.len() + tool_output_text.len() + 128,
+    );
+    prompt.push_str("User request:\n");
+    prompt.push_str(user_prompt);
+    prompt.push_str("\n\nDraft analysis:\n");
+    prompt.push_str(draft_text);
+    prompt.push_str("\n\nTool '");
+    prompt.push_str(tool_name);
+    prompt.push_str("' output JSON:\n");
+    prompt.push_str(&tool_output_text);
+    prompt.push_str("\n\nProduce final answer grounded in the tool output.");
+    prompt
 }
 
 fn sanitize_tool_name_for_model(name: &str) -> String {
