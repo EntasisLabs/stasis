@@ -90,6 +90,13 @@ impl JobHandler for QueueOwnershipRebalanceJobHandler {
             Err(message) => return Ok(Self::failure(message)),
         };
 
+        let QueueRebalancePayload {
+            queue,
+            desired_owners,
+            strategy,
+            reason,
+        } = payload;
+
         let now = Utc::now();
         let nodes = match self.cluster_store.list().await {
             Ok(nodes) => nodes,
@@ -105,11 +112,7 @@ impl JobHandler for QueueOwnershipRebalanceJobHandler {
             .filter(|node| node.lease_expires_at >= now)
             .collect::<Vec<_>>();
 
-        let desired = payload
-            .desired_owners
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>();
+        let desired = desired_owners.into_iter().collect::<BTreeSet<_>>();
 
         if let Some(missing) = desired
             .iter()
@@ -121,10 +124,18 @@ impl JobHandler for QueueOwnershipRebalanceJobHandler {
             )));
         }
 
+        let rebalance_metadata = json!({
+            "action": "queue_ownership_rebalance",
+            "queue": &queue,
+            "strategy": &strategy,
+            "reason": &reason,
+        })
+        .to_string();
+
         let mut updated_nodes = 0usize;
 
         for node in active_nodes {
-            let owns_queue = node.queue_ownership.iter().any(|q| q == &payload.queue);
+            let owns_queue = node.queue_ownership.iter().any(|q| q == &queue);
             let should_own = desired.contains(&node.node_id);
             if owns_queue == should_own {
                 continue;
@@ -132,9 +143,9 @@ impl JobHandler for QueueOwnershipRebalanceJobHandler {
 
             let mut queues = node.queue_ownership.into_iter().collect::<BTreeSet<_>>();
             if should_own {
-                queues.insert(payload.queue.clone());
+                queues.insert(queue.clone());
             } else {
-                queues.remove(&payload.queue);
+                queues.remove(&queue);
             }
 
             let ttl = Self::remaining_ttl_seconds(node.lease_expires_at, now);
@@ -146,15 +157,7 @@ impl JobHandler for QueueOwnershipRebalanceJobHandler {
                     lease_ttl_seconds: ttl,
                     queue_ownership: Some(queues.into_iter().collect::<Vec<_>>()),
                     capability_tags: None,
-                    metadata: Some(
-                        json!({
-                            "action": "queue_ownership_rebalance",
-                            "queue": payload.queue,
-                            "strategy": payload.strategy,
-                            "reason": payload.reason,
-                        })
-                        .to_string(),
-                    ),
+                    metadata: Some(rebalance_metadata.clone()),
                 })
                 .await;
 
@@ -169,10 +172,10 @@ impl JobHandler for QueueOwnershipRebalanceJobHandler {
 
         let diagnostics = json!({
             "status": "success",
-            "queue": payload.queue,
+            "queue": queue,
             "updated_nodes": updated_nodes,
             "desired_owners": desired.into_iter().collect::<Vec<_>>(),
-            "strategy": payload.strategy,
+            "strategy": strategy,
         })
         .to_string();
 

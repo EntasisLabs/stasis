@@ -53,43 +53,58 @@ impl ConcurrentPatternPipeline {
         &self,
         request: ConcurrentPatternExecutionRequest,
     ) -> Result<ConcurrentPatternExecutionResponse> {
-        let merge_strategy = request
-            .merge_strategy
-            .unwrap_or_else(|| "join_with_headers".to_string());
+        let ConcurrentPatternExecutionRequest {
+            initial_user_prompt,
+            trace_id,
+            correlation_id,
+            policy_profile,
+            model_hint,
+            merge_strategy,
+            branches,
+        } = request;
+
+        let merge_strategy = merge_strategy.unwrap_or_else(|| "join_with_headers".to_string());
 
         let mut join_set: JoinSet<Result<ConcurrentPatternBranchResult>> = JoinSet::new();
 
-        for branch in request.branches {
+        for branch in branches {
             let pipeline = self.prompt_pipeline.clone();
-            let trace_id = request.trace_id.clone();
-            let correlation_id = request.correlation_id.clone();
-            let default_policy_profile = request.policy_profile.clone();
-            let default_model_hint = request.model_hint.clone();
-            let initial_input = request.initial_user_prompt.clone();
+            let trace_id = trace_id.clone();
+            let correlation_id = correlation_id.clone();
+            let default_policy_profile = policy_profile.clone();
+            let default_model_hint = model_hint.clone();
+            let initial_input = initial_user_prompt.clone();
 
             join_set.spawn(async move {
-                let rendered_prompt = branch
-                    .user_prompt_template
+                let ConcurrentPatternBranch {
+                    branch_id,
+                    user_prompt_template,
+                    system_prompt,
+                    policy_profile,
+                    model_hint,
+                } = branch;
+
+                let rendered_prompt = user_prompt_template
                     .replace("{{input}}", &initial_input)
                     .replace("{input}", &initial_input);
 
                 let context = PromptExecutionContext {
                     trace_id,
                     correlation_id,
-                    policy_profile: branch.policy_profile.clone().or(default_policy_profile),
-                    model_hint: branch.model_hint.clone().or(default_model_hint),
+                    policy_profile: policy_profile.or(default_policy_profile),
+                    model_hint: model_hint.or(default_model_hint),
                 };
 
                 let mut prompt_request =
                     PromptExecutionRequest::from_user_prompt(rendered_prompt.clone())
                         .with_context(context);
-                if let Some(system_prompt) = branch.system_prompt {
+                if let Some(system_prompt) = system_prompt {
                     prompt_request = prompt_request.with_system_prompt(system_prompt);
                 }
 
                 let response = pipeline.execute(prompt_request).await?;
                 Ok(ConcurrentPatternBranchResult {
-                    branch_id: branch.branch_id,
+                    branch_id,
                     rendered_prompt,
                     output_text: response.text,
                 })
@@ -106,18 +121,7 @@ impl ConcurrentPatternPipeline {
 
         results.sort_by(|a, b| a.branch_id.cmp(&b.branch_id));
 
-        let final_text = match merge_strategy.as_str() {
-            "join_lines" => results
-                .iter()
-                .map(|branch| branch.output_text.clone())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            _ => results
-                .iter()
-                .map(|branch| format!("[{}]\n{}", branch.branch_id, branch.output_text))
-                .collect::<Vec<_>>()
-                .join("\n\n"),
-        };
+        let final_text = render_final_text(&results, &merge_strategy);
 
         Ok(ConcurrentPatternExecutionResponse {
             final_text,
@@ -125,5 +129,43 @@ impl ConcurrentPatternPipeline {
             termination_reason: "completed_all_branches".to_string(),
             merge_strategy,
         })
+    }
+}
+
+fn render_final_text(results: &[ConcurrentPatternBranchResult], merge_strategy: &str) -> String {
+    if results.is_empty() {
+        return String::new();
+    }
+
+    match merge_strategy {
+        "join_lines" => {
+            let total_text_len: usize = results.iter().map(|branch| branch.output_text.len()).sum();
+            let mut final_text = String::with_capacity(total_text_len + results.len().saturating_sub(1));
+            for (idx, branch) in results.iter().enumerate() {
+                if idx > 0 {
+                    final_text.push('\n');
+                }
+                final_text.push_str(&branch.output_text);
+            }
+            final_text
+        }
+        _ => {
+            let total_text_len: usize = results
+                .iter()
+                .map(|branch| branch.branch_id.len() + branch.output_text.len() + 4)
+                .sum();
+            let separator_len = 2 * results.len().saturating_sub(1);
+            let mut final_text = String::with_capacity(total_text_len + separator_len);
+            for (idx, branch) in results.iter().enumerate() {
+                if idx > 0 {
+                    final_text.push_str("\n\n");
+                }
+                final_text.push('[');
+                final_text.push_str(&branch.branch_id);
+                final_text.push_str("]\n");
+                final_text.push_str(&branch.output_text);
+            }
+            final_text
+        }
     }
 }

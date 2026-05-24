@@ -124,19 +124,19 @@ impl HandoffPatternJobHandler {
     }
 
     fn build_failure(message: String) -> JobExecutionOutcome {
+        let diagnostics = json!({
+            "provider": "stasis-orchestration-handoff",
+            "status": "failure",
+            "pattern": "handoff",
+            "guardrail_code": "POLICY_VIOLATION",
+            "policy_reason": &message,
+        })
+        .to_string();
+
         JobExecutionOutcome::FatalFailure {
-            message: message.clone(),
+            message,
             execution_id: None,
-            diagnostics: Some(
-                json!({
-                    "provider": "stasis-orchestration-handoff",
-                    "status": "failure",
-                    "pattern": "handoff",
-                    "guardrail_code": "POLICY_VIOLATION",
-                    "policy_reason": message,
-                })
-                .to_string(),
-            ),
+            diagnostics: Some(diagnostics),
         }
     }
 }
@@ -153,29 +153,33 @@ impl JobHandler for HandoffPatternJobHandler {
             Err(message) => return Ok(Self::build_failure(message)),
         };
 
+        let HandoffPatternJobPayload {
+            thread_id,
+            initial_user_prompt,
+            policy_profile,
+            model_hint,
+            turns,
+        } = payload;
+
         let now = Utc::now();
-        let thread_id = payload
-            .thread_id
-            .clone()
-            .unwrap_or_else(|| job.correlation_id.clone());
+        let thread_id = thread_id.unwrap_or_else(|| job.correlation_id.clone());
         self.ensure_thread(&thread_id, now).await;
         self.append_thread_event(
             format!("{}:handoff:start", job.id),
             &thread_id,
             "orchestration.handoff.started",
-            payload.initial_user_prompt.clone(),
+            initial_user_prompt.clone(),
             now,
         )
         .await;
 
         let request = HandoffPatternExecutionRequest {
-            initial_user_prompt: payload.initial_user_prompt,
+            initial_user_prompt,
             trace_id: Some(job.trace_id.clone()),
             correlation_id: Some(job.correlation_id.clone()),
-            policy_profile: payload.policy_profile,
-            model_hint: payload.model_hint,
-            turns: payload
-                .turns
+            policy_profile,
+            model_hint,
+            turns: turns
                 .into_iter()
                 .map(|turn| HandoffPatternTurn {
                     actor_id: turn.actor_id,
@@ -190,15 +194,16 @@ impl JobHandler for HandoffPatternJobHandler {
         let response = match self.pipeline.execute(request).await {
             Ok(response) => response,
             Err(err) => {
+                let error = err.to_string();
                 return Ok(JobExecutionOutcome::FatalFailure {
-                    message: err.to_string(),
+                    message: error.clone(),
                     execution_id: None,
                     diagnostics: Some(
                         json!({
                             "provider": "stasis-orchestration-handoff",
                             "status": "failure",
                             "pattern": "handoff",
-                            "error": err.to_string(),
+                            "error": error,
                         })
                         .to_string(),
                     ),
