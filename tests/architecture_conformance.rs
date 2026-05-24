@@ -348,12 +348,9 @@ fn default_chat_middlewares_depend_on_ports_not_runtime_infrastructure() {
 }
 
 #[test]
-fn thread_record_alias_usage_isolated_to_domain_compatibility_declaration() {
+fn thread_record_symbol_is_fully_removed() {
     let repo_root = env!("CARGO_MANIFEST_DIR");
     let files = collect_rs_files(&format!("{repo_root}/src"));
-
-    let allowed_path = format!("{repo_root}/src/domain/runtime/thread.rs");
-    let allowed_line_fragment = "pub type ThreadRecord = ThreadSnapshot;";
 
     let contains_thread_record_symbol = |line: &str| {
         line.match_indices("ThreadRecord").any(|(start, _)| {
@@ -386,16 +383,13 @@ fn thread_record_alias_usage_isolated_to_domain_compatibility_declaration() {
                 continue;
             }
 
-            let is_allowed_alias = file == allowed_path && line.contains(allowed_line_fragment);
-            if !is_allowed_alias {
-                violations.push(format!("{file}:{line_no}: {line}"));
-            }
+            violations.push(format!("{file}:{line_no}: {line}"));
         }
     }
 
     assert!(
         violations.is_empty(),
-        "ThreadRecord must remain a transitional alias only. Violations:\n{}",
+        "ThreadRecord symbol must be fully removed. Violations:\n{}",
         violations.join("\n")
     );
 }

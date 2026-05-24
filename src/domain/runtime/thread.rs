@@ -18,9 +18,6 @@ pub struct ThreadSnapshot {
     pub updated_at: DateTime<Utc>,
 }
 
-#[deprecated(note = "Use ThreadSnapshot instead")]
-pub type ThreadRecord = ThreadSnapshot;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewThreadEvent {
     pub event_id: String,
