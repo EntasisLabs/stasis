@@ -1,0 +1,229 @@
+/* Workflow Builder v1 visual-system namespace */
+.wb-root {
+  --wb-surface-0: #f7f8fa;
+  --wb-surface-1: #ffffff;
+  --wb-surface-2: #eef1f5;
+  --wb-border-soft: #dbe2ea;
+  --wb-border-strong: #b8c4d3;
+  --wb-text-primary: #0f1726;
+  --wb-text-secondary: #475569;
+  --wb-focus: #0b6bcb;
+  --wb-success: #0f9f6e;
+  --wb-warning: #d98a00;
+  --wb-blocking: #d23b3b;
+  --wb-running: #5a7bff;
+  --wb-radius-node: 12px;
+  --wb-motion-fast: 140ms;
+  --wb-motion-standard: 220ms;
+  --wb-motion-emphasis: 320ms;
+  --wb-ease-enter: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --wb-font-headline: "Space Grotesk", "Manrope", "Segoe UI", Arial, sans-serif;
+  --wb-font-body: "Manrope", "Segoe UI", Arial, sans-serif;
+  --wb-font-mono: "IBM Plex Mono", "Cascadia Code", Menlo, monospace;
+}
+
+.dark .wb-root {
+  --wb-surface-0: #0d121a;
+  --wb-surface-1: #131a24;
+  --wb-surface-2: #1a2330;
+  --wb-border-soft: #243244;
+  --wb-border-strong: #34506e;
+  --wb-text-primary: #e7eef8;
+  --wb-text-secondary: #9fb2c9;
+  --wb-focus: #5ab0ff;
+  --wb-success: #3dd39c;
+  --wb-warning: #f7b955;
+  --wb-blocking: #ff7373;
+  --wb-running: #89a2ff;
+}
+
+.wb-root,
+.wb-root .card-description,
+.wb-root .text-sm,
+.wb-root .text-xs {
+  font-family: var(--wb-font-body);
+}
+
+.wb-root .text-2xl,
+.wb-root .card-title,
+.wb-root .wb-node-card .text-sm.font-semibold,
+.wb-root .wb-inspector-surface h4 {
+  font-family: var(--wb-font-headline);
+  letter-spacing: -0.01em;
+}
+
+.wb-root .font-mono,
+.wb-root pre,
+.wb-root code {
+  font-family: var(--wb-font-mono);
+}
+
+.wb-topbar {
+  padding-bottom: 4px;
+}
+
+.wb-builder-grid {
+  align-items: start;
+}
+
+.wb-main-column {
+  min-width: 0;
+}
+
+.wb-left-rail-card .card-content {
+  padding: 0 16px 18px;
+}
+
+.wb-workspace-card {
+  overflow: hidden;
+}
+
+.wb-module-tile {
+  border: 1px solid var(--wb-border-soft);
+  background: color-mix(in srgb, var(--wb-surface-1) 90%, var(--wb-surface-0));
+  transition: border-color var(--wb-motion-fast) var(--wb-ease-enter),
+    transform var(--wb-motion-fast) var(--wb-ease-enter),
+    background-color var(--wb-motion-fast) var(--wb-ease-enter);
+}
+
+.wb-module-tile:hover {
+  border-color: var(--wb-border-strong);
+  transform: translateY(-2px);
+}
+
+.wb-saved-lane {
+  border: 1px solid var(--wb-border-soft);
+}
+
+.wb-saved-lane.is-selected {
+  border-color: var(--wb-focus);
+  background: color-mix(in srgb, var(--wb-focus) 10%, var(--wb-surface-1));
+  color: var(--wb-focus);
+}
+
+.wb-canvas-surface,
+.wb-inspector-surface {
+  min-height: 420px;
+}
+
+.wb-canvas-surface {
+  border: 1px solid var(--wb-border-soft);
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--wb-border-soft) 50%, transparent) 1px, transparent 0),
+    linear-gradient(180deg, var(--wb-surface-0) 0%, var(--wb-surface-2) 100%);
+  background-size: 16px 16px, 100% 100%;
+}
+
+.wb-node-card {
+  border: 1px solid var(--wb-border-soft);
+  background: var(--wb-surface-1);
+  transition: border-color var(--wb-motion-standard) var(--wb-ease-enter),
+    box-shadow var(--wb-motion-standard) var(--wb-ease-enter),
+    transform var(--wb-motion-fast) var(--wb-ease-enter);
+}
+
+.wb-node-card:hover {
+  border-color: var(--wb-border-strong);
+  transform: translateY(-1px);
+}
+
+.wb-node-card.is-selected {
+  border: 2px solid var(--wb-focus);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-focus) 18%, transparent);
+}
+
+.wb-status-chip {
+  color: var(--wb-text-primary);
+}
+
+.wb-status-neutral {
+  background: color-mix(in srgb, var(--wb-surface-2) 75%, transparent);
+}
+
+.wb-status-ok {
+  background: color-mix(in srgb, var(--wb-success) 18%, transparent);
+}
+
+.wb-status-warn {
+  background: color-mix(in srgb, var(--wb-warning) 18%, transparent);
+}
+
+.wb-status-info {
+  background: color-mix(in srgb, var(--wb-running) 18%, transparent);
+}
+
+.wb-connections-panel {
+  border: 1px dashed var(--wb-border-strong);
+  background: color-mix(in srgb, var(--wb-surface-2) 70%, transparent);
+}
+
+.wb-inspector-surface {
+  border: 1px solid var(--wb-border-soft);
+  background: color-mix(in srgb, var(--wb-surface-1) 94%, var(--wb-surface-0));
+}
+
+.wb-inspector-section {
+  border: 1px solid var(--wb-border-soft);
+  background: color-mix(in srgb, var(--wb-surface-2) 65%, transparent);
+}
+
+.wb-inspector-collapsed {
+  display: none;
+}
+
+.wb-builder-workspace {
+  border-color: var(--wb-border-soft);
+}
+
+.wb-source-editor {
+  border: 1px solid var(--wb-border-soft);
+  color: var(--wb-text-primary);
+  background: color-mix(in srgb, var(--wb-surface-2) 70%, transparent);
+}
+
+@media (min-width: 1024px) {
+  .wb-builder-grid {
+    grid-template-columns: 280px minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .wb-left-column {
+    grid-column: 1;
+  }
+
+  .wb-main-column {
+    grid-column: 2;
+  }
+
+  .wb-canvas-inspector-grid {
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: 16px;
+  }
+
+  .wb-canvas-surface {
+    min-width: 58%;
+  }
+}
+
+@media (max-width: 1023px) {
+  .wb-builder-grid,
+  .wb-canvas-inspector-grid {
+    gap: 12px;
+  }
+
+  .wb-canvas-surface,
+  .wb-inspector-surface {
+    min-height: 320px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-module-tile,
+  .wb-node-card,
+  .wb-status-chip,
+  .wb-saved-lane {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}

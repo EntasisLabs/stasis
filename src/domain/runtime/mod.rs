@@ -6,3 +6,4 @@ pub mod job_attempt;
 pub mod outbox;
 pub mod recurring;
 pub mod thread;
+pub mod workflow_definition;

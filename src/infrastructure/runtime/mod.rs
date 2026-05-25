@@ -3,6 +3,7 @@ pub mod composite_control_plane_store;
 pub mod endpoint_routing_event_publisher;
 pub mod endpoint_routing_policy;
 pub mod grapheme_sdk_workflow_engine;
+pub mod grapheme_sdk_workflow_reflection;
 pub mod http_cluster_command_forwarder;
 pub mod http_webhook_event_publisher;
 pub mod in_memory_ai_chat_response_cache;
@@ -14,6 +15,7 @@ pub mod in_memory_delivery_endpoint_store;
 pub mod in_memory_endpoint_delivery_status_store;
 pub mod in_memory_runtime_metrics;
 pub mod in_memory_thread_store;
+pub mod in_memory_workflow_definition_store;
 #[cfg(feature = "transport-kafka")]
 pub mod kafka_rskafka_transport_publisher;
 #[cfg(feature = "transport-kafka-wasm")]
@@ -32,6 +34,7 @@ pub mod surreal_job_store;
 pub mod surreal_outbox_store;
 pub mod surreal_recurring_store;
 pub mod surreal_thread_store;
+pub mod surreal_workflow_definition_store;
 pub mod system_clock;
 pub mod tcp_socket_transport_publisher;
 pub mod tokio_channel_event_publisher;

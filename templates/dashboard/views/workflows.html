@@ -1,14 +1,23 @@
-<div class="flex flex-col gap-6">
-  <!-- Header -->
-  <div class="flex items-center justify-between">
+<div class="flex flex-col gap-6 wb-root">
+  <input type="hidden" id="workflow-modules-state" value="{{ custom_modules_csv }}" />
+  <input type="hidden" id="workflow-function-steps-state" value="{{ custom_function_steps_csv }}" />
+  <input type="hidden" id="workflow-function-inputs-state" value="{{ custom_function_inputs_json }}" />
+  <div class="flex items-center justify-between wb-topbar">
     <div>
-      <h2 class="text-2xl font-semibold tracking-tight" style="color: var(--foreground);">Grapheme Workflow Builder</h2>
-      <p class="text-sm mt-1" style="color: var(--muted-foreground);">Design and orchestrate complex data pipelines</p>
+      <h2 class="text-2xl font-semibold tracking-tight" style="color: var(--foreground);">Workflow Builder</h2>
+      <p class="text-sm mt-1" style="color: var(--muted-foreground);">Build and run Grapheme workflows with guided steps.</p>
     </div>
     <div class="flex gap-2">
+      <button class="btn btn-outline btn-sm" type="button" data-theme-toggle>
+        Theme
+      </button>
       <button class="btn btn-outline btn-sm" type="button"
         data-action-post="/action/workflows/save"
-        data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'>
+        data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'
+        data-action-source-selector="{% if advanced_mode %}#workflow-source-editor{% else %}#workflow-source-guided{% endif %}"
+        data-action-modules-selector="#workflow-modules-state"
+        data-action-function-steps-selector="#workflow-function-steps-state"
+        data-action-function-inputs-selector="#workflow-function-inputs-state">
         <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
         Save
       </button>
@@ -21,49 +30,85 @@
     </div>
   </div>
 
-  <!-- Split Layout -->
-  <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-    <!-- Sidebar -->
-    <div class="lg:col-span-1 flex flex-col gap-4">
-      <div class="card">
+  <div class="grid grid-cols-1 gap-6 wb-builder-grid">
+    <div class="wb-left-column flex flex-col gap-4">
+      <div class="card wb-left-rail-card">
         <div class="card-header">
-          <h3 class="card-title">Node Types</h3>
-          <p class="card-description">Builder primitives</p>
+          <h3 class="card-title">Modules</h3>
+          <p class="card-description">Pick a Grapheme module, then drag function steps into the workflow.</p>
         </div>
         <div class="card-content flex flex-col gap-2">
-          <div class="flex items-center gap-3 p-3 rounded-lg cursor-move transition-colors" style="border: 1px solid var(--border);">
-            <div class="p-2 rounded bg-blue-100"><svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg></div>
-            <span class="text-sm font-medium">Data Input</span>
+          <form data-hx-get="/view/workflows" hx-target="#dashboard-view" hx-swap="innerHTML" class="flex flex-col gap-2">
+            <input type="hidden" name="queue" value="{{ selected_queue }}" />
+            <input type="hidden" name="mode" value="{{ mode_query }}" />
+            <input type="hidden" name="modules" value="{{ custom_modules_csv }}" />
+            <input type="hidden" name="function_steps" value="{{ custom_function_steps_csv }}" />
+            <input type="hidden" name="function_inputs" value="{{ custom_function_inputs_json }}" />
+            {% match selected_node %}
+            {% when Some with (node) %}
+            <input type="hidden" name="node" value="{{ node.id }}" />
+            {% when None %}
+            {% endmatch %}
+            <label class="text-xs" for="workflow-module-catalog" style="color: var(--muted-foreground);">Grapheme module</label>
+            <select
+              id="workflow-module-catalog"
+              name="module_catalog"
+              class="w-full rounded-md px-2 py-1 text-sm"
+              style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+              onchange="this.form.requestSubmit()"
+            >
+              {% for option in module_catalog_options %}
+              <option value="{{ option.id }}" {% if option.selected %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </form>
+
+          <div class="text-xs" style="color: var(--muted-foreground);">Function steps in {{ selected_module_catalog }}</div>
+          {% for tile in function_tiles %}
+          <div
+            class="flex items-center gap-3 p-3 rounded-lg cursor-move transition-colors wb-module-tile"
+            draggable="true"
+            data-module-tile
+            data-module-kind="{{ tile.module_id }}"
+            data-function-id="{{ tile.function_id }}"
+            data-module-label="{{ tile.title }}"
+            tabindex="0"
+          >
+            <div class="p-2 rounded {% if tile.accent == "purple" %}bg-purple-100{% else if tile.accent == "green" %}bg-green-100{% else %}bg-blue-100{% endif %}">
+              <svg class="w-4 h-4 {% if tile.accent == "purple" %}text-purple-600{% else if tile.accent == "green" %}text-green-600{% else %}text-blue-600{% endif %}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-sm font-medium">{{ tile.title }}</span>
+              <span class="text-xs" style="color: var(--muted-foreground);">{{ tile.purpose }}</span>
+              <span class="text-xs font-mono" style="color: var(--muted-foreground);">{{ tile.module_id }}.{{ tile.function_id }}</span>
+              <span class="text-xs" style="color: var(--muted-foreground);">effect={{ tile.effect }} stability={{ tile.stability }}</span>
+              {% match tile.input_schema_ref %}
+              {% when Some with (schema_ref) %}
+              <span class="text-xs" style="color: var(--muted-foreground);">input_schema_ref={{ schema_ref }}</span>
+              {% when None %}
+              {% endmatch %}
+              {% match tile.output_schema_ref %}
+              {% when Some with (schema_ref) %}
+              <span class="text-xs" style="color: var(--muted-foreground);">output_schema_ref={{ schema_ref }}</span>
+              {% when None %}
+              {% endmatch %}
+            </div>
           </div>
-          <div class="flex items-center gap-3 p-3 rounded-lg cursor-move transition-colors" style="border: 1px solid var(--border);">
-            <div class="p-2 rounded bg-purple-100"><svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></div>
-            <span class="text-sm font-medium">Transform</span>
-          </div>
-          <div class="flex items-center gap-3 p-3 rounded-lg cursor-move transition-colors" style="border: 1px solid var(--border);">
-            <div class="p-2 rounded bg-green-100"><svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg></div>
-            <span class="text-sm font-medium">Filter</span>
-          </div>
-          <div class="flex items-center gap-3 p-3 rounded-lg cursor-move transition-colors" style="border: 1px solid var(--border);">
-            <div class="p-2 rounded bg-orange-100"><svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg></div>
-            <span class="text-sm font-medium">Merge</span>
-          </div>
-          <div class="flex items-center gap-3 p-3 rounded-lg cursor-move transition-colors" style="border: 1px solid var(--border);">
-            <div class="p-2 rounded bg-indigo-100"><svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg></div>
-            <span class="text-sm font-medium">Data Output</span>
-          </div>
+          {% endfor %}
         </div>
       </div>
 
-      <div class="card">
+      <div class="card wb-left-rail-card">
         <div class="card-header">
           <h3 class="card-title">Saved Workflows</h3>
         </div>
         <div class="card-content flex flex-col gap-1">
           {% for lane in lanes %}
           <a href="#"
-            class="p-3 rounded-lg block transition-colors"
-            style="border: 1px solid {% if lane.selected %}var(--primary){% else %}var(--border){% endif %}; {% if lane.selected %}background: color-mix(in srgb, var(--primary) 10%, transparent); color: var(--primary);{% endif %}"
-            hx-get="/view/workflows?queue={{ lane.lane }}" hx-target="#dashboard-view" hx-swap="innerHTML">
+            class="p-3 rounded-lg block transition-colors wb-saved-lane {% if lane.selected %}is-selected{% endif %}"
+            hx-get="/view/workflows?queue={{ lane.lane }}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode={{ mode_query }}&module_catalog={{ selected_module_catalog }}"
+            hx-target="#dashboard-view"
+            hx-swap="innerHTML">
             <p class="text-sm font-medium">{{ lane.workflow_name }}</p>
             <p class="text-xs mt-0.5" style="color: var(--muted-foreground);">{{ lane.total_jobs }} jobs &bull; {{ lane.lane }}</p>
           </a>
@@ -72,40 +117,111 @@
       </div>
     </div>
 
-    <!-- Canvas -->
-    <div class="lg:col-span-3">
-      <div class="card">
+    <div class="wb-main-column">
+      <div class="card wb-workspace-card">
         <div class="card-header">
           <h3 class="card-title">{{ selected_workflow_name }}</h3>
           <p class="card-description">Workflow ID: <span class="font-mono">{{ selected_workflow_id }}</span></p>
         </div>
         <div class="card-content">
-          <!-- Stage Flow -->
-          <div class="rounded-lg p-8 min-h-[360px] flex flex-col items-center" style="background: color-mix(in srgb, var(--accent) 20%, transparent);">
-            {% for stage in stages %}
-            <div class="flex flex-col items-center w-full max-w-sm">
-              <div class="w-full rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer" style="background: var(--card); border: 2px solid var(--border);">
-                <div class="flex items-center gap-3">
-                  <div class="p-3 rounded-lg {% if stage.node_type == "input" %}bg-blue-100{% else if stage.node_type == "transform" %}bg-purple-100{% else if stage.node_type == "filter" %}bg-green-100{% else if stage.node_type == "merge" %}bg-orange-100{% else %}bg-indigo-100{% endif %}">
-                    <div class="w-5 h-5 rounded {% if stage.node_type == "input" %}bg-blue-500{% else if stage.node_type == "transform" %}bg-purple-500{% else if stage.node_type == "filter" %}bg-green-500{% else if stage.node_type == "merge" %}bg-orange-500{% else %}bg-indigo-500{% endif %}"></div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 wb-canvas-inspector-grid">
+            <div
+              class="rounded-lg p-4 wb-canvas-surface"
+              data-canvas-dropzone
+              data-selected-queue="{{ selected_queue }}"
+              data-selected-node="{% match selected_node %}{% when Some with (node) %}{{ node.id }}{% when None %}{% endmatch %}"
+              data-custom-modules="{{ custom_modules_csv }}"
+              data-custom-function-steps="{{ custom_function_steps_csv }}"
+              data-custom-function-inputs="{{ custom_function_inputs_json }}"
+              data-selected-module-catalog="{{ selected_module_catalog }}"
+            >
+              <h4 class="text-sm font-semibold mb-3">Grapheme Function Flow</h4>
+              <p class="text-xs mb-2" style="color: var(--muted-foreground);">Tip: drag function steps to build a pure Grapheme pipeline.</p>
+              <div class="flex flex-col gap-2">
+                {% for node in graph_nodes %}
+                <button
+                  type="button"
+                  class="text-left rounded-lg p-3 transition-colors wb-node-card {% if node.selected %}is-selected{% endif %}"
+                  data-canvas-node-button
+                  data-node-id="{{ node.id }}"
+                  hx-get="/view/workflows?queue={{ selected_queue }}&node={{ node.id }}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode={{ mode_query }}&module_catalog={{ selected_module_catalog }}"
+                  hx-target="#dashboard-view"
+                  hx-swap="innerHTML"
+                >
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-sm font-semibold">{{ node.label }}</span>
+                    <span class="text-xs px-2 py-0.5 rounded wb-status-chip {% if node.status_tone == "ok" %}wb-status-ok{% else if node.status_tone == "warn" %}wb-status-warn{% else if node.status_tone == "info" %}wb-status-info{% else %}wb-status-neutral{% endif %}">
+                      {{ node.status }}
+                    </span>
                   </div>
-                  <div class="flex-1">
-                    <p class="font-medium text-sm">{{ stage.name }}</p>
-                    <p class="text-xs capitalize" style="color: var(--muted-foreground);">{{ stage.node_type }}</p>
-                  </div>
-                  <span class="text-xs font-mono px-1.5 py-0.5 rounded" style="background: var(--accent); color: var(--muted-foreground);">{{ stage.count }}</span>
+                  <p class="text-xs mt-1" style="color: var(--muted-foreground);">type={{ node.node_type }} count={{ node.count }}</p>
+                  <p class="text-xs mt-1" style="color: var(--muted-foreground);">in={{ node.input_hint }} out={{ node.output_hint }}</p>
+                </button>
+                {% endfor %}
+                {% if graph_nodes.is_empty() %}
+                <p class="text-xs" style="color: var(--muted-foreground);">No function steps yet. Drag a function from the module rail to start your Grapheme flow.</p>
+                {% endif %}
+              </div>
+
+              <div class="mt-3 rounded p-2 wb-connections-panel">
+                <p class="text-xs" style="color: var(--muted-foreground);">Connections</p>
+                <div class="mt-1 flex flex-col gap-1">
+                  {% for edge in graph_edges %}
+                  <p class="text-xs font-mono" style="color: var(--foreground);">{{ edge.from_id }} -> {{ edge.to_id }} ({{ edge.label }})</p>
+                  {% endfor %}
                 </div>
               </div>
-              {% if !loop.last %}
-              <div class="flex items-center justify-center py-3">
-                <svg class="w-5 h-5 rotate-90" style="color: var(--muted-foreground);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-              </div>
-              {% endif %}
             </div>
-            {% endfor %}
+
+            <div class="rounded-lg p-4 wb-inspector-surface {% if !has_selected_node %}wb-inspector-collapsed{% endif %}">
+              <h4 class="text-sm font-semibold mb-3">Node Inspector</h4>
+              {% match selected_node %}
+              {% when Some with (node) %}
+              <div class="flex flex-col gap-2">
+                <p class="text-sm font-semibold">{{ node.label }}</p>
+                <p class="text-xs" style="color: var(--muted-foreground);">id={{ node.id }} type={{ node.node_type }} status={{ node.status }}</p>
+                <p class="text-sm" style="color: var(--foreground);">{{ node.summary }}</p>
+                <div class="rounded p-2 wb-inspector-section">
+                  <p class="text-xs" style="color: var(--muted-foreground);">Function metadata</p>
+                  <p class="text-sm">effect={{ node.effect }} stability={{ node.stability }}</p>
+                  {% match node.input_schema_ref %}
+                  {% when Some with (schema_ref) %}
+                  <p class="text-xs" style="color: var(--muted-foreground);">input_schema_ref={{ schema_ref }}</p>
+                  {% when None %}
+                  {% endmatch %}
+                  {% match node.output_schema_ref %}
+                  {% when Some with (schema_ref) %}
+                  <p class="text-xs" style="color: var(--muted-foreground);">output_schema_ref={{ schema_ref }}</p>
+                  {% when None %}
+                  {% endmatch %}
+                </div>
+                <div class="rounded p-2 wb-inspector-section">
+                  <p class="text-xs" style="color: var(--muted-foreground);">Input</p>
+                  <p class="text-sm">{{ node.input_hint }}</p>
+                </div>
+                <div class="rounded p-2 wb-inspector-section">
+                  <p class="text-xs" style="color: var(--muted-foreground);">Output</p>
+                  <p class="text-sm">{{ node.output_hint }}</p>
+                </div>
+                <div class="rounded p-2 wb-inspector-section">
+                  <label class="text-xs" for="workflow-function-input-editor" style="color: var(--muted-foreground);">Function input payload (JSON/text)</label>
+                  <textarea
+                    id="workflow-function-input-editor"
+                    class="text-xs font-mono p-2 rounded mt-1 w-full"
+                    style="min-height: 120px; border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                    data-function-input-editor
+                    data-node-id="{{ node.id }}"
+                    spellcheck="false"
+                  >{{ node.function_input }}</textarea>
+                </div>
+                <p class="text-xs" style="color: var(--muted-foreground);">recent_count={{ node.count }}</p>
+              </div>
+              {% when None %}
+              <p class="text-xs" style="color: var(--muted-foreground);">Select a node in the canvas to inspect configuration details.</p>
+              {% endmatch %}
+            </div>
           </div>
 
-          <!-- Lane Grid -->
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
             {% for lane in lanes %}
             <div class="p-4 rounded-lg {% if lane.selected %}ring-2 ring-blue-500{% endif %}" style="background: var(--accent); border: 1px solid var(--border);">
@@ -124,14 +240,102 @@
     </div>
   </div>
 
-  <!-- DSL Preview -->
-  <div class="card">
+  <div class="card wb-builder-workspace" {% if advanced_mode %}data-builder-tab-group{% endif %}>
+    <textarea id="workflow-source-guided" class="hidden" aria-hidden="true">{{ grapheme_source_preview }}</textarea>
     <div class="card-header">
-      <h3 class="card-title">DSL Preview</h3>
-      <p class="card-description">Server-rendered preview from the selected workflow lane</p>
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h3 class="card-title">Builder Workspace</h3>
+          <p class="card-description">{% if advanced_mode %}Advanced mode is enabled for source and diagnostics tooling.{% else %}Guided mode keeps workflow building visual-first. Advanced tools are optional.{% endif %}</p>
+        </div>
+        {% if advanced_mode %}
+        <div class="inline-flex rounded-lg p-1" style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 55%, transparent);">
+          <button
+            type="button"
+            class="btn btn-sm"
+            data-builder-tab-trigger="guided"
+            style="background: var(--primary); color: var(--primary-foreground);"
+          >
+            Guided
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            data-builder-tab-trigger="advanced"
+            style="color: var(--muted-foreground);"
+          >
+            Advanced Tools
+          </button>
+        </div>
+        {% else %}
+        <a
+          href="#"
+          class="btn btn-outline btn-sm"
+          hx-get="/view/workflows?queue={{ selected_queue }}&node={% match selected_node %}{% when Some with (node) %}{{ node.id }}{% when None %}{% endmatch %}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode=advanced&module_catalog={{ selected_module_catalog }}"
+          hx-target="#dashboard-view"
+          hx-swap="innerHTML"
+        >
+          Open Advanced Tools
+        </a>
+        {% endif %}
+      </div>
     </div>
-    <div class="card-content">
+
+    <div class="card-content" {% if advanced_mode %}data-builder-tab-panel="guided"{% endif %}>
+      <h4 class="text-sm font-semibold mb-2">Flow Blueprint</h4>
+      <p class="text-xs mb-3" style="color: var(--muted-foreground);">Quick textual summary of the currently selected workflow lane.</p>
       <pre class="text-xs font-mono p-4 rounded-lg overflow-x-auto" style="background: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--foreground);">{{ dsl_preview }}</pre>
     </div>
+
+    {% if advanced_mode %}
+    <div class="card-content hidden wb-advanced-panel" data-builder-tab-panel="advanced">
+      <p class="card-description mb-3">Edit source and inspect deep flow insights in-place.</p>
+      <div class="mb-3">
+        <a
+          href="#"
+          class="btn btn-ghost btn-sm"
+          hx-get="/view/workflows?queue={{ selected_queue }}&node={% match selected_node %}{% when Some with (node) %}{{ node.id }}{% when None %}{% endmatch %}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode=guided&module_catalog={{ selected_module_catalog }}"
+          hx-target="#dashboard-view"
+          hx-swap="innerHTML"
+        >
+          Back To Guided Mode
+        </a>
+      </div>
+      <form
+        class="flex flex-col gap-3"
+        data-hx-get="/stream/workflow-reflection"
+        hx-target="#workflow-reflection-panel"
+        hx-swap="innerHTML"
+      >
+        <input type="hidden" name="workflow_id" value="{{ selected_workflow_id }}" />
+        <input type="hidden" name="queue" value="{{ selected_queue }}" />
+        <input type="hidden" name="mode" value="advanced" />
+        <textarea
+          id="workflow-source-editor"
+          name="source"
+          class="text-xs font-mono p-3 rounded-lg wb-source-editor"
+          style="min-height: 220px;"
+          spellcheck="false"
+        >{{ grapheme_source_preview }}</textarea>
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-xs" style="color: var(--muted-foreground);">Use Refresh Flow Insights after edits to inspect module and executable impacts.</p>
+          <button type="submit" class="btn btn-primary btn-sm">Refresh Flow Insights</button>
+        </div>
+      </form>
+
+      <div
+        id="workflow-reflection-panel"
+        class="mt-4"
+        hx-get="/stream/workflow-reflection?workflow_id={{ selected_workflow_id }}&queue={{ selected_queue }}&mode=advanced"
+        hx-trigger="load"
+        hx-swap="innerHTML"
+      >
+        <div class="card-content pt-0">
+          <h3 class="card-title">Flow Insights</h3>
+          <p class="card-description">Loading module and executable introspection...</p>
+        </div>
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>

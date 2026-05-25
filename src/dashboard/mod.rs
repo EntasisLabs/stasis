@@ -12,5 +12,6 @@ pub use handlers::{DashboardState, router};
 pub use integration::DashboardRouterExt;
 pub use service::{
 	DashboardQueryService, InMemoryDashboardQueryService, InspectEntity,
-	RuntimeDashboardQueryService,
+	RuntimeDashboardQueryService, WorkflowExecuteResult, WorkflowSaveRequest,
+	WorkflowSaveResult,
 };

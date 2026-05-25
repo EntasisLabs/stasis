@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::Utc;
 
 use crate::application::dto::{
     ClusterNodeHealthRow, EndpointDiagnosticsReadModelRow,
@@ -19,18 +20,27 @@ use crate::dashboard::mappers::{
     map_cluster_health_row, map_endpoint_inspector, map_endpoint_row, map_job_to_row,
     map_node_inspector, map_outbox_to_row, map_recurring_definition_row,
 };
-use crate::domain::errors::Result;
+use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job::JobState;
 use crate::domain::runtime::outbox::OutboxEvent;
+use crate::domain::runtime::workflow_definition::{WorkflowDefinition, WorkflowRevision};
+use crate::infrastructure::runtime::grapheme_sdk_workflow_reflection::GraphemeSdkWorkflowReflection;
 use crate::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
 use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
 use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
 use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
+use crate::infrastructure::runtime::in_memory_workflow_definition_store::InMemoryWorkflowDefinitionStore;
 use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
 use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
 use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
+use crate::infrastructure::runtime::surreal_workflow_definition_store::SurrealWorkflowDefinitionStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
+use crate::ports::outbound::runtime::workflow_definition_store::WorkflowDefinitionStore;
+use crate::ports::outbound::runtime::workflow_reflection::{
+    WorkflowModuleInfoReflection, WorkflowModuleSearchReflection,
+    WorkflowModuleTypesReflection, WorkflowReflectionPort, WorkflowSourceReflection,
+};
 use crate::sdk::control_plane_sdk::ControlPlaneSdk;
 
 type DashboardControlStore =
@@ -55,6 +65,255 @@ pub enum InspectEntity {
     Event(String),
 }
 
+#[derive(Clone, Debug)]
+pub struct WorkflowSaveRequest {
+    pub workflow_id: String,
+    pub queue: String,
+    pub source: String,
+    pub graph_modules_csv: Option<String>,
+    pub graph_function_steps_csv: Option<String>,
+    pub graph_function_inputs_json: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkflowSaveResult {
+    pub workflow_id: String,
+    pub queue: String,
+    pub revision_id: String,
+    pub executable_count: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkflowExecuteResult {
+    pub workflow_id: String,
+    pub queue: String,
+    pub revision_id: String,
+    pub executable_count: usize,
+    pub graph_function_steps_csv: String,
+    pub source_bytes: usize,
+    pub reflected_at_utc: String,
+    pub leased_job_id: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkflowSavedRevisionSummary {
+    pub workflow_id: String,
+    pub revision_id: String,
+    pub executable_count: usize,
+    pub reflected_at_utc: String,
+    pub source: String,
+    pub source_bytes: usize,
+    pub graph_modules_csv: String,
+    pub graph_function_steps_csv: String,
+    pub graph_function_inputs_json: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkflowDiagnosticSeverity {
+    Error,
+    Warning,
+    Info,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkflowDiagnostic {
+    pub severity: WorkflowDiagnosticSeverity,
+    pub message: String,
+    pub code: Option<String>,
+    pub line: Option<usize>,
+    pub column: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkflowDiagnosticsResult {
+    pub enabled: bool,
+    pub provider: String,
+    pub summary: String,
+    pub diagnostics: Vec<WorkflowDiagnostic>,
+}
+
+fn parse_leading_usize(input: &str) -> Option<(usize, &str)> {
+    let digits_len = input.chars().take_while(|ch| ch.is_ascii_digit()).count();
+    if digits_len == 0 {
+        return None;
+    }
+
+    let (digits, tail) = input.split_at(digits_len);
+    Some((digits.parse().ok()?, tail))
+}
+
+fn extract_line_column(message: &str) -> (Option<usize>, Option<usize>) {
+    if let Some(anchor_index) = message.find("-->") {
+        let tail = message[(anchor_index + 3)..].trim_start();
+        if let Some((line, rest)) = parse_leading_usize(tail) {
+            let rest = rest.trim_start();
+            if let Some(stripped) = rest.strip_prefix(':') {
+                let stripped = stripped.trim_start();
+                if let Some((column, _)) = parse_leading_usize(stripped) {
+                    return (Some(line), Some(column));
+                }
+            }
+        }
+    }
+
+    for marker in ["line ", "Line "] {
+        if let Some(anchor_index) = message.find(marker) {
+            let tail = &message[(anchor_index + marker.len())..];
+            if let Some((line, rest)) = parse_leading_usize(tail) {
+                let rest_lower = rest.to_ascii_lowercase();
+                if let Some(column_anchor) = rest_lower.find("column ") {
+                    let col_tail = &rest[(column_anchor + "column ".len())..];
+                    if let Some((column, _)) = parse_leading_usize(col_tail) {
+                        return (Some(line), Some(column));
+                    }
+                }
+
+                return (Some(line), None);
+            }
+        }
+    }
+
+    (None, None)
+}
+
+fn reflection_code_for_error(message: &str) -> &'static str {
+    let lowered = message.to_ascii_lowercase();
+    if lowered.contains("capability") {
+        "REFLECTION_CAPABILITY"
+    } else if lowered.contains("schema")
+        || lowered.contains("type")
+        || lowered.contains("state machine")
+    {
+        "REFLECTION_SCHEMA"
+    } else {
+        "REFLECTION"
+    }
+}
+
+fn normalize_graph_modules_csv(raw: Option<&str>) -> String {
+    let Some(raw) = raw else {
+        return String::new();
+    };
+
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for part in raw.split(',') {
+        let module = part.trim().to_ascii_lowercase();
+        let is_allowed = matches!(
+            module.as_str(),
+            "core"
+                | "html"
+                | "json"
+                | "csv"
+                | "yaml"
+                | "docs"
+                | "io"
+                | "http"
+                | "web"
+                | "websearch"
+                | "tcp"
+                | "smtp"
+                | "sql"
+                | "surreal"
+                | "memory"
+                | "runtime"
+                | "secrets"
+                | "textops"
+                | "healthcheck"
+        );
+
+        if is_allowed && seen.insert(module.clone()) {
+            normalized.push(module);
+        }
+    }
+
+    normalized.join(",")
+}
+
+fn normalize_graph_function_steps_csv(raw: Option<&str>) -> String {
+    let Some(raw) = raw else {
+        return String::new();
+    };
+
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for part in raw.split(',') {
+        let token = part.trim().to_ascii_lowercase();
+        let Some((module_id, function_id)) = token.split_once('.') else {
+            continue;
+        };
+        let module_id = module_id.trim();
+        let function_id = function_id.trim();
+
+        if !matches!(
+            module_id,
+            "core"
+                | "html"
+                | "json"
+                | "csv"
+                | "yaml"
+                | "docs"
+                | "io"
+                | "http"
+                | "web"
+                | "websearch"
+                | "tcp"
+                | "smtp"
+                | "sql"
+                | "surreal"
+                | "memory"
+                | "runtime"
+                | "secrets"
+                | "textops"
+                | "healthcheck"
+        ) {
+            continue;
+        }
+        if function_id.is_empty()
+            || !function_id
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            continue;
+        }
+
+        let normalized_token = format!("{module_id}.{function_id}");
+        if seen.insert(normalized_token.clone()) {
+            normalized.push(normalized_token);
+        }
+    }
+
+    normalized.join(",")
+}
+
+fn normalize_graph_function_inputs_json(raw: Option<&str>) -> String {
+    let Some(raw) = raw else {
+        return "{}".to_string();
+    };
+
+    let parsed = serde_json::from_str::<serde_json::Value>(raw);
+    let Ok(value) = parsed else {
+        return "{}".to_string();
+    };
+    let Some(obj) = value.as_object() else {
+        return "{}".to_string();
+    };
+
+    let mut normalized = serde_json::Map::new();
+    for (key, value) in obj {
+        if key.trim().is_empty() {
+            continue;
+        }
+        if let Some(payload) = value.as_str() {
+            normalized.insert(key.clone(), serde_json::Value::String(payload.to_string()));
+        }
+    }
+
+    serde_json::Value::Object(normalized).to_string()
+}
+
 #[async_trait]
 pub trait DashboardQueryService: Send + Sync {
     async fn dashboard(&self, inspect: Option<InspectEntity>) -> Result<DashboardDto>;
@@ -71,6 +330,22 @@ pub trait DashboardQueryService: Send + Sync {
     ) -> Result<Option<String>>;
     async fn scheduler_publish_pending_now(&self, limit: usize) -> Result<usize>;
     async fn scheduler_replay_dead_letter_now(&self, job_id: &str) -> Result<bool>;
+    async fn workflow_save(&self, request: WorkflowSaveRequest) -> Result<WorkflowSaveResult>;
+    async fn workflow_execute(
+        &self,
+        workflow_id: &str,
+        queue: &str,
+        worker_id: &str,
+    ) -> Result<WorkflowExecuteResult>;
+    async fn workflow_reflect_source(&self, source: &str) -> Result<WorkflowSourceReflection>;
+    async fn workflow_modules_search(&self, query: &str) -> Result<WorkflowModuleSearchReflection>;
+    async fn workflow_module_info(&self, module_id: &str) -> Result<Option<WorkflowModuleInfoReflection>>;
+    async fn workflow_module_types(&self, module_id: &str) -> Result<Option<WorkflowModuleTypesReflection>>;
+    async fn workflow_saved_revision_summary(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Option<WorkflowSavedRevisionSummary>>;
+    async fn workflow_lsp_diagnostics(&self, source: &str) -> Result<WorkflowDiagnosticsResult>;
     async fn inspect(&self, entity: InspectEntity) -> Result<InspectorView>;
 }
 
@@ -78,6 +353,8 @@ pub trait DashboardQueryService: Send + Sync {
 pub struct RuntimeDashboardQueryService {
     runtime: RuntimeComposition,
     control_plane: DashboardControlPlaneKind,
+    workflow_reflection: Arc<dyn WorkflowReflectionPort>,
+    workflow_store: Arc<dyn WorkflowDefinitionStore>,
 }
 
 impl RuntimeDashboardQueryService {
@@ -85,12 +362,14 @@ impl RuntimeDashboardQueryService {
         Self {
             runtime: RuntimeComposition::InMemory(runtime.as_ref().clone()),
             control_plane: DashboardControlPlaneKind::InMemory(control_plane),
+            workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
+            workflow_store: Arc::new(InMemoryWorkflowDefinitionStore::default()),
         }
     }
 
     pub fn from_runtime_composition(runtime: RuntimeComposition) -> Self {
-        match &runtime {
-            RuntimeComposition::InMemory(_) => {
+        match runtime {
+            RuntimeComposition::InMemory(rt) => {
                 let endpoint_store = InMemoryDeliveryEndpointStore::default();
                 let cluster_store = InMemoryClusterNodeStore::default();
                 let status_store = Arc::new(InMemoryEndpointDeliveryStatusStore::default());
@@ -99,8 +378,10 @@ impl RuntimeDashboardQueryService {
                     ControlPlaneSdk::new_with_status_store(control_store, status_store);
 
                 Self {
-                    runtime,
+                    runtime: RuntimeComposition::InMemory(rt),
                     control_plane: DashboardControlPlaneKind::InMemory(control_plane),
+                    workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
+                    workflow_store: Arc::new(InMemoryWorkflowDefinitionStore::default()),
                 }
             }
             RuntimeComposition::Surreal(rt) => {
@@ -111,12 +392,26 @@ impl RuntimeDashboardQueryService {
                 let control_plane =
                     ControlPlaneSdk::new_with_status_store(control_store, status_store);
 
+                let workflow_store: Arc<dyn WorkflowDefinitionStore> =
+                    Arc::new(SurrealWorkflowDefinitionStore::new(rt.job_store.db()));
+
                 Self {
-                    runtime,
+                    runtime: RuntimeComposition::Surreal(rt),
                     control_plane: DashboardControlPlaneKind::Surreal(control_plane),
+                    workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
+                    workflow_store,
                 }
             }
         }
+    }
+
+    async fn load_workflow_definition(&self, workflow_id: &str) -> Result<WorkflowDefinition> {
+        self.workflow_store
+            .get_definition(workflow_id)
+            .await?
+            .ok_or_else(|| {
+                StasisError::PortFailure(format!("workflow definition not found: {workflow_id}"))
+            })
     }
 
     async fn list_cluster_node_health_rows(&self) -> Result<Vec<ClusterNodeHealthRow>> {
@@ -448,6 +743,237 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
         }
     }
 
+    async fn workflow_save(&self, request: WorkflowSaveRequest) -> Result<WorkflowSaveResult> {
+        let workflow_id = request.workflow_id.trim();
+        let queue = request.queue.trim();
+        let source = request.source.trim();
+        let graph_modules_csv = normalize_graph_modules_csv(request.graph_modules_csv.as_deref());
+        let graph_function_steps_csv =
+            normalize_graph_function_steps_csv(request.graph_function_steps_csv.as_deref());
+        let graph_function_inputs_json =
+            normalize_graph_function_inputs_json(request.graph_function_inputs_json.as_deref());
+
+        if workflow_id.is_empty() {
+            return Err(StasisError::PortFailure("workflow_id is required".to_string()));
+        }
+        if queue.is_empty() {
+            return Err(StasisError::PortFailure("queue is required".to_string()));
+        }
+        if source.is_empty() {
+            return Err(StasisError::PortFailure("source is required".to_string()));
+        }
+
+        let reflection = self
+            .workflow_reflection
+            .reflect_executables_from_source(source)?;
+        let reflection_receipt_json = serde_json::to_string(&reflection).map_err(|err| {
+            StasisError::PortFailure(format!("encode workflow reflection receipt: {err}"))
+        })?;
+        let now = Utc::now();
+        let revision_id = format!(
+            "rev-{}-{}",
+            now.timestamp_millis(),
+            reflection.count.max(1)
+        );
+
+        let created_at = self
+            .workflow_store
+            .get_definition(workflow_id)
+            .await?
+            .map(|existing| existing.created_at)
+            .unwrap_or(now);
+
+        let definition = WorkflowDefinition {
+            workflow_id: workflow_id.to_string(),
+            queue: queue.to_string(),
+            latest_revision_id: revision_id.clone(),
+            created_at,
+            updated_at: now,
+        };
+
+        let revision = WorkflowRevision {
+            workflow_id: workflow_id.to_string(),
+            revision_id: revision_id.clone(),
+            source: source.to_string(),
+            graph_modules_csv,
+            graph_function_steps_csv,
+            graph_function_inputs_json,
+            reflected_at_utc: now,
+            executable_count: reflection.count,
+            reflection_receipt_json,
+        };
+
+        self.workflow_store.upsert_definition(definition).await?;
+        self.workflow_store.insert_revision(revision).await?;
+
+        Ok(WorkflowSaveResult {
+            workflow_id: workflow_id.to_string(),
+            queue: queue.to_string(),
+            revision_id,
+            executable_count: reflection.count,
+        })
+    }
+
+    async fn workflow_execute(
+        &self,
+        workflow_id: &str,
+        queue: &str,
+        worker_id: &str,
+    ) -> Result<WorkflowExecuteResult> {
+        let workflow = self.load_workflow_definition(workflow_id.trim()).await?;
+        let revisions = self
+            .workflow_store
+            .list_revisions(workflow.workflow_id.as_str())
+            .await?;
+        let latest = revisions
+            .iter()
+            .find(|revision| revision.revision_id == workflow.latest_revision_id)
+            .ok_or_else(|| {
+                StasisError::PortFailure(format!(
+                    "workflow revision not found: {}",
+                    workflow.latest_revision_id
+                ))
+            })?;
+        let resolved_queue = if queue.trim().is_empty() {
+            workflow.queue.clone()
+        } else {
+            queue.trim().to_string()
+        };
+
+        let leased_job_id = match &self.runtime {
+            RuntimeComposition::InMemory(rt) => {
+                rt.process_once_now(resolved_queue.as_str(), worker_id).await?
+            }
+            RuntimeComposition::Surreal(rt) => {
+                rt.process_once_now(resolved_queue.as_str(), worker_id).await?
+            }
+        };
+
+        Ok(WorkflowExecuteResult {
+            workflow_id: workflow.workflow_id,
+            queue: resolved_queue,
+            revision_id: workflow.latest_revision_id,
+            executable_count: latest.executable_count,
+            graph_function_steps_csv: latest.graph_function_steps_csv.clone(),
+            source_bytes: latest.source.len(),
+            reflected_at_utc: latest.reflected_at_utc.to_rfc3339(),
+            leased_job_id,
+        })
+    }
+
+    async fn workflow_reflect_source(&self, source: &str) -> Result<WorkflowSourceReflection> {
+        self.workflow_reflection
+            .reflect_executables_from_source(source)
+    }
+
+    async fn workflow_modules_search(&self, query: &str) -> Result<WorkflowModuleSearchReflection> {
+        self.workflow_reflection.modules_search(query)
+    }
+
+    async fn workflow_module_info(&self, module_id: &str) -> Result<Option<WorkflowModuleInfoReflection>> {
+        self.workflow_reflection.module_info(module_id)
+    }
+
+    async fn workflow_module_types(&self, module_id: &str) -> Result<Option<WorkflowModuleTypesReflection>> {
+        self.workflow_reflection.module_types(module_id)
+    }
+
+    async fn workflow_saved_revision_summary(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Option<WorkflowSavedRevisionSummary>> {
+        let workflow_id = workflow_id.trim();
+        if workflow_id.is_empty() {
+            return Ok(None);
+        }
+
+        let Some(definition) = self.workflow_store.get_definition(workflow_id).await? else {
+            return Ok(None);
+        };
+        let revisions = self.workflow_store.list_revisions(workflow_id).await?;
+        let Some(latest) = revisions
+            .into_iter()
+            .find(|revision| revision.revision_id == definition.latest_revision_id)
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(WorkflowSavedRevisionSummary {
+            workflow_id: definition.workflow_id,
+            revision_id: latest.revision_id,
+            executable_count: latest.executable_count,
+            reflected_at_utc: latest.reflected_at_utc.to_rfc3339(),
+            source_bytes: latest.source.len(),
+            source: latest.source,
+            graph_modules_csv: latest.graph_modules_csv,
+            graph_function_steps_csv: latest.graph_function_steps_csv,
+            graph_function_inputs_json: latest.graph_function_inputs_json,
+        }))
+    }
+
+    async fn workflow_lsp_diagnostics(&self, source: &str) -> Result<WorkflowDiagnosticsResult> {
+        let source = source.trim();
+        let mut diagnostics = Vec::new();
+
+        if source.is_empty() {
+            diagnostics.push(WorkflowDiagnostic {
+                severity: WorkflowDiagnosticSeverity::Warning,
+                message: "Source is empty. Add a query/mutation/subscription to reflect."
+                    .to_string(),
+                code: Some("EMPTY_SOURCE".to_string()),
+                line: None,
+                column: None,
+            });
+        } else if let Err(parse_err) = grapheme_compiler::parse(source) {
+            let parse_message = parse_err.to_string();
+            let (line, column) = extract_line_column(parse_message.as_str());
+
+            diagnostics.push(WorkflowDiagnostic {
+                severity: WorkflowDiagnosticSeverity::Error,
+                message: parse_message,
+                code: Some("PARSE".to_string()),
+                line,
+                column,
+            });
+        } else if let Err(reflect_err) = self
+            .workflow_reflection
+            .reflect_executables_from_source(source)
+        {
+            let reflect_message = reflect_err.to_string();
+            let (line, column) = extract_line_column(reflect_message.as_str());
+
+            diagnostics.push(WorkflowDiagnostic {
+                severity: WorkflowDiagnosticSeverity::Error,
+                message: reflect_message.clone(),
+                code: Some(reflection_code_for_error(reflect_message.as_str()).to_string()),
+                line,
+                column,
+            });
+        }
+
+        let enabled = cfg!(feature = "dashboard-lsp");
+        let provider = if enabled {
+            "grapheme-lsp"
+        } else {
+            "fallback-parser"
+        };
+        let summary = if diagnostics.is_empty() {
+            "No diagnostics from current source snapshot.".to_string()
+        } else {
+            format!(
+                "Diagnostics reported {} issue(s) in the current source snapshot.",
+                diagnostics.len()
+            )
+        };
+
+        Ok(WorkflowDiagnosticsResult {
+            enabled,
+            provider: provider.to_string(),
+            summary,
+            diagnostics,
+        })
+    }
+
     async fn inspect(&self, entity: InspectEntity) -> Result<InspectorView> {
         let inspector = match entity {
             InspectEntity::Job(id) => {
@@ -536,3 +1062,294 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
 
 /// Backward-compatible alias retained for existing callers while naming transitions to runtime-agnostic service.
 pub type InMemoryDashboardQueryService = RuntimeDashboardQueryService;
+
+#[cfg(test)]
+mod tests {
+    use chrono::DateTime;
+
+    use crate::application::runtime::runtime_factory::{RuntimeBackend, RuntimeFactory};
+
+    use super::{
+        DashboardQueryService, RuntimeDashboardQueryService, WorkflowDiagnosticSeverity,
+        WorkflowSaveRequest,
+    };
+    use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
+    use crate::application::runtime::runtime_factory::RuntimeComposition;
+
+    fn valid_workflow_source() -> &'static str {
+        r#"
+import core from "grapheme/core"
+
+query Echo {
+  core.echo(message: "ping") {
+    state {
+      current
+    }
+  }
+}
+"#
+    }
+
+    #[tokio::test]
+    async fn workflow_save_persists_definition_and_revision() {
+        let service = RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+        );
+
+        let saved = service
+            .workflow_save(WorkflowSaveRequest {
+                workflow_id: "wf.phase2".to_string(),
+                queue: "queue.phase2".to_string(),
+                source: valid_workflow_source().to_string(),
+                graph_modules_csv: Some(" core, textops,core,invalid,healthcheck ".to_string()),
+                graph_function_steps_csv: Some(
+                    " core.echo,textops.to_markdown,core.echo,invalid.step,healthcheck.runtime_ready "
+                        .to_string(),
+                ),
+                graph_function_inputs_json: Some(
+                    r#"{"node-fn-core-echo-1":"{\"message\":\"hello\"}"}"#.to_string(),
+                ),
+            })
+            .await
+            .expect("workflow save should succeed");
+
+        let definition = service
+            .workflow_store
+            .get_definition("wf.phase2")
+            .await
+            .expect("definition load should succeed")
+            .expect("definition should exist");
+        assert_eq!(definition.workflow_id, "wf.phase2");
+        assert_eq!(definition.queue, "queue.phase2");
+        assert_eq!(definition.latest_revision_id, saved.revision_id);
+
+        let revisions = service
+            .workflow_store
+            .list_revisions("wf.phase2")
+            .await
+            .expect("revisions load should succeed");
+        assert_eq!(revisions.len(), 1);
+
+        let latest = &revisions[0];
+        assert_eq!(latest.workflow_id, "wf.phase2");
+        assert_eq!(latest.revision_id, saved.revision_id);
+        assert_eq!(latest.executable_count, saved.executable_count);
+        assert_eq!(latest.graph_modules_csv, "core,textops,healthcheck");
+        assert_eq!(
+            latest.graph_function_steps_csv,
+            "core.echo,textops.to_markdown,healthcheck.runtime_ready"
+        );
+        assert_eq!(
+            latest.graph_function_inputs_json,
+            r#"{"node-fn-core-echo-1":"{\"message\":\"hello\"}"}"#
+        );
+
+        let receipt: serde_json::Value = serde_json::from_str(&latest.reflection_receipt_json)
+            .expect("reflection receipt should be valid json");
+        assert_eq!(receipt["count"].as_u64(), Some(saved.executable_count as u64));
+    }
+
+    #[tokio::test]
+    async fn workflow_execute_uses_latest_persisted_revision_metadata() {
+        let service = RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+        );
+        let source = valid_workflow_source();
+
+        let saved = service
+            .workflow_save(WorkflowSaveRequest {
+                workflow_id: "wf.exec.meta".to_string(),
+                queue: "queue.exec.meta".to_string(),
+                source: source.to_string(),
+                graph_modules_csv: None,
+                graph_function_steps_csv: Some("core.echo,textops.to_markdown".to_string()),
+                graph_function_inputs_json: Some(
+                    r#"{"node-fn-core-echo-1":"{\"message\":\"ping\"}"}"#.to_string(),
+                ),
+            })
+            .await
+            .expect("workflow save should succeed");
+
+        let executed = service
+            .workflow_execute("wf.exec.meta", "", "workflow-test")
+            .await
+            .expect("workflow execute should succeed");
+
+        assert_eq!(executed.workflow_id, "wf.exec.meta");
+        assert_eq!(executed.queue, "queue.exec.meta");
+        assert_eq!(executed.revision_id, saved.revision_id);
+        assert_eq!(executed.executable_count, saved.executable_count);
+        assert_eq!(executed.graph_function_steps_csv, "core.echo,textops.to_markdown");
+        assert_eq!(executed.source_bytes, source.trim().len());
+        assert!(executed.leased_job_id.is_none());
+        assert!(
+            DateTime::parse_from_rfc3339(&executed.reflected_at_utc).is_ok(),
+            "reflected_at_utc should be RFC3339"
+        );
+    }
+
+    #[tokio::test]
+    async fn workflow_reflection_queries_match_between_inmemory_and_surrealmem() {
+        let in_memory = RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+        );
+        let surreal_runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
+            namespace: "stasis".to_string(),
+            database: "dashboard_phase3_reflection_parity".to_string(),
+        })
+        .await
+        .expect("surreal mem runtime should build");
+        let surreal = RuntimeDashboardQueryService::from_runtime_composition(surreal_runtime);
+
+        let in_memory_search = in_memory
+            .workflow_modules_search("core")
+            .await
+            .expect("in-memory module search should succeed");
+        let surreal_search = surreal
+            .workflow_modules_search("core")
+            .await
+            .expect("surreal module search should succeed");
+
+        assert!(!in_memory_search.matches.is_empty());
+        assert_eq!(
+            in_memory_search
+                .matches
+                .iter()
+                .map(|row| row.module_id.clone())
+                .collect::<Vec<_>>(),
+            surreal_search
+                .matches
+                .iter()
+                .map(|row| row.module_id.clone())
+                .collect::<Vec<_>>()
+        );
+
+        let module_id = in_memory_search.matches[0].module_id.clone();
+        let in_memory_info = in_memory
+            .workflow_module_info(module_id.as_str())
+            .await
+            .expect("in-memory module info should succeed")
+            .expect("module info should exist");
+        let surreal_info = surreal
+            .workflow_module_info(module_id.as_str())
+            .await
+            .expect("surreal module info should succeed")
+            .expect("module info should exist");
+        assert_eq!(in_memory_info.module_id, surreal_info.module_id);
+        assert_eq!(in_memory_info.total_ops, surreal_info.total_ops);
+
+        let in_memory_types = in_memory
+            .workflow_module_types(module_id.as_str())
+            .await
+            .expect("in-memory module types should succeed")
+            .expect("module types should exist");
+        let surreal_types = surreal
+            .workflow_module_types(module_id.as_str())
+            .await
+            .expect("surreal module types should succeed")
+            .expect("module types should exist");
+        assert_eq!(in_memory_types.module_id, surreal_types.module_id);
+        assert_eq!(in_memory_types.total_types, surreal_types.total_types);
+    }
+
+    #[tokio::test]
+    async fn workflow_saved_revision_summary_returns_latest_saved_revision() {
+        let service = RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+        );
+        let source = valid_workflow_source();
+
+        let saved = service
+            .workflow_save(WorkflowSaveRequest {
+                workflow_id: "wf.summary".to_string(),
+                queue: "queue.summary".to_string(),
+                source: source.to_string(),
+                graph_modules_csv: Some("core, branch, healthcheck, core".to_string()),
+                graph_function_steps_csv: Some(
+                    "core.echo,healthcheck.runtime_ready,unknown.bad,core.echo".to_string(),
+                ),
+                graph_function_inputs_json: Some(
+                    r#"{"node-fn-core-echo-1":"{\"message\":\"summary\"}"}"#.to_string(),
+                ),
+            })
+            .await
+            .expect("workflow save should succeed");
+
+        let summary = service
+            .workflow_saved_revision_summary("wf.summary")
+            .await
+            .expect("summary lookup should succeed")
+            .expect("summary should exist");
+
+        assert_eq!(summary.workflow_id, "wf.summary");
+        assert_eq!(summary.revision_id, saved.revision_id);
+        assert_eq!(summary.executable_count, saved.executable_count);
+        assert_eq!(summary.source_bytes, source.trim().len());
+        assert_eq!(summary.graph_modules_csv, "core,healthcheck");
+        assert_eq!(summary.graph_function_steps_csv, "core.echo,healthcheck.runtime_ready");
+        assert_eq!(
+            summary.graph_function_inputs_json,
+            r#"{"node-fn-core-echo-1":"{\"message\":\"summary\"}"}"#
+        );
+        assert!(summary.source.contains("query Echo"));
+    }
+
+    #[tokio::test]
+    async fn workflow_lsp_diagnostics_reports_disabled_without_feature() {
+        let service = RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+        );
+
+        let diagnostics = service
+            .workflow_lsp_diagnostics(valid_workflow_source())
+            .await
+            .expect("diagnostics call should succeed");
+
+        #[cfg(not(feature = "dashboard-lsp"))]
+        {
+            assert!(!diagnostics.enabled);
+            assert_eq!(diagnostics.provider, "fallback-parser");
+            assert!(diagnostics.diagnostics.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn workflow_lsp_diagnostics_marks_parse_errors_with_parse_code() {
+        let service = RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+        );
+
+        let diagnostics = service
+            .workflow_lsp_diagnostics("query Broken {")
+            .await
+            .expect("diagnostics call should succeed");
+
+        assert!(!diagnostics.diagnostics.is_empty());
+        assert_eq!(diagnostics.diagnostics[0].severity, WorkflowDiagnosticSeverity::Error);
+        assert_eq!(diagnostics.diagnostics[0].code.as_deref(), Some("PARSE"));
+    }
+
+    #[tokio::test]
+    async fn workflow_lsp_diagnostics_marks_reflection_errors_with_reflection_code() {
+        let service = RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+        );
+
+        let source = r#"
+import core from "grapheme/core"
+
+query Broken {
+  core.not_real(message: "ping")
+}
+"#;
+
+        let diagnostics = service
+            .workflow_lsp_diagnostics(source)
+            .await
+            .expect("diagnostics call should succeed");
+
+        assert!(!diagnostics.diagnostics.is_empty());
+        assert_eq!(diagnostics.diagnostics[0].severity, WorkflowDiagnosticSeverity::Error);
+        assert_ne!(diagnostics.diagnostics[0].code.as_deref(), Some("PARSE"));
+    }
+}

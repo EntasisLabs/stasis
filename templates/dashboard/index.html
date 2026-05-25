@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Stasis Command Center</title>
     <link rel="stylesheet" href="/assets/dashboard.css" />
+    <link rel="stylesheet" href="/assets/workflow-builder.css" />
   </head>
   <body>
     <div class="flex h-screen overflow-hidden" id="dashboard-shell">
@@ -258,8 +259,43 @@
 
         var collapseStorageKey = "stasis.dashboard.sidebar.collapsed";
         var themeStorageKey = "stasis.dashboard.theme";
+        var workflowNodeStorageKey = "stasis.dashboard.workflow.selectedNode";
         var currentView = "jobs";
         var liveViews = { jobs: true, endpoints: true, cluster: true, outbox: true, deadletter: true };
+        var telemetryState = {
+          builderOpened: false,
+          advancedModeOpened: false,
+          firstNodeAdded: false,
+          firstSuccessfulRun: false,
+        };
+
+        function emitDashboardEvent(name, payload) {
+          var detail = {
+            event: name,
+            view: currentView,
+            ts: Date.now(),
+          };
+          if (payload && typeof payload === "object") {
+            Object.keys(payload).forEach(function (key) {
+              detail[key] = payload[key];
+            });
+          }
+
+          if (typeof window.CustomEvent === "function") {
+            document.dispatchEvent(
+              new window.CustomEvent("stasis:dashboard:event", { detail: detail })
+            );
+          }
+
+          if (
+            window.stasisDashboardTelemetry &&
+            typeof window.stasisDashboardTelemetry.track === "function"
+          ) {
+            try {
+              window.stasisDashboardTelemetry.track(name, detail);
+            } catch (e) {}
+          }
+        }
 
         function applyCollapsed(collapsed) {
           shell.classList.toggle("sidebar-collapsed", collapsed);
@@ -364,6 +400,16 @@
             })
             .then(function (html) {
               target.innerHTML = html;
+              if (
+                !telemetryState.firstSuccessfulRun &&
+                url === "/action/workflows/execute" &&
+                html.indexOf("Workflow Execute") >= 0
+              ) {
+                telemetryState.firstSuccessfulRun = true;
+                emitDashboardEvent("first_successful_run", {
+                  action: "workflow_execute",
+                });
+              }
               loadView(currentView);
             })
             .catch(function (error) {
@@ -380,6 +426,21 @@
         function requestInto(element) {
           var url = element.getAttribute("hx-get");
           if (!url) return;
+          var includeSelector = element.getAttribute("data-include-selector");
+          var includeParam = element.getAttribute("data-include-param");
+          if (includeSelector && includeParam) {
+            var includeNode = document.querySelector(includeSelector);
+            if (includeNode) {
+              var includeValue = typeof includeNode.value === "string"
+                ? includeNode.value
+                : (includeNode.textContent || "");
+              if (includeValue.trim().length > 0) {
+                var includeUrl = new URL(url, window.location.origin);
+                includeUrl.searchParams.set(includeParam, includeValue);
+                url = includeUrl.pathname + includeUrl.search;
+              }
+            }
+          }
           var targetSelector = element.getAttribute("hx-target");
           var swap = element.getAttribute("hx-swap") || "innerHTML";
           var target = targetSelector ? document.querySelector(targetSelector) : element;
@@ -401,6 +462,19 @@
           formData.forEach(function (value, key) {
             if (typeof value === "string") params.append(key, value);
           });
+          var includeSelector = form.getAttribute("data-include-selector");
+          var includeParam = form.getAttribute("data-include-param");
+          if (includeSelector && includeParam) {
+            var includeNode = document.querySelector(includeSelector);
+            if (includeNode) {
+              var includeValue = typeof includeNode.value === "string"
+                ? includeNode.value
+                : (includeNode.textContent || "");
+              if (includeValue.trim().length > 0) {
+                params.set(includeParam, includeValue);
+              }
+            }
+          }
           var query = params.toString();
           var finalUrl =
             url + (query.length > 0 ? (url.indexOf("?") >= 0 ? "&" : "?") + query : "");
@@ -440,7 +514,155 @@
           host.style.opacity = "0.4";
           host.style.transition = "opacity 0.15s ease";
           request("/view/" + viewName, host, "innerHTML", function () {
+            if (viewName === "workflows") {
+              if (!telemetryState.builderOpened) {
+                telemetryState.builderOpened = true;
+                emitDashboardEvent("builder_opened", { mode: "guided" });
+              }
+              restoreWorkflowNodeSelection();
+            }
             host.style.opacity = "1";
+          });
+        }
+
+        function readWorkflowNodeMap() {
+          try {
+            var raw = window.localStorage.getItem(workflowNodeStorageKey);
+            if (!raw) return {};
+            var parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : {};
+          } catch (e) {
+            return {};
+          }
+        }
+
+        function writeWorkflowNodeMap(map) {
+          try {
+            window.localStorage.setItem(workflowNodeStorageKey, JSON.stringify(map));
+          } catch (e) {}
+        }
+
+        function persistWorkflowNodeSelection(queue, nodeId) {
+          if (!queue || !nodeId) return;
+          var map = readWorkflowNodeMap();
+          map[queue] = nodeId;
+          writeWorkflowNodeMap(map);
+        }
+
+        function requestWorkflowNodeSelection(queue, nodeId, modulesCsv, functionStepsCsv, functionInputsJson, addModuleKind, addFunctionStep, moduleCatalog) {
+          if (!queue) return;
+          var url = "/view/workflows?queue=" + encodeURIComponent(queue);
+          if (nodeId && nodeId.trim().length > 0) {
+            url += "&node=" + encodeURIComponent(nodeId);
+          }
+          if (modulesCsv && modulesCsv.trim().length > 0) {
+            url += "&modules=" + encodeURIComponent(modulesCsv.trim());
+          }
+          if (functionStepsCsv && functionStepsCsv.trim().length > 0) {
+            url += "&function_steps=" + encodeURIComponent(functionStepsCsv.trim());
+          }
+          if (functionInputsJson && functionInputsJson.trim().length > 0) {
+            url += "&function_inputs=" + encodeURIComponent(functionInputsJson.trim());
+          }
+          if (addModuleKind && addModuleKind.trim().length > 0) {
+            url += "&add_module=" + encodeURIComponent(addModuleKind.trim());
+          }
+          if (addFunctionStep && addFunctionStep.trim().length > 0) {
+            url += "&add_function=" + encodeURIComponent(addFunctionStep.trim());
+          }
+          if (moduleCatalog && moduleCatalog.trim().length > 0) {
+            url += "&module_catalog=" + encodeURIComponent(moduleCatalog.trim());
+          }
+          request(url, host, "innerHTML");
+        }
+
+        function restoreWorkflowNodeSelection() {
+          var dropzone = host.querySelector("[data-canvas-dropzone]");
+          if (!dropzone) return;
+
+          var queue = dropzone.getAttribute("data-selected-queue") || "";
+          var currentNode = dropzone.getAttribute("data-selected-node") || "";
+          var modulesCsv = dropzone.getAttribute("data-custom-modules") || "";
+          var functionStepsCsv = dropzone.getAttribute("data-custom-function-steps") || "";
+          var functionInputsState = document.getElementById("workflow-function-inputs-state");
+          var functionInputsJson = functionInputsState ? (functionInputsState.value || "") : (dropzone.getAttribute("data-custom-function-inputs") || "");
+          var moduleCatalog = dropzone.getAttribute("data-selected-module-catalog") || "";
+          var savedNode = readWorkflowNodeMap()[queue] || "";
+
+          if (queue && savedNode && savedNode !== currentNode) {
+            requestWorkflowNodeSelection(queue, savedNode, modulesCsv, functionStepsCsv, functionInputsJson, "", "", moduleCatalog);
+          }
+        }
+
+        function updateFunctionInputState(nodeId, payload) {
+          if (!nodeId) return;
+          var stateNode = document.getElementById("workflow-function-inputs-state");
+          if (!stateNode) return;
+
+          var map = {};
+          if (stateNode.value && stateNode.value.trim().length > 0) {
+            try {
+              var parsed = JSON.parse(stateNode.value);
+              if (parsed && typeof parsed === "object") {
+                map = parsed;
+              }
+            } catch (e) {
+              map = {};
+            }
+          }
+
+          map[nodeId] = payload || "{}";
+          stateNode.value = JSON.stringify(map);
+        }
+
+        function focusWorkflowNode(offset) {
+          var nodeButtons = Array.prototype.slice.call(
+            host.querySelectorAll("[data-canvas-node-button]")
+          );
+          if (nodeButtons.length === 0) return;
+
+          var active = document.activeElement;
+          var currentIndex = nodeButtons.indexOf(active);
+          if (currentIndex < 0) {
+            currentIndex = nodeButtons.findIndex(function (node) {
+              return node.getAttribute("data-node-id") ===
+                ((host.querySelector("[data-canvas-dropzone]") || {}).getAttribute
+                  ? host.querySelector("[data-canvas-dropzone]").getAttribute("data-selected-node")
+                  : "");
+            });
+          }
+          if (currentIndex < 0) currentIndex = 0;
+
+          var nextIndex = (currentIndex + offset + nodeButtons.length) % nodeButtons.length;
+          var nextNode = nodeButtons[nextIndex];
+          nextNode.focus();
+          nextNode.click();
+        }
+
+        function nodeIdForModuleKind(kind) {
+          return "";
+        }
+
+        function activateBuilderTab(trigger) {
+          var group = trigger.closest("[data-builder-tab-group]");
+          if (!group) return;
+
+          var targetTab = trigger.getAttribute("data-builder-tab-trigger");
+          if (!targetTab) return;
+
+          group.querySelectorAll("[data-builder-tab-trigger]").forEach(function (tabTrigger) {
+            var isActive = tabTrigger === trigger;
+            tabTrigger.classList.toggle("btn-ghost", !isActive);
+            tabTrigger.classList.toggle("btn-outline", !isActive);
+            tabTrigger.style.background = isActive ? "var(--primary)" : "transparent";
+            tabTrigger.style.color = isActive
+              ? "var(--primary-foreground)"
+              : "var(--muted-foreground)";
+          });
+
+          group.querySelectorAll("[data-builder-tab-panel]").forEach(function (panel) {
+            var panelTab = panel.getAttribute("data-builder-tab-panel");
+            panel.classList.toggle("hidden", panelTab !== targetTab);
           });
         }
 
@@ -457,6 +679,46 @@
         });
 
         document.addEventListener("click", function (event) {
+          var themeTrigger = event.target.closest("[data-theme-toggle]");
+          if (themeTrigger) {
+            event.preventDefault();
+            applyTheme(theme === "dark" ? "light" : "dark");
+            try { window.localStorage.setItem(themeStorageKey, theme); }
+            catch (e) {}
+            return;
+          }
+
+          var builderTabTrigger = event.target.closest("[data-builder-tab-trigger]");
+          if (builderTabTrigger) {
+            event.preventDefault();
+            activateBuilderTab(builderTabTrigger);
+            return;
+          }
+
+          var workflowNodeTrigger = event.target.closest("[data-canvas-node-button]");
+          if (workflowNodeTrigger) {
+            event.preventDefault();
+            var dropzone = host.querySelector("[data-canvas-dropzone]");
+            if (dropzone) {
+              var queue = dropzone.getAttribute("data-selected-queue") || "";
+              var nodeId = workflowNodeTrigger.getAttribute("data-node-id") || "";
+              var modulesNode = document.getElementById("workflow-modules-state");
+              var functionStepsNode = document.getElementById("workflow-function-steps-state");
+              var functionInputsNode = document.getElementById("workflow-function-inputs-state");
+              var modulesCsv = modulesNode ? (modulesNode.value || "") : (dropzone.getAttribute("data-custom-modules") || "");
+              var functionStepsCsv = functionStepsNode
+                ? (functionStepsNode.value || "")
+                : (dropzone.getAttribute("data-custom-function-steps") || "");
+              var functionInputsJson = functionInputsNode
+                ? (functionInputsNode.value || "")
+                : (dropzone.getAttribute("data-custom-function-inputs") || "");
+              var moduleCatalog = dropzone.getAttribute("data-selected-module-catalog") || "";
+              persistWorkflowNodeSelection(queue, nodeId);
+              requestWorkflowNodeSelection(queue, nodeId, modulesCsv, functionStepsCsv, functionInputsJson, "", "", moduleCatalog);
+            }
+            return;
+          }
+
           var actionTrigger = event.target.closest("[data-action-post]");
           if (actionTrigger) {
             event.preventDefault();
@@ -468,6 +730,66 @@
             if (bodyRaw) {
               try { body = JSON.parse(bodyRaw); } catch (e) { body = {}; }
             }
+            var sourceSelector = actionTrigger.getAttribute("data-action-source-selector");
+            if (sourceSelector) {
+              var sourceNode = document.querySelector(sourceSelector);
+              if (sourceNode) {
+                var sourceValue = "";
+                if (typeof sourceNode.value === "string") {
+                  sourceValue = sourceNode.value;
+                } else {
+                  sourceValue = sourceNode.textContent || "";
+                }
+                if (sourceValue.trim().length > 0) {
+                  body.source = sourceValue;
+                }
+              }
+            }
+            var modulesSelector = actionTrigger.getAttribute("data-action-modules-selector");
+            if (modulesSelector) {
+              var modulesNode = document.querySelector(modulesSelector);
+              if (modulesNode) {
+                var modulesValue = "";
+                if (typeof modulesNode.value === "string") {
+                  modulesValue = modulesNode.value;
+                } else {
+                  modulesValue = modulesNode.textContent || "";
+                }
+                if (modulesValue.trim().length > 0) {
+                  body.modules = modulesValue;
+                }
+              }
+            }
+            var functionStepsSelector = actionTrigger.getAttribute("data-action-function-steps-selector");
+            if (functionStepsSelector) {
+              var functionStepsNode = document.querySelector(functionStepsSelector);
+              if (functionStepsNode) {
+                var functionStepsValue = "";
+                if (typeof functionStepsNode.value === "string") {
+                  functionStepsValue = functionStepsNode.value;
+                } else {
+                  functionStepsValue = functionStepsNode.textContent || "";
+                }
+                if (functionStepsValue.trim().length > 0) {
+                  body.function_steps = functionStepsValue;
+                }
+              }
+            }
+            var functionInputsSelector = actionTrigger.getAttribute("data-action-function-inputs-selector");
+            if (functionInputsSelector) {
+              var functionInputsNode = document.querySelector(functionInputsSelector);
+              if (functionInputsNode) {
+                var functionInputsValue = "";
+                if (typeof functionInputsNode.value === "string") {
+                  functionInputsValue = functionInputsNode.value;
+                } else {
+                  functionInputsValue = functionInputsNode.textContent || "";
+                }
+                if (functionInputsValue.trim().length > 0) {
+                  body.function_inputs = functionInputsValue;
+                }
+              }
+            }
             var inspector = document.getElementById("inspector-panel");
             postAction(url, body, inspector, actionTrigger);
             return;
@@ -475,6 +797,17 @@
           var trigger = event.target.closest("[hx-get]");
           if (!trigger) return;
           if (trigger.tagName === "A" || trigger.tagName === "BUTTON") event.preventDefault();
+
+          var hxUrl = trigger.getAttribute("hx-get") || "";
+          if (
+            !telemetryState.advancedModeOpened &&
+            hxUrl.indexOf("/view/workflows") === 0 &&
+            hxUrl.indexOf("mode=advanced") >= 0
+          ) {
+            telemetryState.advancedModeOpened = true;
+            emitDashboardEvent("advanced_mode_opened", { source: "builder_link" });
+          }
+
           requestInto(trigger);
         });
 
@@ -483,6 +816,91 @@
           if (!form) return;
           event.preventDefault();
           requestFromForm(form);
+        });
+
+        document.addEventListener("input", function (event) {
+          var editor = event.target.closest("[data-function-input-editor]");
+          if (!editor) return;
+          var nodeId = editor.getAttribute("data-node-id") || "";
+          updateFunctionInputState(nodeId, editor.value || "");
+        });
+
+        document.addEventListener("keydown", function (event) {
+          if (currentView !== "workflows") return;
+
+          if (event.key === "ArrowDown") {
+            if (event.target.closest("[data-canvas-node-button]")) {
+              event.preventDefault();
+              focusWorkflowNode(1);
+            }
+          } else if (event.key === "ArrowUp") {
+            if (event.target.closest("[data-canvas-node-button]")) {
+              event.preventDefault();
+              focusWorkflowNode(-1);
+            }
+          }
+        });
+
+        document.addEventListener("dragstart", function (event) {
+          var tile = event.target.closest("[data-module-tile]");
+          if (!tile || !event.dataTransfer) return;
+          event.dataTransfer.effectAllowed = "copy";
+          event.dataTransfer.setData("text/workflow-module-kind", tile.getAttribute("data-module-kind") || "");
+          event.dataTransfer.setData("text/workflow-module-label", tile.getAttribute("data-module-label") || "");
+          event.dataTransfer.setData("text/workflow-function-id", tile.getAttribute("data-function-id") || "");
+        });
+
+        document.addEventListener("dragover", function (event) {
+          var dropzone = event.target.closest("[data-canvas-dropzone]");
+          if (!dropzone) return;
+          event.preventDefault();
+          if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = "copy";
+          }
+          dropzone.style.borderColor = "var(--primary)";
+        });
+
+        document.addEventListener("dragleave", function (event) {
+          var dropzone = event.target.closest("[data-canvas-dropzone]");
+          if (!dropzone) return;
+          dropzone.style.borderColor = "var(--border)";
+        });
+
+        document.addEventListener("drop", function (event) {
+          var dropzone = event.target.closest("[data-canvas-dropzone]");
+          if (!dropzone) return;
+          event.preventDefault();
+          dropzone.style.borderColor = "var(--border)";
+
+          if (!event.dataTransfer) return;
+          var kind = event.dataTransfer.getData("text/workflow-module-kind");
+          var functionId = event.dataTransfer.getData("text/workflow-function-id");
+          var queue = dropzone.getAttribute("data-selected-queue") || "";
+          var modulesCsv = dropzone.getAttribute("data-custom-modules") || "";
+          var functionStepsCsv = dropzone.getAttribute("data-custom-function-steps") || "";
+          var functionInputsStateNode = document.getElementById("workflow-function-inputs-state");
+          var functionInputsJson = functionInputsStateNode
+            ? (functionInputsStateNode.value || "")
+            : (dropzone.getAttribute("data-custom-function-inputs") || "");
+          var moduleCatalog = dropzone.getAttribute("data-selected-module-catalog") || "";
+          var nodeId = nodeIdForModuleKind(kind);
+          var addFunctionStep = "";
+          if (kind && functionId) {
+            addFunctionStep = kind.trim().toLowerCase() + "." + functionId.trim().toLowerCase();
+          }
+
+          if (!telemetryState.firstNodeAdded && kind && kind.trim().length > 0) {
+            telemetryState.firstNodeAdded = true;
+            emitDashboardEvent("first_node_added", {
+              queue: queue,
+              module_kind: kind.trim().toLowerCase(),
+            });
+          }
+
+          if (nodeId && nodeId.trim().length > 0) {
+            persistWorkflowNodeSelection(queue, nodeId);
+          }
+          requestWorkflowNodeSelection(queue, nodeId, modulesCsv, functionStepsCsv, functionInputsJson, kind, addFunctionStep, moduleCatalog);
         });
 
         window.setInterval(function () {

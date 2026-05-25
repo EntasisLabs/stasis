@@ -1,0 +1,243 @@
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">Flow Insights</h3>
+    <p class="card-description">Workflow {{ reflection.workflow_id }} on queue {{ reflection.queue }}</p>
+  </div>
+  <div class="card-content pt-0">
+    <div class="rounded-lg p-3" style="border: 1px solid {% if reflection.comparison.status_tone == "ok" %}var(--primary){% else if reflection.comparison.status_tone == "warn" %}#eab308{% else %}var(--border){% endif %}; background: {% if reflection.comparison.status_tone == "ok" %}color-mix(in srgb, var(--primary) 10%, transparent){% else if reflection.comparison.status_tone == "warn" %}color-mix(in srgb, #eab308 14%, transparent){% else %}color-mix(in srgb, var(--accent) 45%, transparent){% endif %};">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <p class="text-xs font-semibold" style="color: var(--foreground);">Saved vs Live Drift</p>
+          <p class="text-xs" style="color: var(--muted-foreground);">{{ reflection.comparison.detail }}</p>
+        </div>
+        <span class="text-xs px-2 py-0.5 rounded" style="background: var(--card); border: 1px solid var(--border); color: var(--foreground);">{{ reflection.comparison.status_label }}</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 text-xs" style="color: var(--muted-foreground);">
+        <div>
+          <p>live: executables={{ reflection.comparison.live_executable_count }} source_bytes={{ reflection.comparison.live_source_bytes }}</p>
+          {% match reflection.comparison.saved_revision_id %}
+          {% when Some with (revision_id) %}
+          <p>saved revision={{ revision_id }}</p>
+          {% when None %}
+          <p>saved revision=none</p>
+          {% endmatch %}
+        </div>
+        <div>
+          {% match reflection.comparison.saved_executable_count %}
+          {% when Some with (saved_exec) %}
+          <p>saved: executables={{ saved_exec }}</p>
+          {% when None %}
+          <p>saved: executables=n/a</p>
+          {% endmatch %}
+          {% match reflection.comparison.saved_source_bytes %}
+          {% when Some with (saved_bytes) %}
+          <p>saved: source_bytes={{ saved_bytes }}</p>
+          {% when None %}
+          <p>saved: source_bytes=n/a</p>
+          {% endmatch %}
+          {% match reflection.comparison.saved_reflected_at_utc %}
+          {% when Some with (saved_at) %}
+          <p>saved reflected_at={{ saved_at }}</p>
+          {% when None %}
+          <p>saved reflected_at=n/a</p>
+          {% endmatch %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card-content pt-0">
+    <div class="rounded-lg p-3" style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 35%, transparent);">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <p class="text-xs font-semibold" style="color: var(--foreground);">Readiness Guidance</p>
+          <p class="text-xs" style="color: var(--muted-foreground);">{{ reflection.diagnostics.summary }}</p>
+        </div>
+        {% if advanced_mode %}
+        <span class="text-xs px-2 py-0.5 rounded" style="background: var(--card); border: 1px solid var(--border); color: var(--foreground);">provider={{ reflection.diagnostics.provider }}</span>
+        {% else %}
+        <span class="text-xs px-2 py-0.5 rounded" style="background: var(--card); border: 1px solid var(--border); color: var(--foreground);">guided mode</span>
+        {% endif %}
+      </div>
+
+      {% if !reflection.diagnostics.enabled %}
+      <p class="text-xs mt-2 rounded p-2" style="background: color-mix(in srgb, #eab308 14%, transparent); border: 1px dashed #eab308; color: var(--foreground);">
+        LSP diagnostics are currently disabled for this dashboard build.
+      </p>
+      {% endif %}
+
+      {% if reflection.diagnostics.diagnostics.is_empty() %}
+      <p class="text-xs mt-2" style="color: var(--muted-foreground);">No diagnostics emitted for the current source.</p>
+      {% else if !advanced_mode %}
+      <p class="text-xs mt-2 rounded p-2" style="background: color-mix(in srgb, var(--accent) 55%, transparent); border: 1px dashed var(--border); color: var(--foreground);">
+        {{ reflection.diagnostics.diagnostics.len() }} issue(s) detected. Open Advanced Tools for detailed diagnostics and source traces.
+      </p>
+      {% else %}
+      <div class="mt-2 flex flex-col gap-2">
+        {% for item in reflection.diagnostics.diagnostics %}
+        <div class="text-xs rounded p-2" style="background: var(--card); border: 1px solid {% if item.severity == "error" %}#ef4444{% else if item.severity == "warning" %}#eab308{% else %}var(--border){% endif %};">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-semibold" style="text-transform: uppercase; color: var(--foreground);">{{ item.severity }}</span>
+            {% match item.code %}
+            {% when Some with (code) %}
+            <span style="color: var(--muted-foreground);">{{ code }}</span>
+            {% when None %}
+            <span style="color: var(--muted-foreground);">no-code</span>
+            {% endmatch %}
+          </div>
+          <p class="mt-1" style="color: var(--foreground);">{{ item.message }}</p>
+          <p style="color: var(--muted-foreground);">line={{ item.line.unwrap_or(0) }} column={{ item.column.unwrap_or(0) }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card-content grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="rounded-lg p-4" style="border: 1px solid var(--border); background: var(--accent);">
+      <h4 class="text-sm font-semibold mb-2">Executable Signatures</h4>
+      <p class="text-xs mb-3" style="color: var(--muted-foreground);">{{ reflection.executable_count }} reflected from source</p>
+      <div class="flex flex-col gap-2">
+        {% for item in reflection.executables %}
+        <div class="rounded p-2" style="background: var(--card); border: 1px solid var(--border);">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-mono text-xs">{{ item.name }}</span>
+            <span class="text-xs px-2 py-0.5 rounded" style="background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary);">{{ item.kind }}</span>
+          </div>
+          <p class="text-xs mt-1" style="color: var(--muted-foreground);">in={{ item.input_type.as_deref().unwrap_or("none") }} out={{ item.output_type.as_deref().unwrap_or("none") }} pipelines={{ item.pipeline_count }} steps={{ item.step_count }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="rounded-lg p-4" style="border: 1px solid var(--border); background: var(--accent);">
+      <h4 class="text-sm font-semibold mb-2">Module Catalog</h4>
+      <form class="mb-3 rounded p-3 grid grid-cols-1 md:grid-cols-3 gap-2" style="background: var(--card); border: 1px solid var(--border);"
+        data-hx-get="/stream/workflow-reflection"
+        data-include-selector="#workflow-source-editor"
+        data-include-param="source"
+        hx-target="#workflow-reflection-panel"
+        hx-swap="innerHTML">
+        <input type="hidden" name="workflow_id" value="{{ reflection.workflow_id }}" />
+        <input type="hidden" name="queue" value="{{ reflection.queue }}" />
+        <input type="hidden" name="module_id" value="{{ reflection.selected_module_id }}" />
+
+        <label class="text-xs flex flex-col gap-1" style="color: var(--muted-foreground);">
+          Capability
+          <input
+            name="capability"
+            value="{{ reflection.filter_capability }}"
+            list="workflow-capability-options"
+            class="rounded px-2 py-1 text-xs"
+            style="background: var(--background); border: 1px solid var(--border); color: var(--foreground);"
+            placeholder="io"
+          />
+        </label>
+
+        <label class="text-xs flex flex-col gap-1" style="color: var(--muted-foreground);">
+          Effect
+          <input
+            name="effect"
+            value="{{ reflection.filter_effect }}"
+            list="workflow-effect-options"
+            class="rounded px-2 py-1 text-xs"
+            style="background: var(--background); border: 1px solid var(--border); color: var(--foreground);"
+            placeholder="read"
+          />
+        </label>
+
+        <label class="text-xs flex flex-col gap-1" style="color: var(--muted-foreground);">
+          Operation contains
+          <input
+            name="op"
+            value="{{ reflection.filter_op }}"
+            class="rounded px-2 py-1 text-xs"
+            style="background: var(--background); border: 1px solid var(--border); color: var(--foreground);"
+            placeholder="echo"
+          />
+        </label>
+
+        <div class="md:col-span-3 flex items-center justify-between mt-1">
+          <p class="text-xs" style="color: var(--muted-foreground);">Filters shape module operations without losing dashboard context.</p>
+          <button type="submit" class="btn btn-outline btn-sm">Apply Filters</button>
+        </div>
+      </form>
+
+      <div class="flex flex-col gap-2 mb-3">
+        {% for module in reflection.module_matches %}
+        <button
+          class="text-xs px-2 py-2 rounded text-left"
+          style="background: {% if reflection.selected_module_id == module.module_id %}color-mix(in srgb, var(--primary) 12%, var(--card)){% else %}var(--card){% endif %}; border: 1px solid {% if reflection.selected_module_id == module.module_id %}var(--primary){% else %}var(--border){% endif %};"
+          type="button"
+          hx-get="/stream/workflow-reflection?workflow_id={{ reflection.workflow_id }}&queue={{ reflection.queue }}&module_id={{ module.module_id }}&capability={{ reflection.filter_capability }}&effect={{ reflection.filter_effect }}&op={{ reflection.filter_op }}"
+          data-include-selector="#workflow-source-editor"
+          data-include-param="source"
+          hx-target="#workflow-reflection-panel"
+          hx-swap="innerHTML"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-mono">{{ module.module_id }}</span>
+            {% if module.score.is_some() %}
+            <span style="color: var(--muted-foreground);">score={{ module.score.unwrap_or(0.0) }}</span>
+            {% endif %}
+          </div>
+          <p class="mt-1" style="color: var(--muted-foreground);">{{ module.summary }}</p>
+          <p class="mt-1" style="color: var(--muted-foreground);">ops={{ module.matching_ops|join(", ") }}</p>
+        </button>
+        {% endfor %}
+      </div>
+
+      {% match reflection.selected_module %}
+      {% when Some with (module) %}
+      <div class="rounded p-3" style="background: var(--card); border: 1px solid var(--border);">
+        <div class="flex items-center justify-between gap-2">
+          <h5 class="font-mono text-sm">{{ module.module_id }}</h5>
+          <span class="text-xs" style="color: var(--muted-foreground);">v{{ module.version }}</span>
+        </div>
+        <p class="text-xs mt-1" style="color: var(--muted-foreground);">entrypoint={{ module.entrypoint }} ops={{ module.total_ops }} types={{ module.total_types }}</p>
+        <p class="text-xs mt-1" style="color: var(--muted-foreground);">showing {{ module.operations.len() }} of {{ module.operation_total }} exported operations</p>
+        <div class="mt-2 flex flex-wrap gap-1">
+          {% for capability in module.required_capabilities %}
+          <span class="text-xs px-2 py-0.5 rounded" style="background: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);">{{ capability }}</span>
+          {% endfor %}
+        </div>
+        <div class="mt-3 flex flex-col gap-2">
+          {% if module.operations.is_empty() %}
+          <p class="text-xs rounded p-2" style="background: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--muted-foreground); border: 1px dashed var(--border);">
+            No exported operations matched selected filters.
+          </p>
+          {% endif %}
+          {% for op in module.operations %}
+          <div class="text-xs rounded p-2" style="background: var(--accent); border: 1px solid var(--border);">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-mono">{{ op.name }}</span>
+              <span style="color: var(--muted-foreground);">{{ op.effect }} / {{ op.stability }}</span>
+            </div>
+            <p style="color: var(--muted-foreground);">schema in={{ op.has_input_schema }} out={{ op.has_output_schema }}</p>
+          </div>
+          {% endfor %}
+        </div>
+
+        <datalist id="workflow-capability-options">
+          {% for capability in module.capability_options %}
+          <option value="{{ capability }}"></option>
+          {% endfor %}
+        </datalist>
+        <datalist id="workflow-effect-options">
+          {% for effect in module.effect_options %}
+          <option value="{{ effect }}"></option>
+          {% endfor %}
+        </datalist>
+      </div>
+      {% when None %}
+      <p class="text-xs" style="color: var(--muted-foreground);">No module detail available.</p>
+      {% endmatch %}
+    </div>
+  </div>
+
+  {% if advanced_mode %}
+  <div class="card-content pt-0">
+    <h4 class="text-sm font-semibold mb-2">Grapheme Source Preview</h4>
+    <pre class="text-xs font-mono p-3 rounded-lg overflow-x-auto" style="background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--foreground);">{{ reflection.source }}</pre>
+  </div>
+  {% endif %}
+</div>

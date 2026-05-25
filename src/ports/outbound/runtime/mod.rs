@@ -16,3 +16,5 @@ pub mod recurring_store;
 pub mod runtime_metrics;
 pub mod thread_store;
 pub mod workflow_engine;
+pub mod workflow_definition_store;
+pub mod workflow_reflection;

@@ -24,6 +24,7 @@
 - Unified SDK surface proposal: [design/unified-sdk-surface-proposal.md](design/unified-sdk-surface-proposal.md)
 - Locus integration RFC and delivery plan: [design/locus-integration-rfc-plan.md](design/locus-integration-rfc-plan.md)
 - Hospice interoperability safety test analysis and gameplan: [design/hospice-interoperability-safety-test-gameplan.md](design/hospice-interoperability-safety-test-gameplan.md)
+- Grapheme reflection and LSP delivery plan: [design/grapheme-reflection-lsp-delivery-plan.md](design/grapheme-reflection-lsp-delivery-plan.md)
 
 ## Internal Testing Environment Variables
 

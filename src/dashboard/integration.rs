@@ -47,7 +47,7 @@ mod tests {
 
     use async_trait::async_trait;
     use axum::Router;
-    use axum::body::Body;
+    use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
@@ -59,8 +59,15 @@ mod tests {
     use crate::dashboard::integration::DashboardRouterExt;
     use crate::dashboard::service::{
         DashboardQueryService, InspectEntity, RuntimeDashboardQueryService,
+        WorkflowDiagnostic, WorkflowDiagnosticSeverity, WorkflowDiagnosticsResult,
+        WorkflowExecuteResult, WorkflowSaveRequest, WorkflowSaveResult,
+        WorkflowSavedRevisionSummary,
     };
     use crate::domain::errors::{Result, StasisError};
+    use crate::ports::outbound::runtime::workflow_reflection::{
+        WorkflowModuleInfoReflection, WorkflowModuleSearchReflection,
+        WorkflowModuleTypesReflection, WorkflowSourceReflection,
+    };
 
     #[derive(Clone)]
     struct StubDashboardService;
@@ -142,6 +149,60 @@ mod tests {
             Self::unsupported()
         }
 
+        async fn workflow_save(&self, _request: WorkflowSaveRequest) -> Result<WorkflowSaveResult> {
+            Self::unsupported()
+        }
+
+        async fn workflow_execute(
+            &self,
+            _workflow_id: &str,
+            _queue: &str,
+            _worker_id: &str,
+        ) -> Result<WorkflowExecuteResult> {
+            Self::unsupported()
+        }
+
+        async fn workflow_reflect_source(&self, _source: &str) -> Result<WorkflowSourceReflection> {
+            Self::unsupported()
+        }
+
+        async fn workflow_modules_search(&self, _query: &str) -> Result<WorkflowModuleSearchReflection> {
+            Self::unsupported()
+        }
+
+        async fn workflow_module_info(&self, _module_id: &str) -> Result<Option<WorkflowModuleInfoReflection>> {
+            Self::unsupported()
+        }
+
+        async fn workflow_module_types(&self, _module_id: &str) -> Result<Option<WorkflowModuleTypesReflection>> {
+            Self::unsupported()
+        }
+
+        async fn workflow_saved_revision_summary(
+            &self,
+            _workflow_id: &str,
+        ) -> Result<Option<WorkflowSavedRevisionSummary>> {
+            Self::unsupported()
+        }
+
+        async fn workflow_lsp_diagnostics(
+            &self,
+            _source: &str,
+        ) -> Result<WorkflowDiagnosticsResult> {
+            Ok(WorkflowDiagnosticsResult {
+                enabled: false,
+                provider: "disabled".to_string(),
+                summary: "LSP diagnostics are disabled. Enable the dashboard-lsp feature to activate diagnostics preview.".to_string(),
+                diagnostics: vec![WorkflowDiagnostic {
+                    severity: WorkflowDiagnosticSeverity::Info,
+                    message: "dashboard-lsp feature is not enabled".to_string(),
+                    code: Some("LSP_DISABLED".to_string()),
+                    line: None,
+                    column: None,
+                }],
+            })
+        }
+
         async fn inspect(&self, _entity: InspectEntity) -> Result<InspectorView> {
             Self::unsupported()
         }
@@ -211,4 +272,177 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
     }
+
+    #[tokio::test]
+    async fn add_dashboard_exposes_workflow_reflection_stream_route() {
+        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
+            namespace: "stasis".to_string(),
+            database: "dashboard_reflection_route_test".to_string(),
+        })
+        .await
+        .expect("surreal mem runtime should build");
+
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(runtime));
+        let app: Router = Router::new().add_dashboard(service);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/stream/workflow-reflection?workflow_id=wf-int&queue=queue.int")
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let html = String::from_utf8(body.to_vec()).expect("body should be utf8");
+        assert!(html.contains("Flow Insights"));
+        assert!(html.contains("Saved vs Live Drift"));
+        assert!(html.contains("Readiness Guidance"));
+        assert!(html.contains("Module Catalog"));
+        assert!(html.contains("Grapheme Source Preview"));
+    }
+
+    #[tokio::test]
+    async fn add_dashboard_exposes_workflow_reflection_module_drill_down_route() {
+        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
+            namespace: "stasis".to_string(),
+            database: "dashboard_reflection_drilldown_test".to_string(),
+        })
+        .await
+        .expect("surreal mem runtime should build");
+
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(runtime));
+        let app: Router = Router::new().add_dashboard(service);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/stream/workflow-reflection?workflow_id=wf-int&queue=queue.int&module_id=core")
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let html = String::from_utf8(body.to_vec()).expect("body should be utf8");
+        assert!(html.contains("entrypoint="));
+        assert!(html.contains("ops="));
+    }
+
+    #[tokio::test]
+    async fn add_dashboard_exposes_workflow_reflection_filter_empty_state() {
+        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
+            namespace: "stasis".to_string(),
+            database: "dashboard_reflection_filter_test".to_string(),
+        })
+        .await
+        .expect("surreal mem runtime should build");
+
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(runtime));
+        let app: Router = Router::new().add_dashboard(service);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/stream/workflow-reflection?workflow_id=wf-int&queue=queue.int&module_id=core&effect=__none__")
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let html = String::from_utf8(body.to_vec()).expect("body should be utf8");
+        assert!(html.contains("No exported operations matched selected filters."));
+    }
+
+    #[tokio::test]
+    async fn add_dashboard_exposes_workflow_reflection_source_override_content() {
+        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
+            namespace: "stasis".to_string(),
+            database: "dashboard_reflection_source_override_test".to_string(),
+        })
+        .await
+        .expect("surreal mem runtime should build");
+
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(runtime));
+        let app: Router = Router::new().add_dashboard(service);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/stream/workflow-reflection?workflow_id=wf-int&queue=queue.int&source=custom_source_preview")
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let html = String::from_utf8(body.to_vec()).expect("body should be utf8");
+        assert!(html.contains("custom_source_preview"));
+    }
+
+    #[tokio::test]
+    async fn add_dashboard_reflection_preserves_filters_and_source_across_module_cycle() {
+        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
+            namespace: "stasis".to_string(),
+            database: "dashboard_reflection_source_filter_cycle_test".to_string(),
+        })
+        .await
+        .expect("surreal mem runtime should build");
+
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(runtime));
+        let app: Router = Router::new().add_dashboard(service);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/stream/workflow-reflection?workflow_id=wf-int&queue=queue.int&source=custom_source_preview&module_id=core&capability=qa_capability&effect=qa_effect&op=qa_op")
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let html = String::from_utf8(body.to_vec()).expect("body should be utf8");
+
+        assert!(html.contains("Saved vs Live Drift"));
+        assert!(html.contains("Readiness Guidance"));
+        assert!(html.contains("custom_source_preview"));
+        assert!(html.contains("value=\"qa_capability\""));
+        assert!(html.contains("value=\"qa_effect\""));
+        assert!(html.contains("value=\"qa_op\""));
+        assert!(html.contains("No exported operations matched selected filters."));
+    }
+
 }
