@@ -141,7 +141,11 @@ impl Default for GraphemeSdkWorkflowEngine {
 
 #[async_trait]
 impl WorkflowEngine for GraphemeSdkWorkflowEngine {
-    async fn execute_grapheme_source(&self, source: &str) -> Result<WorkflowExecutionOutput> {
+    async fn execute_grapheme_source(
+        &self,
+        source: &str,
+        state_current: Option<&Value>,
+    ) -> Result<WorkflowExecutionOutput> {
         self.validate_source(source)?;
 
         if self.guardrails.execution_timeout.is_zero() {
@@ -151,8 +155,21 @@ impl WorkflowEngine for GraphemeSdkWorkflowEngine {
         }
 
         let source_owned = source.to_string();
+        let state_current_owned = state_current.cloned();
+        let guardrails = self.guardrails.clone();
         let engine = Arc::clone(&self.engine);
-        let handle = task::spawn_blocking(move || engine.execute_source(&source_owned));
+        let handle = task::spawn_blocking(move || {
+            if let Some(initial_state_current) = state_current_owned {
+                let state_engine = GraphemeEngine::builder()
+                    .with_max_steps(guardrails.max_steps)
+                    .with_max_call_depth(guardrails.max_call_depth)
+                    .with_initial_state_current(initial_state_current)
+                    .build();
+                state_engine.execute_source(&source_owned)
+            } else {
+                engine.execute_source(&source_owned)
+            }
+        });
         let result = time::timeout(self.guardrails.execution_timeout, handle)
             .await
             .map_err(|_| {

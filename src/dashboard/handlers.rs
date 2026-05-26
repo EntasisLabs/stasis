@@ -11,13 +11,17 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use chrono::Utc;
 use serde::Deserialize;
+use serde_json::Value;
 
+use crate::domain::errors::StasisError;
 use crate::dashboard::assets;
 use crate::dashboard::dto::{
     ClusterNodeCardDto, DashboardDto, EndpointInspectorDto, EventInspectorDto, InspectorView,
     JobInspectorDto, JobRowDto, NodeInspectorDto, OutboxEventRowDto, RecurringDefinitionRowDto,
 };
-use crate::dashboard::service::{DashboardQueryService, InspectEntity, WorkflowSaveRequest};
+use crate::dashboard::service::{
+    DashboardQueryService, InspectEntity, WorkflowRunDraftRequest, WorkflowSaveRequest,
+};
 
 #[derive(Clone)]
 pub struct DashboardState {
@@ -59,6 +63,7 @@ pub fn router(state: DashboardState) -> Router {
         .route("/scheduler/process", post(action_scheduler_process_queue))
         .route("/scheduler/publish", post(action_scheduler_publish_pending))
         .route("/scheduler/replay", post(action_scheduler_replay_deadletter))
+        .route("/workflows/run-draft", post(action_workflow_run_draft))
         .route("/workflows/save", post(action_workflow_save))
         .route("/workflows/execute", post(action_workflow_execute))
         .route_layer(middleware::from_fn_with_state(
@@ -580,6 +585,596 @@ fn serialize_function_inputs_json(inputs: &BTreeMap<String, String>) -> String {
     serde_json::to_string(inputs).unwrap_or_else(|_| "{}".to_string())
 }
 
+fn build_parameter_fields(
+    operation: Option<&crate::ports::outbound::runtime::workflow_reflection::WorkflowModuleOperationReflection>,
+    function_input: &str,
+) -> Vec<WorkflowParameterFieldDto> {
+    let mut entries = BTreeMap::<String, WorkflowParameterFieldDto>::new();
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(function_input)
+        && let Some(object) = value.as_object()
+    {
+        for (key, value) in object {
+            let (display_value, binding_mode) = match value {
+                serde_json::Value::Object(map) => {
+                    if let Some(state_path) = map.get("$state").and_then(serde_json::Value::as_str)
+                    {
+                        (state_path.to_string(), "state".to_string())
+                    } else {
+                        (value.to_string(), "literal".to_string())
+                    }
+                }
+                serde_json::Value::String(text) => (text.clone(), "literal".to_string()),
+                _ => (value.to_string(), "literal".to_string()),
+            };
+            entries.insert(
+                key.to_string(),
+                WorkflowParameterFieldDto {
+                    key: key.to_string(),
+                    value: display_value,
+                    binding_mode,
+                    ty: None,
+                    required: false,
+                },
+            );
+        }
+    }
+
+    if let Some(operation) = operation {
+        for arg in &operation.args {
+            entries
+                .entry(arg.name.clone())
+                .and_modify(|field| {
+                    field.required = field.required || arg.required;
+                    field.ty = Some(arg.ty.clone());
+                })
+                .or_insert_with(|| WorkflowParameterFieldDto {
+                    key: arg.name.clone(),
+                    value: String::new(),
+                    binding_mode: "literal".to_string(),
+                    ty: Some(arg.ty.clone()),
+                    required: arg.required,
+                });
+        }
+
+        if let Some(input_object_type) = &operation.input_object_type {
+            for (name, field) in &input_object_type.properties {
+                let required = field.required
+                    || input_object_type
+                        .required
+                        .iter()
+                        .any(|required_name| required_name == name);
+                entries
+                    .entry(name.clone())
+                    .and_modify(|existing| {
+                        existing.required = existing.required || required;
+                        if existing.ty.is_none() {
+                            existing.ty = Some(field.ty.clone());
+                        }
+                    })
+                    .or_insert_with(|| WorkflowParameterFieldDto {
+                        key: name.clone(),
+                        value: String::new(),
+                        binding_mode: "literal".to_string(),
+                        ty: Some(field.ty.clone()),
+                        required,
+                    });
+            }
+        }
+    }
+
+    entries.into_values().collect::<Vec<_>>()
+}
+
+fn validate_function_inputs_payload(raw: &str) -> Result<(), String> {
+    let map = serde_json::from_str::<BTreeMap<String, String>>(raw)
+        .map_err(|err| format!("function_inputs must be JSON object map (node_id -> payload): {err}"))?;
+
+    for (node_id, payload) in map {
+        let payload = payload.trim();
+        if payload.is_empty() {
+            continue;
+        }
+        if let Err(err) = serde_json::from_str::<serde_json::Value>(payload) {
+            return Err(format!(
+                "function_inputs payload for {} must be valid JSON: {}",
+                node_id, err
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn pretty_json_or_raw(raw: &str) -> String {
+    serde_json::from_str::<Value>(raw)
+        .ok()
+        .and_then(|value| serde_json::to_string_pretty(&value).ok())
+        .unwrap_or_else(|| raw.to_string())
+}
+
+fn stringify_json_field(value: Option<&Value>) -> String {
+    let Some(value) = value else {
+        return "-".to_string();
+    };
+
+    match value {
+        Value::Null => "-".to_string(),
+        Value::String(text) => {
+            if text.trim().is_empty() {
+                "-".to_string()
+            } else {
+                text.clone()
+            }
+        }
+        _ => value.to_string(),
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WorkflowGraphCompileSpec {
+    intent_goal: Option<String>,
+    query: WorkflowGraphExecutableSpec,
+    iterators: Option<Vec<WorkflowGraphIteratorSpec>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WorkflowGraphExecutableSpec {
+    name: Option<String>,
+    on: Option<String>,
+    steps: Vec<WorkflowGraphOperationSpec>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WorkflowGraphIteratorSpec {
+    name: String,
+    on: Option<String>,
+    #[serde(rename = "loop")]
+    loop_directive: WorkflowGraphLoopDirective,
+    steps: Vec<WorkflowGraphOperationSpec>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WorkflowGraphLoopDirective {
+    max: usize,
+    each: String,
+    merge: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WorkflowGraphOperationSpec {
+    op: String,
+    args: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkflowGraphTopologySpec {
+    nodes: Option<Vec<WorkflowGraphTopologyNodeSpec>>,
+    edges: Option<Vec<WorkflowGraphTopologyEdgeSpec>>,
+    guided_loop: Option<WorkflowGraphTopologyLoopSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkflowGraphTopologyNodeSpec {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkflowGraphTopologyEdgeSpec {
+    from: String,
+    to: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkflowGraphTopologyLoopSpec {
+    max: usize,
+    each: String,
+    merge: Option<String>,
+    start_node_id: Option<String>,
+    end_node_id: Option<String>,
+}
+
+fn parse_module_function_from_node_id(node_id: &str) -> Option<(String, String)> {
+    let trimmed = node_id.trim();
+    let rest = trimmed.strip_prefix("node-fn-")?;
+    let mut parts = rest.rsplitn(2, '-');
+    let _index = parts.next()?;
+    let module_and_function = parts.next()?;
+    let (module_id, function_id) = module_and_function.split_once('-')?;
+
+    let module_id = module_id.trim().to_ascii_lowercase();
+    let function_id = function_id.trim().to_ascii_lowercase();
+    if !is_supported_grapheme_module(module_id.as_str()) || function_id.is_empty() {
+        return None;
+    }
+
+    Some((module_id, function_id))
+}
+
+fn topology_ordered_node_ids(spec: &WorkflowGraphTopologySpec) -> Vec<String> {
+    let nodes = spec
+        .nodes
+        .as_ref()
+        .map(|items| {
+            items
+                .iter()
+                .map(|node| node.id.trim().to_string())
+                .filter(|id| !id.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if nodes.is_empty() {
+        return Vec::new();
+    }
+
+    let mut incoming = BTreeMap::<String, usize>::new();
+    let mut outgoing = BTreeMap::<String, Vec<String>>::new();
+    for node_id in &nodes {
+        incoming.entry(node_id.clone()).or_default();
+        outgoing.entry(node_id.clone()).or_default();
+    }
+
+    if let Some(edges) = spec.edges.as_ref() {
+        for edge in edges {
+            let from = edge.from.trim();
+            let to = edge.to.trim();
+            if from.is_empty() || to.is_empty() {
+                continue;
+            }
+            if !incoming.contains_key(from) || !incoming.contains_key(to) {
+                continue;
+            }
+            outgoing
+                .entry(from.to_string())
+                .or_default()
+                .push(to.to_string());
+            *incoming.entry(to.to_string()).or_default() += 1;
+        }
+    }
+
+    let start = nodes
+        .iter()
+        .find(|node_id| incoming.get(*node_id).copied().unwrap_or(0) == 0)
+        .cloned()
+        .unwrap_or_else(|| nodes[0].clone());
+
+    let mut ordered = Vec::<String>::new();
+    let mut cursor = start;
+    let mut visited = BTreeSet::<String>::new();
+    while !visited.contains(cursor.as_str()) {
+        visited.insert(cursor.clone());
+        ordered.push(cursor.clone());
+        let next = outgoing
+            .get(cursor.as_str())
+            .and_then(|targets| targets.first())
+            .cloned();
+        let Some(next_node) = next else {
+            break;
+        };
+        cursor = next_node;
+    }
+
+    for node_id in nodes {
+        if !visited.contains(node_id.as_str()) {
+            ordered.push(node_id);
+        }
+    }
+
+    ordered
+}
+
+fn build_compile_spec_from_topology_graph(
+    workflow_id: &str,
+    graph_state_json: &str,
+) -> Option<WorkflowGraphCompileSpec> {
+    let spec = serde_json::from_str::<WorkflowGraphTopologySpec>(graph_state_json).ok()?;
+    let loop_config = spec.guided_loop.as_ref()?;
+    if loop_config.max == 0 {
+        return None;
+    }
+
+    let each = loop_config.each.trim();
+    if each.is_empty() || !each.starts_with('$') {
+        return None;
+    }
+
+    let ordered_nodes = topology_ordered_node_ids(&spec);
+    if ordered_nodes.is_empty() {
+        return None;
+    }
+    let ordered_ops = ordered_nodes
+        .iter()
+        .filter_map(|node_id| {
+            parse_module_function_from_node_id(node_id).map(|(module_id, function_id)| {
+                WorkflowGraphOperationSpec {
+                    op: format!("{module_id}.{function_id}"),
+                    args: None,
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    if ordered_ops.is_empty() {
+        return None;
+    }
+
+    let start_node_id = loop_config
+        .start_node_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| ordered_nodes.first().map(String::as_str).unwrap_or_default());
+    let end_node_id = loop_config
+        .end_node_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| ordered_nodes.last().map(String::as_str).unwrap_or_default());
+
+    let start_index = ordered_nodes.iter().position(|node| node == start_node_id)?;
+    let end_index = ordered_nodes.iter().position(|node| node == end_node_id)?;
+    if start_index > end_index {
+        return None;
+    }
+
+    let iterator_steps = ordered_ops[start_index..=end_index].to_vec();
+    if iterator_steps.is_empty() {
+        return None;
+    }
+
+    let mut query_steps = ordered_ops[..start_index]
+        .iter()
+        .chain(ordered_ops[(end_index + 1)..].iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    if query_steps.is_empty()
+        && let Some(first_step) = iterator_steps.first().cloned()
+    {
+        query_steps.push(first_step);
+    }
+
+    Some(WorkflowGraphCompileSpec {
+        intent_goal: Some("Guided loop authoring".to_string()),
+        query: WorkflowGraphExecutableSpec {
+            name: Some(sanitize_executable_name(workflow_id)),
+            on: Some("Any".to_string()),
+            steps: query_steps,
+        },
+        iterators: Some(vec![WorkflowGraphIteratorSpec {
+            name: "GuidedLoop".to_string(),
+            on: Some("Any".to_string()),
+            loop_directive: WorkflowGraphLoopDirective {
+                max: loop_config.max,
+                each: each.to_string(),
+                merge: loop_config.merge.clone(),
+            },
+            steps: iterator_steps,
+        }]),
+    })
+}
+
+fn render_graph_literal(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "null".to_string(),
+        serde_json::Value::Bool(flag) => flag.to_string(),
+        serde_json::Value::Number(number) => number.to_string(),
+        serde_json::Value::String(text) => {
+            if text.starts_with("{$") && text.ends_with('}') && text.len() > 3 {
+                return text[1..(text.len() - 1)].to_string();
+            }
+            serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string())
+        }
+        serde_json::Value::Array(items) => {
+            let rendered = items
+                .iter()
+                .map(render_graph_literal)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("[{rendered}]")
+        }
+        serde_json::Value::Object(map) => {
+            if map.len() == 1
+                && let Some(state_path) = map
+                    .get("$state")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+            {
+                return state_path.to_string();
+            }
+
+            let mut entries = map.iter().collect::<Vec<_>>();
+            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            let rendered = entries
+                .into_iter()
+                .map(|(key, value)| {
+                    let key_rendered = if key
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+                        && key
+                            .chars()
+                            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                    {
+                        key.to_string()
+                    } else {
+                        serde_json::to_string(key).unwrap_or_else(|_| "\"key\"".to_string())
+                    };
+                    format!("{key_rendered}: {}", render_graph_literal(value))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{ {rendered} }}")
+        }
+    }
+}
+
+fn render_graph_call_args(args: Option<&serde_json::Value>) -> String {
+    let Some(value) = args else {
+        return "()".to_string();
+    };
+    let Some(object) = value.as_object() else {
+        return "()".to_string();
+    };
+
+    let mut entries = object.iter().collect::<Vec<_>>();
+    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    let rendered = entries
+        .into_iter()
+        .map(|(key, value)| format!("{key}: {}", render_graph_literal(value)))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if rendered.trim().is_empty() {
+        "()".to_string()
+    } else {
+        format!("({rendered})")
+    }
+}
+
+fn compile_graph_operation_step(step: &WorkflowGraphOperationSpec) -> Option<(String, String)> {
+    let (module_id, function_id) = normalize_function_step(step.op.as_str())?;
+    let args = render_graph_call_args(step.args.as_ref());
+    Some((module_id.clone(), format!("{module_id}.{function_id}{args}")))
+}
+
+fn compile_grapheme_source_from_graph_state(
+    workflow_id: &str,
+    queue: &str,
+    graph_state_json: &str,
+) -> Option<String> {
+    let spec = serde_json::from_str::<WorkflowGraphCompileSpec>(graph_state_json)
+        .ok()
+        .or_else(|| build_compile_spec_from_topology_graph(workflow_id, graph_state_json))?;
+    if spec.query.steps.is_empty() {
+        return None;
+    }
+
+    let mut import_modules = BTreeSet::<String>::new();
+    let query_steps = spec
+        .query
+        .steps
+        .iter()
+        .filter_map(|step| {
+            compile_graph_operation_step(step).map(|(module_id, rendered)| {
+                import_modules.insert(module_id);
+                rendered
+            })
+        })
+        .collect::<Vec<_>>();
+    if query_steps.is_empty() {
+        return None;
+    }
+
+    let iterator_blocks = spec
+        .iterators
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|iterator| {
+            if iterator.name.trim().is_empty() || iterator.loop_directive.max == 0 {
+                return None;
+            }
+
+            let steps = iterator
+                .steps
+                .iter()
+                .filter_map(|step| {
+                    compile_graph_operation_step(step).map(|(module_id, rendered)| {
+                        import_modules.insert(module_id);
+                        rendered
+                    })
+                })
+                .collect::<Vec<_>>();
+            if steps.is_empty() {
+                return None;
+            }
+
+            let each = iterator.loop_directive.each.trim();
+            if each.is_empty() {
+                return None;
+            }
+            let each_rendered = if each.starts_with('$') {
+                each.to_string()
+            } else {
+                serde_json::to_string(each).unwrap_or_else(|_| "\"$current\"".to_string())
+            };
+
+            let merge = iterator
+                .loop_directive
+                .merge
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("append");
+            let merge_rendered =
+                serde_json::to_string(merge).unwrap_or_else(|_| "\"append\"".to_string());
+
+            Some(format!(
+                "iterator {name} on {on_scope} @loop(max: {max}, each: {each_rendered}, merge: {merge_rendered}) {{\n  {steps}\n}}",
+                name = sanitize_executable_name(iterator.name.trim()),
+                on_scope = iterator
+                    .on
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("Any"),
+                max = iterator.loop_directive.max,
+                steps = steps.join("\n  |> "),
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    let import_block = import_modules
+        .into_iter()
+        .map(|module_id| format!("import {module_id} from \"grapheme/{module_id}\""))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let query_name = spec
+        .query
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(sanitize_executable_name)
+        .unwrap_or_else(|| sanitize_executable_name(workflow_id));
+    let query_on = spec
+        .query
+        .on
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Any");
+
+    let intent_block = spec
+        .intent_goal
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|goal| {
+            format!(
+                "#[intent(goal: {goal})]\n",
+                goal = serde_json::to_string(goal)
+                    .unwrap_or_else(|_| "\"Workflow intent\"".to_string())
+            )
+        })
+        .unwrap_or_default();
+
+    let query_block = format!(
+        "{intent_block}query {query_name} on {query_on} {{\n  set {{ workflow_id: {workflow_id_literal}, queue: {queue_literal} }}\n    |> {steps}\n}}",
+        workflow_id_literal = serde_json::to_string(workflow_id)
+            .unwrap_or_else(|_| "\"workflow\"".to_string()),
+        queue_literal = serde_json::to_string(queue).unwrap_or_else(|_| "\"default\"".to_string()),
+        steps = query_steps.join("\n    |> "),
+    );
+
+    let iterator_section = if iterator_blocks.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", iterator_blocks.join("\n\n"))
+    };
+
+    Some(format!("{import_block}\n\n{query_block}{iterator_section}\n"))
+}
+
 fn format_function_title(function_id: &str) -> String {
     function_id
         .split('_')
@@ -599,6 +1194,7 @@ fn compile_grapheme_source_from_function_steps(
     workflow_id: &str,
     queue: &str,
     function_steps_csv: &str,
+    function_inputs_json: Option<&str>,
 ) -> Option<String> {
     let steps = parse_function_steps_csv(function_steps_csv);
     if steps.is_empty() {
@@ -606,14 +1202,112 @@ fn compile_grapheme_source_from_function_steps(
     }
 
     let executable_name = sanitize_executable_name(workflow_id);
-    let step_list = steps
+    let function_inputs = function_inputs_json
+        .map(parse_function_inputs_json)
+        .unwrap_or_default();
+
+    let mut import_modules = steps
         .iter()
-        .map(|(module_id, function_id)| format!("{module_id}.{function_id}"))
+        .map(|(module_id, _)| module_id.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    import_modules.sort();
+
+    let import_block = import_modules
+        .iter()
+        .map(|module_id| format!("import {module_id} from \"grapheme/{module_id}\""))
         .collect::<Vec<_>>()
-        .join(" -> ");
+        .join("\n");
+
+    let render_literal = |value: &serde_json::Value| -> String {
+        fn inner(value: &serde_json::Value) -> String {
+            match value {
+                serde_json::Value::Null => "null".to_string(),
+                serde_json::Value::Bool(flag) => flag.to_string(),
+                serde_json::Value::Number(number) => number.to_string(),
+                serde_json::Value::String(text) => {
+                    if text.starts_with("{$") && text.ends_with('}') && text.len() > 3 {
+                        return text[1..(text.len() - 1)].to_string();
+                    }
+                    serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string())
+                }
+                serde_json::Value::Array(items) => {
+                    let rendered = items.iter().map(inner).collect::<Vec<_>>().join(", ");
+                    format!("[{rendered}]")
+                }
+                serde_json::Value::Object(map) => {
+                    if map.len() == 1
+                        && let Some(state_path) = map
+                            .get("$state")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                    {
+                        return state_path.to_string();
+                    }
+
+                    let mut entries = map.iter().collect::<Vec<_>>();
+                    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+                    let rendered = entries
+                        .into_iter()
+                        .map(|(key, value)| {
+                            let key_rendered = if key
+                                .chars()
+                                .next()
+                                .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+                                && key
+                                    .chars()
+                                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                            {
+                                key.to_string()
+                            } else {
+                                serde_json::to_string(key)
+                                    .unwrap_or_else(|_| "\"key\"".to_string())
+                            };
+                            format!("{key_rendered}: {}", inner(value))
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{{ {rendered} }}")
+                }
+            }
+        }
+
+        inner(value)
+    };
+
+    let pipeline_steps = steps
+        .iter()
+        .enumerate()
+        .map(|(index, (module_id, function_id))| {
+            let node_id = format!("node-fn-{}-{}-{}", module_id, function_id, index + 1);
+            let args = function_inputs
+                .get(node_id.as_str())
+                .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+                .and_then(|value| value.as_object().cloned())
+                .map(|object| {
+                    let mut entries = object.iter().collect::<Vec<_>>();
+                    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+                    entries
+                        .into_iter()
+                        .map(|(key, value)| format!("{key}: {}", render_literal(value)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .filter(|args| !args.trim().is_empty())
+                .map(|args| format!("({args})"))
+                .unwrap_or_else(|| "()".to_string());
+            format!("{module_id}.{function_id}{args}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n    |> ");
 
     Some(format!(
-        "import core from \"grapheme/core\"\n\nquery {executable_name} {{\n  core.echo(message: \"workflow:{workflow_id} queue:{queue} steps:{step_list}\") {{\n    state {{\n      current\n    }}\n  }}\n}}\n"
+        "{import_block}\n\nquery {executable_name} {{\n  set {{ workflow_id: {workflow_id_literal}, queue: {queue_literal} }}\n    |> {pipeline_steps}\n}}\n",
+        workflow_id_literal = serde_json::to_string(workflow_id)
+            .unwrap_or_else(|_| "\"workflow\"".to_string()),
+        queue_literal = serde_json::to_string(queue).unwrap_or_else(|_| "\"default\"".to_string())
     ))
 }
 
@@ -1054,6 +1748,10 @@ async fn view_section(
                 .as_ref()
                 .map(|summary| summary.graph_function_inputs_json.clone())
                 .unwrap_or_else(|| "{}".to_string());
+            let saved_revision_graph_state_json = saved_revision_summary
+                .as_ref()
+                .map(|summary| summary.graph_state_json.clone())
+                .unwrap_or_else(|| "{}".to_string());
 
             let normalize_module_kind = |kind: &str| -> Option<String> {
                 let normalized = kind.trim().to_ascii_lowercase();
@@ -1248,6 +1946,19 @@ async fn view_section(
                         output_schema_ref: node.output_schema_ref.clone(),
                         effect: node.effect.clone(),
                         stability: node.stability.clone(),
+                        parameter_fields: {
+                            let (module_id, function_id) = node
+                                .node_type
+                                .split_once('.')
+                                .unwrap_or(("", ""));
+                            let operation = reflected_module_operations
+                                .get(module_id)
+                                .and_then(|ops| ops.iter().find(|op| op.op == function_id));
+                            build_parameter_fields(
+                                operation,
+                                node.function_input.as_str(),
+                            )
+                        },
                         count: node.count,
                     })
             });
@@ -1289,7 +2000,15 @@ async fn view_section(
             let custom_function_inputs_json = serialize_function_inputs_json(&custom_function_inputs);
 
             let grapheme_source_preview =
-                default_grapheme_source(selected_id.as_str(), selected_queue_name.as_str());
+                compile_grapheme_source_from_function_steps(
+                    selected_id.as_str(),
+                    selected_queue_name.as_str(),
+                    custom_function_steps_csv.as_str(),
+                    Some(custom_function_inputs_json.as_str()),
+                )
+                .unwrap_or_else(|| {
+                    default_grapheme_source(selected_id.as_str(), selected_queue_name.as_str())
+                });
 
             render_template(WorkflowsViewTemplate {
                 lanes: lane_rows,
@@ -1308,6 +2027,7 @@ async fn view_section(
                 custom_modules_csv: custom_module_kinds.join(","),
                 custom_function_steps_csv,
                 custom_function_inputs_json,
+                saved_graph_state_json: saved_revision_graph_state_json,
                 dsl_preview,
                 grapheme_source_preview,
                 advanced_mode,
@@ -1506,6 +2226,7 @@ struct WorkflowActionRequest {
     modules: Option<String>,
     function_steps: Option<String>,
     function_inputs: Option<String>,
+    graph_state: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1652,18 +2373,39 @@ async fn action_workflow_save(
         });
     }
 
-    let compiled_source = payload
-        .function_steps
+    let compiled_from_graph = payload
+        .graph_state
         .as_deref()
-        .and_then(|steps| {
+        .and_then(|graph| {
+            compile_grapheme_source_from_graph_state(
+                payload.workflow_id.trim(),
+                payload.queue.trim(),
+                graph,
+            )
+        });
+    let compiled_from_steps = if compiled_from_graph.is_none() {
+        payload.function_steps.as_deref().and_then(|steps| {
             compile_grapheme_source_from_function_steps(
                 payload.workflow_id.trim(),
                 payload.queue.trim(),
                 steps,
+                payload.function_inputs.as_deref(),
             )
-        });
-    let source = compiled_source
+        })
+    } else {
+        None
+    };
+    let compiled_source = compiled_from_graph
         .as_deref()
+        .or(compiled_from_steps.as_deref());
+    let compile_mode_hint = if compiled_from_graph.is_some() {
+        "graph_compiled"
+    } else if compiled_from_steps.is_some() {
+        "legacy_function_steps"
+    } else {
+        "source_passthrough"
+    };
+    let source = compiled_source
         .unwrap_or_else(|| payload.source.as_deref().map(str::trim).unwrap_or_default());
     if source.is_empty() {
         return render_template(ActionStatusTemplate {
@@ -1673,18 +2415,39 @@ async fn action_workflow_save(
         });
     }
 
-    let saved = state
+    if let Some(function_inputs) = payload.function_inputs.as_deref()
+        && let Err(detail) = validate_function_inputs_payload(function_inputs)
+    {
+        return render_template(ActionStatusTemplate {
+            title: "Workflow Save Rejected".to_string(),
+            detail,
+            kind: "bad".to_string(),
+        });
+    }
+
+    let saved = match state
         .service
         .workflow_save(WorkflowSaveRequest {
             workflow_id: payload.workflow_id.trim().to_string(),
             queue: payload.queue.trim().to_string(),
             source: source.to_string(),
+            compile_mode_hint: Some(compile_mode_hint.to_string()),
+            graph_state_json: payload.graph_state.clone(),
             graph_modules_csv: payload.modules.clone(),
             graph_function_steps_csv: payload.function_steps.clone(),
             graph_function_inputs_json: payload.function_inputs.clone(),
         })
         .await
-        .map_err(internal_error)?;
+    {
+        Ok(saved) => saved,
+        Err(StasisError::PortFailure(detail)) => {
+            return Err(action_bad_request_template(
+                "Workflow Save Rejected",
+                detail.as_str(),
+            ));
+        }
+        Err(err) => return Err(internal_error(err)),
+    };
 
     render_template(ActionStatusTemplate {
         title: "Workflow Saved".to_string(),
@@ -1693,6 +2456,148 @@ async fn action_workflow_save(
             saved.workflow_id, saved.queue, saved.revision_id, saved.executable_count
         ),
         kind: "ok".to_string(),
+    })
+}
+
+async fn action_workflow_run_draft(
+    State(state): State<DashboardState>,
+    Json(payload): Json<WorkflowActionRequest>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    if payload.workflow_id.trim().is_empty() {
+        return render_template(ActionStatusTemplate {
+            title: "Workflow Draft Run Rejected".to_string(),
+            detail: "workflow_id is required".to_string(),
+            kind: "bad".to_string(),
+        });
+    }
+
+    if payload.queue.trim().is_empty() {
+        return render_template(ActionStatusTemplate {
+            title: "Workflow Draft Run Rejected".to_string(),
+            detail: "queue is required".to_string(),
+            kind: "bad".to_string(),
+        });
+    }
+
+    let compiled_from_graph = payload
+        .graph_state
+        .as_deref()
+        .and_then(|graph| {
+            compile_grapheme_source_from_graph_state(
+                payload.workflow_id.trim(),
+                payload.queue.trim(),
+                graph,
+            )
+        });
+    let compiled_from_steps = if compiled_from_graph.is_none() {
+        payload.function_steps.as_deref().and_then(|steps| {
+            compile_grapheme_source_from_function_steps(
+                payload.workflow_id.trim(),
+                payload.queue.trim(),
+                steps,
+                payload.function_inputs.as_deref(),
+            )
+        })
+    } else {
+        None
+    };
+    let compiled_source = compiled_from_graph
+        .as_deref()
+        .or(compiled_from_steps.as_deref());
+    let source = compiled_source
+        .unwrap_or_else(|| payload.source.as_deref().map(str::trim).unwrap_or_default());
+    if source.is_empty() {
+        return render_template(ActionStatusTemplate {
+            title: "Workflow Draft Run Rejected".to_string(),
+            detail: "source is required".to_string(),
+            kind: "bad".to_string(),
+        });
+    }
+
+    if let Some(function_inputs) = payload.function_inputs.as_deref()
+        && let Err(detail) = validate_function_inputs_payload(function_inputs)
+    {
+        return render_template(ActionStatusTemplate {
+            title: "Workflow Draft Run Rejected".to_string(),
+            detail,
+            kind: "bad".to_string(),
+        });
+    }
+
+    let run = match state
+        .service
+        .workflow_run_draft(WorkflowRunDraftRequest {
+            workflow_id: payload.workflow_id.trim().to_string(),
+            queue: payload.queue.trim().to_string(),
+            source: source.to_string(),
+            graph_state_json: payload.graph_state.clone(),
+            graph_modules_csv: payload.modules.clone(),
+            graph_function_steps_csv: payload.function_steps.clone(),
+            graph_function_inputs_json: payload.function_inputs.clone(),
+        })
+        .await
+    {
+        Ok(run) => run,
+        Err(StasisError::PortFailure(detail)) => {
+            return Err(action_bad_request_template(
+                "Workflow Draft Run Rejected",
+                detail.as_str(),
+            ));
+        }
+        Err(err) => return Err(internal_error(err)),
+    };
+
+    let execution_value = serde_json::from_str::<Value>(run.execution_json.as_str()).unwrap_or(Value::Null);
+    let final_state_value =
+        serde_json::from_str::<Value>(run.final_state_json.as_str()).unwrap_or(Value::Null);
+    let outcome = execution_value
+        .get("outcome")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let lineage_steps = final_state_value
+        .get("pipeline")
+        .and_then(Value::as_array)
+        .map(|steps| {
+            steps
+                .iter()
+                .enumerate()
+                .map(|(fallback_index, step)| WorkflowLineageStepRowDto {
+                    index: step
+                        .get("index")
+                        .and_then(Value::as_u64)
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| fallback_index.to_string()),
+                    op: step
+                        .get("op")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    ok_label: if step.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                        "yes".to_string()
+                    } else {
+                        "no".to_string()
+                    },
+                    error_summary: stringify_json_field(step.get("error")),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    render_template(WorkflowDraftRunResultTemplate {
+        workflow_id: run.workflow_id,
+        queue: run.queue,
+        run_id: run.run_id,
+        outcome,
+        executable_count: run.executable_count,
+        source_bytes: run.source_bytes,
+        execution_json_pretty: pretty_json_or_raw(run.execution_json.as_str()),
+        final_state_json_pretty: pretty_json_or_raw(run.final_state_json.as_str()),
+        final_state_json_raw: run.final_state_json,
+        compiled_source_pretty: source.to_string(),
+        error_message: None,
+        lineage_step_count: lineage_steps.len(),
+        lineage_steps,
     })
 }
 
@@ -1716,7 +2621,7 @@ async fn action_workflow_execute(
 
     let detail = match executed.leased_job_id {
         Some(job_id) => format!(
-            "executed one job from {} using {} (revision={}, executables={}, function_steps={}, source_bytes={}, job_id={})",
+            "executed one job from {} using {} (revision={}, executables={}, function_steps={}, function_inputs={}, source_bytes={}, job_id={})",
             executed.queue,
             executed.workflow_id,
             executed.revision_id,
@@ -1726,11 +2631,16 @@ async fn action_workflow_execute(
             } else {
                 executed.graph_function_steps_csv.clone()
             },
+            if executed.graph_function_inputs_json.is_empty() {
+                "{}".to_string()
+            } else {
+                executed.graph_function_inputs_json.clone()
+            },
             executed.source_bytes,
             job_id
         ),
         None => format!(
-            "{} (revision={}, executables={}, function_steps={}, reflected_at={}) queued execution request, but no due jobs were available in {}",
+            "{} (revision={}, executables={}, function_steps={}, function_inputs={}, reflected_at={}) queued execution request, but no due jobs were available in {}",
             executed.workflow_id,
             executed.revision_id,
             executed.executable_count,
@@ -1738,6 +2648,11 @@ async fn action_workflow_execute(
                 "none".to_string()
             } else {
                 executed.graph_function_steps_csv.clone()
+            },
+            if executed.graph_function_inputs_json.is_empty() {
+                "{}".to_string()
+            } else {
+                executed.graph_function_inputs_json.clone()
             },
             executed.reflected_at_utc,
             executed.queue
@@ -1784,6 +2699,22 @@ fn internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
     )
 }
 
+fn action_bad_request_template(title: &str, detail: &str) -> (StatusCode, String) {
+    let template = ActionStatusTemplate {
+        title: title.to_string(),
+        detail: detail.to_string(),
+        kind: "bad".to_string(),
+    };
+
+    match template.render() {
+        Ok(html) => (StatusCode::BAD_REQUEST, html),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            format!("dashboard bad request: {detail} (template error: {err})"),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -1800,7 +2731,8 @@ mod tests {
     };
     use crate::dashboard::service::{
         DashboardQueryService, InspectEntity, RuntimeDashboardQueryService,
-        WorkflowExecuteResult, WorkflowSaveRequest,
+        WorkflowExecuteResult, WorkflowRunDraftRequest, WorkflowRunDraftResult,
+        WorkflowSaveRequest,
         WorkflowDiagnostic, WorkflowDiagnosticSeverity, WorkflowDiagnosticsResult,
         WorkflowSaveResult, WorkflowSavedRevisionSummary,
     };
@@ -1918,6 +2850,13 @@ mod tests {
             Self::unsupported()
         }
 
+        async fn workflow_run_draft(
+            &self,
+            _request: WorkflowRunDraftRequest,
+        ) -> Result<WorkflowRunDraftResult> {
+            Self::unsupported()
+        }
+
         async fn workflow_reflect_source(&self, _source: &str) -> Result<WorkflowSourceReflection> {
             Ok(WorkflowSourceReflection {
                 count: 1,
@@ -1961,6 +2900,9 @@ mod tests {
                     op: "echo".to_string(),
                     stability: "stable".to_string(),
                     effect: "Read".to_string(),
+                    args: vec![],
+                    input_object_type: None,
+                    output_object_type: None,
                     input_schema_ref: Some("#/types/EchoInput".to_string()),
                     output_schema_ref: Some("#/types/EchoOutput".to_string()),
                 }],
@@ -1975,6 +2917,9 @@ mod tests {
                     op: "echo".to_string(),
                     stability: "stable".to_string(),
                     effect: "Read".to_string(),
+                    args: vec![],
+                    input_object_type: None,
+                    output_object_type: None,
                     input_schema_ref: Some("#/types/EchoInput".to_string()),
                     output_schema_ref: Some("#/types/EchoOutput".to_string()),
                 }],
@@ -2221,6 +3166,105 @@ mod tests {
             .expect("response body should decode");
         let body_text = String::from_utf8(body.to_vec()).expect("body should be utf8");
         assert!(body_text.contains("source is required"));
+    }
+
+    #[tokio::test]
+    async fn workflow_save_rejects_invalid_function_inputs_payload() {
+        let materialize_calls = Arc::new(AtomicUsize::new(0));
+        let process_calls = Arc::new(AtomicUsize::new(0));
+        let service = MockDashboardService {
+            materialize_calls,
+            process_calls,
+        };
+
+        let app = router(
+            DashboardState::new(Arc::new(service)).with_action_auth_bearer_token("test-token"),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/workflows/save")
+                    .method("POST")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"workflow_id":"wf-1","queue":"default","source":"query Echo { core.echo(message: \"ok\") { state { current } } }","function_inputs":"{\"node-fn-core-echo-1\":\"not-json\"}"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should decode");
+        let body_text = String::from_utf8(body.to_vec()).expect("body should be utf8");
+        assert!(body_text.contains("function_inputs payload"));
+    }
+
+    #[tokio::test]
+    async fn workflow_save_returns_bad_request_for_invalid_graph_state_contract() {
+        let runtime = InMemoryRuntime::new();
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(runtime),
+        ));
+        let app = router(DashboardState::new(service));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/workflows/save")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"workflow_id":"wf-bad-graph","queue":"default","source":"query Echo { core.echo(message: \"ok\") { state { current } } }","graph_state":"{\"query\":{\"name\":\"Q\",\"steps\":[]}}"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should decode");
+        let body_text = String::from_utf8(body.to_vec()).expect("body should be utf8");
+        assert!(body_text.contains("Workflow Save Rejected"));
+        assert!(body_text.contains("requires at least one query step"));
+    }
+
+    #[tokio::test]
+    async fn workflow_run_draft_returns_bad_request_for_invalid_graph_state_contract() {
+        let runtime = InMemoryRuntime::new();
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(runtime),
+        ));
+        let app = router(DashboardState::new(service));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/action/workflows/run-draft")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"workflow_id":"wf-bad-graph","queue":"default","source":"query Echo { core.echo(message: \"ok\") { state { current } } }","graph_state":"{\"query\":{\"name\":\"Q\",\"steps\":[]}}"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should decode");
+        let body_text = String::from_utf8(body.to_vec()).expect("body should be utf8");
+        assert!(body_text.contains("Workflow Draft Run Rejected"));
+        assert!(body_text.contains("requires at least one query step"));
     }
 
     #[tokio::test]
@@ -2696,6 +3740,305 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn workflow_save_route_source_only_marks_source_passthrough_compile_mode() {
+        let runtime = InMemoryRuntime::new();
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(runtime),
+        ));
+        let app = router(DashboardState::new(service.clone()));
+
+        let save_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/action/workflows/save")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"workflow_id":"wf-source-pass","queue":"default","source":"import core from \"grapheme/core\"\n\nquery Echo {\n  core.echo(message: \"source-only\") {\n    state {\n      current\n    }\n  }\n}\n"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("save response should build");
+
+        assert_eq!(save_response.status(), StatusCode::OK);
+
+        let summary = service
+            .workflow_saved_revision_summary("wf-source-pass")
+            .await
+            .expect("summary lookup should succeed")
+            .expect("summary should exist");
+        assert_eq!(summary.compile_mode, "source_passthrough");
+    }
+
+    #[tokio::test]
+    async fn workflow_save_route_persists_graph_state_and_workflows_view_rehydrates_hidden_graph() {
+        let runtime = InMemoryRuntime::new();
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(runtime),
+        ));
+        let app = router(DashboardState::new(service));
+
+        let save_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/action/workflows/save")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"workflow_id":"wf-none","queue":"default","source":"import core from \"grapheme/core\"\n\nquery Echo {\n  core.echo(message: \"ping\") {\n    state {\n      current\n    }\n  }\n}\n","modules":"core","function_steps":"core.echo","graph_state":"{\"version\":1,\"nodes\":[{\"id\":\"node-fn-core-echo-1\"}],\"edges\":[]}"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("save response should build");
+
+        assert_eq!(save_response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/view/workflows?queue=default")
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("response should build");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let html = String::from_utf8(body.to_vec()).expect("body should be utf8");
+
+        assert!(html.contains("id=\"workflow-graph-state\" value=\"{&quot;edges&quot;:[],&quot;nodes&quot;:[{&quot;id&quot;:&quot;node-fn-core-echo-1&quot;}],&quot;version&quot;:1}\""));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_function_steps_emits_selected_operations() {
+        let source = super::compile_grapheme_source_from_function_steps(
+            "wf-none",
+            "default",
+            "web.duckduckgo,textops.to_markdown",
+            Some(r#"{"node-fn-web-duckduckgo-1":"{\"query\":\"rust async\"}"}"#),
+        )
+        .expect("source should compile");
+
+        assert!(source.contains("import web from \"grapheme/web\""));
+        assert!(source.contains("import textops from \"grapheme/textops\""));
+        assert!(source.contains("|> web.duckduckgo(query: \"rust async\")"));
+        assert!(source.contains("|> textops.to_markdown()"));
+        assert!(!source.contains("core.echo(message: \"workflow:"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_function_steps_defaults_to_empty_call_when_inputs_missing() {
+        let source = super::compile_grapheme_source_from_function_steps(
+            "wf-none",
+            "default",
+            "web.duckduckgo",
+            Some("{}"),
+        )
+        .expect("source should compile");
+
+        assert!(source.contains("|> web.duckduckgo()"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_function_steps_supports_explicit_state_bindings() {
+        let source = super::compile_grapheme_source_from_function_steps(
+            "wf-none",
+            "default",
+            "web.duckduckgo",
+            Some(r#"{"node-fn-web-duckduckgo-1":"{\"query\":{\"$state\":\"$current.message\"}}"}"#),
+        )
+        .expect("source should compile");
+
+        assert!(source.contains("|> web.duckduckgo(query: $current.message)"));
+        assert!(!source.contains("query: \"$current.message\""));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_emits_iterator_loop_mapping() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-search",
+            "default",
+            r#"{
+                "intent_goal":"Find the best rust runtime patterns",
+                "query":{
+                    "name":"Q",
+                    "on":"Any",
+                    "steps":[
+                        {"op":"websearch.search","args":{"query":"Rust async runtime patterns","max_results":3}}
+                    ]
+                },
+                "iterators":[
+                    {
+                        "name":"ParseResults",
+                        "on":"Any",
+                        "loop":{"max":3,"each":"$current.results","merge":"append"},
+                        "steps":[
+                            {"op":"http.get","args":{"url":{"$state":"$current.url"}}},
+                            {"op":"html.to_md","args":{"html":{"$state":"$current.body"}}}
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .expect("graph source should compile");
+
+        assert!(source.contains("import websearch from \"grapheme/websearch\""));
+        assert!(source.contains("query Q on Any"));
+        assert!(source.contains("|> websearch.search(max_results: 3, query: \"Rust async runtime patterns\")"));
+        assert!(source.contains("iterator ParseResults on Any @loop(max: 3, each: $current.results, merge: \"append\")"));
+        assert!(source.contains("http.get("));
+        assert!(source.contains("$current.url"));
+        assert!(source.contains("|> html.to_md("));
+        assert!(source.contains("$current.body"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_rejects_unbounded_loop() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-search",
+            "default",
+            r#"{
+                "query":{
+                    "name":"Q",
+                    "steps":[
+                        {"op":"websearch.search","args":{"query":"Rust","max_results":3}}
+                    ]
+                },
+                "iterators":[
+                    {
+                        "name":"ParseResults",
+                        "loop":{"max":0,"each":"$current.results","merge":"append"},
+                        "steps":[
+                            {"op":"http.get","args":{"url":{"$state":"$current.url"}}}
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .expect("query section should still compile");
+
+        assert!(!source.contains("iterator ParseResults"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_supports_guided_loop_topology_range() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-guided-loop",
+            "default",
+            r#"{
+                "version": 1,
+                "nodes": [
+                    {"id": "node-fn-core-websearch-1"},
+                    {"id": "node-fn-http-get-2"},
+                    {"id": "node-fn-html-to_markdown-3"}
+                ],
+                "edges": [
+                    {"from": "node-fn-core-websearch-1", "to": "node-fn-http-get-2"},
+                    {"from": "node-fn-http-get-2", "to": "node-fn-html-to_markdown-3"}
+                ],
+                "guided_loop": {
+                    "max": 3,
+                    "each": "$current.results",
+                    "merge": "append",
+                    "start_node_id": "node-fn-http-get-2",
+                    "end_node_id": "node-fn-html-to_markdown-3"
+                }
+            }"#,
+        )
+        .expect("guided loop topology should compile");
+
+        assert!(source.contains("import core from \"grapheme/core\""));
+        assert!(source.contains("import http from \"grapheme/http\""));
+        assert!(source.contains("import html from \"grapheme/html\""));
+        assert!(source.contains("iterator GuidedLoop on Any @loop(max: 3, each: $current.results, merge: \"append\")"));
+        assert!(source.contains("http.get()"));
+        assert!(source.contains("html.to_markdown()"));
+    }
+
+    #[tokio::test]
+    async fn workflow_run_draft_route_executes_live_source_without_save() {
+        let runtime = InMemoryRuntime::new();
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(runtime),
+        ));
+        let app = router(DashboardState::new(service.clone()));
+
+        let run_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/action/workflows/run-draft")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"workflow_id":"wf-draft","queue":"default","function_steps":"core.echo"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("run response should build");
+
+        assert_eq!(run_response.status(), StatusCode::OK);
+
+        let run_body = to_bytes(run_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let run_html = String::from_utf8(run_body.to_vec()).expect("body should be utf8");
+        assert!(run_html.contains("Workflow Draft Run"));
+        assert!(run_html.contains("Run ID:"));
+        assert!(run_html.contains("Workflow Lineage"));
+
+        let saved_summary = service
+            .workflow_saved_revision_summary("wf-draft")
+            .await
+            .expect("summary lookup should succeed");
+        assert!(saved_summary.is_none(), "draft run should not persist revision");
+    }
+
+    #[tokio::test]
+    async fn workflow_run_draft_route_executes_guided_loop_topology_graph_state() {
+        let runtime = InMemoryRuntime::new();
+        let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(runtime),
+        ));
+        let app = router(DashboardState::new(service));
+
+        let run_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/action/workflows/run-draft")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"workflow_id":"wf-loop-draft","queue":"default","function_steps":"core.echo","graph_state":"{\"version\":1,\"nodes\":[{\"id\":\"node-fn-core-echo-1\"}],\"edges\":[],\"guided_loop\":{\"max\":2,\"each\":\"$current\",\"merge\":\"append\",\"start_node_id\":\"node-fn-core-echo-1\",\"end_node_id\":\"node-fn-core-echo-1\"}}"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("run response should build");
+
+        assert_eq!(run_response.status(), StatusCode::OK);
+
+        let run_body = to_bytes(run_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let run_html = String::from_utf8(run_body.to_vec()).expect("body should be utf8");
+        assert!(run_html.contains("Workflow Draft Run"));
+        assert!(run_html.contains("Run ID:"));
+        assert!(!run_html.contains("Workflow Draft Run Rejected"));
+    }
+
+    #[tokio::test]
     async fn workflows_view_query_modules_override_saved_revision_modules() {
         let runtime = InMemoryRuntime::new();
         let service = Arc::new(RuntimeDashboardQueryService::from_runtime_composition(
@@ -2843,6 +4186,7 @@ struct WorkflowsViewTemplate {
     custom_modules_csv: String,
     custom_function_steps_csv: String,
     custom_function_inputs_json: String,
+    saved_graph_state_json: String,
     dsl_preview: String,
     grapheme_source_preview: String,
     advanced_mode: bool,
@@ -2950,7 +4294,17 @@ struct WorkflowSelectedNodeDto {
     output_schema_ref: Option<String>,
     effect: String,
     stability: String,
+    parameter_fields: Vec<WorkflowParameterFieldDto>,
     count: usize,
+}
+
+#[derive(Clone, Debug)]
+struct WorkflowParameterFieldDto {
+    key: String,
+    value: String,
+    binding_mode: String,
+    ty: Option<String>,
+    required: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -3088,12 +4442,38 @@ struct LineageGraphNodeDto {
     occurred_at: String,
 }
 
+#[derive(Clone, Debug)]
+struct WorkflowLineageStepRowDto {
+    index: String,
+    op: String,
+    ok_label: String,
+    error_summary: String,
+}
+
 #[derive(Template)]
 #[template(path = "dashboard/action_status.html")]
 struct ActionStatusTemplate {
     title: String,
     detail: String,
     kind: String,
+}
+
+#[derive(Template)]
+#[template(path = "dashboard/workflow_draft_run_result.html")]
+struct WorkflowDraftRunResultTemplate {
+    workflow_id: String,
+    queue: String,
+    run_id: String,
+    outcome: String,
+    executable_count: usize,
+    source_bytes: usize,
+    execution_json_pretty: String,
+    final_state_json_pretty: String,
+    final_state_json_raw: String,
+    compiled_source_pretty: String,
+    error_message: Option<String>,
+    lineage_step_count: usize,
+    lineage_steps: Vec<WorkflowLineageStepRowDto>,
 }
 
 #[derive(Template)]

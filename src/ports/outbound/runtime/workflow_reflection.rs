@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::domain::errors::Result;
 
@@ -47,10 +48,33 @@ pub struct WorkflowModuleSearchMatchReflection {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowModuleOperationArgReflection {
+    pub name: String,
+    pub ty: String,
+    pub required: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowModuleOperationObjectFieldReflection {
+    pub ty: String,
+    pub required: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowModuleOperationObjectTypeReflection {
+    pub kind: String,
+    pub required: Vec<String>,
+    pub properties: BTreeMap<String, WorkflowModuleOperationObjectFieldReflection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowModuleOperationReflection {
     pub op: String,
     pub stability: String,
     pub effect: String,
+    pub args: Vec<WorkflowModuleOperationArgReflection>,
+    pub input_object_type: Option<WorkflowModuleOperationObjectTypeReflection>,
+    pub output_object_type: Option<WorkflowModuleOperationObjectTypeReflection>,
     pub input_schema_ref: Option<String>,
     pub output_schema_ref: Option<String>,
 }

@@ -2450,9 +2450,9 @@ dependencies = [
 
 [[package]]
 name = "grapheme-runtime"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e778af67751939c0a08bee2bdeb99ce479ce5bb6ac8840a1e02703c804bb8132"
+checksum = "c13ff3beb5034a150457d50a068e0fdfac67e83bc66b4c27c14074f25bf21081"
 dependencies = [
  "grapheme-artifact",
  "grapheme-signatures",
@@ -2465,9 +2465,9 @@ dependencies = [
 
 [[package]]
 name = "grapheme-sdk"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28c4388ed1188cf9f302924836f134103ed2a8fc400fd158cfcf7ad6cbbd7836"
+checksum = "8f1611cfc0e080429d048616ae8efadf984b7b731f04ae6e25652288337342f3"
 dependencies = [
  "grapheme-artifact",
  "grapheme-compiler",

@@ -14,6 +14,8 @@ pub struct WorkflowRevision {
     pub workflow_id: String,
     pub revision_id: String,
     pub source: String,
+    pub graph_state_json: String,
+    pub compiler_metadata_json: String,
     pub graph_modules_csv: String,
     pub graph_function_steps_csv: String,
     pub graph_function_inputs_json: String,

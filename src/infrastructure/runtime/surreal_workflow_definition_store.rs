@@ -43,6 +43,8 @@ struct WorkflowRevisionRecord {
     workflow_id: String,
     revision_id: String,
     source: String,
+    graph_state_json: Option<String>,
+    compiler_metadata_json: Option<String>,
     graph_modules_csv: String,
     graph_function_steps_csv: String,
     graph_function_inputs_json: String,
@@ -81,6 +83,8 @@ impl From<WorkflowRevision> for WorkflowRevisionRecord {
             workflow_id: value.workflow_id,
             revision_id: value.revision_id,
             source: value.source,
+            graph_state_json: Some(value.graph_state_json),
+            compiler_metadata_json: Some(value.compiler_metadata_json),
             graph_modules_csv: value.graph_modules_csv,
             graph_function_steps_csv: value.graph_function_steps_csv,
             graph_function_inputs_json: value.graph_function_inputs_json,
@@ -97,6 +101,10 @@ impl From<WorkflowRevisionRecord> for WorkflowRevision {
             workflow_id: value.workflow_id,
             revision_id: value.revision_id,
             source: value.source,
+            graph_state_json: value.graph_state_json.unwrap_or_else(|| "{}".to_string()),
+            compiler_metadata_json: value
+                .compiler_metadata_json
+                .unwrap_or_else(|| "{}".to_string()),
             graph_modules_csv: value.graph_modules_csv,
             graph_function_steps_csv: value.graph_function_steps_csv,
             graph_function_inputs_json: value.graph_function_inputs_json,

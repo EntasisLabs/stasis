@@ -260,6 +260,8 @@
         var collapseStorageKey = "stasis.dashboard.sidebar.collapsed";
         var themeStorageKey = "stasis.dashboard.theme";
         var workflowNodeStorageKey = "stasis.dashboard.workflow.selectedNode";
+        var workflowStateSnapshotStorageKey = "stasis.dashboard.workflow.stateSnapshot";
+        var workflowGraphStateStorageKey = "stasis.dashboard.workflow.graphState";
         var currentView = "jobs";
         var liveViews = { jobs: true, endpoints: true, cluster: true, outbox: true, deadletter: true };
         var telemetryState = {
@@ -267,7 +269,12 @@
           advancedModeOpened: false,
           firstNodeAdded: false,
           firstSuccessfulRun: false,
+          firstValidGraph: false,
         };
+        var stateBindingTarget = { nodeId: "", paramKey: "" };
+        var selectedWorkflowEdgeId = "";
+        var graphLinkDraft = null;
+        var workflowLoopContainerCollapsed = false;
 
         function emitDashboardEvent(name, payload) {
           var detail = {
@@ -358,15 +365,59 @@
 
         window.addEventListener("resize", applyLayout);
 
+        function isLikelyHtmlResponseBody(body) {
+          var trimmed = (body || "").trim();
+          return trimmed.charAt(0) === "<";
+        }
+
+        function compactResponseBody(body) {
+          var trimmed = (body || "").trim();
+          if (!trimmed) return "";
+          if (isLikelyHtmlResponseBody(trimmed)) {
+            var probe = document.createElement("div");
+            probe.innerHTML = trimmed;
+            return (probe.textContent || "").replace(/\s+/g, " ").trim();
+          }
+          return trimmed.replace(/\s+/g, " ").trim();
+        }
+
+        function renderRequestError(target, status, body) {
+          if (!target) return;
+          var statusCode = Number(status);
+          if (isLikelyHtmlResponseBody(body)) {
+            target.innerHTML = body;
+            return;
+          }
+          var detail = compactResponseBody(body) || "No additional error detail was returned.";
+          var title = statusCode >= 500 ? "Server Error" : "Request Rejected";
+          renderInlineActionError(
+            target,
+            title,
+            "Request failed (" + (statusCode || "unknown") + "): " + detail
+          );
+        }
+
         function request(url, target, swap, done) {
           if (!target) return;
           var mode = swap || "innerHTML";
           fetch(url, { method: "GET", headers: { "HX-Request": "true" } })
             .then(function (response) {
-              if (!response.ok) throw new Error("Request failed: " + response.status);
-              return response.text();
+              return response.text().then(function (text) {
+                return {
+                  ok: response.ok,
+                  status: response.status,
+                  body: text || "",
+                };
+              });
             })
-            .then(function (html) {
+            .then(function (result) {
+              if (!result.ok) {
+                renderRequestError(target, result.status, result.body);
+                if (done) done(target);
+                return;
+              }
+
+              var html = result.body;
               if (mode === "outerHTML") {
                 target.outerHTML = html;
               } else {
@@ -375,8 +426,11 @@
               if (done) done(target);
             })
             .catch(function (error) {
-              target.innerHTML =
-                '<div class="request-error">Request error: ' + error.message + "</div>";
+              renderInlineActionError(
+                target,
+                "Request Error",
+                (error && error.message) ? error.message : "Unknown request error."
+              );
               if (done) done(target);
             });
         }
@@ -395,10 +449,21 @@
             body: JSON.stringify(body || {}),
           })
             .then(function (response) {
-              if (!response.ok) throw new Error("Request failed: " + response.status);
-              return response.text();
+              return response.text().then(function (text) {
+                return {
+                  ok: response.ok,
+                  status: response.status,
+                  body: text || "",
+                };
+              });
             })
-            .then(function (html) {
+            .then(function (result) {
+              if (!result.ok) {
+                renderRequestError(target, result.status, result.body);
+                return;
+              }
+
+              var html = result.body;
               target.innerHTML = html;
               if (
                 !telemetryState.firstSuccessfulRun &&
@@ -410,11 +475,19 @@
                   action: "workflow_execute",
                 });
               }
-              loadView(currentView);
+              if (url !== "/action/workflows/run-draft") {
+                loadView(currentView);
+              } else {
+                captureLatestWorkflowStateFromDraftResult(target);
+                hydrateWorkflowStateBindingUx();
+              }
             })
             .catch(function (error) {
-              target.innerHTML =
-                '<div class="request-error">Request error: ' + error.message + "</div>";
+              renderInlineActionError(
+                target,
+                "Request Error",
+                (error && error.message) ? error.message : "Unknown request error."
+              );
             })
             .finally(function () {
               if (!trigger) return;
@@ -511,6 +584,9 @@
 
         function loadView(viewName) {
           currentView = viewName;
+          if (viewName !== "workflows") {
+            closeWorkflowAdvancedDrawer();
+          }
           host.style.opacity = "0.4";
           host.style.transition = "opacity 0.15s ease";
           request("/view/" + viewName, host, "innerHTML", function () {
@@ -520,6 +596,7 @@
                 emitDashboardEvent("builder_opened", { mode: "guided" });
               }
               restoreWorkflowNodeSelection();
+              hydrateWorkflowStateBindingUx();
             }
             host.style.opacity = "1";
           });
@@ -542,11 +619,1914 @@
           } catch (e) {}
         }
 
+        function readWorkflowStateSnapshotMap() {
+          try {
+            var raw = window.localStorage.getItem(workflowStateSnapshotStorageKey);
+            if (!raw) return {};
+            var parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : {};
+          } catch (e) {
+            return {};
+          }
+        }
+
+        function writeWorkflowStateSnapshotMap(map) {
+          try {
+            window.localStorage.setItem(workflowStateSnapshotStorageKey, JSON.stringify(map));
+          } catch (e) {}
+        }
+
+        function readWorkflowGraphStateMap() {
+          try {
+            var raw = window.localStorage.getItem(workflowGraphStateStorageKey);
+            if (!raw) return {};
+            var parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : {};
+          } catch (e) {
+            return {};
+          }
+        }
+
+        function writeWorkflowGraphStateMap(map) {
+          try {
+            window.localStorage.setItem(workflowGraphStateStorageKey, JSON.stringify(map));
+          } catch (e) {}
+        }
+
+        function getSelectedWorkflowContext() {
+          var workflowNode = document.getElementById("workflow-selected-workflow-id");
+          var queueNode = document.getElementById("workflow-selected-queue");
+          var workflowId = workflowNode && typeof workflowNode.value === "string"
+            ? workflowNode.value.trim()
+            : "";
+          var queue = queueNode && typeof queueNode.value === "string"
+            ? queueNode.value.trim()
+            : "";
+          if (!workflowId || !queue) return null;
+          return { workflowId: workflowId, queue: queue };
+        }
+
+        function workflowStateSnapshotKey(workflowId, queue) {
+          return workflowId + "::" + queue;
+        }
+
+        function workflowGraphStateKey(workflowId, queue) {
+          return workflowId + "::" + queue;
+        }
+
+        function getWorkflowGraphStateNode() {
+          return document.getElementById("workflow-graph-state");
+        }
+
+        function isWorkflowAdvancedMode() {
+          var sourceEditor = document.getElementById("workflow-source-editor");
+          return !!sourceEditor;
+        }
+
+        function parseWorkflowGraphState(raw) {
+          if (!raw || !raw.trim()) return null;
+          try {
+            var parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== "object") return null;
+            return parsed;
+          } catch (e) {
+            return null;
+          }
+        }
+
+        function buildDefaultLinearGraph(nodeIds) {
+          var nodes = (nodeIds || []).map(function (nodeId) {
+            return { id: nodeId };
+          });
+          var edges = [];
+          for (var i = 0; i < nodeIds.length - 1; i++) {
+            edges.push({
+              id: "e:" + nodeIds[i] + "->" + nodeIds[i + 1],
+              from: nodeIds[i],
+              to: nodeIds[i + 1],
+              mappings: [{ target: "$input", source: "$pipeline[" + i + "].output" }],
+            });
+          }
+          return { version: 1, nodes: nodes, edges: edges };
+        }
+
+        function normalizeWorkflowGuidedLoopConfig(raw) {
+          if (!raw || typeof raw !== "object") return null;
+          var max = Number(raw.max);
+          if (!Number.isFinite(max) || max <= 0) return null;
+          var each = typeof raw.each === "string" ? raw.each.trim() : "";
+          if (!each || each.charAt(0) !== "$") return null;
+          var merge = typeof raw.merge === "string" ? raw.merge.trim() : "";
+          var startNodeId = typeof raw.start_node_id === "string" ? raw.start_node_id.trim() : "";
+          var endNodeId = typeof raw.end_node_id === "string" ? raw.end_node_id.trim() : "";
+          if (!startNodeId || !endNodeId) return null;
+          return {
+            max: Math.floor(max),
+            each: each,
+            merge: merge || "append",
+            start_node_id: startNodeId,
+            end_node_id: endNodeId,
+          };
+        }
+
+        function getWorkflowLoopFieldNodes() {
+          return {
+            enabled: document.getElementById("workflow-loop-enabled"),
+            max: document.getElementById("workflow-loop-max"),
+            each: document.getElementById("workflow-loop-each"),
+            merge: document.getElementById("workflow-loop-merge"),
+            startNode: document.getElementById("workflow-loop-start-node"),
+            endNode: document.getElementById("workflow-loop-end-node"),
+          };
+        }
+
+        function readWorkflowLoopConfigFromInputs() {
+          var fields = getWorkflowLoopFieldNodes();
+          if (!fields.enabled || !fields.max || !fields.each || !fields.merge || !fields.startNode || !fields.endNode) return null;
+          if (!fields.enabled.checked) return null;
+
+          var startNodeId = (fields.startNode.value || "").trim();
+          var endNodeId = (fields.endNode.value || "").trim();
+
+          return normalizeWorkflowGuidedLoopConfig({
+            max: fields.max.value,
+            each: fields.each.value,
+            merge: fields.merge.value,
+            start_node_id: startNodeId,
+            end_node_id: endNodeId,
+          });
+        }
+
+        function applyWorkflowLoopConfigToInputs(config) {
+          var fields = getWorkflowLoopFieldNodes();
+          if (!fields.enabled || !fields.max || !fields.each || !fields.merge || !fields.startNode || !fields.endNode) return;
+          var normalized = normalizeWorkflowGuidedLoopConfig(config);
+          fields.enabled.checked = !!normalized;
+          fields.max.value = normalized ? String(normalized.max) : "";
+          fields.each.value = normalized ? normalized.each : "";
+          fields.merge.value = normalized ? normalized.merge : "";
+          if (normalized) {
+            fields.startNode.value = normalized.start_node_id;
+            fields.endNode.value = normalized.end_node_id;
+          }
+        }
+
+        function normalizeWorkflowGraphState(graph, visibleNodeIds) {
+          var visibleSet = {};
+          (visibleNodeIds || []).forEach(function (nodeId) {
+            visibleSet[nodeId] = true;
+          });
+
+          var nodes = [];
+          if (graph && Array.isArray(graph.nodes)) {
+            graph.nodes.forEach(function (node) {
+              var nodeId = node && typeof node.id === "string" ? node.id : "";
+              if (!nodeId || !visibleSet[nodeId]) return;
+              nodes.push({ id: nodeId });
+            });
+          }
+
+          visibleNodeIds.forEach(function (nodeId) {
+            if (!nodes.some(function (n) { return n.id === nodeId; })) {
+              nodes.push({ id: nodeId });
+            }
+          });
+
+          var edges = [];
+          if (graph && Array.isArray(graph.edges)) {
+            graph.edges.forEach(function (edge) {
+              if (!edge || typeof edge !== "object") return;
+              var from = typeof edge.from === "string" ? edge.from : "";
+              var to = typeof edge.to === "string" ? edge.to : "";
+              if (!from || !to || !visibleSet[from] || !visibleSet[to]) return;
+              var mappings = Array.isArray(edge.mappings) ? edge.mappings : [];
+              edges.push({
+                id: typeof edge.id === "string" && edge.id ? edge.id : ("e:" + from + "->" + to),
+                from: from,
+                to: to,
+                mappings: mappings.length > 0 ? mappings : [{ target: "$input", source: "$current" }],
+              });
+            });
+          }
+
+          if (edges.length === 0 && visibleNodeIds.length > 1) {
+            var defaultGraph = buildDefaultLinearGraph(visibleNodeIds);
+            var defaultLoop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
+            if (defaultLoop) {
+              defaultGraph.guided_loop = defaultLoop;
+            }
+            return defaultGraph;
+          }
+
+          var normalizedGraph = { version: 1, nodes: nodes, edges: edges };
+          var guidedLoop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
+          if (guidedLoop) {
+            normalizedGraph.guided_loop = guidedLoop;
+          }
+          return normalizedGraph;
+        }
+
+        function collectVisibleWorkflowNodeIds() {
+          return Array.prototype.slice.call(
+            host.querySelectorAll("[data-canvas-node-button]")
+          ).map(function (node) {
+            return node.getAttribute("data-node-id") || "";
+          }).filter(function (nodeId) { return !!nodeId; });
+        }
+
+        function refreshWorkflowLoopNodeOptions(preferredStartNodeId, preferredEndNodeId) {
+          var fields = getWorkflowLoopFieldNodes();
+          if (!fields.startNode || !fields.endNode) return;
+          var nodeIds = collectVisibleWorkflowNodeIds();
+
+          fields.startNode.innerHTML = "";
+          fields.endNode.innerHTML = "";
+          if (nodeIds.length === 0) return;
+
+          nodeIds.forEach(function (nodeId) {
+            var startOption = document.createElement("option");
+            startOption.value = nodeId;
+            startOption.textContent = nodeId;
+            fields.startNode.appendChild(startOption);
+
+            var endOption = document.createElement("option");
+            endOption.value = nodeId;
+            endOption.textContent = nodeId;
+            fields.endNode.appendChild(endOption);
+          });
+
+          var startNodeId = preferredStartNodeId && nodeIds.indexOf(preferredStartNodeId) >= 0
+            ? preferredStartNodeId
+            : nodeIds[0];
+          var endNodeId = preferredEndNodeId && nodeIds.indexOf(preferredEndNodeId) >= 0
+            ? preferredEndNodeId
+            : nodeIds[nodeIds.length - 1];
+
+          fields.startNode.value = startNodeId;
+          fields.endNode.value = endNodeId;
+        }
+
+        function readWorkflowGraphForCurrentContext() {
+          var context = getSelectedWorkflowContext();
+          if (!context) return null;
+
+          var map = readWorkflowGraphStateMap();
+          var key = workflowGraphStateKey(context.workflowId, context.queue);
+          var hidden = getWorkflowGraphStateNode();
+          var hiddenGraph = hidden ? parseWorkflowGraphState(hidden.value || "") : null;
+          var storedGraph = map[key] && typeof map[key] === "object" ? map[key] : null;
+          var sourceGraph = storedGraph || hiddenGraph || { version: 1, nodes: [], edges: [] };
+          var visibleNodeIds = collectVisibleWorkflowNodeIds();
+          return normalizeWorkflowGraphState(sourceGraph, visibleNodeIds);
+        }
+
+        function persistWorkflowGraphForCurrentContext(graph) {
+          var context = getSelectedWorkflowContext();
+          if (!context || !graph || typeof graph !== "object") return;
+          var key = workflowGraphStateKey(context.workflowId, context.queue);
+          var map = readWorkflowGraphStateMap();
+          map[key] = graph;
+          writeWorkflowGraphStateMap(map);
+          var hidden = getWorkflowGraphStateNode();
+          if (hidden) {
+            hidden.value = JSON.stringify(graph);
+          }
+        }
+
+        function findWorkflowEdgeById(graph, edgeId) {
+          var edges = graph && Array.isArray(graph.edges) ? graph.edges : [];
+          return edges.find(function (item) { return item.id === edgeId; }) || null;
+        }
+
+        function graphHasPath(graph, startNodeId, targetNodeId, visited) {
+          if (!graph || !startNodeId || !targetNodeId) return false;
+          if (startNodeId === targetNodeId) return true;
+          var seen = visited || {};
+          if (seen[startNodeId]) return false;
+          seen[startNodeId] = true;
+          var edges = graph && Array.isArray(graph.edges) ? graph.edges : [];
+          for (var i = 0; i < edges.length; i++) {
+            var edge = edges[i];
+            if (!edge || edge.from !== startNodeId) continue;
+            if (edge.to === targetNodeId) return true;
+            if (graphHasPath(graph, edge.to, targetNodeId, seen)) return true;
+          }
+          return false;
+        }
+
+        function graphIsValidAcyclic(graph) {
+          if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
+            return false;
+          }
+          for (var i = 0; i < graph.edges.length; i++) {
+            var edge = graph.edges[i];
+            if (!edge || !edge.from || !edge.to || edge.from === edge.to) {
+              return false;
+            }
+            if (graphHasPath(graph, edge.to, edge.from, {})) {
+              return false;
+            }
+          }
+          return graph.edges.length > 0;
+        }
+
+        function updateWorkflowEdgeMapping(edgeId, target, source) {
+          if (!isWorkflowAdvancedMode()) return;
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph) return;
+          var edge = findWorkflowEdgeById(graph, edgeId);
+          if (!edge) return;
+          if (!Array.isArray(edge.mappings) || edge.mappings.length === 0) {
+            edge.mappings = [{ target: "$input", source: "$current" }];
+          }
+          edge.mappings[0] = {
+            target: (target || "$input").trim() || "$input",
+            source: (source || "$current").trim() || "$current",
+          };
+          persistWorkflowGraphForCurrentContext(graph);
+          renderWorkflowGraphLinks(graph);
+        }
+
+        function removeWorkflowEdge(edgeId) {
+          if (!isWorkflowAdvancedMode()) return;
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph) return;
+          graph.edges = (graph.edges || []).filter(function (edge) { return edge.id !== edgeId; });
+          if (selectedWorkflowEdgeId === edgeId) {
+            selectedWorkflowEdgeId = graph.edges.length > 0 ? graph.edges[0].id : "";
+          }
+          persistWorkflowGraphForCurrentContext(graph);
+          renderWorkflowGraphLinks(graph);
+        }
+
+        function upsertWorkflowGraphEdge(fromNodeId, toNodeId) {
+          if (!fromNodeId || !toNodeId || fromNodeId === toNodeId) return;
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph) return;
+
+          if (!isWorkflowAdvancedMode()) {
+            graph.edges = (graph.edges || []).filter(function (edge) {
+              return edge.to !== toNodeId;
+            });
+          }
+
+          if (graphHasPath(graph, toNodeId, fromNodeId, {})) {
+            var inspector = host.querySelector("[data-graph-edge-empty]");
+            if (inspector) {
+              inspector.textContent = "This link would create a loop. Guided mode supports forward flow only.";
+            }
+            return;
+          }
+
+          var existing = (graph.edges || []).find(function (edge) {
+            return edge.from === fromNodeId && edge.to === toNodeId;
+          }) || null;
+          if (existing) {
+            selectedWorkflowEdgeId = existing.id;
+            persistWorkflowGraphForCurrentContext(graph);
+            renderWorkflowGraphLinks(graph);
+            return;
+          }
+
+          var edgeId = "e:" + fromNodeId + "->" + toNodeId;
+          var suffix = 1;
+          while ((graph.edges || []).some(function (edge) { return edge.id === edgeId; })) {
+            suffix += 1;
+            edgeId = "e:" + fromNodeId + "->" + toNodeId + ":" + suffix;
+          }
+
+          graph.edges = graph.edges || [];
+          graph.edges.push({
+            id: edgeId,
+            from: fromNodeId,
+            to: toNodeId,
+            mappings: [{ target: "$input", source: "$current" }],
+          });
+          selectedWorkflowEdgeId = edgeId;
+          persistWorkflowGraphForCurrentContext(graph);
+          renderWorkflowGraphLinks(graph);
+
+          if (!telemetryState.firstValidGraph && graphIsValidAcyclic(graph)) {
+            telemetryState.firstValidGraph = true;
+            emitDashboardEvent("first_valid_graph", {
+              queue: (getSelectedWorkflowContext() || {}).queue || "",
+              edge_count: graph.edges.length,
+            });
+          }
+        }
+
+        function getGraphHandlePoint(nodeId, handleType) {
+          if (!nodeId || !handleType) return null;
+          var selector = handleType === "out"
+            ? '[data-graph-output-handle][data-node-id="' + nodeId + '"]'
+            : '[data-graph-input-handle][data-node-id="' + nodeId + '"]';
+          var handle = host.querySelector(selector);
+          var canvas = host.querySelector("[data-graph-canvas]");
+          if (!handle || !canvas) return null;
+          var handleRect = handle.getBoundingClientRect();
+          var canvasRect = canvas.getBoundingClientRect();
+          return {
+            x: (handleRect.left + handleRect.width / 2) - canvasRect.left,
+            y: (handleRect.top + handleRect.height / 2) - canvasRect.top,
+          };
+        }
+
+        function renderGraphDraftLink() {
+          if (!graphLinkDraft) return;
+          var svg = host.querySelector("[data-graph-link-layer]");
+          if (!svg) return;
+          var existing = svg.querySelector("[data-graph-draft-link]");
+          if (existing) existing.remove();
+
+          var start = graphLinkDraft.start;
+          var current = graphLinkDraft.current;
+          if (!start || !current) return;
+
+          var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          var controlOffset = Math.max(24, Math.abs(current.y - start.y) * 0.35);
+          var d = "M " + start.x + " " + start.y
+            + " C " + start.x + " " + (start.y + controlOffset)
+            + ", " + current.x + " " + (current.y - controlOffset)
+            + ", " + current.x + " " + current.y;
+          path.setAttribute("d", d);
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke", "var(--info)");
+          path.setAttribute("stroke-width", "2");
+          path.setAttribute("stroke-dasharray", "6 4");
+          path.setAttribute("stroke-linecap", "round");
+          path.setAttribute("data-graph-draft-link", "1");
+          path.style.pointerEvents = "none";
+          svg.appendChild(path);
+        }
+
+        function updateGraphDraftPointer(clientX, clientY) {
+          if (!graphLinkDraft) return;
+          var canvas = host.querySelector("[data-graph-canvas]");
+          if (!canvas) return;
+          var canvasRect = canvas.getBoundingClientRect();
+          graphLinkDraft.current = {
+            x: clientX - canvasRect.left,
+            y: clientY - canvasRect.top,
+          };
+          renderGraphDraftLink();
+        }
+
+        function clearGraphDraftLink() {
+          graphLinkDraft = null;
+          var svg = host.querySelector("[data-graph-link-layer]");
+          if (!svg) return;
+          var existing = svg.querySelector("[data-graph-draft-link]");
+          if (existing) existing.remove();
+        }
+
+        function startGraphDraftLink(fromNodeId, clientX, clientY) {
+          var startPoint = getGraphHandlePoint(fromNodeId, "out");
+          if (!startPoint) return;
+          graphLinkDraft = {
+            fromNodeId: fromNodeId,
+            start: startPoint,
+            current: startPoint,
+          };
+          updateGraphDraftPointer(clientX, clientY);
+        }
+
+        function setWorkflowEdgeInspector(graph, edgeId) {
+          var inspector = host.querySelector("[data-graph-edge-inspector]");
+          if (!inspector) return;
+          var emptyNode = inspector.querySelector("[data-graph-edge-empty]");
+          var detailsNode = inspector.querySelector("[data-graph-edge-details]");
+          var labelNode = inspector.querySelector("[data-graph-edge-label]");
+          var mapNode = inspector.querySelector("[data-graph-edge-map]");
+          var targetInput = inspector.querySelector("[data-graph-edge-map-target]");
+          var sourceInput = inspector.querySelector("[data-graph-edge-map-source]");
+          var hasAdvancedInputs = !!(targetInput && sourceInput);
+          if (!emptyNode || !detailsNode || !labelNode || !mapNode) return;
+
+          var edge = findWorkflowEdgeById(graph, edgeId);
+          if (!edge) {
+            emptyNode.classList.remove("hidden");
+            detailsNode.classList.add("hidden");
+            detailsNode.removeAttribute("data-graph-edge-id");
+            return;
+          }
+
+          emptyNode.classList.add("hidden");
+          detailsNode.classList.remove("hidden");
+          detailsNode.setAttribute("data-graph-edge-id", edge.id);
+          labelNode.textContent = edge.from + " -> " + edge.to;
+          var firstMapping = Array.isArray(edge.mappings) && edge.mappings.length > 0
+            ? edge.mappings[0]
+            : { target: "$input", source: "$current" };
+          if (hasAdvancedInputs) {
+            targetInput.value = firstMapping.target || "$input";
+            sourceInput.value = firstMapping.source || "$current";
+          }
+          mapNode.textContent = "mapping: " + (firstMapping.target || "$input") + " <= " + (firstMapping.source || "$current");
+        }
+
+        function renderWorkflowGraphConnectionsList(graph) {
+          var listNode = host.querySelector("[data-graph-connections-list]");
+          if (!listNode) return;
+          var edges = graph && Array.isArray(graph.edges) ? graph.edges : [];
+          listNode.innerHTML = "";
+          if (edges.length === 0) {
+            var empty = document.createElement("p");
+            empty.className = "text-xs";
+            empty.style.color = "var(--muted-foreground)";
+            empty.textContent = "No connections yet.";
+            listNode.appendChild(empty);
+            return;
+          }
+
+          edges.forEach(function (edge) {
+            var row = document.createElement("p");
+            row.className = "text-xs font-mono";
+            row.style.color = "var(--foreground)";
+            row.textContent = edge.from + " -> " + edge.to;
+            listNode.appendChild(row);
+          });
+        }
+
+        function getLoopContainerReadiness() {
+          var readiness = computeWorkflowReadiness();
+          var loopFieldIds = {
+            "workflow-loop-max": true,
+            "workflow-loop-each": true,
+            "workflow-loop-start-node": true,
+            "workflow-loop-end-node": true,
+          };
+          var blockers = (readiness.blockers || []).filter(function (item) {
+            return !!(item && item.fieldId && loopFieldIds[item.fieldId]);
+          });
+          return {
+            canRun: blockers.length === 0,
+            blockers: blockers,
+          };
+        }
+
+        function resetWorkflowNodeListToFlatOrder(nodeList) {
+          if (!nodeList) return;
+          var existingShell = nodeList.querySelector("[data-graph-loop-container-shell]");
+          if (existingShell && existingShell.parentNode) {
+            existingShell.parentNode.removeChild(existingShell);
+          }
+
+          var buttons = Array.prototype.slice.call(
+            nodeList.querySelectorAll("[data-canvas-node-button]")
+          );
+          buttons.forEach(function (button, index) {
+            if (!button.hasAttribute("data-node-order")) {
+              button.setAttribute("data-node-order", String(index));
+            }
+          });
+
+          buttons.sort(function (a, b) {
+            var left = Number(a.getAttribute("data-node-order"));
+            var right = Number(b.getAttribute("data-node-order"));
+            return left - right;
+          });
+
+          buttons.forEach(function (button) {
+            nodeList.appendChild(button);
+          });
+        }
+
+        function renderWorkflowLoopContainerShell(graph) {
+          var nodeList = host.querySelector("[data-graph-node-list]");
+          if (!nodeList) return;
+
+          resetWorkflowNodeListToFlatOrder(nodeList);
+
+          var loop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
+          if (!loop) return;
+
+          var nodeIds = collectVisibleWorkflowNodeIds();
+          if (!nodeIds.length) return;
+          var startIndex = nodeIds.indexOf(loop.start_node_id);
+          var endIndex = nodeIds.indexOf(loop.end_node_id);
+          if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) return;
+
+          var scopedIds = nodeIds.slice(startIndex, endIndex + 1);
+          if (!scopedIds.length) return;
+
+          var shell = document.createElement("div");
+          shell.className = "wb-loop-container-shell";
+          shell.setAttribute("data-graph-loop-container-shell", "1");
+
+          var header = document.createElement("div");
+          header.className = "wb-loop-container-header";
+
+          var title = document.createElement("p");
+          title.className = "wb-loop-container-title";
+          title.textContent = "Repeat Container";
+
+          var headerControls = document.createElement("div");
+          headerControls.className = "wb-loop-container-header-controls";
+
+          var loopReadiness = getLoopContainerReadiness();
+          var readinessBadge = document.createElement("span");
+          readinessBadge.className = "wb-loop-readiness-badge" + (loopReadiness.canRun ? "" : " is-blocked");
+          readinessBadge.textContent = loopReadiness.canRun
+            ? "Ready"
+            : (loopReadiness.blockers.length + " fix" + (loopReadiness.blockers.length === 1 ? "" : "es"));
+          headerControls.appendChild(readinessBadge);
+
+          var toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "btn btn-ghost btn-xs wb-loop-container-toggle";
+          toggle.setAttribute("data-graph-loop-toggle", "1");
+          toggle.textContent = workflowLoopContainerCollapsed ? "Show Steps" : "Hide Steps";
+          headerControls.appendChild(toggle);
+
+          var meta = document.createElement("div");
+          meta.className = "wb-loop-container-meta";
+
+          [
+            "repeat over " + loop.each,
+            "stop after " + loop.max,
+            "combine " + loop.merge,
+            "scope " + loop.start_node_id + " -> " + loop.end_node_id,
+          ].forEach(function (chipText) {
+            var chip = document.createElement("span");
+            chip.className = "wb-loop-container-meta-chip";
+            chip.textContent = chipText;
+            meta.appendChild(chip);
+          });
+
+          header.appendChild(title);
+          header.appendChild(headerControls);
+          header.appendChild(meta);
+
+          var body = document.createElement("div");
+          body.className = "wb-loop-container-body";
+          body.setAttribute("data-graph-loop-container-body", "1");
+          if (workflowLoopContainerCollapsed) {
+            body.classList.add("is-collapsed");
+          }
+
+          var dropHint = document.createElement("p");
+          dropHint.className = "text-xs wb-loop-drop-hint";
+          dropHint.textContent = "Drop a step here to add it inside this repeat scope.";
+          body.appendChild(dropHint);
+
+          if (!loopReadiness.canRun) {
+            var readinessList = document.createElement("div");
+            readinessList.className = "wb-loop-readiness-list";
+            loopReadiness.blockers.forEach(function (blocker) {
+              var fixButton = document.createElement("button");
+              fixButton.type = "button";
+              fixButton.className = "btn btn-ghost btn-xs wb-loop-readiness-item";
+              fixButton.textContent = "Do: " + blocker.message;
+              fixButton.setAttribute("data-workflow-readiness-jump", blocker.fieldId);
+              readinessList.appendChild(fixButton);
+            });
+            body.appendChild(readinessList);
+          }
+
+          shell.appendChild(header);
+          shell.appendChild(body);
+
+          var firstNode = nodeList.querySelector('[data-canvas-node-button][data-node-id="' + scopedIds[0] + '"]');
+          if (!firstNode) return;
+          nodeList.insertBefore(shell, firstNode);
+
+          scopedIds.forEach(function (nodeId) {
+            var button = nodeList.querySelector('[data-canvas-node-button][data-node-id="' + nodeId + '"]');
+            if (!button) return;
+            body.appendChild(button);
+          });
+        }
+
+        function clearWorkflowLoopScopeVisual() {
+          var summary = host.querySelector("[data-workflow-loop-summary]");
+          if (summary) {
+            summary.classList.add("hidden");
+            summary.textContent = "";
+          }
+
+          host.querySelectorAll("[data-canvas-node-button]").forEach(function (nodeButton) {
+            nodeButton.classList.remove("wb-node-loop-scope", "wb-node-loop-start", "wb-node-loop-end");
+            var chip = nodeButton.querySelector("[data-node-loop-chip]");
+            if (chip) {
+              chip.classList.add("hidden");
+              chip.textContent = "";
+            }
+          });
+        }
+
+        function applyWorkflowLoopScopeVisual(graph) {
+          clearWorkflowLoopScopeVisual();
+          var loop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
+          if (!loop) return;
+
+          var nodeIds = collectVisibleWorkflowNodeIds();
+          if (!nodeIds.length) return;
+          var startIndex = nodeIds.indexOf(loop.start_node_id);
+          var endIndex = nodeIds.indexOf(loop.end_node_id);
+          if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) return;
+
+          var summary = host.querySelector("[data-workflow-loop-summary]");
+          if (summary) {
+            summary.textContent = "Repeat Scope: "
+              + loop.start_node_id + " -> " + loop.end_node_id
+              + " | each " + loop.each
+              + " | max " + loop.max
+              + " | merge " + loop.merge;
+            summary.classList.remove("hidden");
+          }
+
+          for (var i = startIndex; i <= endIndex; i++) {
+            var nodeId = nodeIds[i];
+            var nodeButton = host.querySelector('[data-canvas-node-button][data-node-id="' + nodeId + '"]');
+            if (!nodeButton) continue;
+            nodeButton.classList.add("wb-node-loop-scope");
+            if (i === startIndex) nodeButton.classList.add("wb-node-loop-start");
+            if (i === endIndex) nodeButton.classList.add("wb-node-loop-end");
+
+            var chip = nodeButton.querySelector("[data-node-loop-chip]");
+            if (!chip) continue;
+            var label = "In Loop";
+            if (startIndex === endIndex) {
+              label = "Repeat Step";
+            } else if (i === startIndex) {
+              label = "Repeat Start";
+            } else if (i === endIndex) {
+              label = "Repeat End";
+            }
+            chip.textContent = label;
+            chip.classList.remove("hidden");
+          }
+        }
+
+        function renderWorkflowGraphLinks(graph) {
+          var canvas = host.querySelector("[data-graph-canvas]");
+          var svg = host.querySelector("[data-graph-link-layer]");
+          if (!canvas || !svg) return;
+
+          renderWorkflowLoopContainerShell(graph);
+
+          var rect = canvas.getBoundingClientRect();
+          svg.setAttribute("viewBox", "0 0 " + Math.max(rect.width, 1) + " " + Math.max(rect.height, 1));
+          svg.innerHTML = "";
+
+          var nodesById = {};
+          host.querySelectorAll("[data-canvas-node-button]").forEach(function (node) {
+            var nodeId = node.getAttribute("data-node-id") || "";
+            if (nodeId) nodesById[nodeId] = node;
+          });
+
+          var edges = graph && Array.isArray(graph.edges) ? graph.edges : [];
+          edges.forEach(function (edge) {
+            var fromNode = nodesById[edge.from];
+            var toNode = nodesById[edge.to];
+            if (!fromNode || !toNode) return;
+
+            var start = getGraphHandlePoint(edge.from, "out");
+            var end = getGraphHandlePoint(edge.to, "in");
+            if (!start || !end) return;
+
+            var startX = start.x;
+            var startY = start.y;
+            var endX = end.x;
+            var endY = end.y;
+            var controlY = startY + Math.max(18, (endY - startY) * 0.45);
+
+            var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            var d = "M " + startX + " " + startY
+              + " C " + startX + " " + controlY
+              + ", " + endX + " " + (endY - Math.max(18, (endY - startY) * 0.45))
+              + ", " + endX + " " + endY;
+            path.setAttribute("d", d);
+            path.setAttribute("fill", "none");
+            path.setAttribute("stroke", edge.id === selectedWorkflowEdgeId ? "var(--primary)" : "var(--border)");
+            path.setAttribute("stroke-width", edge.id === selectedWorkflowEdgeId ? "3" : "2");
+            path.setAttribute("stroke-linecap", "round");
+            path.style.pointerEvents = "stroke";
+            path.style.cursor = "pointer";
+            path.setAttribute("data-graph-edge-id", edge.id);
+            svg.appendChild(path);
+          });
+
+          if (graphLinkDraft) {
+            renderGraphDraftLink();
+          }
+
+          renderWorkflowGraphConnectionsList(graph);
+          setWorkflowEdgeInspector(graph, selectedWorkflowEdgeId);
+          applyWorkflowLoopScopeVisual(graph);
+          positionWorkflowContextPanel();
+        }
+
+        function isWorkflowAdvancedDrawerOpen() {
+          var drawer = host.querySelector("[data-step-advanced-drawer]");
+          return !!(drawer && drawer.classList.contains("is-open"));
+        }
+
+        function closeWorkflowAdvancedDrawer() {
+          var drawer = host.querySelector("[data-step-advanced-drawer]");
+          var backdrop = host.querySelector("[data-step-advanced-backdrop]");
+          if (!drawer || !backdrop) return;
+          drawer.classList.remove("is-open");
+          drawer.setAttribute("aria-hidden", "true");
+          backdrop.classList.remove("is-open");
+        }
+
+        function openWorkflowAdvancedDrawer() {
+          if (currentView !== "workflows") return;
+          var panel = host.querySelector("[data-node-context-panel].wb-inspector-contextual");
+          if (!panel || panel.classList.contains("wb-inspector-collapsed")) return;
+
+          var drawer = host.querySelector("[data-step-advanced-drawer]");
+          var backdrop = host.querySelector("[data-step-advanced-backdrop]");
+          if (!drawer || !backdrop) return;
+
+          drawer.classList.add("is-open");
+          drawer.setAttribute("aria-hidden", "false");
+          backdrop.classList.add("is-open");
+        }
+
+        function syncWorkflowAdvancedDrawerState() {
+          var drawer = host.querySelector("[data-step-advanced-drawer]");
+          if (!drawer) return;
+          var panel = host.querySelector("[data-node-context-panel].wb-inspector-contextual");
+          if (!panel || panel.classList.contains("wb-inspector-collapsed")) {
+            closeWorkflowAdvancedDrawer();
+          }
+        }
+
+        function syncWorkflowParamRowMode(row) {
+          if (!row) return;
+          var modeNode = row.querySelector("[data-function-param-mode]");
+          if (!modeNode) return;
+          var isState = (modeNode.value || "literal") === "state";
+          row.classList.toggle("is-state-mode", isState);
+        }
+
+        function syncWorkflowParamRowsMode() {
+          host.querySelectorAll("[data-function-param-row]").forEach(function (row) {
+            syncWorkflowParamRowMode(row);
+          });
+        }
+
+        function setWorkflowParamRowFocus(row, focused) {
+          if (!row) return;
+          row.classList.toggle("is-focused", !!focused);
+          if (focused) {
+            syncWorkflowParamRowMode(row);
+          }
+        }
+
+        function clearWorkflowParamRowFocus(exceptRow) {
+          host.querySelectorAll("[data-function-param-row].is-focused").forEach(function (row) {
+            if (exceptRow && row === exceptRow) return;
+            row.classList.remove("is-focused");
+          });
+        }
+
+        function positionWorkflowContextPanel() {
+          if (currentView !== "workflows") return;
+          var panel = host.querySelector("[data-node-context-panel]");
+          if (!panel || !panel.classList.contains("wb-inspector-contextual")) {
+            closeWorkflowAdvancedDrawer();
+            return;
+          }
+
+          panel.style.left = "";
+          panel.style.top = "";
+          if (panel.classList.contains("wb-inspector-collapsed")) {
+            closeWorkflowAdvancedDrawer();
+            return;
+          }
+          if (window.innerWidth <= 1023) return;
+
+          var grid = host.querySelector(".wb-canvas-inspector-grid");
+          var selectedNode = host.querySelector("[data-canvas-node-button].is-selected");
+          if (!grid || !selectedNode) return;
+
+          var gridRect = grid.getBoundingClientRect();
+          var nodeRect = selectedNode.getBoundingClientRect();
+          var panelWidth = panel.offsetWidth || 320;
+          var panelHeight = panel.offsetHeight || 280;
+          var margin = 12;
+
+          var availableRight = gridRect.right - nodeRect.right - margin;
+          var availableLeft = nodeRect.left - gridRect.left - margin;
+          var placeRight = availableRight >= panelWidth || availableRight >= availableLeft;
+
+          var left = placeRight
+            ? ((nodeRect.right - gridRect.left) + margin)
+            : ((nodeRect.left - gridRect.left) - panelWidth - margin);
+          var maxLeft = Math.max(margin, gridRect.width - panelWidth - margin);
+          if (left > maxLeft) left = maxLeft;
+          if (left < margin) left = margin;
+
+          var nodeLeft = nodeRect.left - gridRect.left;
+          var nodeRight = nodeRect.right - gridRect.left;
+          if (left < nodeRight && (left + panelWidth) > nodeLeft) {
+            if (placeRight) {
+              left = Math.min(maxLeft, nodeRight + margin);
+            } else {
+              left = Math.max(margin, nodeLeft - panelWidth - margin);
+            }
+          }
+
+          var top = (nodeRect.top - gridRect.top);
+          var maxTop = Math.max(margin, gridRect.height - panelHeight - margin);
+          if (top > maxTop) top = maxTop;
+          if (top < margin) top = margin;
+
+          panel.style.left = left + "px";
+          panel.style.top = top + "px";
+        }
+
+        function hydrateWorkflowGraphState() {
+          if (currentView !== "workflows") return;
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph) return;
+          if (Array.isArray(graph.edges) && graph.edges.length > 0) {
+            var stillExists = graph.edges.some(function (edge) { return edge.id === selectedWorkflowEdgeId; });
+            if (!selectedWorkflowEdgeId || !stillExists) {
+              selectedWorkflowEdgeId = graph.edges[0].id;
+            }
+          } else {
+            selectedWorkflowEdgeId = "";
+          }
+          refreshWorkflowLoopNodeOptions(
+            graph.guided_loop && graph.guided_loop.start_node_id,
+            graph.guided_loop && graph.guided_loop.end_node_id
+          );
+          applyWorkflowLoopConfigToInputs(graph.guided_loop || null);
+          persistWorkflowGraphForCurrentContext(graph);
+          renderWorkflowGraphLinks(graph);
+        }
+
+        function syncWorkflowLoopConfigToGraph() {
+          if (currentView !== "workflows") return;
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph || typeof graph !== "object") return;
+          var loopConfig = readWorkflowLoopConfigFromInputs();
+          if (loopConfig) {
+            graph.guided_loop = loopConfig;
+          } else {
+            delete graph.guided_loop;
+          }
+          persistWorkflowGraphForCurrentContext(graph);
+          renderWorkflowGraphLinks(graph);
+          updateWorkflowLoopDetailVisibility();
+          updateWorkflowLoopStory();
+        }
+
+        function updateWorkflowLoopDetailVisibility() {
+          var details = host.querySelector("[data-workflow-loop-details]");
+          var fields = getWorkflowLoopFieldNodes();
+          if (!details || !fields.enabled) return;
+          details.style.display = fields.enabled.checked ? "flex" : "none";
+        }
+
+        function updateWorkflowLoopStory() {
+          var storyNode = host.querySelector("[data-workflow-loop-story]");
+          if (!storyNode) return;
+
+          var fields = getWorkflowLoopFieldNodes();
+          if (!fields.enabled || !fields.enabled.checked) {
+            storyNode.textContent = "Repeat is off. Turn Repeat On to run selected steps for each item in a list.";
+            return;
+          }
+
+          var each = (fields.each && fields.each.value ? fields.each.value : "").trim();
+          var max = (fields.max && fields.max.value ? fields.max.value : "").trim();
+          var merge = (fields.merge && fields.merge.value ? fields.merge.value : "append").trim() || "append";
+          var start = (fields.startNode && fields.startNode.value ? fields.startNode.value : "").trim();
+          var end = (fields.endNode && fields.endNode.value ? fields.endNode.value : "").trim();
+
+          var listPhrase = each ? each : "(choose a list)";
+          var maxPhrase = max ? max : "(choose max items)";
+          var rangePhrase = (start && end) ? (start + " to " + end) : "(pick start/end steps)";
+          storyNode.textContent = "Story: Run steps " + rangePhrase + " for each item in " + listPhrase + ", stop after " + maxPhrase + " item(s), then " + merge + " the outputs.";
+        }
+
+        function addRepeatContainerFromSelection() {
+          var fields = getWorkflowLoopFieldNodes();
+          if (!fields.enabled || !fields.each || !fields.max || !fields.merge || !fields.startNode || !fields.endNode) {
+            return;
+          }
+
+          fields.enabled.checked = true;
+          fields.each.value = "$current.results";
+          fields.max.value = "5";
+          fields.merge.value = "append";
+
+          var nodeIds = collectVisibleWorkflowNodeIds();
+          var dropzone = host.querySelector("[data-canvas-dropzone]");
+          var selectedNodeId = dropzone ? ((dropzone.getAttribute("data-selected-node") || "").trim()) : "";
+
+          if (selectedNodeId && nodeIds.indexOf(selectedNodeId) >= 0) {
+            fields.startNode.value = selectedNodeId;
+            fields.endNode.value = selectedNodeId;
+          } else if (nodeIds.length > 0) {
+            fields.startNode.value = nodeIds[0];
+            fields.endNode.value = nodeIds[nodeIds.length - 1];
+          }
+
+          workflowLoopContainerCollapsed = false;
+          syncWorkflowLoopConfigToGraph();
+          updateWorkflowReadinessStrip();
+          updateWorkflowLoopStory();
+        }
+
+        function serializeWorkflowGraphStateForRequest() {
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph || typeof graph !== "object") return "";
+          var loopConfig = readWorkflowLoopConfigFromInputs();
+          if (loopConfig) {
+            graph.guided_loop = loopConfig;
+          } else {
+            delete graph.guided_loop;
+          }
+          try {
+            return JSON.stringify(graph);
+          } catch (e) {
+            return "";
+          }
+        }
+
+        function persistLatestWorkflowStateSnapshot(finalState) {
+          var context = getSelectedWorkflowContext();
+          if (!context || !finalState || typeof finalState !== "object") return;
+          var map = readWorkflowStateSnapshotMap();
+          map[workflowStateSnapshotKey(context.workflowId, context.queue)] = finalState;
+          writeWorkflowStateSnapshotMap(map);
+        }
+
+        function readLatestWorkflowStateSnapshot() {
+          var context = getSelectedWorkflowContext();
+          if (!context) return null;
+          var map = readWorkflowStateSnapshotMap();
+          var snapshot = map[workflowStateSnapshotKey(context.workflowId, context.queue)];
+          return snapshot && typeof snapshot === "object" ? snapshot : null;
+        }
+
+        function captureLatestWorkflowStateFromDraftResult(container) {
+          if (!container) return;
+          var rawNode = container.querySelector("[data-workflow-final-state-json]");
+          if (!rawNode) return;
+          var raw = typeof rawNode.value === "string"
+            ? rawNode.value
+            : (rawNode.textContent || "");
+          if (!raw || !raw.trim()) return;
+          try {
+            var parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object") {
+              persistLatestWorkflowStateSnapshot(parsed);
+            }
+          } catch (e) {}
+        }
+
+        function collectStatePaths(value, prefix, depth, output) {
+          if (!output || depth > 5) return;
+          if (prefix) output.push(prefix);
+          if (value === null || value === undefined) return;
+
+          if (Array.isArray(value)) {
+            var maxItems = Math.min(value.length, 4);
+            for (var i = 0; i < maxItems; i++) {
+              collectStatePaths(value[i], prefix + "[" + i + "]", depth + 1, output);
+            }
+            return;
+          }
+
+          if (typeof value === "object") {
+            Object.keys(value).slice(0, 20).forEach(function (key) {
+              var childPrefix = prefix ? (prefix + "." + key) : key;
+              collectStatePaths(value[key], childPrefix, depth + 1, output);
+            });
+          }
+        }
+
+        function getDynamicStatePathOptions(finalState) {
+          if (!finalState || typeof finalState !== "object") return [];
+          var paths = [];
+          collectStatePaths(finalState.current, "$current", 0, paths);
+          collectStatePaths(finalState.pipeline, "$pipeline", 0, paths);
+          collectStatePaths(finalState.diff, "$diff", 0, paths);
+          collectStatePaths(finalState.errors, "$errors", 0, paths);
+          collectStatePaths(finalState.proposed, "$proposed", 0, paths);
+          var unique = [];
+          var seen = {};
+          paths.forEach(function (path) {
+            if (!path || seen[path]) return;
+            seen[path] = true;
+            unique.push(path);
+          });
+          return unique.sort();
+        }
+
+        function populateStatePathPickers() {
+          var finalState = readLatestWorkflowStateSnapshot();
+          if (!finalState) return;
+          var options = getDynamicStatePathOptions(finalState);
+          if (!options.length) return;
+
+          host.querySelectorAll("[data-function-state-picker]").forEach(function (picker) {
+            if (!picker) return;
+            var existing = {};
+            Array.prototype.slice.call(picker.options || []).forEach(function (option) {
+              existing[option.value] = true;
+            });
+            options.forEach(function (path) {
+              if (existing[path]) return;
+              var option = document.createElement("option");
+              option.value = path;
+              option.textContent = path;
+              option.setAttribute("data-dynamic-state-option", "1");
+              picker.appendChild(option);
+            });
+          });
+        }
+
+        function resolveStateBindingPath(finalState, rawPath) {
+          var path = (rawPath || "").trim();
+          if (!path) {
+            return { ok: false, reason: "empty" };
+          }
+          if (!finalState || typeof finalState !== "object") {
+            return { ok: false, reason: "no_state" };
+          }
+
+          var normalized = path.charAt(0) === "$" ? path.slice(1) : path;
+          var root = null;
+          var remainder = "";
+
+          if (normalized === "current" || normalized.indexOf("current") === 0) {
+            root = finalState.current;
+            remainder = normalized.slice("current".length);
+          } else if (normalized === "pipeline" || normalized.indexOf("pipeline") === 0) {
+            root = finalState.pipeline;
+            remainder = normalized.slice("pipeline".length);
+          } else if (normalized === "diff" || normalized.indexOf("diff") === 0) {
+            root = finalState.diff;
+            remainder = normalized.slice("diff".length);
+          } else if (normalized === "errors" || normalized.indexOf("errors") === 0) {
+            root = finalState.errors;
+            remainder = normalized.slice("errors".length);
+          } else if (normalized === "proposed" || normalized.indexOf("proposed") === 0) {
+            root = finalState.proposed;
+            remainder = normalized.slice("proposed".length);
+          } else {
+            return { ok: false, reason: "unknown_root" };
+          }
+
+          var tokenExpr = remainder.replace(/\[(\d+)\]/g, ".$1");
+          if (tokenExpr.indexOf(".") === 0) tokenExpr = tokenExpr.slice(1);
+          var tokens = tokenExpr ? tokenExpr.split(".").filter(Boolean) : [];
+
+          var cursor = root;
+          for (var i = 0; i < tokens.length; i++) {
+            var token = tokens[i];
+            if (Array.isArray(cursor)) {
+              var index = Number(token);
+              if (!Number.isInteger(index) || index < 0 || index >= cursor.length) {
+                return { ok: false, reason: "missing", token: token, index: i };
+              }
+              cursor = cursor[index];
+              continue;
+            }
+
+            if (cursor && typeof cursor === "object" && Object.prototype.hasOwnProperty.call(cursor, token)) {
+              cursor = cursor[token];
+              continue;
+            }
+
+            return { ok: false, reason: "missing", token: token, index: i };
+          }
+
+          return { ok: true, value: cursor };
+        }
+
+        function validateStateBindingsInInspector() {
+          var finalState = readLatestWorkflowStateSnapshot();
+          host.querySelectorAll("[data-function-param-row]").forEach(function (row) {
+            var modeNode = row.querySelector("[data-function-param-mode]");
+            var valueNode = row.querySelector("[data-function-param-input]");
+            var hintNode = row.querySelector("[data-function-param-state-hint]");
+            if (!modeNode || !valueNode || !hintNode) return;
+
+            if ((modeNode.value || "literal") !== "state") {
+              hintNode.textContent = "";
+              hintNode.style.color = "var(--muted-foreground)";
+              return;
+            }
+
+            var path = (valueNode.value || "").trim();
+            if (!path) {
+              hintNode.textContent = "Choose or type a state path.";
+              hintNode.style.color = "var(--color-red-700)";
+              return;
+            }
+
+            var resolved = resolveStateBindingPath(finalState, path);
+            if (!finalState) {
+              hintNode.textContent = "Test Run to validate this state path against live state.";
+              hintNode.style.color = "var(--muted-foreground)";
+              return;
+            }
+
+            if (!resolved.ok) {
+              hintNode.textContent = "Path not found in latest final state.";
+              hintNode.style.color = "var(--color-red-700)";
+              return;
+            }
+
+            var preview;
+            try {
+              preview = JSON.stringify(resolved.value);
+            } catch (e) {
+              preview = String(resolved.value);
+            }
+            if (preview && preview.length > 120) {
+              preview = preview.slice(0, 117) + "...";
+            }
+            hintNode.textContent = "Resolved from latest state: " + preview;
+            hintNode.style.color = "var(--color-green-700)";
+          });
+        }
+
+        function getStateBindingTargetRow() {
+          if (stateBindingTarget.nodeId && stateBindingTarget.paramKey) {
+            var targetedRow = host.querySelector(
+              '[data-function-param-row][data-node-id="' + stateBindingTarget.nodeId + '"][data-param-key="' + stateBindingTarget.paramKey + '"]'
+            );
+            if (targetedRow) return targetedRow;
+          }
+          return host.querySelector("[data-function-param-row]");
+        }
+
+        function updateStateExplorerTargetLabel(row) {
+          var label = host.querySelector("[data-state-explorer-target]");
+          if (!label) return;
+          if (!row) {
+            label.textContent = "Target: none";
+            return;
+          }
+          var paramKey = row.getAttribute("data-param-key") || "";
+          var nodeId = row.getAttribute("data-node-id") || "";
+          label.textContent = "Target: " + paramKey + (nodeId ? (" @ " + nodeId) : "");
+        }
+
+        function setStateBindingTarget(nodeId, paramKey) {
+          if (!nodeId || !paramKey) return;
+          stateBindingTarget.nodeId = nodeId;
+          stateBindingTarget.paramKey = paramKey;
+
+          host.querySelectorAll("[data-function-param-row]").forEach(function (row) {
+            var isActive = row.getAttribute("data-node-id") === nodeId
+              && row.getAttribute("data-param-key") === paramKey;
+            row.classList.toggle("is-target-row", isActive);
+          });
+
+          updateStateExplorerTargetLabel(getStateBindingTargetRow());
+        }
+
+        function renderStateExplorerPaths() {
+          var list = host.querySelector("[data-state-explorer-list]");
+          if (!list) return;
+
+          var finalState = readLatestWorkflowStateSnapshot();
+          var options = finalState ? getDynamicStatePathOptions(finalState) : [];
+          list.innerHTML = "";
+
+          if (!options.length) {
+            var empty = document.createElement("p");
+            empty.className = "text-xs";
+            empty.style.color = "var(--muted-foreground)";
+            empty.setAttribute("data-state-explorer-empty", "");
+            empty.textContent = finalState
+              ? "No discoverable paths in latest final state snapshot."
+              : "Test Run to load live final state paths.";
+            list.appendChild(empty);
+            updateStateExplorerTargetLabel(getStateBindingTargetRow());
+            return;
+          }
+
+          options.slice(0, 160).forEach(function (path) {
+            var button = document.createElement("button");
+            button.type = "button";
+            button.className = "btn btn-ghost btn-xs";
+            button.style.justifyContent = "flex-start";
+            button.style.width = "100%";
+            button.style.fontFamily = "SF Mono,Monaco,Cascadia Code,Roboto Mono,monospace";
+            button.style.marginBottom = "0.25rem";
+            button.setAttribute("data-state-explorer-path", path);
+            button.textContent = path;
+            list.appendChild(button);
+          });
+
+          updateStateExplorerTargetLabel(getStateBindingTargetRow());
+        }
+
+        function insertStateExplorerPath(path) {
+          if (!path) return;
+          var row = getStateBindingTargetRow();
+          if (!row) return;
+
+          var nodeId = row.getAttribute("data-node-id") || "";
+          var paramKey = row.getAttribute("data-param-key") || "";
+          var valueInput = row.querySelector("[data-function-param-input]");
+          var modeInput = row.querySelector("[data-function-param-mode]");
+          if (!nodeId || !paramKey || !valueInput) return;
+
+          if (modeInput) modeInput.value = "state";
+          valueInput.value = path;
+          syncWorkflowParamRowMode(row);
+          setStateBindingTarget(nodeId, paramKey);
+          syncFunctionInputEditorFromParameterInputs(nodeId);
+          validateStateBindingsInInspector();
+          valueInput.focus();
+        }
+
+        function hydrateWorkflowStateBindingUx() {
+          if (currentView !== "workflows") return;
+          hydrateWorkflowGraphState();
+          populateStatePathPickers();
+          renderStateExplorerPaths();
+          var row = getStateBindingTargetRow();
+          if (row) {
+            setStateBindingTarget(
+              row.getAttribute("data-node-id") || "",
+              row.getAttribute("data-param-key") || ""
+            );
+          } else {
+            updateStateExplorerTargetLabel(null);
+          }
+          validateStateBindingsInInspector();
+          syncWorkflowParamRowsMode();
+          clearWorkflowParamRowFocus(null);
+          updateWorkflowLoopDetailVisibility();
+          updateWorkflowReadinessStrip();
+          updateWorkflowLoopStory();
+          syncWorkflowAdvancedDrawerState();
+          positionWorkflowContextPanel();
+        }
+
+        function clearWorkflowLoopDropTargetHighlight() {
+          host.querySelectorAll("[data-graph-loop-container-shell].is-drop-target").forEach(function (node) {
+            node.classList.remove("is-drop-target");
+          });
+          host.querySelectorAll("[data-canvas-node-button].wb-loop-drop-before, [data-canvas-node-button].wb-loop-drop-after").forEach(function (node) {
+            node.classList.remove("wb-loop-drop-before", "wb-loop-drop-after");
+          });
+        }
+
+        function updateWorkflowLoopDropTargetHighlight(event) {
+          clearWorkflowLoopDropTargetHighlight();
+          if (!event) return;
+          var loopShell = event.target.closest("[data-graph-loop-container-shell]");
+          if (!loopShell) return;
+
+          loopShell.classList.add("is-drop-target");
+          if (typeof event.clientY !== "number") return;
+
+          var anchorNode = event.target.closest("[data-canvas-node-button]");
+          if (!anchorNode || !loopShell.contains(anchorNode)) return;
+
+          var rect = anchorNode.getBoundingClientRect();
+          var placeBefore = event.clientY < (rect.top + rect.height / 2);
+          anchorNode.classList.add(placeBefore ? "wb-loop-drop-before" : "wb-loop-drop-after");
+        }
+
+        function normalizeWorkflowModuleKind(raw) {
+          var value = (raw || "").trim().toLowerCase();
+          if (!value || !/^[a-z0-9_]+$/.test(value)) return "";
+          return value;
+        }
+
+        function normalizeWorkflowFunctionName(raw) {
+          var value = (raw || "").trim().toLowerCase();
+          if (!value || !/^[a-z0-9_]+$/.test(value)) return "";
+          return value;
+        }
+
+        function parseWorkflowModulesCsv(raw) {
+          var seen = {};
+          var modules = [];
+          (raw || "").split(",").forEach(function (part) {
+            var moduleId = normalizeWorkflowModuleKind(part);
+            if (!moduleId || seen[moduleId]) return;
+            seen[moduleId] = true;
+            modules.push(moduleId);
+          });
+          return modules;
+        }
+
+        function joinWorkflowModulesCsv(modules) {
+          return (modules || []).filter(function (value) { return !!value; }).join(",");
+        }
+
+        function parseWorkflowFunctionStepsCsv(raw) {
+          var steps = [];
+          (raw || "").split(",").forEach(function (part) {
+            var token = (part || "").trim().toLowerCase();
+            if (!token) return;
+            var pieces = token.split(".");
+            if (pieces.length !== 2) return;
+            var moduleId = normalizeWorkflowModuleKind(pieces[0]);
+            var functionName = normalizeWorkflowFunctionName(pieces[1]);
+            if (!moduleId || !functionName) return;
+            steps.push(moduleId + "." + functionName);
+          });
+          return steps;
+        }
+
+        function joinWorkflowFunctionStepsCsv(steps) {
+          return (steps || []).filter(function (value) { return !!value; }).join(",");
+        }
+
+        function buildWorkflowNodeIdFromStepToken(stepToken, index) {
+          if (!stepToken || index < 0) return "";
+          var parts = stepToken.split(".");
+          if (parts.length !== 2) return "";
+          var moduleId = normalizeWorkflowModuleKind(parts[0]);
+          var functionName = normalizeWorkflowFunctionName(parts[1]);
+          if (!moduleId || !functionName) return "";
+          return "node-fn-" + moduleId + "-" + functionName + "-" + String(index + 1);
+        }
+
+        function parseWorkflowNodeIndex(nodeId) {
+          var match = /-(\d+)$/.exec((nodeId || "").trim());
+          if (!match) return -1;
+          var parsed = Number(match[1]);
+          if (!Number.isFinite(parsed) || parsed <= 0) return -1;
+          return parsed - 1;
+        }
+
+        function remapWorkflowFunctionInputsWithIndexMap(functionInputsJson, oldSteps, oldIndexToNewIndex) {
+          var parsed = {};
+          try {
+            parsed = JSON.parse(functionInputsJson || "{}");
+          } catch (e) {
+            parsed = {};
+          }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            parsed = {};
+          }
+
+          var remapped = {};
+          (oldSteps || []).forEach(function (stepToken, oldIndex) {
+            var mapped = oldIndexToNewIndex[String(oldIndex)];
+            if (typeof mapped !== "number" || mapped < 0) return;
+            var oldNodeId = buildWorkflowNodeIdFromStepToken(stepToken, oldIndex);
+            var newNodeId = buildWorkflowNodeIdFromStepToken(stepToken, mapped);
+            if (!oldNodeId || !newNodeId) return;
+            if (!Object.prototype.hasOwnProperty.call(parsed, oldNodeId)) return;
+            if (typeof parsed[oldNodeId] !== "string") return;
+            remapped[newNodeId] = parsed[oldNodeId];
+          });
+
+          try {
+            return JSON.stringify(remapped);
+          } catch (e) {
+            return "{}";
+          }
+        }
+
+        function remapWorkflowFunctionInputsForInsertedStep(functionInputsJson, oldSteps, insertIndex) {
+          var map = {};
+          (oldSteps || []).forEach(function (_stepToken, index) {
+            map[String(index)] = index >= insertIndex ? (index + 1) : index;
+          });
+          return remapWorkflowFunctionInputsWithIndexMap(functionInputsJson, oldSteps, map);
+        }
+
+        function remapWorkflowNodeIdForInsertedStep(nodeId, oldSteps, insertIndex) {
+          var target = (nodeId || "").trim();
+          if (!target) return "";
+
+          for (var i = 0; i < (oldSteps || []).length; i++) {
+            var oldNodeId = buildWorkflowNodeIdFromStepToken(oldSteps[i], i);
+            if (oldNodeId !== target) continue;
+            var nextIndex = i >= insertIndex ? (i + 1) : i;
+            return buildWorkflowNodeIdFromStepToken(oldSteps[i], nextIndex) || target;
+          }
+
+          return target;
+        }
+
+        function readWorkflowCanvasMutableState(dropzone) {
+          if (!dropzone) return null;
+          var queue = dropzone.getAttribute("data-selected-queue") || "";
+          if (!queue) return null;
+
+          var modulesNode = document.getElementById("workflow-modules-state");
+          var functionStepsNode = document.getElementById("workflow-function-steps-state");
+          var functionInputsNode = document.getElementById("workflow-function-inputs-state");
+
+          return {
+            queue: queue,
+            moduleCatalog: dropzone.getAttribute("data-selected-module-catalog") || "",
+            modulesNode: modulesNode,
+            functionStepsNode: functionStepsNode,
+            functionInputsNode: functionInputsNode,
+            modulesCsv: modulesNode
+              ? (modulesNode.value || "")
+              : (dropzone.getAttribute("data-custom-modules") || ""),
+            functionStepsCsv: functionStepsNode
+              ? (functionStepsNode.value || "")
+              : (dropzone.getAttribute("data-custom-function-steps") || ""),
+            functionInputsJson: functionInputsNode
+              ? (functionInputsNode.value || "")
+              : (dropzone.getAttribute("data-custom-function-inputs") || ""),
+          };
+        }
+
+        function applyWorkflowLoopConfigAfterStepRemoval(graph, removeIndex, newSteps) {
+          var loop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
+          if (!loop) return;
+
+          var startIndex = parseWorkflowNodeIndex(loop.start_node_id);
+          var endIndex = parseWorkflowNodeIndex(loop.end_node_id);
+          if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
+            delete graph.guided_loop;
+            return;
+          }
+
+          if (removeIndex < startIndex) {
+            startIndex -= 1;
+            endIndex -= 1;
+          } else if (removeIndex <= endIndex) {
+            if (startIndex === endIndex) {
+              delete graph.guided_loop;
+              return;
+            }
+            endIndex -= 1;
+          }
+
+          if (
+            startIndex < 0 ||
+            endIndex < 0 ||
+            startIndex >= newSteps.length ||
+            endIndex >= newSteps.length ||
+            startIndex > endIndex
+          ) {
+            delete graph.guided_loop;
+            return;
+          }
+
+          var startNodeId = buildWorkflowNodeIdFromStepToken(newSteps[startIndex], startIndex);
+          var endNodeId = buildWorkflowNodeIdFromStepToken(newSteps[endIndex], endIndex);
+          if (!startNodeId || !endNodeId) {
+            delete graph.guided_loop;
+            return;
+          }
+
+          loop.start_node_id = startNodeId;
+          loop.end_node_id = endNodeId;
+          graph.guided_loop = loop;
+        }
+
+        function applyWorkflowLoopConfigAfterStepMove(graph, oldIndexToNewIndex, newSteps) {
+          var loop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
+          if (!loop) return;
+
+          var startIndex = parseWorkflowNodeIndex(loop.start_node_id);
+          var endIndex = parseWorkflowNodeIndex(loop.end_node_id);
+          if (startIndex < 0 || endIndex < 0) {
+            delete graph.guided_loop;
+            return;
+          }
+
+          if (Object.prototype.hasOwnProperty.call(oldIndexToNewIndex, String(startIndex))) {
+            startIndex = oldIndexToNewIndex[String(startIndex)];
+          }
+          if (Object.prototype.hasOwnProperty.call(oldIndexToNewIndex, String(endIndex))) {
+            endIndex = oldIndexToNewIndex[String(endIndex)];
+          }
+
+          if (
+            startIndex < 0 ||
+            endIndex < 0 ||
+            startIndex >= newSteps.length ||
+            endIndex >= newSteps.length
+          ) {
+            delete graph.guided_loop;
+            return;
+          }
+
+          if (startIndex > endIndex) {
+            var temp = startIndex;
+            startIndex = endIndex;
+            endIndex = temp;
+          }
+
+          var startNodeId = buildWorkflowNodeIdFromStepToken(newSteps[startIndex], startIndex);
+          var endNodeId = buildWorkflowNodeIdFromStepToken(newSteps[endIndex], endIndex);
+          if (!startNodeId || !endNodeId) {
+            delete graph.guided_loop;
+            return;
+          }
+
+          loop.start_node_id = startNodeId;
+          loop.end_node_id = endNodeId;
+          graph.guided_loop = loop;
+        }
+
+        function moveWorkflowStepByNodeId(dropzone, nodeId, offset) {
+          var state = readWorkflowCanvasMutableState(dropzone);
+          if (!state) return;
+
+          var oldSteps = parseWorkflowFunctionStepsCsv(state.functionStepsCsv);
+          if (oldSteps.length < 2) return;
+
+          var fromIndex = parseWorkflowNodeIndex(nodeId);
+          if (fromIndex < 0 || fromIndex >= oldSteps.length) return;
+
+          var toIndex = fromIndex + offset;
+          if (toIndex < 0 || toIndex >= oldSteps.length) return;
+
+          var updatedSteps = oldSteps.slice();
+          var movedStep = updatedSteps[fromIndex];
+          updatedSteps[fromIndex] = updatedSteps[toIndex];
+          updatedSteps[toIndex] = movedStep;
+
+          var indexMap = {};
+          for (var i = 0; i < oldSteps.length; i++) {
+            indexMap[String(i)] = i;
+          }
+          indexMap[String(fromIndex)] = toIndex;
+          indexMap[String(toIndex)] = fromIndex;
+
+          var remappedInputsJson = remapWorkflowFunctionInputsWithIndexMap(
+            state.functionInputsJson,
+            oldSteps,
+            indexMap
+          );
+          var updatedStepsCsv = joinWorkflowFunctionStepsCsv(updatedSteps);
+          var selectedNodeId = buildWorkflowNodeIdFromStepToken(updatedSteps[toIndex], toIndex);
+
+          var graph = readWorkflowGraphForCurrentContext();
+          if (graph) {
+            applyWorkflowLoopConfigAfterStepMove(graph, indexMap, updatedSteps);
+            persistWorkflowGraphForCurrentContext(graph);
+          }
+
+          if (state.functionStepsNode) state.functionStepsNode.value = updatedStepsCsv;
+          if (state.functionInputsNode) state.functionInputsNode.value = remappedInputsJson;
+
+          closeWorkflowAdvancedDrawer();
+          clearWorkflowParamRowFocus(null);
+          persistWorkflowNodeSelection(state.queue, selectedNodeId);
+          requestWorkflowNodeSelection(
+            state.queue,
+            selectedNodeId,
+            state.modulesCsv,
+            updatedStepsCsv,
+            remappedInputsJson,
+            "",
+            "",
+            state.moduleCatalog
+          );
+        }
+
+        function removeWorkflowStepByNodeId(dropzone, nodeId) {
+          var state = readWorkflowCanvasMutableState(dropzone);
+          if (!state) return;
+
+          var oldSteps = parseWorkflowFunctionStepsCsv(state.functionStepsCsv);
+          if (oldSteps.length <= 1) {
+            var targetPanel = document.getElementById("workflow-draft-run-results") || document.getElementById("inspector-panel");
+            renderInlineActionError(
+              targetPanel,
+              "Cannot Remove Final Step",
+              "At least one step is required in guided mode."
+            );
+            return;
+          }
+
+          var removeIndex = parseWorkflowNodeIndex(nodeId);
+          if (removeIndex < 0 || removeIndex >= oldSteps.length) return;
+
+          var updatedSteps = oldSteps.slice();
+          updatedSteps.splice(removeIndex, 1);
+
+          var indexMap = {};
+          for (var i = 0; i < oldSteps.length; i++) {
+            if (i < removeIndex) {
+              indexMap[String(i)] = i;
+            } else if (i > removeIndex) {
+              indexMap[String(i)] = i - 1;
+            } else {
+              indexMap[String(i)] = -1;
+            }
+          }
+
+          var remappedInputsJson = remapWorkflowFunctionInputsWithIndexMap(
+            state.functionInputsJson,
+            oldSteps,
+            indexMap
+          );
+          var updatedStepsCsv = joinWorkflowFunctionStepsCsv(updatedSteps);
+          var nextIndex = Math.min(removeIndex, updatedSteps.length - 1);
+          var selectedNodeId = buildWorkflowNodeIdFromStepToken(updatedSteps[nextIndex], nextIndex);
+
+          var graph = readWorkflowGraphForCurrentContext();
+          if (graph) {
+            applyWorkflowLoopConfigAfterStepRemoval(graph, removeIndex, updatedSteps);
+            persistWorkflowGraphForCurrentContext(graph);
+          }
+
+          if (state.functionStepsNode) state.functionStepsNode.value = updatedStepsCsv;
+          if (state.functionInputsNode) state.functionInputsNode.value = remappedInputsJson;
+
+          closeWorkflowAdvancedDrawer();
+          clearWorkflowParamRowFocus(null);
+          persistWorkflowNodeSelection(state.queue, selectedNodeId);
+          requestWorkflowNodeSelection(
+            state.queue,
+            selectedNodeId,
+            state.modulesCsv,
+            updatedStepsCsv,
+            remappedInputsJson,
+            "",
+            "",
+            state.moduleCatalog
+          );
+        }
+
+        function computeWorkflowLoopInsertIndex(loopShell, visibleNodeIds, startIndex, endIndex, dropHint) {
+          var insertIndex = endIndex + 1;
+          var hint = dropHint || {};
+          var targetNodeId = (hint.targetNodeId || "").trim();
+
+          if (targetNodeId) {
+            var targetIndex = visibleNodeIds.indexOf(targetNodeId);
+            if (targetIndex >= startIndex && targetIndex <= endIndex) {
+              var targetNode = host.querySelector(
+                '[data-canvas-node-button][data-node-id="' + targetNodeId + '"]'
+              );
+              if (targetNode && typeof hint.clientY === "number") {
+                var rect = targetNode.getBoundingClientRect();
+                var placeBefore = hint.clientY < (rect.top + rect.height / 2);
+                insertIndex = targetIndex + (placeBefore ? 0 : 1);
+              }
+            }
+          } else if (typeof hint.clientY === "number") {
+            var loopBody = loopShell ? loopShell.querySelector("[data-graph-loop-container-body]") : null;
+            var referenceRect = (loopBody || loopShell) ? (loopBody || loopShell).getBoundingClientRect() : null;
+            if (referenceRect) {
+              insertIndex = hint.clientY < (referenceRect.top + referenceRect.height / 2)
+                ? startIndex
+                : (endIndex + 1);
+            }
+          }
+
+          if (insertIndex < startIndex) insertIndex = startIndex;
+          if (insertIndex > (endIndex + 1)) insertIndex = endIndex + 1;
+          return insertIndex;
+        }
+
+        function tryInsertDroppedStepIntoLoop(dropzone, moduleKind, functionId, functionInputsJson, dropHint) {
+          if (!dropzone) return null;
+          var moduleId = normalizeWorkflowModuleKind(moduleKind);
+          var functionName = normalizeWorkflowFunctionName(functionId);
+          if (!moduleId || !functionName) return null;
+
+          var graph = readWorkflowGraphForCurrentContext();
+          var loop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
+          if (!graph || !loop) return null;
+
+          var loopShell = dropHint && dropHint.loopShell ? dropHint.loopShell : null;
+          if (!loopShell || !host.contains(loopShell)) return null;
+
+          var visibleNodeIds = collectVisibleWorkflowNodeIds();
+          if (!visibleNodeIds.length) return null;
+          var startIndex = visibleNodeIds.indexOf(loop.start_node_id);
+          var endIndex = visibleNodeIds.indexOf(loop.end_node_id);
+          if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) return null;
+
+          var functionStepsNode = document.getElementById("workflow-function-steps-state");
+          var modulesNode = document.getElementById("workflow-modules-state");
+          var inputsNode = document.getElementById("workflow-function-inputs-state");
+          var currentStepsCsv = functionStepsNode
+            ? (functionStepsNode.value || "")
+            : (dropzone.getAttribute("data-custom-function-steps") || "");
+          var currentModulesCsv = modulesNode
+            ? (modulesNode.value || "")
+            : (dropzone.getAttribute("data-custom-modules") || "");
+
+          var existingSteps = parseWorkflowFunctionStepsCsv(currentStepsCsv);
+          if (!existingSteps.length) return null;
+
+          var insertIndex = computeWorkflowLoopInsertIndex(
+            loopShell,
+            visibleNodeIds,
+            startIndex,
+            endIndex,
+            dropHint
+          );
+          insertIndex = Math.min(existingSteps.length, Math.max(0, insertIndex));
+          var insertedStepToken = moduleId + "." + functionName;
+          var updatedSteps = existingSteps.slice();
+          updatedSteps.splice(insertIndex, 0, insertedStepToken);
+          var updatedStepsCsv = joinWorkflowFunctionStepsCsv(updatedSteps);
+
+          var modules = parseWorkflowModulesCsv(currentModulesCsv);
+          if (modules.indexOf(moduleId) < 0) {
+            modules.push(moduleId);
+          }
+          var updatedModulesCsv = joinWorkflowModulesCsv(modules);
+          var remappedInputsJson = remapWorkflowFunctionInputsForInsertedStep(
+            functionInputsJson,
+            existingSteps,
+            insertIndex
+          );
+          var insertedNodeId = buildWorkflowNodeIdFromStepToken(insertedStepToken, insertIndex);
+          if (!insertedNodeId) return null;
+
+          var updatedLoop = normalizeWorkflowGuidedLoopConfig(loop);
+          if (!updatedLoop) return null;
+
+          var remappedStartNodeId = remapWorkflowNodeIdForInsertedStep(
+            updatedLoop.start_node_id,
+            existingSteps,
+            insertIndex
+          );
+          var remappedEndNodeId = remapWorkflowNodeIdForInsertedStep(
+            updatedLoop.end_node_id,
+            existingSteps,
+            insertIndex
+          );
+
+          updatedLoop.start_node_id = insertIndex <= startIndex
+            ? insertedNodeId
+            : (remappedStartNodeId || updatedLoop.start_node_id);
+          updatedLoop.end_node_id = insertIndex > endIndex
+            ? insertedNodeId
+            : (remappedEndNodeId || updatedLoop.end_node_id);
+
+          graph.guided_loop = updatedLoop;
+          persistWorkflowGraphForCurrentContext(graph);
+
+          if (functionStepsNode) functionStepsNode.value = updatedStepsCsv;
+          if (modulesNode) modulesNode.value = updatedModulesCsv;
+          if (inputsNode) inputsNode.value = remappedInputsJson;
+
+          return {
+            nodeId: insertedNodeId,
+            modulesCsv: updatedModulesCsv,
+            functionStepsCsv: updatedStepsCsv,
+            functionInputsJson: remappedInputsJson,
+          };
+        }
+
         function persistWorkflowNodeSelection(queue, nodeId) {
           if (!queue || !nodeId) return;
           var map = readWorkflowNodeMap();
           map[queue] = nodeId;
           writeWorkflowNodeMap(map);
+        }
+
+        function clearWorkflowNodeSelection(queue) {
+          if (!queue) return;
+          var map = readWorkflowNodeMap();
+          if (!Object.prototype.hasOwnProperty.call(map, queue)) return;
+          delete map[queue];
+          writeWorkflowNodeMap(map);
+        }
+
+        function requestWorkflowCanvasUnselect(dropzone) {
+          if (!dropzone) return;
+          var selectedNode = (dropzone.getAttribute("data-selected-node") || "").trim();
+          if (!selectedNode) return;
+
+          var queue = dropzone.getAttribute("data-selected-queue") || "";
+          if (!queue) return;
+
+          var modulesNode = document.getElementById("workflow-modules-state");
+          var functionStepsNode = document.getElementById("workflow-function-steps-state");
+          var functionInputsNode = document.getElementById("workflow-function-inputs-state");
+          var modulesCsv = modulesNode
+            ? (modulesNode.value || "")
+            : (dropzone.getAttribute("data-custom-modules") || "");
+          var functionStepsCsv = functionStepsNode
+            ? (functionStepsNode.value || "")
+            : (dropzone.getAttribute("data-custom-function-steps") || "");
+          var functionInputsJson = functionInputsNode
+            ? (functionInputsNode.value || "")
+            : (dropzone.getAttribute("data-custom-function-inputs") || "");
+          var moduleCatalog = dropzone.getAttribute("data-selected-module-catalog") || "";
+
+          closeWorkflowAdvancedDrawer();
+          clearWorkflowParamRowFocus(null);
+          clearWorkflowNodeSelection(queue);
+          requestWorkflowNodeSelection(
+            queue,
+            "",
+            modulesCsv,
+            functionStepsCsv,
+            functionInputsJson,
+            "",
+            "",
+            moduleCatalog
+          );
         }
 
         function requestWorkflowNodeSelection(queue, nodeId, modulesCsv, functionStepsCsv, functionInputsJson, addModuleKind, addFunctionStep, moduleCatalog) {
@@ -573,7 +2553,9 @@
           if (moduleCatalog && moduleCatalog.trim().length > 0) {
             url += "&module_catalog=" + encodeURIComponent(moduleCatalog.trim());
           }
-          request(url, host, "innerHTML");
+          request(url, host, "innerHTML", function () {
+            hydrateWorkflowStateBindingUx();
+          });
         }
 
         function restoreWorkflowNodeSelection() {
@@ -613,6 +2595,244 @@
 
           map[nodeId] = payload || "{}";
           stateNode.value = JSON.stringify(map);
+        }
+
+        function syncFunctionInputEditorFromParameterInputs(nodeId) {
+          if (!nodeId) return;
+          var editor = host.querySelector('[data-function-input-editor][data-node-id="' + nodeId + '"]');
+          if (!editor) return;
+
+          var paramInputs = host.querySelectorAll('[data-function-param-input][data-node-id="' + nodeId + '"]');
+          if (!paramInputs || paramInputs.length === 0) return;
+
+          var payload = {};
+          paramInputs.forEach(function (input) {
+            var key = (input.getAttribute("data-param-key") || "").trim();
+            if (!key) return;
+            var rawValue = (input.value || "").trim();
+            if (!rawValue) return;
+            var row = input.closest("[data-function-param-row]");
+            var modeNode = row ? row.querySelector("[data-function-param-mode]") : null;
+            var mode = modeNode ? (modeNode.value || "literal") : "literal";
+
+            if (mode === "state") {
+              payload[key] = { "$state": rawValue };
+              return;
+            }
+
+            try {
+              payload[key] = JSON.parse(rawValue);
+            } catch (e) {
+              payload[key] = rawValue;
+            }
+          });
+
+          editor.value = JSON.stringify(payload, null, 2);
+          updateFunctionInputState(nodeId, editor.value || "{}");
+        }
+
+        function syncParameterInputsFromFunctionInputEditor(nodeId, payloadRaw) {
+          if (!nodeId) return;
+          var parsed = {};
+          try {
+            parsed = JSON.parse(payloadRaw || "{}");
+          } catch (e) {
+            return;
+          }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+
+          var paramInputs = host.querySelectorAll('[data-function-param-input][data-node-id="' + nodeId + '"]');
+          if (!paramInputs || paramInputs.length === 0) return;
+
+          paramInputs.forEach(function (input) {
+            var key = (input.getAttribute("data-param-key") || "").trim();
+            if (!key) return;
+            if (!(key in parsed)) return;
+            var value = parsed[key];
+            var row = input.closest("[data-function-param-row]");
+            var modeNode = row ? row.querySelector("[data-function-param-mode]") : null;
+
+            if (value && typeof value === "object" && !Array.isArray(value) && typeof value.$state === "string") {
+              if (modeNode) modeNode.value = "state";
+              input.value = value.$state;
+              if (row) syncWorkflowParamRowMode(row);
+              return;
+            }
+
+            if (modeNode) modeNode.value = "literal";
+            if (typeof value === "string") {
+              input.value = value;
+            } else {
+              input.value = JSON.stringify(value);
+            }
+            if (row) syncWorkflowParamRowMode(row);
+          });
+
+          syncWorkflowParamRowsMode();
+        }
+
+        function validateFunctionInputsForSave(functionInputsRaw) {
+          if (!functionInputsRaw || functionInputsRaw.trim().length === 0) {
+            return { ok: true };
+          }
+
+          var map;
+          try {
+            map = JSON.parse(functionInputsRaw);
+          } catch (e) {
+            return { ok: false, detail: "function_inputs must be valid JSON object." };
+          }
+
+          if (!map || typeof map !== "object" || Array.isArray(map)) {
+            return { ok: false, detail: "function_inputs must be an object map of node_id to payload string." };
+          }
+
+          for (var nodeId in map) {
+            if (!Object.prototype.hasOwnProperty.call(map, nodeId)) continue;
+            var payload = map[nodeId];
+            if (typeof payload !== "string") {
+              return { ok: false, detail: "function_inputs payload for " + nodeId + " must be a string." };
+            }
+            var trimmed = payload.trim();
+            if (!trimmed) continue;
+            try {
+              JSON.parse(trimmed);
+            } catch (e) {
+              return { ok: false, detail: "function_inputs payload for " + nodeId + " must be valid JSON." };
+            }
+          }
+
+          return { ok: true };
+        }
+
+        function computeWorkflowReadiness() {
+          var blockers = [];
+          var visibleNodeIds = collectVisibleWorkflowNodeIds();
+          if (!visibleNodeIds.length) {
+            blockers.push({
+              message: "Add your first step.",
+            });
+          }
+
+          var functionInputsNode = document.getElementById("workflow-function-inputs-state");
+          if (functionInputsNode) {
+            var inputsValidation = validateFunctionInputsForSave(functionInputsNode.value || "");
+            if (!inputsValidation.ok) {
+              blockers.push({
+                message: inputsValidation.detail,
+                fieldId: "workflow-function-input-editor",
+              });
+            }
+          }
+
+          var loopFields = getWorkflowLoopFieldNodes();
+          var loopEnabled = !!(loopFields.enabled && loopFields.enabled.checked);
+          if (loopEnabled) {
+            var maxVal = Number(loopFields.max && loopFields.max.value);
+            if (!Number.isFinite(maxVal) || maxVal <= 0) {
+              blockers.push({ message: "Set stop-after items to 1 or more.", fieldId: "workflow-loop-max" });
+            }
+
+            var eachVal = (loopFields.each && loopFields.each.value ? loopFields.each.value : "").trim();
+            if (!eachVal || eachVal.charAt(0) !== "$") {
+              blockers.push({ message: "Choose a repeat list (example: $current.results).", fieldId: "workflow-loop-each" });
+            }
+
+            var startNodeId = (loopFields.startNode && loopFields.startNode.value ? loopFields.startNode.value : "").trim();
+            var endNodeId = (loopFields.endNode && loopFields.endNode.value ? loopFields.endNode.value : "").trim();
+            if (!startNodeId) {
+              blockers.push({ message: "Pick the first repeated step.", fieldId: "workflow-loop-start-node" });
+            }
+            if (!endNodeId) {
+              blockers.push({ message: "Pick the last repeated step.", fieldId: "workflow-loop-end-node" });
+            }
+
+            if (startNodeId && endNodeId) {
+              var startIdx = visibleNodeIds.indexOf(startNodeId);
+              var endIdx = visibleNodeIds.indexOf(endNodeId);
+              if (startIdx < 0) {
+                blockers.push({ message: "Re-select the first repeated step.", fieldId: "workflow-loop-start-node" });
+              }
+              if (endIdx < 0) {
+                blockers.push({ message: "Re-select the last repeated step.", fieldId: "workflow-loop-end-node" });
+              }
+              if (startIdx >= 0 && endIdx >= 0 && startIdx > endIdx) {
+                blockers.push({ message: "Move first repeated step above last repeated step.", fieldId: "workflow-loop-start-node" });
+              }
+            }
+          }
+
+          return {
+            canRun: blockers.length === 0,
+            blockers: blockers,
+          };
+        }
+
+        function renderWorkflowReadinessStrip(readiness) {
+          var strip = host.querySelector("[data-workflow-readiness-strip]");
+          if (!strip) return;
+          var statusNode = strip.querySelector("[data-workflow-readiness-status]");
+          var blockersWrap = strip.querySelector("[data-workflow-readiness-blockers]");
+          var blockersList = strip.querySelector("[data-workflow-readiness-list]");
+          if (!statusNode || !blockersWrap || !blockersList) return;
+
+          blockersList.innerHTML = "";
+          if (readiness.canRun) {
+            strip.classList.add("hidden");
+            return;
+          }
+
+          strip.classList.remove("hidden");
+          statusNode.textContent = "Action Needed";
+          statusNode.style.color = "var(--destructive)";
+          blockersWrap.classList.remove("hidden");
+
+          readiness.blockers.forEach(function (blocker) {
+            var li = document.createElement("li");
+            var button = document.createElement("button");
+            button.type = "button";
+            button.className = "btn btn-ghost btn-xs";
+            button.style.justifyContent = "flex-start";
+            button.style.width = "100%";
+            button.style.textAlign = "left";
+            button.style.color = "var(--destructive)";
+            button.textContent = "Do: " + blocker.message;
+            if (blocker.fieldId) {
+              button.setAttribute("data-workflow-readiness-jump", blocker.fieldId);
+            } else {
+              button.disabled = true;
+            }
+            li.appendChild(button);
+            blockersList.appendChild(li);
+          });
+        }
+
+        function updateWorkflowReadinessStrip() {
+          if (currentView !== "workflows") return { canRun: true, blockers: [] };
+          var readiness = computeWorkflowReadiness();
+          renderWorkflowReadinessStrip(readiness);
+          return readiness;
+        }
+
+        function renderInlineActionError(target, title, detail) {
+          if (!target) return;
+          target.innerHTML = "";
+          var content = document.createElement("div");
+          content.className = "card-content";
+
+          var heading = document.createElement("h3");
+          heading.className = "card-title";
+          heading.style.color = "var(--destructive)";
+          heading.textContent = title || "Request Error";
+
+          var paragraph = document.createElement("p");
+          paragraph.className = "card-description";
+          paragraph.style.marginTop = "0.5rem";
+          paragraph.textContent = detail || "Unknown request error.";
+
+          content.appendChild(heading);
+          content.appendChild(paragraph);
+          target.appendChild(content);
         }
 
         function focusWorkflowNode(offset) {
@@ -666,6 +2886,31 @@
           });
         }
 
+        function activateDraftRunTab(trigger) {
+          var group = trigger.closest("[data-draft-run-tab-group]");
+          if (!group) return;
+
+          var targetTab = trigger.getAttribute("data-draft-run-tab-trigger");
+          if (!targetTab) return;
+
+          group.querySelectorAll("[data-draft-run-tab-trigger]").forEach(function (tabTrigger) {
+            var isActive = tabTrigger === trigger;
+            tabTrigger.classList.toggle("btn-ghost", !isActive);
+            tabTrigger.classList.toggle("btn-outline", !isActive);
+            tabTrigger.style.background = isActive ? "var(--primary)" : "transparent";
+            tabTrigger.style.color = isActive
+              ? "var(--primary-foreground)"
+              : "var(--muted-foreground)";
+          });
+
+          var root = group.closest(".card") || group.parentElement;
+          if (!root) return;
+          root.querySelectorAll("[data-draft-run-tab-panel]").forEach(function (panel) {
+            var panelTab = panel.getAttribute("data-draft-run-tab-panel");
+            panel.classList.toggle("hidden", panelTab !== targetTab);
+          });
+        }
+
         document.querySelectorAll(".nav-item").forEach(function (item) {
           item.addEventListener("click", function (event) {
             event.preventDefault();
@@ -695,6 +2940,137 @@
             return;
           }
 
+          var draftRunTabTrigger = event.target.closest("[data-draft-run-tab-trigger]");
+          if (draftRunTabTrigger) {
+            event.preventDefault();
+            activateDraftRunTab(draftRunTabTrigger);
+            return;
+          }
+
+          var stepAdvancedOpen = event.target.closest("[data-step-advanced-open]");
+          if (stepAdvancedOpen) {
+            event.preventDefault();
+            openWorkflowAdvancedDrawer();
+            return;
+          }
+
+          var stepAdvancedClose = event.target.closest("[data-step-advanced-close], [data-step-advanced-backdrop]");
+          if (stepAdvancedClose) {
+            event.preventDefault();
+            closeWorkflowAdvancedDrawer();
+            return;
+          }
+
+          var statePathTrigger = event.target.closest("[data-state-explorer-path]");
+          if (statePathTrigger) {
+            event.preventDefault();
+            insertStateExplorerPath(statePathTrigger.getAttribute("data-state-explorer-path") || "");
+            return;
+          }
+
+          var graphEdgeTrigger = event.target.closest("[data-graph-edge-id]");
+          if (graphEdgeTrigger) {
+            event.preventDefault();
+            selectedWorkflowEdgeId = graphEdgeTrigger.getAttribute("data-graph-edge-id") || "";
+            hydrateWorkflowGraphState();
+            return;
+          }
+
+          var edgeRemoveTrigger = event.target.closest("[data-graph-edge-remove]");
+          if (edgeRemoveTrigger) {
+            event.preventDefault();
+            var edgeDetails = edgeRemoveTrigger.closest("[data-graph-edge-details]");
+            var removeEdgeId = edgeDetails ? (edgeDetails.getAttribute("data-graph-edge-id") || "") : "";
+            if (removeEdgeId) {
+              removeWorkflowEdge(removeEdgeId);
+            }
+            return;
+          }
+
+          var moveNodeUpTrigger = event.target.closest("[data-canvas-node-move-up]");
+          if (moveNodeUpTrigger) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (moveNodeUpTrigger.classList.contains("is-disabled")) return;
+            var upDropzone = host.querySelector("[data-canvas-dropzone]");
+            if (!upDropzone) return;
+            moveWorkflowStepByNodeId(
+              upDropzone,
+              moveNodeUpTrigger.getAttribute("data-node-id") || "",
+              -1
+            );
+            return;
+          }
+
+          var moveNodeDownTrigger = event.target.closest("[data-canvas-node-move-down]");
+          if (moveNodeDownTrigger) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (moveNodeDownTrigger.classList.contains("is-disabled")) return;
+            var downDropzone = host.querySelector("[data-canvas-dropzone]");
+            if (!downDropzone) return;
+            moveWorkflowStepByNodeId(
+              downDropzone,
+              moveNodeDownTrigger.getAttribute("data-node-id") || "",
+              1
+            );
+            return;
+          }
+
+          var removeNodeTrigger = event.target.closest("[data-canvas-node-remove]");
+          if (removeNodeTrigger) {
+            event.preventDefault();
+            event.stopPropagation();
+            var removeDropzone = host.querySelector("[data-canvas-dropzone]");
+            if (!removeDropzone) return;
+            if (!window.confirm("Remove this step from the workflow?")) return;
+            removeWorkflowStepByNodeId(
+              removeDropzone,
+              removeNodeTrigger.getAttribute("data-node-id") || ""
+            );
+            return;
+          }
+
+          var graphHandleTrigger = event.target.closest("[data-graph-output-handle], [data-graph-input-handle]");
+          if (graphHandleTrigger) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+
+          var paramRowTrigger = event.target.closest("[data-function-param-row]");
+          if (paramRowTrigger) {
+            clearWorkflowParamRowFocus(paramRowTrigger);
+            setWorkflowParamRowFocus(paramRowTrigger, true);
+            var targetNodeId = paramRowTrigger.getAttribute("data-node-id") || "";
+            var targetParamKey = paramRowTrigger.getAttribute("data-param-key") || "";
+            if (targetNodeId && targetParamKey) {
+              setStateBindingTarget(targetNodeId, targetParamKey);
+            }
+            var directField = event.target.closest("input, select, textarea, button");
+            if (!directField) {
+              var primaryInput = paramRowTrigger.querySelector("[data-function-param-input]");
+              if (primaryInput && typeof primaryInput.focus === "function") {
+                primaryInput.focus();
+              }
+            }
+          } else if (currentView === "workflows") {
+            clearWorkflowParamRowFocus(null);
+          }
+
+          var canvasUnselectTrigger = event.target.closest("[data-canvas-dropzone]");
+          if (canvasUnselectTrigger) {
+            var canvasInteractive = event.target.closest(
+              "[data-canvas-node-button], [data-graph-output-handle], [data-graph-input-handle], [data-graph-edge-id], [data-graph-loop-toggle], [data-workflow-loop-config], [data-workflow-readiness-jump], [data-node-context-panel], [data-step-advanced-drawer], [data-step-advanced-open], [data-step-advanced-close], [data-state-explorer-path]"
+            );
+            if (!canvasInteractive) {
+              event.preventDefault();
+              event.stopPropagation();
+              requestWorkflowCanvasUnselect(canvasUnselectTrigger);
+              return;
+            }
+          }
+
           var workflowNodeTrigger = event.target.closest("[data-canvas-node-button]");
           if (workflowNodeTrigger) {
             event.preventDefault();
@@ -713,6 +3089,7 @@
                 ? (functionInputsNode.value || "")
                 : (dropzone.getAttribute("data-custom-function-inputs") || "");
               var moduleCatalog = dropzone.getAttribute("data-selected-module-catalog") || "";
+              closeWorkflowAdvancedDrawer();
               persistWorkflowNodeSelection(queue, nodeId);
               requestWorkflowNodeSelection(queue, nodeId, modulesCsv, functionStepsCsv, functionInputsJson, "", "", moduleCatalog);
             }
@@ -720,6 +3097,41 @@
           }
 
           var actionTrigger = event.target.closest("[data-action-post]");
+
+          var readinessJump = event.target.closest("[data-workflow-readiness-jump]");
+          if (readinessJump) {
+            event.preventDefault();
+            event.stopPropagation();
+            var jumpFieldId = readinessJump.getAttribute("data-workflow-readiness-jump") || "";
+            if (jumpFieldId) {
+              var jumpField = document.getElementById(jumpFieldId);
+              if (jumpField && typeof jumpField.focus === "function") {
+                jumpField.focus();
+                if (typeof jumpField.scrollIntoView === "function") {
+                  jumpField.scrollIntoView({ block: "center", behavior: "smooth" });
+                }
+              }
+            }
+            return;
+          }
+
+          var addRepeatTrigger = event.target.closest("[data-workflow-add-repeat]");
+          if (addRepeatTrigger) {
+            event.preventDefault();
+            event.stopPropagation();
+            addRepeatContainerFromSelection();
+            return;
+          }
+
+          var loopContainerToggle = event.target.closest("[data-graph-loop-toggle]");
+          if (loopContainerToggle) {
+            event.preventDefault();
+            event.stopPropagation();
+            workflowLoopContainerCollapsed = !workflowLoopContainerCollapsed;
+            hydrateWorkflowGraphState();
+            return;
+          }
+
           if (actionTrigger) {
             event.preventDefault();
             event.stopPropagation();
@@ -791,7 +3203,44 @@
               }
             }
             var inspector = document.getElementById("inspector-panel");
-            postAction(url, body, inspector, actionTrigger);
+            var draftRunResults = document.getElementById("workflow-draft-run-results");
+            var targetPanel = (url === "/action/workflows/run-draft" && draftRunResults)
+              ? draftRunResults
+              : inspector;
+
+            if ((url === "/action/workflows/save" || url === "/action/workflows/run-draft") && body.function_inputs) {
+              var validation = validateFunctionInputsForSave(body.function_inputs);
+              if (!validation.ok) {
+                renderInlineActionError(
+                  targetPanel,
+                  url === "/action/workflows/run-draft" ? "Cannot Test Run Yet" : "Cannot Save Yet",
+                  validation.detail
+                );
+                updateWorkflowReadinessStrip();
+                return;
+              }
+            }
+
+            if (url === "/action/workflows/save" || url === "/action/workflows/run-draft") {
+              var readiness = updateWorkflowReadinessStrip();
+              if (!readiness.canRun) {
+                renderInlineActionError(
+                  targetPanel,
+                  url === "/action/workflows/run-draft" ? "Cannot Test Run Yet" : "Cannot Save Yet",
+                  readiness.blockers.map(function (item) { return item.message; }).join(" ")
+                );
+                return;
+              }
+            }
+
+            if (url === "/action/workflows/save" || url === "/action/workflows/run-draft") {
+              var graphStatePayload = serializeWorkflowGraphStateForRequest();
+              if (graphStatePayload) {
+                body.graph_state = graphStatePayload;
+              }
+            }
+
+            postAction(url, body, targetPanel, actionTrigger);
             return;
           }
           var trigger = event.target.closest("[hx-get]");
@@ -819,14 +3268,163 @@
         });
 
         document.addEventListener("input", function (event) {
+          var loopInput = event.target.closest("[data-workflow-loop-field]");
+          if (loopInput) {
+            syncWorkflowLoopConfigToGraph();
+            updateWorkflowReadinessStrip();
+            return;
+          }
+
+          var edgeTargetInput = event.target.closest("[data-graph-edge-map-target]");
+          var edgeSourceInput = event.target.closest("[data-graph-edge-map-source]");
+          if (edgeTargetInput || edgeSourceInput) {
+            if (!isWorkflowAdvancedMode()) return;
+            var edgeDetails = event.target.closest("[data-graph-edge-details]");
+            if (!edgeDetails) return;
+            var edgeId = edgeDetails.getAttribute("data-graph-edge-id") || "";
+            if (!edgeId) return;
+            var targetValueNode = edgeDetails.querySelector("[data-graph-edge-map-target]");
+            var sourceValueNode = edgeDetails.querySelector("[data-graph-edge-map-source]");
+            var targetValue = targetValueNode ? targetValueNode.value : "$input";
+            var sourceValue = sourceValueNode ? sourceValueNode.value : "$current";
+            updateWorkflowEdgeMapping(edgeId, targetValue, sourceValue);
+            return;
+          }
+
           var editor = event.target.closest("[data-function-input-editor]");
-          if (!editor) return;
-          var nodeId = editor.getAttribute("data-node-id") || "";
-          updateFunctionInputState(nodeId, editor.value || "");
+          if (editor) {
+            var nodeId = editor.getAttribute("data-node-id") || "";
+            updateFunctionInputState(nodeId, editor.value || "");
+            syncParameterInputsFromFunctionInputEditor(nodeId, editor.value || "{}");
+            validateStateBindingsInInspector();
+            updateWorkflowReadinessStrip();
+            return;
+          }
+
+          var paramInput = event.target.closest("[data-function-param-input]");
+          if (paramInput) {
+            var nodeId = paramInput.getAttribute("data-node-id") || "";
+            var paramKey = paramInput.getAttribute("data-param-key") || "";
+            if (nodeId && paramKey) {
+              setStateBindingTarget(nodeId, paramKey);
+            }
+            syncFunctionInputEditorFromParameterInputs(nodeId);
+            validateStateBindingsInInspector();
+            updateWorkflowReadinessStrip();
+          }
+        });
+
+        document.addEventListener("change", function (event) {
+          var loopField = event.target.closest("[data-workflow-loop-field]");
+          if (loopField) {
+            syncWorkflowLoopConfigToGraph();
+            updateWorkflowReadinessStrip();
+            return;
+          }
+
+          var modeInput = event.target.closest("[data-function-param-mode]");
+          if (modeInput) {
+            var modeNodeId = modeInput.getAttribute("data-node-id") || "";
+            var modeParamKey = modeInput.getAttribute("data-param-key") || "";
+            if (modeNodeId && modeParamKey) {
+              setStateBindingTarget(modeNodeId, modeParamKey);
+            }
+            var row = modeInput.closest("[data-function-param-row]");
+            var valueInput = row ? row.querySelector("[data-function-param-input]") : null;
+            if (modeInput.value === "state" && valueInput && !valueInput.value.trim()) {
+              valueInput.value = "$current";
+            }
+            syncWorkflowParamRowMode(row);
+            syncFunctionInputEditorFromParameterInputs(modeNodeId);
+            validateStateBindingsInInspector();
+            updateWorkflowReadinessStrip();
+            return;
+          }
+
+          var statePicker = event.target.closest("[data-function-state-picker]");
+          if (statePicker) {
+            var pickerNodeId = statePicker.getAttribute("data-node-id") || "";
+            var pickerParamKey = statePicker.getAttribute("data-param-key") || "";
+            if (pickerNodeId && pickerParamKey) {
+              setStateBindingTarget(pickerNodeId, pickerParamKey);
+            }
+            var pickerRow = statePicker.closest("[data-function-param-row]");
+            var pickerValueInput = pickerRow ? pickerRow.querySelector("[data-function-param-input]") : null;
+            var pickerModeInput = pickerRow ? pickerRow.querySelector("[data-function-param-mode]") : null;
+            if (pickerValueInput && statePicker.value) {
+              pickerValueInput.value = statePicker.value;
+              if (pickerModeInput) {
+                pickerModeInput.value = "state";
+              }
+              syncWorkflowParamRowMode(pickerRow);
+              syncFunctionInputEditorFromParameterInputs(pickerNodeId);
+              statePicker.value = "";
+              validateStateBindingsInInspector();
+              updateWorkflowReadinessStrip();
+            }
+          }
+        });
+
+        document.addEventListener("focusin", function (event) {
+          if (currentView !== "workflows") return;
+          var row = event.target.closest("[data-function-param-row]");
+          if (!row || !host.contains(row)) return;
+
+          clearWorkflowParamRowFocus(row);
+          setWorkflowParamRowFocus(row, true);
+
+          var nodeId = row.getAttribute("data-node-id") || "";
+          var paramKey = row.getAttribute("data-param-key") || "";
+          if (nodeId && paramKey) {
+            setStateBindingTarget(nodeId, paramKey);
+          }
+        });
+
+        document.addEventListener("focusout", function (event) {
+          if (currentView !== "workflows") return;
+          var row = event.target.closest("[data-function-param-row]");
+          if (!row || !host.contains(row)) return;
+
+          window.requestAnimationFrame(function () {
+            var active = document.activeElement;
+            if (active && row.contains(active)) return;
+            row.classList.remove("is-focused");
+          });
+        });
+
+        document.addEventListener("mousedown", function (event) {
+          var outputHandle = event.target.closest("[data-graph-output-handle]");
+          if (!outputHandle) return;
+          var fromNodeId = outputHandle.getAttribute("data-node-id") || "";
+          if (!fromNodeId) return;
+          event.preventDefault();
+          event.stopPropagation();
+          startGraphDraftLink(fromNodeId, event.clientX, event.clientY);
+        });
+
+        document.addEventListener("mousemove", function (event) {
+          if (!graphLinkDraft) return;
+          updateGraphDraftPointer(event.clientX, event.clientY);
+        });
+
+        document.addEventListener("mouseup", function (event) {
+          if (!graphLinkDraft) return;
+          var toHandle = event.target.closest("[data-graph-input-handle]");
+          var toNodeId = toHandle ? (toHandle.getAttribute("data-node-id") || "") : "";
+          var fromNodeId = graphLinkDraft.fromNodeId || "";
+          clearGraphDraftLink();
+          if (!fromNodeId || !toNodeId) return;
+          upsertWorkflowGraphEdge(fromNodeId, toNodeId);
         });
 
         document.addEventListener("keydown", function (event) {
           if (currentView !== "workflows") return;
+
+          if (event.key === "Escape" && isWorkflowAdvancedDrawerOpen()) {
+            event.preventDefault();
+            closeWorkflowAdvancedDrawer();
+            return;
+          }
 
           if (event.key === "ArrowDown") {
             if (event.target.closest("[data-canvas-node-button]")) {
@@ -857,6 +3455,7 @@
           if (event.dataTransfer) {
             event.dataTransfer.dropEffect = "copy";
           }
+          updateWorkflowLoopDropTargetHighlight(event);
           dropzone.style.borderColor = "var(--primary)";
         });
 
@@ -864,6 +3463,7 @@
           var dropzone = event.target.closest("[data-canvas-dropzone]");
           if (!dropzone) return;
           dropzone.style.borderColor = "var(--border)";
+          clearWorkflowLoopDropTargetHighlight();
         });
 
         document.addEventListener("drop", function (event) {
@@ -871,42 +3471,97 @@
           if (!dropzone) return;
           event.preventDefault();
           dropzone.style.borderColor = "var(--border)";
+          clearWorkflowLoopDropTargetHighlight();
 
           if (!event.dataTransfer) return;
           var kind = event.dataTransfer.getData("text/workflow-module-kind");
           var functionId = event.dataTransfer.getData("text/workflow-function-id");
           var queue = dropzone.getAttribute("data-selected-queue") || "";
-          var modulesCsv = dropzone.getAttribute("data-custom-modules") || "";
-          var functionStepsCsv = dropzone.getAttribute("data-custom-function-steps") || "";
+          var modulesStateNode = document.getElementById("workflow-modules-state");
+          var functionStepsStateNode = document.getElementById("workflow-function-steps-state");
+          var modulesCsv = modulesStateNode
+            ? (modulesStateNode.value || "")
+            : (dropzone.getAttribute("data-custom-modules") || "");
+          var functionStepsCsv = functionStepsStateNode
+            ? (functionStepsStateNode.value || "")
+            : (dropzone.getAttribute("data-custom-function-steps") || "");
           var functionInputsStateNode = document.getElementById("workflow-function-inputs-state");
           var functionInputsJson = functionInputsStateNode
             ? (functionInputsStateNode.value || "")
             : (dropzone.getAttribute("data-custom-function-inputs") || "");
           var moduleCatalog = dropzone.getAttribute("data-selected-module-catalog") || "";
+          var normalizedKind = normalizeWorkflowModuleKind(kind);
+          var normalizedFunctionId = normalizeWorkflowFunctionName(functionId);
           var nodeId = nodeIdForModuleKind(kind);
           var addFunctionStep = "";
-          if (kind && functionId) {
-            addFunctionStep = kind.trim().toLowerCase() + "." + functionId.trim().toLowerCase();
+          if (normalizedKind && normalizedFunctionId) {
+            addFunctionStep = normalizedKind + "." + normalizedFunctionId;
           }
 
           if (!telemetryState.firstNodeAdded && kind && kind.trim().length > 0) {
             telemetryState.firstNodeAdded = true;
             emitDashboardEvent("first_node_added", {
               queue: queue,
-              module_kind: kind.trim().toLowerCase(),
+              module_kind: normalizedKind || kind.trim().toLowerCase(),
             });
+          }
+
+          var loopShell = event.target.closest("[data-graph-loop-container-shell]");
+          var loopTargetNode = event.target.closest("[data-canvas-node-button]");
+          var droppedInLoopShell = !!loopShell;
+          if (droppedInLoopShell && normalizedKind && normalizedFunctionId) {
+            var inserted = tryInsertDroppedStepIntoLoop(
+              dropzone,
+              normalizedKind,
+              normalizedFunctionId,
+              functionInputsJson,
+              {
+                loopShell: loopShell,
+                targetNodeId: loopTargetNode ? (loopTargetNode.getAttribute("data-node-id") || "") : "",
+                clientY: event.clientY,
+              }
+            );
+            if (inserted && inserted.nodeId) {
+              persistWorkflowNodeSelection(queue, inserted.nodeId);
+              requestWorkflowNodeSelection(
+                queue,
+                inserted.nodeId,
+                inserted.modulesCsv,
+                inserted.functionStepsCsv,
+                inserted.functionInputsJson,
+                "",
+                "",
+                moduleCatalog
+              );
+              return;
+            }
           }
 
           if (nodeId && nodeId.trim().length > 0) {
             persistWorkflowNodeSelection(queue, nodeId);
           }
-          requestWorkflowNodeSelection(queue, nodeId, modulesCsv, functionStepsCsv, functionInputsJson, kind, addFunctionStep, moduleCatalog);
+          requestWorkflowNodeSelection(
+            queue,
+            nodeId,
+            modulesCsv,
+            functionStepsCsv,
+            functionInputsJson,
+            normalizedKind || kind,
+            addFunctionStep,
+            moduleCatalog
+          );
         });
 
         window.setInterval(function () {
           if (!liveViews[currentView]) return;
           loadView(currentView);
         }, 5000);
+
+        window.addEventListener("resize", function () {
+          if (currentView !== "workflows") return;
+          hydrateWorkflowGraphState();
+          positionWorkflowContextPanel();
+        });
 
         loadView("jobs");
         initHxLite();

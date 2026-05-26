@@ -6499,7 +6499,7 @@ query Run {
 "#;
 
     let err = engine
-        .execute_grapheme_source(source)
+        .execute_grapheme_source(source, None)
         .await
         .expect_err("non-allowlisted import should be rejected");
 
@@ -6526,7 +6526,7 @@ query Hello {
 "#;
 
     let err = engine
-        .execute_grapheme_source(source)
+        .execute_grapheme_source(source, None)
         .await
         .expect_err("zero timeout should reject execution");
 

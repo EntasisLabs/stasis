@@ -1,15 +1,30 @@
 <div class="flex flex-col gap-6 wb-root">
+  <input type="hidden" id="workflow-selected-workflow-id" value="{{ selected_workflow_id }}" />
+  <input type="hidden" id="workflow-selected-queue" value="{{ selected_queue }}" />
   <input type="hidden" id="workflow-modules-state" value="{{ custom_modules_csv }}" />
   <input type="hidden" id="workflow-function-steps-state" value="{{ custom_function_steps_csv }}" />
   <input type="hidden" id="workflow-function-inputs-state" value="{{ custom_function_inputs_json }}" />
+  <input type="hidden" id="workflow-graph-state" value="{{ saved_graph_state_json }}" />
   <div class="flex items-center justify-between wb-topbar">
     <div>
       <h2 class="text-2xl font-semibold tracking-tight" style="color: var(--foreground);">Workflow Builder</h2>
-      <p class="text-sm mt-1" style="color: var(--muted-foreground);">Build and run Grapheme workflows with guided steps.</p>
+      <p class="text-sm mt-1" style="color: var(--muted-foreground);">Add steps. Add Repeat. Test Run.</p>
     </div>
     <div class="flex gap-2">
+      {% if advanced_mode %}
       <button class="btn btn-outline btn-sm" type="button" data-theme-toggle>
         Theme
+      </button>
+      {% endif %}
+      <button class="btn btn-outline btn-sm" type="button"
+        data-action-post="/action/workflows/run-draft"
+        data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'
+        data-action-source-selector="{% if advanced_mode %}#workflow-source-editor{% else %}#workflow-source-guided{% endif %}"
+        data-action-modules-selector="#workflow-modules-state"
+        data-action-function-steps-selector="#workflow-function-steps-state"
+        data-action-function-inputs-selector="#workflow-function-inputs-state">
+        <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m0 0l-4-4m4 4l-4 4"/></svg>
+        Test Run
       </button>
       <button class="btn btn-outline btn-sm" type="button"
         data-action-post="/action/workflows/save"
@@ -21,12 +36,23 @@
         <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
         Save
       </button>
+      {% if advanced_mode %}
       <button class="btn btn-primary btn-sm" type="button"
         data-action-post="/action/workflows/execute"
         data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'>
         <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         Execute
       </button>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="hidden rounded-lg p-3" data-workflow-readiness-strip style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 45%, transparent);">
+    <div class="flex items-center justify-between gap-2 flex-wrap">
+      <p class="text-sm font-semibold" data-workflow-readiness-status style="color: var(--foreground);">Action Needed</p>
+    </div>
+    <div class="mt-2 hidden" data-workflow-readiness-blockers>
+      <ul class="mt-1 flex flex-col gap-1" data-workflow-readiness-list></ul>
     </div>
   </div>
 
@@ -34,10 +60,18 @@
     <div class="wb-left-column flex flex-col gap-4">
       <div class="card wb-left-rail-card">
         <div class="card-header">
-          <h3 class="card-title">Modules</h3>
-          <p class="card-description">Pick a Grapheme module, then drag function steps into the workflow.</p>
+          <h3 class="card-title">Action Library</h3>
+          <p class="card-description">Drag steps into the canvas.</p>
         </div>
         <div class="card-content flex flex-col gap-2">
+          <button
+            type="button"
+            class="btn btn-outline btn-sm wb-repeat-action"
+            data-workflow-add-repeat
+          >
+            + Add Repeat Container
+          </button>
+
           <form data-hx-get="/view/workflows" hx-target="#dashboard-view" hx-swap="innerHTML" class="flex flex-col gap-2">
             <input type="hidden" name="queue" value="{{ selected_queue }}" />
             <input type="hidden" name="mode" value="{{ mode_query }}" />
@@ -63,7 +97,6 @@
             </select>
           </form>
 
-          <div class="text-xs" style="color: var(--muted-foreground);">Function steps in {{ selected_module_catalog }}</div>
           {% for tile in function_tiles %}
           <div
             class="flex items-center gap-3 p-3 rounded-lg cursor-move transition-colors wb-module-tile"
@@ -80,6 +113,7 @@
             <div class="flex flex-col">
               <span class="text-sm font-medium">{{ tile.title }}</span>
               <span class="text-xs" style="color: var(--muted-foreground);">{{ tile.purpose }}</span>
+              {% if advanced_mode %}
               <span class="text-xs font-mono" style="color: var(--muted-foreground);">{{ tile.module_id }}.{{ tile.function_id }}</span>
               <span class="text-xs" style="color: var(--muted-foreground);">effect={{ tile.effect }} stability={{ tile.stability }}</span>
               {% match tile.input_schema_ref %}
@@ -92,6 +126,7 @@
               <span class="text-xs" style="color: var(--muted-foreground);">output_schema_ref={{ schema_ref }}</span>
               {% when None %}
               {% endmatch %}
+              {% endif %}
             </div>
           </div>
           {% endfor %}
@@ -121,10 +156,12 @@
       <div class="card wb-workspace-card">
         <div class="card-header">
           <h3 class="card-title">{{ selected_workflow_name }}</h3>
+          {% if advanced_mode %}
           <p class="card-description">Workflow ID: <span class="font-mono">{{ selected_workflow_id }}</span></p>
+          {% endif %}
         </div>
         <div class="card-content">
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 wb-canvas-inspector-grid">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 wb-canvas-inspector-grid {% if !advanced_mode %}wb-canvas-only{% endif %}">
             <div
               class="rounded-lg p-4 wb-canvas-surface"
               data-canvas-dropzone
@@ -135,52 +172,229 @@
               data-custom-function-inputs="{{ custom_function_inputs_json }}"
               data-selected-module-catalog="{{ selected_module_catalog }}"
             >
-              <h4 class="text-sm font-semibold mb-3">Grapheme Function Flow</h4>
-              <p class="text-xs mb-2" style="color: var(--muted-foreground);">Tip: drag function steps to build a pure Grapheme pipeline.</p>
-              <div class="flex flex-col gap-2">
+              <h4 class="text-sm font-semibold mb-3">Step Flow</h4>
+              <div class="hidden mb-2 rounded px-2 py-1 wb-loop-summary" data-workflow-loop-summary></div>
+              <div class="relative" data-graph-canvas>
+                <svg
+                  class="absolute inset-0 w-full h-full"
+                  data-graph-link-layer
+                  style="overflow: visible; pointer-events: auto;"
+                  aria-hidden="true"
+                ></svg>
+                <div class="flex flex-col gap-2 relative" data-graph-node-list style="z-index: 2;">
                 {% for node in graph_nodes %}
                 <button
                   type="button"
                   class="text-left rounded-lg p-3 transition-colors wb-node-card {% if node.selected %}is-selected{% endif %}"
                   data-canvas-node-button
                   data-node-id="{{ node.id }}"
+                  style="position: relative; z-index: 2;"
                   hx-get="/view/workflows?queue={{ selected_queue }}&node={{ node.id }}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode={{ mode_query }}&module_catalog={{ selected_module_catalog }}"
                   hx-target="#dashboard-view"
                   hx-swap="innerHTML"
                 >
+                  <span
+                    class="absolute"
+                    style="left: -7px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; border-radius: 9999px; border: 2px solid var(--border); background: var(--card); z-index: 4;"
+                    data-graph-input-handle
+                    data-node-id="{{ node.id }}"
+                    title="Drop link here"
+                  ></span>
+                  <span
+                    class="absolute"
+                    style="right: -7px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; border-radius: 9999px; border: 2px solid var(--primary); background: var(--card); z-index: 4;"
+                    data-graph-output-handle
+                    data-node-id="{{ node.id }}"
+                    title="Drag to link"
+                  ></span>
                   <div class="flex items-center justify-between gap-2">
                     <span class="text-sm font-semibold">{{ node.label }}</span>
-                    <span class="text-xs px-2 py-0.5 rounded wb-status-chip {% if node.status_tone == "ok" %}wb-status-ok{% else if node.status_tone == "warn" %}wb-status-warn{% else if node.status_tone == "info" %}wb-status-info{% else %}wb-status-neutral{% endif %}">
-                      {{ node.status }}
+                    <span class="flex items-center gap-1.5">
+                      <span class="hidden text-xs px-2 py-0.5 rounded wb-loop-chip" data-node-loop-chip></span>
+                      <span class="text-xs px-2 py-0.5 rounded wb-status-chip {% if node.status_tone == "ok" %}wb-status-ok{% else if node.status_tone == "warn" %}wb-status-warn{% else if node.status_tone == "info" %}wb-status-info{% else %}wb-status-neutral{% endif %}">
+                        {{ node.status }}
+                      </span>
+                      {% if !advanced_mode %}
+                      <span class="wb-node-inline-actions" aria-hidden="true">
+                        <span
+                          class="wb-node-action-btn {% if loop.first %}is-disabled{% endif %}"
+                          data-canvas-node-move-up
+                          data-node-id="{{ node.id }}"
+                          title="Move step up"
+                        >
+                          &uarr;
+                        </span>
+                        <span
+                          class="wb-node-action-btn {% if loop.last %}is-disabled{% endif %}"
+                          data-canvas-node-move-down
+                          data-node-id="{{ node.id }}"
+                          title="Move step down"
+                        >
+                          &darr;
+                        </span>
+                        <span
+                          class="wb-node-action-btn is-danger"
+                          data-canvas-node-remove
+                          data-node-id="{{ node.id }}"
+                          title="Remove step"
+                        >
+                          &times;
+                        </span>
+                      </span>
+                      {% endif %}
                     </span>
                   </div>
+                  {% if advanced_mode %}
                   <p class="text-xs mt-1" style="color: var(--muted-foreground);">type={{ node.node_type }} count={{ node.count }}</p>
                   <p class="text-xs mt-1" style="color: var(--muted-foreground);">in={{ node.input_hint }} out={{ node.output_hint }}</p>
+                  {% endif %}
                 </button>
                 {% endfor %}
                 {% if graph_nodes.is_empty() %}
                 <p class="text-xs" style="color: var(--muted-foreground);">No function steps yet. Drag a function from the module rail to start your Grapheme flow.</p>
                 {% endif %}
+                </div>
               </div>
 
+              {% if advanced_mode %}
               <div class="mt-3 rounded p-2 wb-connections-panel">
-                <p class="text-xs" style="color: var(--muted-foreground);">Connections</p>
-                <div class="mt-1 flex flex-col gap-1">
+                <p class="text-xs" style="color: var(--muted-foreground);">Data Flow</p>
+                <div class="mt-1 flex flex-col gap-1" data-graph-connections-list>
                   {% for edge in graph_edges %}
                   <p class="text-xs font-mono" style="color: var(--foreground);">{{ edge.from_id }} -> {{ edge.to_id }} ({{ edge.label }})</p>
                   {% endfor %}
                 </div>
               </div>
+              <div class="mt-3 rounded p-2 wb-connections-panel" data-graph-edge-inspector>
+                <p class="text-xs" style="color: var(--muted-foreground);">Uses Data From</p>
+                <p class="text-xs mt-1" style="color: var(--muted-foreground);" data-graph-edge-empty>
+                  Click a function pipe to view how output flows into the next step.
+                </p>
+                <div class="hidden mt-2" data-graph-edge-details>
+                  <p class="text-xs font-mono" style="color: var(--foreground);" data-graph-edge-label></p>
+                  {% if advanced_mode %}
+                  <div class="mt-2 flex flex-col gap-2" data-graph-edge-advanced>
+                    <label class="text-xs" style="color: var(--muted-foreground);">
+                      Target param
+                      <input
+                        type="text"
+                        class="text-xs font-mono p-1 rounded mt-1 w-full"
+                        style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                        data-graph-edge-map-target
+                      />
+                    </label>
+                    <label class="text-xs" style="color: var(--muted-foreground);">
+                      Source expression
+                      <input
+                        type="text"
+                        class="text-xs font-mono p-1 rounded mt-1 w-full"
+                        style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                        data-graph-edge-map-source
+                      />
+                    </label>
+                    <div class="flex justify-between items-center">
+                      <p class="text-xs" style="color: var(--muted-foreground);" data-graph-edge-map></p>
+                      <button type="button" class="btn btn-ghost btn-xs" data-graph-edge-remove>Remove Edge</button>
+                    </div>
+                  </div>
+                  {% else %}
+                  <div class="mt-2" data-graph-edge-guided>
+                    <p class="text-xs" style="color: var(--muted-foreground);" data-graph-edge-map>
+                      This pipe uses guided binding from previous step output.
+                    </p>
+                    <p class="text-xs mt-1" style="color: var(--muted-foreground);">
+                      Open Advanced Tools to customize raw data expressions.
+                    </p>
+                  </div>
+                  {% endif %}
+                </div>
+              </div>
+              {% endif %}
+              <div class="mt-3 rounded p-2 wb-connections-panel" data-workflow-loop-config>
+                <p class="text-xs" style="color: var(--muted-foreground);">Repeat Steps</p>
+                <label class="text-xs mt-2 flex items-center gap-2" style="color: var(--foreground);">
+                  <input type="checkbox" id="workflow-loop-enabled" data-workflow-loop-field />
+                  Turn Repeat On
+                </label>
+                <div class="mt-2 flex flex-col gap-2" data-workflow-loop-details style="display: none;">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <label class="text-xs" style="color: var(--muted-foreground);">
+                    stop after this many items
+                    <input
+                      id="workflow-loop-max"
+                      data-workflow-loop-field
+                      type="number"
+                      min="1"
+                      step="1"
+                      placeholder="3"
+                      class="text-xs font-mono p-1 rounded mt-1 w-full"
+                      style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                    />
+                  </label>
+                  <label class="text-xs" style="color: var(--muted-foreground);">
+                    repeat over this list
+                    <input
+                      id="workflow-loop-each"
+                      data-workflow-loop-field
+                      type="text"
+                      placeholder="$current.results"
+                      class="text-xs font-mono p-1 rounded mt-1 w-full"
+                      style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                    />
+                  </label>
+                  <label class="text-xs" style="color: var(--muted-foreground);">
+                    combine results using
+                    <input
+                      id="workflow-loop-merge"
+                      data-workflow-loop-field
+                      type="text"
+                      placeholder="append"
+                      class="text-xs font-mono p-1 rounded mt-1 w-full"
+                      style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                    />
+                  </label>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <label class="text-xs" style="color: var(--muted-foreground);">
+                    first repeated step
+                    <select
+                      id="workflow-loop-start-node"
+                      data-workflow-loop-field
+                      class="text-xs font-mono p-1 rounded mt-1 w-full"
+                      style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                    ></select>
+                  </label>
+                  <label class="text-xs" style="color: var(--muted-foreground);">
+                    last repeated step
+                    <select
+                      id="workflow-loop-end-node"
+                      data-workflow-loop-field
+                      class="text-xs font-mono p-1 rounded mt-1 w-full"
+                      style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                    ></select>
+                  </label>
+                </div>
+                <p class="text-xs wb-loop-story" data-workflow-loop-story style="color: var(--muted-foreground);"></p>
+                </div>
+              </div>
             </div>
 
-            <div class="rounded-lg p-4 wb-inspector-surface {% if !has_selected_node %}wb-inspector-collapsed{% endif %}">
-              <h4 class="text-sm font-semibold mb-3">Node Inspector</h4>
+            <div class="rounded-lg p-4 wb-inspector-surface {% if !has_selected_node %}wb-inspector-collapsed{% endif %}{% if !advanced_mode %} wb-inspector-contextual wb-inspector-compact{% endif %}" data-node-context-panel>
+              <h4 class="text-sm font-semibold mb-3 wb-step-settings-title">Step Settings</h4>
               {% match selected_node %}
               {% when Some with (node) %}
-              <div class="flex flex-col gap-2">
-                <p class="text-sm font-semibold">{{ node.label }}</p>
+              <div class="flex flex-col gap-2 wb-step-settings-content">
+                <div class="flex items-start justify-between gap-2">
+                  <p class="text-sm font-semibold">{{ node.label }}</p>
+                  {% if !advanced_mode %}
+                  <button type="button" class="btn btn-ghost btn-xs wb-step-advanced-open" data-step-advanced-open>More</button>
+                  {% endif %}
+                </div>
+                {% if advanced_mode %}
                 <p class="text-xs" style="color: var(--muted-foreground);">id={{ node.id }} type={{ node.node_type }} status={{ node.status }}</p>
-                <p class="text-sm" style="color: var(--foreground);">{{ node.summary }}</p>
+                {% endif %}
+                <p class="text-sm wb-step-summary" style="color: var(--foreground);">{{ node.summary }}</p>
+                {% if advanced_mode %}
                 <div class="rounded p-2 wb-inspector-section">
                   <p class="text-xs" style="color: var(--muted-foreground);">Function metadata</p>
                   <p class="text-sm">effect={{ node.effect }} stability={{ node.stability }}</p>
@@ -195,6 +409,72 @@
                   {% when None %}
                   {% endmatch %}
                 </div>
+                {% endif %}
+                <div class="rounded p-2 wb-inspector-section wb-quick-inputs-section">
+                  <p class="text-xs wb-quick-inputs-heading" style="color: var(--muted-foreground);">{% if advanced_mode %}Quick Inputs{% else %}Inputs{% endif %}</p>
+                  {% if node.parameter_fields.is_empty() %}
+                  <p class="text-xs wb-quick-inputs-empty" style="color: var(--muted-foreground);">No quick inputs for this step.</p>
+                  {% else %}
+                  <div class="mt-2 flex flex-col gap-2 wb-param-list" data-step-param-list>
+                    {% for field in node.parameter_fields %}
+                    <div class="rounded p-2 wb-param-row" style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 30%, transparent);" data-function-param-row data-node-id="{{ node.id }}" data-param-key="{{ field.key }}" data-param-required="{% if field.required %}true{% else %}false{% endif %}">
+                      <div class="wb-param-row-head">
+                        <label class="text-xs wb-param-key" style="color: var(--muted-foreground);">{{ field.key }}</label>
+                        <p class="text-xs wb-param-meta" style="color: var(--muted-foreground);">
+                          {% if field.required %}Required{% else %}Optional{% endif %}
+                          {% match field.ty %}
+                          {% when Some with (field_type) %}
+                          &bull; {{ field_type }}
+                          {% when None %}
+                          {% endmatch %}
+                        </p>
+                      </div>
+                      <div class="wb-param-inline">
+                        <select
+                          class="text-xs rounded px-2 py-1 wb-param-mode"
+                          style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                          data-function-param-mode
+                          data-node-id="{{ node.id }}"
+                          data-param-key="{{ field.key }}"
+                        >
+                          <option value="literal" {% if field.binding_mode == "literal" %}selected{% endif %}>Literal</option>
+                          <option value="state" {% if field.binding_mode == "state" %}selected{% endif %}>From State</option>
+                        </select>
+                        <input
+                          type="text"
+                          class="text-xs font-mono p-2 rounded wb-param-input"
+                          style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                          data-function-param-input
+                          data-node-id="{{ node.id }}"
+                          data-param-key="{{ field.key }}"
+                          value="{{ field.value }}"
+                        />
+                      </div>
+                      <div class="wb-param-state-wrap" data-function-state-picker-wrap>
+                        <select
+                          class="text-xs rounded px-2 py-1 w-full wb-param-state-picker"
+                          style="border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                          data-function-state-picker
+                          data-node-id="{{ node.id }}"
+                          data-param-key="{{ field.key }}"
+                        >
+                          <option value="">Insert state path...</option>
+                          <option value="$current">$current</option>
+                          <option value="$current.message">$current.message</option>
+                          <option value="$current.query">$current.query</option>
+                          <option value="$current.results">$current.results</option>
+                          <option value="$current.text">$current.text</option>
+                          <option value="$pipeline[0].output">$pipeline[0].output</option>
+                        </select>
+                      </div>
+                      <p class="text-xs wb-param-hint" style="color: var(--muted-foreground);" data-function-param-state-hint></p>
+                    </div>
+                    {% endfor %}
+                  </div>
+                  {% endif %}
+                </div>
+                {% if advanced_mode %}
+                <div data-step-advanced-details>
                 <div class="rounded p-2 wb-inspector-section">
                   <p class="text-xs" style="color: var(--muted-foreground);">Input</p>
                   <p class="text-sm">{{ node.input_hint }}</p>
@@ -203,6 +483,20 @@
                   <p class="text-xs" style="color: var(--muted-foreground);">Output</p>
                   <p class="text-sm">{{ node.output_hint }}</p>
                 </div>
+                  <div class="rounded p-2 wb-inspector-section" data-state-explorer>
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="text-xs font-medium" style="color: var(--foreground);">State Explorer</p>
+                      <span class="text-xs" style="color: var(--muted-foreground);" data-state-explorer-target>Target: none</span>
+                    </div>
+                    <p class="text-xs mt-1" style="color: var(--muted-foreground);">
+                      Click a path to bind it to the selected parameter.
+                    </p>
+                    <div class="mt-2 rounded p-2" style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 20%, transparent); max-height: 180px; overflow-y: auto;" data-state-explorer-list>
+                      <p class="text-xs" style="color: var(--muted-foreground);" data-state-explorer-empty>
+                        Test Run to load live final state paths.
+                      </p>
+                    </div>
+                  </div>
                 <div class="rounded p-2 wb-inspector-section">
                   <label class="text-xs" for="workflow-function-input-editor" style="color: var(--muted-foreground);">Function input payload (JSON/text)</label>
                   <textarea
@@ -214,12 +508,77 @@
                     spellcheck="false"
                   >{{ node.function_input }}</textarea>
                 </div>
+                </div>
+                {% endif %}
+                {% if advanced_mode %}
                 <p class="text-xs" style="color: var(--muted-foreground);">recent_count={{ node.count }}</p>
+                {% endif %}
               </div>
               {% when None %}
               <p class="text-xs" style="color: var(--muted-foreground);">Select a node in the canvas to inspect configuration details.</p>
               {% endmatch %}
             </div>
+
+            {% if !advanced_mode %}
+            <div class="wb-step-advanced-backdrop" data-step-advanced-backdrop></div>
+            <aside class="wb-step-advanced-drawer" data-step-advanced-drawer aria-hidden="true">
+              <div class="wb-step-advanced-drawer-header">
+                <div>
+                  <p class="text-sm font-semibold">Advanced Step Settings</p>
+                  {% match selected_node %}
+                  {% when Some with (node) %}
+                  <p class="text-xs" style="color: var(--muted-foreground);">{{ node.label }}</p>
+                  <p class="text-xs mt-1" style="color: var(--muted-foreground);">{{ node.summary }}</p>
+                  {% when None %}
+                  <p class="text-xs" style="color: var(--muted-foreground);">Select a step to open advanced controls.</p>
+                  {% endmatch %}
+                </div>
+                <button type="button" class="btn btn-ghost btn-xs" data-step-advanced-close>Close</button>
+              </div>
+              <div class="wb-step-advanced-drawer-body">
+                {% match selected_node %}
+                {% when Some with (node) %}
+                <div class="flex flex-col gap-2">
+                  <div class="rounded p-2 wb-inspector-section">
+                    <p class="text-xs" style="color: var(--muted-foreground);">Input</p>
+                    <p class="text-sm">{{ node.input_hint }}</p>
+                  </div>
+                  <div class="rounded p-2 wb-inspector-section">
+                    <p class="text-xs" style="color: var(--muted-foreground);">Output</p>
+                    <p class="text-sm">{{ node.output_hint }}</p>
+                  </div>
+                  <div class="rounded p-2 wb-inspector-section" data-state-explorer>
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="text-xs font-medium" style="color: var(--foreground);">State Explorer</p>
+                      <span class="text-xs" style="color: var(--muted-foreground);" data-state-explorer-target>Target: none</span>
+                    </div>
+                    <p class="text-xs mt-1" style="color: var(--muted-foreground);">
+                      Click a path to bind it to the selected parameter.
+                    </p>
+                    <div class="mt-2 rounded p-2" style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 20%, transparent); max-height: 220px; overflow-y: auto;" data-state-explorer-list>
+                      <p class="text-xs" style="color: var(--muted-foreground);" data-state-explorer-empty>
+                        Test Run to load live final state paths.
+                      </p>
+                    </div>
+                  </div>
+                  <div class="rounded p-2 wb-inspector-section">
+                    <label class="text-xs" for="workflow-function-input-editor" style="color: var(--muted-foreground);">Function input payload (JSON/text)</label>
+                    <textarea
+                      id="workflow-function-input-editor"
+                      class="text-xs font-mono p-2 rounded mt-1 w-full"
+                      style="min-height: 160px; border: 1px solid var(--border); background: var(--card); color: var(--foreground);"
+                      data-function-input-editor
+                      data-node-id="{{ node.id }}"
+                      spellcheck="false"
+                    >{{ node.function_input }}</textarea>
+                  </div>
+                </div>
+                {% when None %}
+                <p class="text-xs" style="color: var(--muted-foreground);">Select a node in the canvas to inspect advanced configuration details.</p>
+                {% endmatch %}
+              </div>
+            </aside>
+            {% endif %}
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
@@ -235,6 +594,13 @@
             </div>
             {% endfor %}
           </div>
+        </div>
+      </div>
+
+      <div id="workflow-draft-run-results" class="card mt-4">
+        <div class="card-header">
+          <h3 class="card-title">Test Run Output</h3>
+          <p class="card-description">Test Run to view clean engine output and workflow lineage without leaving the builder.</p>
         </div>
       </div>
     </div>

@@ -6,6 +6,8 @@ use grapheme_sdk::{
 
 use crate::domain::errors::{Result, StasisError};
 use crate::ports::outbound::runtime::workflow_reflection::{
+    WorkflowModuleOperationArgReflection, WorkflowModuleOperationObjectFieldReflection,
+    WorkflowModuleOperationObjectTypeReflection,
     WorkflowExecutableKind, WorkflowExecutableReflection, WorkflowModuleInfoReflection,
     WorkflowModuleOperationReflection, WorkflowModuleSearchMatchReflection,
     WorkflowModuleSearchReflection, WorkflowModuleTypesReflection, WorkflowReflectionPort,
@@ -33,11 +35,44 @@ impl GraphemeSdkWorkflowReflection {
         format!("{effect:?}")
     }
 
+    fn map_object_type(
+        object_type: Option<grapheme_sdk::OperationObjectType>,
+    ) -> Option<WorkflowModuleOperationObjectTypeReflection> {
+        object_type.map(|object_type| WorkflowModuleOperationObjectTypeReflection {
+            kind: object_type.kind,
+            required: object_type.required,
+            properties: object_type
+                .properties
+                .into_iter()
+                .map(|(name, field)| {
+                    (
+                        name,
+                        WorkflowModuleOperationObjectFieldReflection {
+                            ty: field.ty,
+                            required: field.required,
+                        },
+                    )
+                })
+                .collect(),
+        })
+    }
+
     fn map_operation(op: grapheme_sdk::CompactModuleOp) -> WorkflowModuleOperationReflection {
         WorkflowModuleOperationReflection {
             op: op.op,
             stability: op.stability,
             effect: Self::map_effect(op.effect),
+            args: op
+                .args
+                .into_iter()
+                .map(|arg| WorkflowModuleOperationArgReflection {
+                    name: arg.name,
+                    ty: arg.ty,
+                    required: arg.required,
+                })
+                .collect(),
+            input_object_type: Self::map_object_type(op.input_object_type),
+            output_object_type: Self::map_object_type(op.output_object_type),
             input_schema_ref: op.input_schema_ref,
             output_schema_ref: op.output_schema_ref,
         }

@@ -9,7 +9,7 @@ use crate::application::dto::{
     ListClusterNodeHealthRequest, ListEndpointDiagnosticsReadModelRequest,
     ListEndpointFailureRateTrendsRequest,
 };
-use crate::application::runtime::runtime_factory::RuntimeComposition;
+use crate::application::runtime::runtime_factory::{RuntimeComposition, RuntimeFactory};
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
 use crate::dashboard::dto::{
     AttemptInspectorDto, ClusterMapDto, DashboardDto, EndpointRowDto, EventInspectorDto,
@@ -37,6 +37,7 @@ use crate::infrastructure::runtime::surreal_workflow_definition_store::SurrealWo
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
 use crate::ports::outbound::runtime::workflow_definition_store::WorkflowDefinitionStore;
+use crate::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 use crate::ports::outbound::runtime::workflow_reflection::{
     WorkflowModuleInfoReflection, WorkflowModuleSearchReflection,
     WorkflowModuleTypesReflection, WorkflowReflectionPort, WorkflowSourceReflection,
@@ -70,6 +71,8 @@ pub struct WorkflowSaveRequest {
     pub workflow_id: String,
     pub queue: String,
     pub source: String,
+    pub compile_mode_hint: Option<String>,
+    pub graph_state_json: Option<String>,
     pub graph_modules_csv: Option<String>,
     pub graph_function_steps_csv: Option<String>,
     pub graph_function_inputs_json: Option<String>,
@@ -90,9 +93,35 @@ pub struct WorkflowExecuteResult {
     pub revision_id: String,
     pub executable_count: usize,
     pub graph_function_steps_csv: String,
+    pub graph_function_inputs_json: String,
     pub source_bytes: usize,
     pub reflected_at_utc: String,
     pub leased_job_id: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkflowRunDraftRequest {
+    pub workflow_id: String,
+    pub queue: String,
+    pub source: String,
+    pub graph_state_json: Option<String>,
+    pub graph_modules_csv: Option<String>,
+    pub graph_function_steps_csv: Option<String>,
+    pub graph_function_inputs_json: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkflowRunDraftResult {
+    pub workflow_id: String,
+    pub queue: String,
+    pub executable_count: usize,
+    pub graph_modules_csv: String,
+    pub graph_function_steps_csv: String,
+    pub graph_function_inputs_json: String,
+    pub source_bytes: usize,
+    pub run_id: String,
+    pub execution_json: String,
+    pub final_state_json: String,
 }
 
 #[derive(Clone, Debug)]
@@ -101,8 +130,10 @@ pub struct WorkflowSavedRevisionSummary {
     pub revision_id: String,
     pub executable_count: usize,
     pub reflected_at_utc: String,
+    pub compile_mode: String,
     pub source: String,
     pub source_bytes: usize,
+    pub graph_state_json: String,
     pub graph_modules_csv: String,
     pub graph_function_steps_csv: String,
     pub graph_function_inputs_json: String,
@@ -314,6 +345,186 @@ fn normalize_graph_function_inputs_json(raw: Option<&str>) -> String {
     serde_json::Value::Object(normalized).to_string()
 }
 
+fn normalize_graph_state_json(raw: Option<&str>) -> String {
+    let Some(raw) = raw else {
+        return "{}".to_string();
+    };
+
+    let parsed = serde_json::from_str::<serde_json::Value>(raw);
+    let Ok(value) = parsed else {
+        return "{}".to_string();
+    };
+
+    value.to_string()
+}
+
+fn validate_compile_graph_state_contract(
+    graph: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    let query = graph
+        .get("query")
+        .and_then(|value| value.as_object())
+        .ok_or_else(|| {
+            StasisError::PortFailure(
+                "graph_state compile contract requires query.steps".to_string(),
+            )
+        })?;
+    let steps = query
+        .get("steps")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| {
+            StasisError::PortFailure(
+                "graph_state compile contract requires query.steps".to_string(),
+            )
+        })?;
+
+    if steps.is_empty() {
+        return Err(StasisError::PortFailure(
+            "graph_state compile contract requires at least one query step".to_string(),
+        ));
+    }
+
+    if let Some(iterators) = graph.get("iterators") {
+        let iterators = iterators.as_array().ok_or_else(|| {
+            StasisError::PortFailure(
+                "graph_state compile contract requires iterators to be an array"
+                    .to_string(),
+            )
+        })?;
+
+        for (index, iterator) in iterators.iter().enumerate() {
+            let iterator_obj = iterator.as_object().ok_or_else(|| {
+                StasisError::PortFailure(format!(
+                    "graph_state compile contract iterator[{index}] must be an object"
+                ))
+            })?;
+            let loop_obj = iterator_obj
+                .get("loop")
+                .and_then(|value| value.as_object())
+                .ok_or_else(|| {
+                    StasisError::PortFailure(format!(
+                        "graph_state compile contract iterator[{index}] requires loop"
+                    ))
+                })?;
+
+            let max = loop_obj
+                .get("max")
+                .and_then(|value| value.as_u64())
+                .ok_or_else(|| {
+                    StasisError::PortFailure(format!(
+                        "graph_state compile contract iterator[{index}] requires bounded loop.max"
+                    ))
+                })?;
+            if max == 0 {
+                return Err(StasisError::PortFailure(format!(
+                    "graph_state compile contract iterator[{index}] requires bounded loop.max"
+                )));
+            }
+
+            let each = loop_obj
+                .get("each")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .unwrap_or("");
+            if each.is_empty() || !each.starts_with('$') {
+                return Err(StasisError::PortFailure(format!(
+                    "graph_state compile contract iterator[{index}] requires loop.each path"
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_topology_graph_state_contract(
+    graph: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    let nodes = graph
+        .get("nodes")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| {
+            StasisError::PortFailure(
+                "graph_state topology contract requires nodes array".to_string(),
+            )
+        })?;
+    let _edges = graph
+        .get("edges")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| {
+            StasisError::PortFailure(
+                "graph_state topology contract requires edges array".to_string(),
+            )
+        })?;
+
+    for (index, node) in nodes.iter().enumerate() {
+        let node_id = node
+            .as_object()
+            .and_then(|value| value.get("id"))
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .unwrap_or("");
+        if node_id.is_empty() {
+            return Err(StasisError::PortFailure(format!(
+                "graph_state topology contract node[{index}] requires id"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_and_normalize_graph_state_json(raw: Option<&str>) -> Result<String> {
+    let normalized = normalize_graph_state_json(raw);
+    if normalized == "{}" {
+        return Ok(normalized);
+    }
+
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).map_err(|err| {
+        StasisError::PortFailure(format!(
+            "graph_state must be valid JSON object: {err}"
+        ))
+    })?;
+    let graph = value.as_object().ok_or_else(|| {
+        StasisError::PortFailure("graph_state must be a JSON object".to_string())
+    })?;
+
+    let has_compile_shape = graph.contains_key("query") || graph.contains_key("iterators");
+    let has_topology_shape =
+        graph.contains_key("nodes") || graph.contains_key("edges") || graph.contains_key("version");
+
+    if has_compile_shape {
+        validate_compile_graph_state_contract(graph)?;
+    }
+    if has_topology_shape {
+        validate_topology_graph_state_contract(graph)?;
+    }
+
+    Ok(normalized)
+}
+
+fn graph_state_contains_compile_shape(graph_state_json: &str) -> bool {
+    let parsed = serde_json::from_str::<serde_json::Value>(graph_state_json);
+    let Ok(value) = parsed else {
+        return false;
+    };
+    let Some(graph) = value.as_object() else {
+        return false;
+    };
+
+    graph.contains_key("query") || graph.contains_key("iterators")
+}
+
+fn normalize_compile_mode_hint(raw: Option<&str>) -> Option<String> {
+    let value = raw.map(str::trim).unwrap_or_default();
+    match value {
+        "graph_compiled" | "legacy_function_steps" | "source_passthrough" => {
+            Some(value.to_string())
+        }
+        _ => None,
+    }
+}
+
 #[async_trait]
 pub trait DashboardQueryService: Send + Sync {
     async fn dashboard(&self, inspect: Option<InspectEntity>) -> Result<DashboardDto>;
@@ -337,6 +548,10 @@ pub trait DashboardQueryService: Send + Sync {
         queue: &str,
         worker_id: &str,
     ) -> Result<WorkflowExecuteResult>;
+    async fn workflow_run_draft(
+        &self,
+        request: WorkflowRunDraftRequest,
+    ) -> Result<WorkflowRunDraftResult>;
     async fn workflow_reflect_source(&self, source: &str) -> Result<WorkflowSourceReflection>;
     async fn workflow_modules_search(&self, query: &str) -> Result<WorkflowModuleSearchReflection>;
     async fn workflow_module_info(&self, module_id: &str) -> Result<Option<WorkflowModuleInfoReflection>>;
@@ -355,6 +570,7 @@ pub struct RuntimeDashboardQueryService {
     control_plane: DashboardControlPlaneKind,
     workflow_reflection: Arc<dyn WorkflowReflectionPort>,
     workflow_store: Arc<dyn WorkflowDefinitionStore>,
+    workflow_engine: Arc<dyn WorkflowEngine>,
 }
 
 impl RuntimeDashboardQueryService {
@@ -364,6 +580,7 @@ impl RuntimeDashboardQueryService {
             control_plane: DashboardControlPlaneKind::InMemory(control_plane),
             workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
             workflow_store: Arc::new(InMemoryWorkflowDefinitionStore::default()),
+            workflow_engine: RuntimeFactory::default_workflow_engine(),
         }
     }
 
@@ -382,6 +599,7 @@ impl RuntimeDashboardQueryService {
                     control_plane: DashboardControlPlaneKind::InMemory(control_plane),
                     workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
                     workflow_store: Arc::new(InMemoryWorkflowDefinitionStore::default()),
+                    workflow_engine: RuntimeFactory::default_workflow_engine(),
                 }
             }
             RuntimeComposition::Surreal(rt) => {
@@ -400,6 +618,7 @@ impl RuntimeDashboardQueryService {
                     control_plane: DashboardControlPlaneKind::Surreal(control_plane),
                     workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
                     workflow_store,
+                    workflow_engine: RuntimeFactory::default_workflow_engine(),
                 }
             }
         }
@@ -752,6 +971,18 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
             normalize_graph_function_steps_csv(request.graph_function_steps_csv.as_deref());
         let graph_function_inputs_json =
             normalize_graph_function_inputs_json(request.graph_function_inputs_json.as_deref());
+        let graph_state_json =
+            validate_and_normalize_graph_state_json(request.graph_state_json.as_deref())?;
+        let compile_mode = normalize_compile_mode_hint(request.compile_mode_hint.as_deref())
+            .unwrap_or_else(|| {
+                if graph_state_contains_compile_shape(graph_state_json.as_str()) {
+                    "graph_compiled".to_string()
+                } else if !graph_function_steps_csv.is_empty() {
+                    "legacy_function_steps".to_string()
+                } else {
+                    "source_passthrough".to_string()
+                }
+            });
 
         if workflow_id.is_empty() {
             return Err(StasisError::PortFailure("workflow_id is required".to_string()));
@@ -795,6 +1026,13 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
             workflow_id: workflow_id.to_string(),
             revision_id: revision_id.clone(),
             source: source.to_string(),
+            graph_state_json,
+            compiler_metadata_json: serde_json::json!({
+                "compiler_version": "workflow-graph-v1",
+                "compile_mode": compile_mode,
+                "compiled_at_utc": now.to_rfc3339(),
+            })
+            .to_string(),
             graph_modules_csv,
             graph_function_steps_csv,
             graph_function_inputs_json,
@@ -855,9 +1093,57 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
             revision_id: workflow.latest_revision_id,
             executable_count: latest.executable_count,
             graph_function_steps_csv: latest.graph_function_steps_csv.clone(),
+            graph_function_inputs_json: latest.graph_function_inputs_json.clone(),
             source_bytes: latest.source.len(),
             reflected_at_utc: latest.reflected_at_utc.to_rfc3339(),
             leased_job_id,
+        })
+    }
+
+    async fn workflow_run_draft(
+        &self,
+        request: WorkflowRunDraftRequest,
+    ) -> Result<WorkflowRunDraftResult> {
+        let workflow_id = request.workflow_id.trim();
+        let queue = request.queue.trim();
+        let source = request.source.trim();
+        let graph_modules_csv = normalize_graph_modules_csv(request.graph_modules_csv.as_deref());
+        let graph_function_steps_csv =
+            normalize_graph_function_steps_csv(request.graph_function_steps_csv.as_deref());
+        let graph_function_inputs_json =
+            normalize_graph_function_inputs_json(request.graph_function_inputs_json.as_deref());
+        let _graph_state_json =
+            validate_and_normalize_graph_state_json(request.graph_state_json.as_deref())?;
+
+        if workflow_id.is_empty() {
+            return Err(StasisError::PortFailure("workflow_id is required".to_string()));
+        }
+        if queue.is_empty() {
+            return Err(StasisError::PortFailure("queue is required".to_string()));
+        }
+        if source.is_empty() {
+            return Err(StasisError::PortFailure("source is required".to_string()));
+        }
+
+        let reflection = self
+            .workflow_reflection
+            .reflect_executables_from_source(source)?;
+        let output = self
+            .workflow_engine
+            .execute_grapheme_source(source, None)
+            .await?;
+
+        Ok(WorkflowRunDraftResult {
+            workflow_id: workflow_id.to_string(),
+            queue: queue.to_string(),
+            executable_count: reflection.count,
+            graph_modules_csv,
+            graph_function_steps_csv,
+            graph_function_inputs_json,
+            source_bytes: source.len(),
+            run_id: output.run_id,
+            execution_json: output.execution.to_string(),
+            final_state_json: output.final_state.to_string(),
         })
     }
 
@@ -897,14 +1183,27 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
         else {
             return Ok(None);
         };
+        let compile_mode = serde_json::from_str::<serde_json::Value>(
+            latest.compiler_metadata_json.as_str(),
+        )
+        .ok()
+        .and_then(|value| {
+            value
+                .get("compile_mode")
+                .and_then(serde_json::Value::as_str)
+                .map(|text| text.to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
 
         Ok(Some(WorkflowSavedRevisionSummary {
             workflow_id: definition.workflow_id,
             revision_id: latest.revision_id,
             executable_count: latest.executable_count,
             reflected_at_utc: latest.reflected_at_utc.to_rfc3339(),
+            compile_mode,
             source_bytes: latest.source.len(),
             source: latest.source,
+            graph_state_json: latest.graph_state_json,
             graph_modules_csv: latest.graph_modules_csv,
             graph_function_steps_csv: latest.graph_function_steps_csv,
             graph_function_inputs_json: latest.graph_function_inputs_json,
@@ -1071,7 +1370,7 @@ mod tests {
 
     use super::{
         DashboardQueryService, RuntimeDashboardQueryService, WorkflowDiagnosticSeverity,
-        WorkflowSaveRequest,
+        WorkflowRunDraftRequest, WorkflowSaveRequest,
     };
     use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
     use crate::application::runtime::runtime_factory::RuntimeComposition;
@@ -1101,6 +1400,11 @@ query Echo {
                 workflow_id: "wf.phase2".to_string(),
                 queue: "queue.phase2".to_string(),
                 source: valid_workflow_source().to_string(),
+                compile_mode_hint: None,
+                graph_state_json: Some(
+                    r#"{"query":{"name":"Q","steps":[{"op":"core.echo","args":{"message":"hello"}}]}}"#
+                        .to_string(),
+                ),
                 graph_modules_csv: Some(" core, textops,core,invalid,healthcheck ".to_string()),
                 graph_function_steps_csv: Some(
                     " core.echo,textops.to_markdown,core.echo,invalid.step,healthcheck.runtime_ready "
@@ -1143,10 +1447,99 @@ query Echo {
             latest.graph_function_inputs_json,
             r#"{"node-fn-core-echo-1":"{\"message\":\"hello\"}"}"#
         );
+        assert_eq!(
+            latest.graph_state_json,
+            r#"{"query":{"name":"Q","steps":[{"args":{"message":"hello"},"op":"core.echo"}]}}"#
+        );
+
+        let compiler_metadata: serde_json::Value =
+            serde_json::from_str(&latest.compiler_metadata_json)
+                .expect("compiler metadata should be valid json");
+        assert_eq!(
+            compiler_metadata["compile_mode"].as_str(),
+            Some("graph_compiled")
+        );
 
         let receipt: serde_json::Value = serde_json::from_str(&latest.reflection_receipt_json)
             .expect("reflection receipt should be valid json");
         assert_eq!(receipt["count"].as_u64(), Some(saved.executable_count as u64));
+    }
+
+    #[tokio::test]
+    async fn workflow_save_rejects_compile_graph_state_without_query_steps() {
+        let service = RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+        );
+
+        let error = service
+            .workflow_save(WorkflowSaveRequest {
+                workflow_id: "wf.invalid.graph.contract".to_string(),
+                queue: "queue.invalid.graph.contract".to_string(),
+                source: valid_workflow_source().to_string(),
+                compile_mode_hint: None,
+                graph_state_json: Some(
+                    r#"{"query":{"name":"Q","steps":[]}}"#.to_string(),
+                ),
+                graph_modules_csv: None,
+                graph_function_steps_csv: Some("core.echo".to_string()),
+                graph_function_inputs_json: None,
+            })
+            .await
+            .expect_err("workflow save should reject invalid compile graph contract");
+
+        let error_text = error.to_string();
+        assert!(error_text.contains("requires at least one query step"));
+    }
+
+    #[tokio::test]
+    async fn workflow_save_accepts_topology_graph_state_contract() {
+        let service = RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+        );
+
+        let saved = service
+            .workflow_save(WorkflowSaveRequest {
+                workflow_id: "wf.topology.graph.contract".to_string(),
+                queue: "queue.topology.graph.contract".to_string(),
+                source: valid_workflow_source().to_string(),
+                compile_mode_hint: None,
+                graph_state_json: Some(
+                    r#"{"version":1,"nodes":[{"id":"node-fn-core-echo-1"}],"edges":[]}"#
+                        .to_string(),
+                ),
+                graph_modules_csv: Some("core".to_string()),
+                graph_function_steps_csv: Some("core.echo".to_string()),
+                graph_function_inputs_json: None,
+            })
+            .await
+            .expect("workflow save should accept topology graph contract");
+
+        let summary = service
+            .workflow_saved_revision_summary("wf.topology.graph.contract")
+            .await
+            .expect("summary lookup should succeed")
+            .expect("summary should exist");
+        assert_eq!(summary.revision_id, saved.revision_id);
+        assert_eq!(
+            summary.graph_state_json,
+            r#"{"edges":[],"nodes":[{"id":"node-fn-core-echo-1"}],"version":1}"#
+        );
+
+        let revisions = service
+            .workflow_store
+            .list_revisions("wf.topology.graph.contract")
+            .await
+            .expect("revisions load should succeed");
+        let latest = revisions
+            .first()
+            .expect("one revision should exist for topology contract test");
+        let compiler_metadata: serde_json::Value =
+            serde_json::from_str(&latest.compiler_metadata_json)
+                .expect("compiler metadata should be valid json");
+        assert_eq!(
+            compiler_metadata["compile_mode"].as_str(),
+            Some("legacy_function_steps")
+        );
     }
 
     #[tokio::test]
@@ -1161,6 +1554,8 @@ query Echo {
                 workflow_id: "wf.exec.meta".to_string(),
                 queue: "queue.exec.meta".to_string(),
                 source: source.to_string(),
+                compile_mode_hint: None,
+                graph_state_json: None,
                 graph_modules_csv: None,
                 graph_function_steps_csv: Some("core.echo,textops.to_markdown".to_string()),
                 graph_function_inputs_json: Some(
@@ -1180,12 +1575,71 @@ query Echo {
         assert_eq!(executed.revision_id, saved.revision_id);
         assert_eq!(executed.executable_count, saved.executable_count);
         assert_eq!(executed.graph_function_steps_csv, "core.echo,textops.to_markdown");
+        assert_eq!(
+            executed.graph_function_inputs_json,
+            r#"{"node-fn-core-echo-1":"{\"message\":\"ping\"}"}"#
+        );
         assert_eq!(executed.source_bytes, source.trim().len());
         assert!(executed.leased_job_id.is_none());
         assert!(
             DateTime::parse_from_rfc3339(&executed.reflected_at_utc).is_ok(),
             "reflected_at_utc should be RFC3339"
         );
+    }
+
+    #[tokio::test]
+    async fn workflow_run_draft_executes_without_persisting_revision() {
+        let service = RuntimeDashboardQueryService::from_runtime_composition(
+            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+        );
+        let source = valid_workflow_source();
+
+        let run = service
+            .workflow_run_draft(WorkflowRunDraftRequest {
+                workflow_id: "wf.draft.run".to_string(),
+                queue: "queue.draft.run".to_string(),
+                source: source.to_string(),
+                graph_state_json: Some(
+                    r#"{"query":{"name":"Draft","steps":[{"op":"core.echo","args":{"message":"ping"}}]}}"#
+                        .to_string(),
+                ),
+                graph_modules_csv: Some("core".to_string()),
+                graph_function_steps_csv: Some("core.echo".to_string()),
+                graph_function_inputs_json: Some(
+                    r#"{"node-fn-core-echo-1":"{\"message\":\"ping\"}"}"#.to_string(),
+                ),
+            })
+            .await
+            .expect("draft run should succeed");
+
+        assert_eq!(run.workflow_id, "wf.draft.run");
+        assert_eq!(run.queue, "queue.draft.run");
+        assert_eq!(run.executable_count, 1);
+        assert_eq!(run.graph_modules_csv, "core");
+        assert_eq!(run.graph_function_steps_csv, "core.echo");
+        assert!(run.source_bytes > 0);
+        assert!(!run.run_id.is_empty());
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&run.execution_json)
+                .ok()
+                .and_then(|value| value.as_object().cloned())
+                .is_some(),
+            "execution_json should be a JSON object"
+        );
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&run.final_state_json)
+                .ok()
+                .and_then(|value| value.as_object().cloned())
+                .is_some(),
+            "final_state_json should be a JSON object"
+        );
+
+        let definition = service
+            .workflow_store
+            .get_definition("wf.draft.run")
+            .await
+            .expect("definition load should succeed");
+        assert!(definition.is_none(), "draft run should not persist definition");
     }
 
     #[tokio::test]
@@ -1264,6 +1718,11 @@ query Echo {
                 workflow_id: "wf.summary".to_string(),
                 queue: "queue.summary".to_string(),
                 source: source.to_string(),
+                compile_mode_hint: None,
+                graph_state_json: Some(
+                    r#"{"query":{"name":"Summary","steps":[{"op":"core.echo","args":{"message":"summary"}}]}}"#
+                        .to_string(),
+                ),
                 graph_modules_csv: Some("core, branch, healthcheck, core".to_string()),
                 graph_function_steps_csv: Some(
                     "core.echo,healthcheck.runtime_ready,unknown.bad,core.echo".to_string(),
@@ -1284,12 +1743,17 @@ query Echo {
         assert_eq!(summary.workflow_id, "wf.summary");
         assert_eq!(summary.revision_id, saved.revision_id);
         assert_eq!(summary.executable_count, saved.executable_count);
+        assert_eq!(summary.compile_mode, "graph_compiled");
         assert_eq!(summary.source_bytes, source.trim().len());
         assert_eq!(summary.graph_modules_csv, "core,healthcheck");
         assert_eq!(summary.graph_function_steps_csv, "core.echo,healthcheck.runtime_ready");
         assert_eq!(
             summary.graph_function_inputs_json,
             r#"{"node-fn-core-echo-1":"{\"message\":\"summary\"}"}"#
+        );
+        assert_eq!(
+            summary.graph_state_json,
+            r#"{"query":{"name":"Summary","steps":[{"args":{"message":"summary"},"op":"core.echo"}]}}"#
         );
         assert!(summary.source.contains("query Echo"));
     }

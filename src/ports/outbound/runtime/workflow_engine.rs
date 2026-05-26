@@ -12,5 +12,9 @@ pub struct WorkflowExecutionOutput {
 
 #[async_trait]
 pub trait WorkflowEngine: Send + Sync {
-    async fn execute_grapheme_source(&self, source: &str) -> Result<WorkflowExecutionOutput>;
+    async fn execute_grapheme_source(
+        &self,
+        source: &str,
+        state_current: Option<&Value>,
+    ) -> Result<WorkflowExecutionOutput>;
 }

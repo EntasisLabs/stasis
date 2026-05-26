@@ -1,0 +1,94 @@
+<div class="card">
+  <textarea class="hidden" data-workflow-final-state-json>{{ final_state_json_raw }}</textarea>
+  <div class="card-header">
+    <h3 class="card-title">Workflow Draft Run</h3>
+    <p class="card-description">Run ID: <span class="font-mono">{{ run_id }}</span> &bull; outcome={{ outcome }} &bull; steps={{ lineage_step_count }}</p>
+  </div>
+  <div class="card-content">
+    {% match error_message %}
+    {% when Some with (message) %}
+    <div class="rounded p-3 mb-3" style="border: 1px solid var(--color-red-200); background: var(--color-red-50);">
+      <p class="text-sm font-semibold" style="color: var(--color-red-800);">Draft Run Failed</p>
+      <p class="text-xs mt-1" style="color: var(--color-red-700);">{{ message }}</p>
+    </div>
+    {% when None %}
+    {% endmatch %}
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+      <div class="rounded p-2" style="border: 1px solid var(--border); background: var(--accent);">
+        <p class="text-xs" style="color: var(--muted-foreground);">Workflow</p>
+        <p class="text-sm font-mono">{{ workflow_id }}</p>
+      </div>
+      <div class="rounded p-2" style="border: 1px solid var(--border); background: var(--accent);">
+        <p class="text-xs" style="color: var(--muted-foreground);">Queue</p>
+        <p class="text-sm font-mono">{{ queue }}</p>
+      </div>
+      <div class="rounded p-2" style="border: 1px solid var(--border); background: var(--accent);">
+        <p class="text-xs" style="color: var(--muted-foreground);">Executable Count</p>
+        <p class="text-sm font-mono">{{ executable_count }}</p>
+      </div>
+      <div class="rounded p-2" style="border: 1px solid var(--border); background: var(--accent);">
+        <p class="text-xs" style="color: var(--muted-foreground);">Source Bytes</p>
+        <p class="text-sm font-mono">{{ source_bytes }}</p>
+      </div>
+    </div>
+
+    <div class="inline-flex rounded-lg p-1 mb-3" style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 55%, transparent);" data-draft-run-tab-group>
+      <button
+        type="button"
+        class="btn btn-sm"
+        data-draft-run-tab-trigger="console"
+        style="background: var(--primary); color: var(--primary-foreground);"
+      >
+        Console
+      </button>
+      <button
+        type="button"
+        class="btn btn-ghost btn-sm"
+        data-draft-run-tab-trigger="lineage"
+        style="color: var(--muted-foreground);"
+      >
+        Workflow Lineage
+      </button>
+    </div>
+
+    <div data-draft-run-tab-panel="console">
+      <p class="text-xs mb-2" style="color: var(--muted-foreground);">Engine output</p>
+      <pre class="text-xs font-mono p-3 rounded overflow-x-auto" style="max-height: 280px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--foreground);">{{ execution_json_pretty }}</pre>
+      <p class="text-xs mb-2 mt-3" style="color: var(--muted-foreground);">Compiled Grapheme source</p>
+      <pre class="text-xs font-mono p-3 rounded overflow-x-auto" style="max-height: 320px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--foreground);">{{ compiled_source_pretty }}</pre>
+    </div>
+
+    <div class="hidden" data-draft-run-tab-panel="lineage">
+      <p class="text-xs mb-2" style="color: var(--muted-foreground);">Pipeline trace</p>
+      {% if lineage_steps.is_empty() %}
+      <p class="text-xs mb-2" style="color: var(--muted-foreground);">No pipeline steps were reported for this run.</p>
+      {% else %}
+      <div class="overflow-x-auto mb-3" style="border: 1px solid var(--border); border-radius: var(--radius-md);">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Step</th>
+              <th>Operation</th>
+              <th>OK</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for step in lineage_steps %}
+            <tr>
+              <td class="text-xs font-mono">{{ step.index }}</td>
+              <td class="text-xs font-mono">{{ step.op }}</td>
+              <td class="text-xs">{{ step.ok_label }}</td>
+              <td class="text-xs font-mono">{{ step.error_summary }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+      <p class="text-xs mb-2" style="color: var(--muted-foreground);">Final state snapshot</p>
+      <pre class="text-xs font-mono p-3 rounded overflow-x-auto" style="max-height: 320px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--foreground);">{{ final_state_json_pretty }}</pre>
+    </div>
+  </div>
+</div>

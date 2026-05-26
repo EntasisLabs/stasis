@@ -39,6 +39,12 @@ Design implication:
 1. Canvas graph is the source of truth for guided mode.
 2. Grapheme source is a compiled artifact (and advanced override), not the default authoring primitive.
 
+Control-flow contract (Grapheme-native):
+1. Guided loop behavior maps to Grapheme `iterator ... @loop(...)` blocks.
+2. No generic `while` node exists in guided mode.
+3. Loop execution must stay bounded and explicit via `@loop` controls such as `max`, `each`, and merge strategy.
+4. Any advanced override must still compile to valid Grapheme iterator semantics.
+
 ## North Star Outcomes
 
 1. First successful run in under 3 minutes (P50).
@@ -125,6 +131,12 @@ Deliverables:
 2. Form-first node configuration and defaults.
 3. Runtime mapping from visual graph to executable Grapheme script artifact.
 4. Capability-safe execution constraints reflected in UI affordances.
+5. Controlled loop blocks backed by iterator semantics (bounded, explicit, non-generic).
+
+Loop scope for this phase:
+1. Support `for-each` style iteration using Grapheme iterator `@loop(each: ..., max: ..., merge: ...)`.
+2. Validate loop bounds and iterable source path before publish.
+3. Keep free-form loop constructs out of guided mode.
 
 ### Phase 2.5: Job Trigger Binding (1 sprint)
 
@@ -154,6 +166,7 @@ Deliverables:
 2. Node-by-node result cards and side-effect preview.
 3. Readiness score with guided fixes.
 4. Friendly issue language (no raw compiler framing in default mode).
+5. Iteration-aware playback for iterator loops (per-iteration step traces + stop reason).
 
 Exit criteria:
 1. User can identify and fix blockers without opening advanced mode.
@@ -179,6 +192,7 @@ Exit criteria:
 2. If a feature is visible, it must be functional.
 3. If a state is invalid, remediation must be one click or one clear instruction away.
 4. No internal architecture terms in default UI labels.
+5. No generic loop authoring controls in guided mode; loop UX must map directly to Grapheme iterator constraints.
 
 ## Metrics and Instrumentation
 

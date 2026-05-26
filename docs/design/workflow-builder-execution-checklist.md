@@ -11,6 +11,22 @@
 
 Translate the product phase plan into sprint-ready implementation tasks mapped to current code touchpoints.
 
+## Mid-Slice Recovery Delta (2026-05-25)
+
+Completed in this slice:
+- [x] Schema-guided parameter controls in Node Inspector seeded by Grapheme input schema refs and function metadata.
+- [x] Pre-save validation guardrails for malformed `function_inputs` payloads (client and server).
+- [x] Execute provenance now includes the saved `function_inputs` snapshot from the immutable workflow revision.
+- [x] Added `Run Draft` action in Workflow Builder to execute in-editor Grapheme flow immediately (without persisting a workflow revision).
+- [x] Save and Run Draft payloads now include canonical `graph_state` from the linker model.
+- [x] Save/Run Draft now return HTTP 400 responses for graph-state contract failures with user-actionable rejection details.
+- [x] Revision compiler metadata `compile_mode` now aligns to actual selected compile path (`graph_compiled`, `legacy_function_steps`, `source_passthrough`).
+- [x] Guided Loop Block controls (`max`, `each`, `merge`) are now present in Workflow Builder and are serialized into canonical `graph_state` as `guided_loop`.
+- [x] Added save-route integration coverage proving source-only saves mark revision compile mode as `source_passthrough`.
+
+Follow-up already in motion:
+- [ ] Replace schema-ref heuristics with full field-level schema expansion once Grapheme reflection exposes concrete input field definitions.
+
 ## Contract Lock: Agentic Workflow Semantics
 
 Canonical definitions:
@@ -18,6 +34,11 @@ Canonical definitions:
 2. Edge = piped function output -> next function input.
 3. Workflow = AI skill graph compiled into Grapheme script.
 4. Job = trigger binding that runs a workflow revision and forwards output into model context.
+
+Loop semantics lock:
+1. Guided loops compile to Grapheme `iterator ... @loop(...)` blocks.
+2. No guided `while` loop authoring path is supported.
+3. Loop safety is explicit and bounded (`max` required; iterable source required for `each`).
 
 Definition of done for contract lock:
 - Guided UI labels use action language while preserving Grapheme function identity in metadata.
@@ -38,9 +59,9 @@ Scope (v0):
   - workflow revision selected by ID
 
 Implementation tasks:
-- [ ] Add workflow graph serialization field in revision domain model and stores.
-- [ ] Add deterministic graph -> Grapheme compiler for canonical chain.
-- [ ] Update save action to persist graph + compiled source + reflection receipt.
+- [x] Add workflow graph serialization field in revision domain model and stores.
+- [x] Add deterministic graph -> Grapheme compiler for canonical chain.
+- [x] Update save action to persist graph + compiled source + reflection receipt.
 - [ ] Add queue trigger binding payload referencing workflow revision ID.
 - [ ] Update execute path to resolve workflow by revision ID from trigger-bound job metadata.
 
@@ -151,13 +172,28 @@ Definition of done:
 - Connections validate against typed inputs/outputs in UI before publish.
 
 ### P2.2 Graph-to-runtime mapping (no-code parity)
-- [ ] Add graph serialization field(s) to workflow revision model in [src/domain/runtime/workflow_definition.rs](src/domain/runtime/workflow_definition.rs#L13).
-- [ ] Extend save path in [src/dashboard/service.rs](src/dashboard/service.rs#L632) to compile graph into Grapheme source artifact.
+- [x] Add graph serialization field(s) to workflow revision model in [src/domain/runtime/workflow_definition.rs](src/domain/runtime/workflow_definition.rs#L13).
+- [x] Extend save path in [src/dashboard/service.rs](src/dashboard/service.rs#L632) to compile graph into Grapheme source artifact.
 - [ ] Ensure execute path in [src/dashboard/service.rs](src/dashboard/service.rs#L650) consumes latest graph-backed revision.
-- [ ] Add deterministic graph -> Grapheme script compiler tests for canonical skill templates.
+- [x] Add deterministic graph -> Grapheme script compiler tests for canonical skill templates.
+- [x] Add deterministic compiler support for iterator loop blocks that emit `iterator ... @loop(max: ..., each: ..., merge: ...)`.
+- [x] Add save-time validation that guided loop blocks always include bounded `max`.
 
 Definition of done:
 - Visual-only workflows compile and run with parity to source-authored Grapheme flows.
+- Guided loop workflows compile to bounded Grapheme iterator blocks with no generic loop semantics.
+
+### P2.4 Controlled Loop Blocks (Grapheme-native)
+- [x] Add guided Loop Block type backed by Grapheme iterator semantics in workflow DTO mapping near [src/dashboard/handlers.rs](src/dashboard/handlers.rs#L669).
+- [x] Add Loop Block form fields in [templates/dashboard/views/workflows.html](templates/dashboard/views/workflows.html) for:
+  - `max`
+  - `each`
+  - `merge`
+- [x] Keep raw loop expression editing in advanced mode only.
+- [ ] Add publish/readiness checks for missing loop bounds and missing iterable path.
+
+Definition of done:
+- Users can configure bounded iteration in guided mode without seeing raw source or generic loop controls.
 
 ### P2.3 Trigger-binding Job model
 - [ ] Add workflow-trigger binding contract for HTTP/Kafka/Queue in runtime/domain boundary.
@@ -226,11 +262,13 @@ Definition of done:
 - [ ] Keep and extend state retention checks from [src/dashboard/integration.rs](src/dashboard/integration.rs#L410).
 - [ ] Add light/dark theme render parity checks for key builder states.
 - [ ] Add integration test for canonical skill template compile path: graph input -> Grapheme source -> saved revision.
+- [ ] Add guided loop compile test: loop block config -> iterator `@loop` source artifact.
 
 ### Service tests
 - [ ] Add graph serialization/deserialization parity tests near [src/dashboard/service.rs](src/dashboard/service.rs#L1039).
 - [ ] Add save/execute parity tests for graph-backed revisions across InMemory and SurrealMem.
 - [ ] Add service tests for trigger-binding job creation with workflow revision reference integrity.
+- [ ] Add service tests for bounded loop validation failures (missing `max`, invalid `each` path).
 
 ### Handler tests
 - [ ] Add DTO contract tests for mode toggles, readiness messages, and simulation summaries in [src/dashboard/handlers.rs](src/dashboard/handlers.rs).
