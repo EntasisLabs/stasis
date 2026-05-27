@@ -713,14 +713,26 @@ fn stringify_json_field(value: Option<&Value>) -> String {
 #[derive(Clone, Debug, Deserialize)]
 struct WorkflowGraphCompileSpec {
     intent_goal: Option<String>,
+    prelude: Option<Vec<String>>,
+    glyph: Option<WorkflowGraphGlyphSpec>,
+    executables: Option<Vec<WorkflowGraphExecutableSpec>>,
     query: WorkflowGraphExecutableSpec,
     iterators: Option<Vec<WorkflowGraphIteratorSpec>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 struct WorkflowGraphExecutableSpec {
+    kind: Option<String>,
     name: Option<String>,
     on: Option<String>,
+    returns: Option<String>,
+    inject_context: Option<bool>,
+    steps: Vec<WorkflowGraphOperationSpec>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct WorkflowGraphGlyphSpec {
+    name: Option<String>,
     steps: Vec<WorkflowGraphOperationSpec>,
 }
 
@@ -742,15 +754,21 @@ struct WorkflowGraphLoopDirective {
 
 #[derive(Clone, Debug, Deserialize)]
 struct WorkflowGraphOperationSpec {
+    #[serde(default)]
     op: String,
     args: Option<serde_json::Value>,
+    expr: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct WorkflowGraphTopologySpec {
     nodes: Option<Vec<WorkflowGraphTopologyNodeSpec>>,
     edges: Option<Vec<WorkflowGraphTopologyEdgeSpec>>,
+    guided_loops: Option<Vec<WorkflowGraphTopologyLoopSpec>>,
     guided_loop: Option<WorkflowGraphTopologyLoopSpec>,
+    prelude: Option<Vec<String>>,
+    glyph: Option<WorkflowGraphGlyphSpec>,
+    executables: Option<Vec<WorkflowGraphExecutableSpec>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -764,11 +782,12 @@ struct WorkflowGraphTopologyEdgeSpec {
     to: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct WorkflowGraphTopologyLoopSpec {
     max: usize,
     each: String,
     merge: Option<String>,
+    name: Option<String>,
     start_node_id: Option<String>,
     end_node_id: Option<String>,
 }
@@ -862,18 +881,68 @@ fn topology_ordered_node_ids(spec: &WorkflowGraphTopologySpec) -> Vec<String> {
     ordered
 }
 
+fn parse_function_input_payload_args(
+    function_inputs: Option<&BTreeMap<String, String>>,
+    node_id: &str,
+) -> Option<serde_json::Value> {
+    let payload = function_inputs
+        .and_then(|inputs| inputs.get(node_id))
+        .map(|raw| raw.trim())
+        .filter(|raw| !raw.is_empty())?;
+    let mut parsed = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    let object = parsed.as_object_mut()?;
+    object.remove("$graph");
+    object.remove("$expr");
+    object.remove("$exec");
+    object.remove("$prelude");
+    object.remove("$glyph");
+    if object.is_empty() {
+        return None;
+    }
+    Some(parsed)
+}
+
+fn sanitize_iterator_name(raw: Option<&str>) -> String {
+    let candidate = raw
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("GuidedLoop");
+    let mut out = candidate
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '_' { ch } else { '_' })
+        .collect::<String>();
+
+    if out.is_empty() {
+        return "GuidedLoop".to_string();
+    }
+
+    if out
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_digit())
+    {
+        out.insert(0, '_');
+    }
+
+    out
+}
+
 fn build_compile_spec_from_topology_graph(
     workflow_id: &str,
     graph_state_json: &str,
+    function_inputs: Option<&BTreeMap<String, String>>,
 ) -> Option<WorkflowGraphCompileSpec> {
     let spec = serde_json::from_str::<WorkflowGraphTopologySpec>(graph_state_json).ok()?;
-    let loop_config = spec.guided_loop.as_ref()?;
-    if loop_config.max == 0 {
-        return None;
+    let topology_prelude = spec.prelude.clone();
+    let topology_glyph = spec.glyph.clone();
+    let topology_executables = spec.executables.clone();
+    let mut loop_configs = spec.guided_loops.clone().unwrap_or_default();
+    if loop_configs.is_empty()
+        && let Some(single_loop) = spec.guided_loop.clone()
+    {
+        loop_configs.push(single_loop);
     }
-
-    let each = loop_config.each.trim();
-    if each.is_empty() || !each.starts_with('$') {
+    if loop_configs.is_empty() {
         return None;
     }
 
@@ -887,7 +956,8 @@ fn build_compile_spec_from_topology_graph(
             parse_module_function_from_node_id(node_id).map(|(module_id, function_id)| {
                 WorkflowGraphOperationSpec {
                     op: format!("{module_id}.{function_id}"),
-                    args: None,
+                    args: parse_function_input_payload_args(function_inputs, node_id.as_str()),
+                    expr: None,
                 }
             })
         })
@@ -896,58 +966,134 @@ fn build_compile_spec_from_topology_graph(
         return None;
     }
 
-    let start_node_id = loop_config
-        .start_node_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| ordered_nodes.first().map(String::as_str).unwrap_or_default());
-    let end_node_id = loop_config
-        .end_node_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| ordered_nodes.last().map(String::as_str).unwrap_or_default());
+    let mut ranges = loop_configs
+        .into_iter()
+        .filter_map(|loop_config| {
+            if loop_config.max == 0 {
+                return None;
+            }
 
-    let start_index = ordered_nodes.iter().position(|node| node == start_node_id)?;
-    let end_index = ordered_nodes.iter().position(|node| node == end_node_id)?;
-    if start_index > end_index {
-        return None;
-    }
+            let each = loop_config.each.trim();
+            if each.is_empty() || !each.starts_with('$') {
+                return None;
+            }
 
-    let iterator_steps = ordered_ops[start_index..=end_index].to_vec();
-    if iterator_steps.is_empty() {
-        return None;
-    }
+            let start_node_id = loop_config
+                .start_node_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())?;
+            let end_node_id = loop_config
+                .end_node_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())?;
 
-    let mut query_steps = ordered_ops[..start_index]
-        .iter()
-        .chain(ordered_ops[(end_index + 1)..].iter())
-        .cloned()
+            let start_index = ordered_nodes.iter().position(|node| node == start_node_id)?;
+            let end_index = ordered_nodes.iter().position(|node| node == end_node_id)?;
+            if start_index > end_index {
+                return None;
+            }
+
+            Some((
+                start_index,
+                end_index,
+                loop_config.max,
+                each.to_string(),
+                loop_config.merge.clone(),
+                sanitize_iterator_name(loop_config.name.as_deref()),
+            ))
+        })
         .collect::<Vec<_>>();
-    if query_steps.is_empty()
-        && let Some(first_step) = iterator_steps.first().cloned()
-    {
-        query_steps.push(first_step);
+
+    if ranges.is_empty() {
+        return None;
+    }
+
+    ranges.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
+
+    let mut sanitized_ranges = Vec::<(usize, usize, usize, String, Option<String>, String)>::new();
+    let mut last_end: Option<usize> = None;
+    let mut used_names = BTreeMap::<String, usize>::new();
+    for (start, end, max, each, merge, base_name) in ranges {
+        if let Some(last) = last_end
+            && start <= last
+        {
+            continue;
+        }
+
+        let entry = used_names.entry(base_name.clone()).or_insert(0);
+        *entry += 1;
+        let iterator_name = if *entry == 1 {
+            base_name
+        } else {
+            format!("{}_{}", base_name, *entry)
+        };
+
+        last_end = Some(end);
+        sanitized_ranges.push((start, end, max, each, merge, iterator_name));
+    }
+
+    if sanitized_ranges.is_empty() {
+        return None;
+    }
+
+    let mut query_steps = Vec::<WorkflowGraphOperationSpec>::new();
+    let mut iterators = Vec::<WorkflowGraphIteratorSpec>::new();
+    let mut cursor = 0usize;
+
+    for (start, end, max, each, merge, iterator_name) in &sanitized_ranges {
+        while cursor < *start {
+            query_steps.push(ordered_ops[cursor].clone());
+            cursor += 1;
+        }
+
+        query_steps.push(WorkflowGraphOperationSpec {
+            op: iterator_name.clone(),
+            args: None,
+            expr: None,
+        });
+
+        let iterator_steps = ordered_ops[*start..=*end].to_vec();
+        if !iterator_steps.is_empty() {
+            iterators.push(WorkflowGraphIteratorSpec {
+                name: iterator_name.clone(),
+                on: Some("Any".to_string()),
+                loop_directive: WorkflowGraphLoopDirective {
+                    max: *max,
+                    each: each.clone(),
+                    merge: merge.clone(),
+                },
+                steps: iterator_steps,
+            });
+        }
+
+        cursor = end + 1;
+    }
+
+    while cursor < ordered_ops.len() {
+        query_steps.push(ordered_ops[cursor].clone());
+        cursor += 1;
+    }
+
+    if query_steps.is_empty() || iterators.is_empty() {
+        return None;
     }
 
     Some(WorkflowGraphCompileSpec {
         intent_goal: Some("Guided loop authoring".to_string()),
+        prelude: topology_prelude,
+        glyph: topology_glyph,
+        executables: topology_executables,
         query: WorkflowGraphExecutableSpec {
+            kind: Some("query".to_string()),
             name: Some(sanitize_executable_name(workflow_id)),
             on: Some("Any".to_string()),
+            returns: None,
+            inject_context: Some(true),
             steps: query_steps,
         },
-        iterators: Some(vec![WorkflowGraphIteratorSpec {
-            name: "GuidedLoop".to_string(),
-            on: Some("Any".to_string()),
-            loop_directive: WorkflowGraphLoopDirective {
-                max: loop_config.max,
-                each: each.to_string(),
-                merge: loop_config.merge.clone(),
-            },
-            steps: iterator_steps,
-        }]),
+        iterators: Some(iterators),
     })
 }
 
@@ -1030,39 +1176,210 @@ fn render_graph_call_args(args: Option<&serde_json::Value>) -> String {
     }
 }
 
+fn extract_graph_module_from_expression(expr: &str) -> Option<String> {
+    let token = expr
+        .trim()
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '.')
+        .collect::<String>();
+    let (module_id, _) = token.split_once('.')?;
+    let module_id = module_id.trim().to_ascii_lowercase();
+    if is_supported_grapheme_module(module_id.as_str()) {
+        Some(module_id)
+    } else {
+        None
+    }
+}
+
 fn compile_graph_operation_step(step: &WorkflowGraphOperationSpec) -> Option<(String, String)> {
-    let (module_id, function_id) = normalize_function_step(step.op.as_str())?;
-    let args = render_graph_call_args(step.args.as_ref());
-    Some((module_id.clone(), format!("{module_id}.{function_id}{args}")))
+    if let Some(expr) = step
+        .expr
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some((
+            extract_graph_module_from_expression(expr).unwrap_or_default(),
+            expr.to_string(),
+        ));
+    }
+
+    if let Some((module_id, function_id)) = normalize_function_step(step.op.as_str()) {
+        let args = render_graph_call_args(step.args.as_ref());
+        return Some((module_id.clone(), format!("{module_id}.{function_id}{args}")));
+    }
+
+    if step.args.is_none() {
+        let op = step.op.trim();
+        if !op.is_empty()
+            && op
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            && op.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return Some((String::new(), op.to_string()));
+        }
+    }
+
+    None
+}
+
+fn collect_graph_rendered_steps(
+    steps: &[WorkflowGraphOperationSpec],
+    import_modules: &mut BTreeSet<String>,
+) -> Vec<String> {
+    steps
+        .iter()
+        .filter_map(|step| {
+            compile_graph_operation_step(step).map(|(module_id, rendered)| {
+                if !module_id.is_empty() {
+                    import_modules.insert(module_id);
+                }
+                rendered
+            })
+        })
+        .collect::<Vec<_>>()
+}
+
+fn normalize_graph_executable_kind(raw_kind: Option<&str>) -> &'static str {
+    match raw_kind
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("query")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "mutation" => "mutation",
+        _ => "query",
+    }
+}
+
+fn render_graph_executable_block(
+    kind: Option<&str>,
+    name: &str,
+    on: Option<&str>,
+    returns: Option<&str>,
+    inject_context: bool,
+    steps: &[String],
+    workflow_context: Option<(&str, &str)>,
+) -> Option<String> {
+    if steps.is_empty() {
+        return None;
+    }
+
+    let kind = normalize_graph_executable_kind(kind);
+    let on_scope = on
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Any");
+    let returns_clause = returns
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!(" -> {value}"))
+        .unwrap_or_default();
+
+    let body = if inject_context && kind == "query" {
+        let Some((workflow_id, queue)) = workflow_context else {
+            return None;
+        };
+        format!(
+            "  set {{ workflow_id: {workflow_id_literal}, queue: {queue_literal} }}\n    |> {steps}",
+            workflow_id_literal = serde_json::to_string(workflow_id)
+                .unwrap_or_else(|_| "\"workflow\"".to_string()),
+            queue_literal = serde_json::to_string(queue)
+                .unwrap_or_else(|_| "\"default\"".to_string()),
+            steps = steps.join("\n    |> "),
+        )
+    } else {
+        format!("  {}", steps.join("\n  |> "))
+    };
+
+    Some(format!(
+        "{kind} {name} on {on_scope}{returns_clause} {{\n{body}\n}}",
+        name = sanitize_executable_name(name),
+    ))
+}
+
+fn render_graph_glyph_block(name: &str, steps: &[String]) -> Option<String> {
+    if steps.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "glyph {name} {{\n  {steps}\n}}",
+        name = sanitize_executable_name(name),
+        steps = steps.join("\n  |> "),
+    ))
 }
 
 fn compile_grapheme_source_from_graph_state(
     workflow_id: &str,
     queue: &str,
     graph_state_json: &str,
+    function_inputs_json: Option<&str>,
 ) -> Option<String> {
+    let function_inputs = function_inputs_json.map(parse_function_inputs_json);
     let spec = serde_json::from_str::<WorkflowGraphCompileSpec>(graph_state_json)
         .ok()
-        .or_else(|| build_compile_spec_from_topology_graph(workflow_id, graph_state_json))?;
+        .or_else(|| {
+            build_compile_spec_from_topology_graph(
+                workflow_id,
+                graph_state_json,
+                function_inputs.as_ref(),
+            )
+        })?;
     if spec.query.steps.is_empty() {
         return None;
     }
 
     let mut import_modules = BTreeSet::<String>::new();
-    let query_steps = spec
-        .query
-        .steps
-        .iter()
-        .filter_map(|step| {
-            compile_graph_operation_step(step).map(|(module_id, rendered)| {
-                import_modules.insert(module_id);
-                rendered
-            })
-        })
-        .collect::<Vec<_>>();
+    let query_steps = collect_graph_rendered_steps(&spec.query.steps, &mut import_modules);
     if query_steps.is_empty() {
         return None;
     }
+
+    let prelude_blocks = spec
+        .prelude
+        .unwrap_or_default()
+        .into_iter()
+        .map(|block| block.trim().to_string())
+        .filter(|block| !block.is_empty())
+        .collect::<Vec<_>>();
+
+    let glyph_block = spec.glyph.and_then(|glyph| {
+        let steps = collect_graph_rendered_steps(&glyph.steps, &mut import_modules);
+        let glyph_name = glyph
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Main");
+        render_graph_glyph_block(glyph_name, &steps)
+    });
+
+    let supplemental_executable_blocks = spec
+        .executables
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|executable| {
+            let name = executable
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())?;
+            let steps = collect_graph_rendered_steps(&executable.steps, &mut import_modules);
+            render_graph_executable_block(
+                executable.kind.as_deref(),
+                name,
+                executable.on.as_deref(),
+                executable.returns.as_deref(),
+                executable.inject_context.unwrap_or(false),
+                &steps,
+                Some((workflow_id, queue)),
+            )
+        })
+        .collect::<Vec<_>>();
 
     let iterator_blocks = spec
         .iterators
@@ -1073,16 +1390,7 @@ fn compile_grapheme_source_from_graph_state(
                 return None;
             }
 
-            let steps = iterator
-                .steps
-                .iter()
-                .filter_map(|step| {
-                    compile_graph_operation_step(step).map(|(module_id, rendered)| {
-                        import_modules.insert(module_id);
-                        rendered
-                    })
-                })
-                .collect::<Vec<_>>();
+            let steps = collect_graph_rendered_steps(&iterator.steps, &mut import_modules);
             if steps.is_empty() {
                 return None;
             }
@@ -1128,6 +1436,7 @@ fn compile_grapheme_source_from_graph_state(
         .collect::<Vec<_>>()
         .join("\n");
 
+    let query_kind = spec.query.kind.as_deref();
     let query_name = spec
         .query
         .name
@@ -1136,43 +1445,46 @@ fn compile_grapheme_source_from_graph_state(
         .filter(|value| !value.is_empty())
         .map(sanitize_executable_name)
         .unwrap_or_else(|| sanitize_executable_name(workflow_id));
-    let query_on = spec
-        .query
-        .on
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Any");
+    let mut query_block = render_graph_executable_block(
+        query_kind,
+        query_name.as_str(),
+        spec.query.on.as_deref(),
+        spec.query.returns.as_deref(),
+        spec.query.inject_context.unwrap_or(true),
+        &query_steps,
+        Some((workflow_id, queue)),
+    )?;
 
-    let intent_block = spec
+    if let Some(intent_goal) = spec
         .intent_goal
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|goal| {
-            format!(
-                "#[intent(goal: {goal})]\n",
-                goal = serde_json::to_string(goal)
-                    .unwrap_or_else(|_| "\"Workflow intent\"".to_string())
-            )
-        })
-        .unwrap_or_default();
+    {
+        query_block = format!(
+            "#[intent(goal: {goal})]\n{query_block}",
+            goal = serde_json::to_string(intent_goal)
+                .unwrap_or_else(|_| "\"Workflow intent\"".to_string())
+        );
+    }
 
-    let query_block = format!(
-        "{intent_block}query {query_name} on {query_on} {{\n  set {{ workflow_id: {workflow_id_literal}, queue: {queue_literal} }}\n    |> {steps}\n}}",
-        workflow_id_literal = serde_json::to_string(workflow_id)
-            .unwrap_or_else(|_| "\"workflow\"".to_string()),
-        queue_literal = serde_json::to_string(queue).unwrap_or_else(|_| "\"default\"".to_string()),
-        steps = query_steps.join("\n    |> "),
-    );
+    let mut sections = Vec::<String>::new();
+    if !import_block.trim().is_empty() {
+        sections.push(import_block);
+    }
+    if !prelude_blocks.is_empty() {
+        sections.push(prelude_blocks.join("\n\n"));
+    }
+    if let Some(glyph) = glyph_block {
+        sections.push(glyph);
+    }
+    sections.push(query_block);
+    sections.extend(supplemental_executable_blocks);
+    if !iterator_blocks.is_empty() {
+        sections.push(iterator_blocks.join("\n\n"));
+    }
 
-    let iterator_section = if iterator_blocks.is_empty() {
-        String::new()
-    } else {
-        format!("\n\n{}", iterator_blocks.join("\n\n"))
-    };
-
-    Some(format!("{import_block}\n\n{query_block}{iterator_section}\n"))
+    Some(format!("{}\n", sections.join("\n\n")))
 }
 
 fn format_function_title(function_id: &str) -> String {
@@ -2381,6 +2693,7 @@ async fn action_workflow_save(
                 payload.workflow_id.trim(),
                 payload.queue.trim(),
                 graph,
+                payload.function_inputs.as_deref(),
             )
         });
     let compiled_from_steps = if compiled_from_graph.is_none() {
@@ -2487,6 +2800,7 @@ async fn action_workflow_run_draft(
                 payload.workflow_id.trim(),
                 payload.queue.trim(),
                 graph,
+                payload.function_inputs.as_deref(),
             )
         });
     let compiled_from_steps = if compiled_from_graph.is_none() {
@@ -3888,17 +4202,103 @@ mod tests {
                     }
                 ]
             }"#,
+            None,
         )
         .expect("graph source should compile");
 
         assert!(source.contains("import websearch from \"grapheme/websearch\""));
         assert!(source.contains("query Q on Any"));
+        assert!(source.contains("set { workflow_id: \"wf-search\", queue: \"default\" }"));
         assert!(source.contains("|> websearch.search(max_results: 3, query: \"Rust async runtime patterns\")"));
         assert!(source.contains("iterator ParseResults on Any @loop(max: 3, each: $current.results, merge: \"append\")"));
         assert!(source.contains("http.get("));
         assert!(source.contains("$current.url"));
         assert!(source.contains("|> html.to_md("));
         assert!(source.contains("$current.body"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_supports_prelude_glyph_and_mutation_blocks() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-approval",
+            "default",
+            r#"{
+                "prelude":[
+                    "enum ApprovalStatus {\n  draft,\n  reviewing,\n  approved,\n  rejected\n}",
+                    "state_machine ApprovalLifecycle on ApprovalStatus {\n  transition draft -> reviewing\n  transition reviewing -> approved\n  transition reviewing -> rejected\n  terminal approved\n  terminal rejected\n}",
+                    "struct ApprovalState {\n  status: ApprovalStatus\n  request_id: String\n  owner: String\n  attempts: Float\n  state?: Json\n  note?: String\n}"
+                ],
+                "glyph":{
+                    "name":"Main",
+                    "steps":[
+                        {"expr":"SeedApproval"},
+                        {"expr":"ApproveRequest"},
+                        {"op":"core.pick","args":{"fields":["request_id","owner","status","state","note"]}}
+                    ]
+                },
+                "query":{
+                    "kind":"query",
+                    "name":"SeedApproval",
+                    "on":"Any",
+                    "returns":"ApprovalState",
+                    "inject_context":false,
+                    "steps":[
+                        {"expr":"ApprovalState { status: \"reviewing\", request_id: \"req-42\", owner: \"platform\", attempts: 1.0 }"}
+                    ]
+                },
+                "executables":[
+                    {
+                        "kind":"mutation",
+                        "name":"ApproveRequest",
+                        "on":"ApprovalState",
+                        "returns":"ApprovalState",
+                        "steps":[
+                            {"expr":"apply state { actor: \"policy-engine\", mutation: \"ApproveRequest\" }"},
+                            {"expr":"transition $current.status -> approved { note: \"approved via explicit mutation + apply\" }"}
+                        ]
+                    }
+                ]
+            }"#,
+            None,
+        )
+        .expect("complex graph source should compile");
+
+        assert!(source.contains("import core from \"grapheme/core\""));
+        assert!(source.contains("enum ApprovalStatus"));
+        assert!(source.contains("state_machine ApprovalLifecycle on ApprovalStatus"));
+        assert!(source.contains("struct ApprovalState"));
+        assert!(source.contains("glyph Main {"));
+        assert!(source.contains("SeedApproval"));
+        assert!(source.contains("|> ApproveRequest"));
+        assert!(source.contains("|> core.pick("));
+        assert!(source.contains("query SeedApproval on Any -> ApprovalState"));
+        assert!(source.contains("ApprovalState { status: \"reviewing\""));
+        assert!(!source.contains("set { workflow_id:"));
+        assert!(source.contains("mutation ApproveRequest on ApprovalState -> ApprovalState"));
+        assert!(source.contains("apply state { actor: \"policy-engine\", mutation: \"ApproveRequest\" }"));
+        assert!(source.contains("transition $current.status -> approved"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_extracts_imports_from_expr_steps() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-expr-imports",
+            "default",
+            r#"{
+                "query":{
+                    "name":"ExprImport",
+                    "on":"Any",
+                    "steps":[
+                        {"expr":"core.pick(fields: [\"title\", \"url\"])"}
+                    ]
+                }
+            }"#,
+            None,
+        )
+        .expect("expr graph source should compile");
+
+        assert!(source.contains("import core from \"grapheme/core\""));
+        assert!(source.contains("|> core.pick(fields: [\"title\", \"url\"])"));
     }
 
     #[test]
@@ -3923,6 +4323,7 @@ mod tests {
                     }
                 ]
             }"#,
+            None,
         )
         .expect("query section should still compile");
 
@@ -3953,15 +4354,164 @@ mod tests {
                     "end_node_id": "node-fn-html-to_markdown-3"
                 }
             }"#,
+            None,
         )
         .expect("guided loop topology should compile");
 
         assert!(source.contains("import core from \"grapheme/core\""));
         assert!(source.contains("import http from \"grapheme/http\""));
         assert!(source.contains("import html from \"grapheme/html\""));
+        assert!(source.contains("|> GuidedLoop"));
         assert!(source.contains("iterator GuidedLoop on Any @loop(max: 3, each: $current.results, merge: \"append\")"));
         assert!(source.contains("http.get()"));
         assert!(source.contains("html.to_markdown()"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_supports_named_guided_loop_iterator() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-guided-loop",
+            "default",
+            r#"{
+                "version": 1,
+                "nodes": [
+                    {"id": "node-fn-core-websearch-1"},
+                    {"id": "node-fn-http-get-2"}
+                ],
+                "edges": [
+                    {"from": "node-fn-core-websearch-1", "to": "node-fn-http-get-2"}
+                ],
+                "guided_loop": {
+                    "name": "FetchPages",
+                    "max": 3,
+                    "each": "$current.results",
+                    "merge": "append",
+                    "start_node_id": "node-fn-http-get-2",
+                    "end_node_id": "node-fn-http-get-2"
+                }
+            }"#,
+            None,
+        )
+        .expect("named guided loop topology should compile");
+
+        assert!(source.contains("|> FetchPages"));
+        assert!(source.contains("iterator FetchPages on Any @loop(max: 3, each: $current.results, merge: \"append\")"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_supports_multiple_guided_loops() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-guided-loop",
+            "default",
+            r#"{
+                "version": 1,
+                "nodes": [
+                    {"id": "node-fn-core-websearch-1"},
+                    {"id": "node-fn-http-get-2"},
+                    {"id": "node-fn-html-to_markdown-3"}
+                ],
+                "edges": [
+                    {"from": "node-fn-core-websearch-1", "to": "node-fn-http-get-2"},
+                    {"from": "node-fn-http-get-2", "to": "node-fn-html-to_markdown-3"}
+                ],
+                "guided_loops": [
+                    {
+                        "name": "FetchPages",
+                        "max": 3,
+                        "each": "$current.results",
+                        "merge": "append",
+                        "start_node_id": "node-fn-http-get-2",
+                        "end_node_id": "node-fn-http-get-2"
+                    },
+                    {
+                        "name": "RenderMarkdown",
+                        "max": 2,
+                        "each": "$current.results",
+                        "merge": "append",
+                        "start_node_id": "node-fn-html-to_markdown-3",
+                        "end_node_id": "node-fn-html-to_markdown-3"
+                    }
+                ]
+            }"#,
+            None,
+        )
+        .expect("multi loop topology should compile");
+
+        assert!(source.contains("|> core.websearch()"));
+        assert!(source.contains("|> FetchPages"));
+        assert!(source.contains("|> RenderMarkdown"));
+        assert!(source.contains("iterator FetchPages on Any @loop(max: 3, each: $current.results, merge: \"append\")"));
+        assert!(source.contains("iterator RenderMarkdown on Any @loop(max: 2, each: $current.results, merge: \"append\")"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_ignores_incomplete_guided_loops() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-guided-loop",
+            "default",
+            r#"{
+                "version": 1,
+                "nodes": [
+                    {"id": "node-fn-core-websearch-1"},
+                    {"id": "node-fn-http-get-2"}
+                ],
+                "edges": [
+                    {"from": "node-fn-core-websearch-1", "to": "node-fn-http-get-2"}
+                ],
+                "guided_loops": [
+                    {
+                        "name": "IncompleteLoop",
+                        "max": 3,
+                        "each": "$current.results",
+                        "merge": "append"
+                    },
+                    {
+                        "name": "FetchPages",
+                        "max": 2,
+                        "each": "$current.results",
+                        "merge": "append",
+                        "start_node_id": "node-fn-http-get-2",
+                        "end_node_id": "node-fn-http-get-2"
+                    }
+                ]
+            }"#,
+            None,
+        )
+        .expect("topology should compile with at least one complete loop");
+
+        assert!(!source.contains("|> IncompleteLoop"));
+        assert!(source.contains("|> FetchPages"));
+        assert!(source.contains("iterator FetchPages on Any @loop(max: 2, each: $current.results, merge: \"append\")"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_applies_guided_topology_function_inputs() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-guided-loop",
+            "default",
+            r#"{
+                "version": 1,
+                "nodes": [
+                    {"id": "node-fn-core-websearch-1"},
+                    {"id": "node-fn-http-get-2"}
+                ],
+                "edges": [
+                    {"from": "node-fn-core-websearch-1", "to": "node-fn-http-get-2"}
+                ],
+                "guided_loop": {
+                    "max": 2,
+                    "each": "$current.results",
+                    "merge": "append",
+                    "start_node_id": "node-fn-http-get-2",
+                    "end_node_id": "node-fn-http-get-2"
+                }
+            }"#,
+            Some(r#"{"node-fn-core-websearch-1":"{\"query\":\"rust async\"}","node-fn-http-get-2":"{\"url\":{\"$state\":\"$current.url\"}}"}"#),
+        )
+        .expect("guided loop topology should compile with function inputs");
+
+        assert!(source.contains("core.websearch(query: \"rust async\")"));
+        assert!(source.contains("http.get(url: $current.url)"));
     }
 
     #[tokio::test]

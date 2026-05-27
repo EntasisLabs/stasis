@@ -273,8 +273,11 @@
         };
         var stateBindingTarget = { nodeId: "", paramKey: "" };
         var selectedWorkflowEdgeId = "";
+        var selectedWorkflowLoopId = "";
         var graphLinkDraft = null;
-        var workflowLoopContainerCollapsed = false;
+        var workflowLoopContainerCollapsedMap = {};
+        var workflowLoopSettingsExpandedMap = {};
+        var openWorkflowLoopMenuId = "";
 
         function emitDashboardEvent(name, payload) {
           var detail = {
@@ -694,6 +697,212 @@
           }
         }
 
+        function parseWorkflowJsonObjectValue(raw) {
+          if (!raw || typeof raw !== "string" || !raw.trim()) return null;
+          try {
+            var parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+            return parsed;
+          } catch (e) {
+            return null;
+          }
+        }
+
+        function readWorkflowFunctionInputsStateMap() {
+          var stateNode = document.getElementById("workflow-function-inputs-state");
+          if (!stateNode) return {};
+          var parsed = parseWorkflowJsonObjectValue(stateNode.value || "");
+          return parsed || {};
+        }
+
+        function isWorkflowGraphReservedPayloadKey(key) {
+          return key === "$graph"
+            || key === "$expr"
+            || key === "$exec"
+            || key === "$prelude"
+            || key === "$glyph";
+        }
+
+        function preserveWorkflowGraphPayloadMetadata(raw) {
+          var parsed = parseWorkflowJsonObjectValue(raw || "");
+          if (!parsed) return {};
+
+          var preserved = {};
+          Object.keys(parsed).forEach(function (key) {
+            if (isWorkflowGraphReservedPayloadKey(key)) {
+              preserved[key] = parsed[key];
+            }
+          });
+          return preserved;
+        }
+
+        function sanitizeWorkflowExecutableName(raw, fallbackName) {
+          var fallback = (typeof fallbackName === "string" && fallbackName.trim())
+            ? fallbackName.trim()
+            : "WorkflowPreview";
+          var candidate = typeof raw === "string" ? raw.trim() : "";
+          if (!candidate) candidate = fallback;
+
+          var out = candidate.replace(/[^A-Za-z0-9_]/g, "_");
+          if (!out) out = "WorkflowPreview";
+          if (/^[0-9]/.test(out)) {
+            out = "_" + out;
+          }
+          return out;
+        }
+
+        function parseWorkflowModuleFunctionFromNodeId(nodeId) {
+          var match = /^node-fn-([a-z0-9_]+)-([a-z0-9_]+)-\d+$/i.exec((nodeId || "").trim());
+          if (!match) return null;
+
+          var moduleId = normalizeWorkflowModuleKind(match[1]);
+          var functionId = normalizeWorkflowFunctionName(match[2]);
+          if (!moduleId || !functionId) return null;
+
+          return { moduleId: moduleId, functionId: functionId };
+        }
+
+        function normalizeWorkflowGraphOperationSpec(raw) {
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+
+          var expr = typeof raw.expr === "string" ? raw.expr.trim() : "";
+          if (expr) {
+            return { expr: expr };
+          }
+
+          var op = typeof raw.op === "string" ? raw.op.trim() : "";
+          if (!op) return null;
+
+          var normalized = { op: op };
+          if (raw.args && typeof raw.args === "object" && !Array.isArray(raw.args)) {
+            var argsKeys = Object.keys(raw.args);
+            if (argsKeys.length > 0) {
+              normalized.args = raw.args;
+            }
+          }
+          return normalized;
+        }
+
+        function normalizeWorkflowGraphExecutableSpec(raw) {
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+
+          var nameRaw = typeof raw.name === "string" ? raw.name.trim() : "";
+          if (!nameRaw) return null;
+
+          var steps = Array.isArray(raw.steps)
+            ? raw.steps.map(normalizeWorkflowGraphOperationSpec).filter(function (step) { return !!step; })
+            : [];
+          if (!steps.length) return null;
+
+          var normalized = {
+            name: sanitizeWorkflowExecutableName(nameRaw, "Executable"),
+            steps: steps,
+          };
+
+          var kind = typeof raw.kind === "string" ? raw.kind.trim().toLowerCase() : "";
+          if (kind === "query" || kind === "mutation") {
+            normalized.kind = kind;
+          }
+
+          var onScope = typeof raw.on === "string" ? raw.on.trim() : "";
+          if (onScope) normalized.on = onScope;
+
+          var returnsType = typeof raw.returns === "string" ? raw.returns.trim() : "";
+          if (returnsType) normalized.returns = returnsType;
+
+          if (typeof raw.inject_context === "boolean") {
+            normalized.inject_context = raw.inject_context;
+          }
+
+          return normalized;
+        }
+
+        function normalizeWorkflowGraphGlyphSpec(raw) {
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+
+          var steps = Array.isArray(raw.steps)
+            ? raw.steps.map(normalizeWorkflowGraphOperationSpec).filter(function (step) { return !!step; })
+            : [];
+          if (!steps.length) return null;
+
+          var name = typeof raw.name === "string" ? raw.name.trim() : "";
+          return {
+            name: sanitizeWorkflowExecutableName(name || "Main", "Main"),
+            steps: steps,
+          };
+        }
+
+        function normalizeWorkflowGraphPrelude(raw) {
+          var items = [];
+          if (typeof raw === "string") {
+            items = [raw];
+          } else if (Array.isArray(raw)) {
+            items = raw.slice();
+          }
+
+          var seen = {};
+          var normalized = [];
+          items.forEach(function (item) {
+            if (typeof item !== "string") return;
+            var text = item.trim();
+            if (!text || seen[text]) return;
+            seen[text] = true;
+            normalized.push(text);
+          });
+          return normalized;
+        }
+
+        function normalizeWorkflowGraphCompileMetadata(graph) {
+          if (!graph || typeof graph !== "object") return null;
+
+          var prelude = normalizeWorkflowGraphPrelude(graph.prelude);
+          var glyph = normalizeWorkflowGraphGlyphSpec(graph.glyph);
+          var executables = Array.isArray(graph.executables)
+            ? graph.executables
+              .map(normalizeWorkflowGraphExecutableSpec)
+              .filter(function (item) { return !!item; })
+            : [];
+
+          if (!prelude.length && !glyph && !executables.length) {
+            return null;
+          }
+
+          return {
+            prelude: prelude,
+            glyph: glyph,
+            executables: executables,
+          };
+        }
+
+        function applyWorkflowGraphCompileMetadata(graph, metadata) {
+          if (!graph || typeof graph !== "object") return;
+
+          if (!metadata) {
+            delete graph.prelude;
+            delete graph.glyph;
+            delete graph.executables;
+            return;
+          }
+
+          if (Array.isArray(metadata.prelude) && metadata.prelude.length > 0) {
+            graph.prelude = metadata.prelude;
+          } else {
+            delete graph.prelude;
+          }
+
+          if (metadata.glyph) {
+            graph.glyph = metadata.glyph;
+          } else {
+            delete graph.glyph;
+          }
+
+          if (Array.isArray(metadata.executables) && metadata.executables.length > 0) {
+            graph.executables = metadata.executables;
+          } else {
+            delete graph.executables;
+          }
+        }
+
         function buildDefaultLinearGraph(nodeIds) {
           var nodes = (nodeIds || []).map(function (nodeId) {
             return { id: nodeId };
@@ -711,27 +920,325 @@
         }
 
         function normalizeWorkflowGuidedLoopConfig(raw) {
+          var normalized = normalizeWorkflowGuidedLoopContainer(raw, "");
+          if (!normalized) return null;
+          if (!normalized.start_node_id || !normalized.end_node_id) return null;
+          return normalized;
+        }
+
+        function normalizeWorkflowGuidedLoopContainer(raw, fallbackId) {
           if (!raw || typeof raw !== "object") return null;
+          var id = typeof raw.id === "string" ? raw.id.trim() : "";
+          if (!id) id = fallbackId || "loop-1";
           var max = Number(raw.max);
-          if (!Number.isFinite(max) || max <= 0) return null;
+          if (!Number.isFinite(max) || max <= 0) max = 5;
           var each = typeof raw.each === "string" ? raw.each.trim() : "";
-          if (!each || each.charAt(0) !== "$") return null;
+          if (!each || each.charAt(0) !== "$") each = "$current.results";
           var merge = typeof raw.merge === "string" ? raw.merge.trim() : "";
+          var loopName = normalizeWorkflowLoopName(raw.name);
           var startNodeId = typeof raw.start_node_id === "string" ? raw.start_node_id.trim() : "";
           var endNodeId = typeof raw.end_node_id === "string" ? raw.end_node_id.trim() : "";
-          if (!startNodeId || !endNodeId) return null;
           return {
+            id: id,
             max: Math.floor(max),
             each: each,
             merge: merge || "append",
+            name: loopName,
             start_node_id: startNodeId,
             end_node_id: endNodeId,
           };
         }
 
+        function normalizeWorkflowLoopName(raw) {
+          var value = typeof raw === "string" ? raw.trim() : "";
+          if (!value) return "GuidedLoop";
+          value = value.replace(/[^A-Za-z0-9_]/g, "_");
+          if (!value) return "GuidedLoop";
+          if (!/^[A-Za-z_]/.test(value)) {
+            value = "_" + value;
+          }
+          return value;
+        }
+
+        function readWorkflowGuidedLoopsFromGraph(graph) {
+          var sourceLoops = [];
+          if (graph && Array.isArray(graph.guided_loops)) {
+            sourceLoops = graph.guided_loops.slice();
+          } else if (graph && graph.guided_loop && typeof graph.guided_loop === "object") {
+            sourceLoops = [graph.guided_loop];
+          }
+
+          var seen = {};
+          var loops = [];
+          sourceLoops.forEach(function (raw, index) {
+            var normalized = normalizeWorkflowGuidedLoopContainer(raw, "loop-" + String(index + 1));
+            if (!normalized) return;
+            var baseId = normalized.id;
+            var nextId = baseId;
+            var suffix = 2;
+            while (seen[nextId]) {
+              nextId = baseId + "-" + String(suffix);
+              suffix += 1;
+            }
+            normalized.id = nextId;
+            seen[nextId] = true;
+            loops.push(normalized);
+          });
+          return loops;
+        }
+
+        function writeWorkflowGuidedLoopsToGraph(graph, loops) {
+          if (!graph || typeof graph !== "object") return;
+          var normalized = (loops || []).map(function (loop, index) {
+            return normalizeWorkflowGuidedLoopContainer(loop, "loop-" + String(index + 1));
+          }).filter(function (loop) { return !!loop; });
+
+          if (!normalized.length) {
+            delete graph.guided_loops;
+            delete graph.guided_loop;
+            return;
+          }
+
+          graph.guided_loops = normalized;
+          var firstComplete = normalized.find(function (loop) {
+            return !!normalizeWorkflowGuidedLoopConfig(loop);
+          }) || null;
+          if (firstComplete) {
+            graph.guided_loop = firstComplete;
+          } else {
+            delete graph.guided_loop;
+          }
+        }
+
+        function getWorkflowLoopRange(loop, nodeIds) {
+          var complete = normalizeWorkflowGuidedLoopConfig(loop);
+          if (!complete) return null;
+          var ids = nodeIds || collectVisibleWorkflowNodeIds();
+          if (!ids.length) return null;
+          var startIndex = ids.indexOf(complete.start_node_id);
+          var endIndex = ids.indexOf(complete.end_node_id);
+          if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) return null;
+          return {
+            startIndex: startIndex,
+            endIndex: endIndex,
+          };
+        }
+
+        function ensureSelectedWorkflowLoopId(graph) {
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          if (!loops.length) {
+            selectedWorkflowLoopId = "";
+            return "";
+          }
+
+          var exists = loops.some(function (loop) {
+            return loop.id === selectedWorkflowLoopId;
+          });
+          if (!exists) {
+            selectedWorkflowLoopId = loops[0].id;
+          }
+          return selectedWorkflowLoopId;
+        }
+
+        function selectedWorkflowLoopFromGraph(graph) {
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          if (!loops.length) return null;
+          var selectedId = ensureSelectedWorkflowLoopId(graph);
+          return loops.find(function (loop) { return loop.id === selectedId; }) || loops[0];
+        }
+
+        function pruneWorkflowLoopCollapseState(graph) {
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          var keep = {};
+          loops.forEach(function (loop) {
+            keep[loop.id] = true;
+          });
+          Object.keys(workflowLoopContainerCollapsedMap).forEach(function (loopId) {
+            if (!keep[loopId]) {
+              delete workflowLoopContainerCollapsedMap[loopId];
+            }
+          });
+          Object.keys(workflowLoopSettingsExpandedMap).forEach(function (loopId) {
+            if (!keep[loopId]) {
+              delete workflowLoopSettingsExpandedMap[loopId];
+            }
+          });
+          if (openWorkflowLoopMenuId && !keep[openWorkflowLoopMenuId]) {
+            openWorkflowLoopMenuId = "";
+          }
+        }
+
+        function isWorkflowLoopCollapsed(loopId) {
+          var key = (loopId || "").trim();
+          if (!key) return false;
+          return !!workflowLoopContainerCollapsedMap[key];
+        }
+
+        function setWorkflowLoopCollapsed(loopId, collapsed) {
+          var key = (loopId || "").trim();
+          if (!key) return;
+          if (collapsed) {
+            workflowLoopContainerCollapsedMap[key] = true;
+          } else {
+            delete workflowLoopContainerCollapsedMap[key];
+          }
+        }
+
+        function isWorkflowLoopSettingsExpanded(loopId) {
+          var key = (loopId || "").trim();
+          if (!key) return false;
+          return !!workflowLoopSettingsExpandedMap[key];
+        }
+
+        function setWorkflowLoopSettingsExpanded(loopId, expanded) {
+          var key = (loopId || "").trim();
+          if (!key) return;
+          if (expanded) {
+            workflowLoopSettingsExpandedMap[key] = true;
+          } else {
+            delete workflowLoopSettingsExpandedMap[key];
+          }
+        }
+
+        function nextWorkflowLoopId(loops) {
+          var existing = {};
+          (loops || []).forEach(function (loop) {
+            if (!loop || !loop.id) return;
+            existing[loop.id] = true;
+          });
+
+          var index = (loops || []).length + 1;
+          var loopId = "loop-" + String(index);
+          while (existing[loopId]) {
+            index += 1;
+            loopId = "loop-" + String(index);
+          }
+          return loopId;
+        }
+
+        function nextWorkflowLoopName(loops, preferredBaseName) {
+          var existing = {};
+          (loops || []).forEach(function (loop) {
+            if (!loop || !loop.name) return;
+            existing[loop.name] = true;
+          });
+
+          var base = normalizeWorkflowLoopName(preferredBaseName || "GuidedLoop");
+          if (!existing[base]) return base;
+
+          var suffix = 2;
+          var candidate = base + "_" + String(suffix);
+          while (existing[candidate]) {
+            suffix += 1;
+            candidate = base + "_" + String(suffix);
+          }
+          return candidate;
+        }
+
+        function removeWorkflowLoopContainer(loopId) {
+          var targetId = (loopId || "").trim();
+          if (!targetId) return;
+
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph || typeof graph !== "object") return;
+
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          var removeIndex = loops.findIndex(function (loop) {
+            return loop.id === targetId;
+          });
+          if (removeIndex < 0) return;
+
+          loops.splice(removeIndex, 1);
+          delete workflowLoopContainerCollapsedMap[targetId];
+          delete workflowLoopSettingsExpandedMap[targetId];
+
+          writeWorkflowGuidedLoopsToGraph(graph, loops);
+
+          if (selectedWorkflowLoopId === targetId) {
+            if (loops.length > 0) {
+              var nextIndex = Math.max(0, removeIndex - 1);
+              selectedWorkflowLoopId = loops[nextIndex].id;
+            } else {
+              selectedWorkflowLoopId = "";
+            }
+          }
+
+          persistWorkflowGraphForCurrentContext(graph);
+          hydrateWorkflowGraphState();
+          updateWorkflowLoopDetailVisibility();
+          updateWorkflowLoopStory();
+          updateWorkflowReadinessStrip();
+        }
+
+        function duplicateWorkflowLoopContainer(loopId) {
+          var targetId = (loopId || "").trim();
+          if (!targetId) return;
+
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph || typeof graph !== "object") return;
+
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          var sourceIndex = loops.findIndex(function (loop) {
+            return loop.id === targetId;
+          });
+          if (sourceIndex < 0) return;
+
+          var sourceLoop = normalizeWorkflowGuidedLoopContainer(loops[sourceIndex], targetId);
+          if (!sourceLoop) return;
+
+          sourceLoop.id = nextWorkflowLoopId(loops);
+          sourceLoop.name = nextWorkflowLoopName(loops, sourceLoop.name || "GuidedLoop");
+          sourceLoop.start_node_id = "";
+          sourceLoop.end_node_id = "";
+
+          loops.splice(sourceIndex + 1, 0, sourceLoop);
+          writeWorkflowGuidedLoopsToGraph(graph, loops);
+
+          selectedWorkflowLoopId = sourceLoop.id;
+          setWorkflowLoopCollapsed(sourceLoop.id, false);
+          setWorkflowLoopSettingsExpanded(sourceLoop.id, false);
+
+          persistWorkflowGraphForCurrentContext(graph);
+          hydrateWorkflowGraphState();
+          updateWorkflowLoopDetailVisibility();
+          updateWorkflowLoopStory();
+          updateWorkflowReadinessStrip();
+        }
+
+        function moveWorkflowLoopContainer(loopId, direction) {
+          var targetId = (loopId || "").trim();
+          if (!targetId) return;
+
+          var offset = direction < 0 ? -1 : 1;
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph || typeof graph !== "object") return;
+
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          var sourceIndex = loops.findIndex(function (loop) {
+            return loop.id === targetId;
+          });
+          if (sourceIndex < 0) return;
+
+          var targetIndex = sourceIndex + offset;
+          if (targetIndex < 0 || targetIndex >= loops.length) return;
+
+          var moved = loops.splice(sourceIndex, 1)[0];
+          loops.splice(targetIndex, 0, moved);
+
+          writeWorkflowGuidedLoopsToGraph(graph, loops);
+          selectedWorkflowLoopId = targetId;
+
+          persistWorkflowGraphForCurrentContext(graph);
+          hydrateWorkflowGraphState();
+          updateWorkflowLoopDetailVisibility();
+          updateWorkflowLoopStory();
+          updateWorkflowReadinessStrip();
+        }
+
         function getWorkflowLoopFieldNodes() {
           return {
             enabled: document.getElementById("workflow-loop-enabled"),
+            name: document.getElementById("workflow-loop-name"),
             max: document.getElementById("workflow-loop-max"),
             each: document.getElementById("workflow-loop-each"),
             merge: document.getElementById("workflow-loop-merge"),
@@ -740,7 +1247,138 @@
           };
         }
 
-        function readWorkflowLoopConfigFromInputs() {
+        function normalizeWorkflowLoopFieldKey(fieldIdOrKey) {
+          var raw = (fieldIdOrKey || "").trim();
+          switch (raw) {
+            case "workflow-loop-name":
+            case "name":
+              return "name";
+            case "workflow-loop-max":
+            case "max":
+              return "max";
+            case "workflow-loop-each":
+            case "each":
+              return "each";
+            case "workflow-loop-merge":
+            case "merge":
+              return "merge";
+            case "workflow-loop-start-node":
+            case "start_node_id":
+              return "start_node_id";
+            case "workflow-loop-end-node":
+            case "end_node_id":
+              return "end_node_id";
+            default:
+              return "";
+          }
+        }
+
+        function workflowLoopLegacyFieldId(fieldKey) {
+          var key = normalizeWorkflowLoopFieldKey(fieldKey);
+          switch (key) {
+            case "name":
+              return "workflow-loop-name";
+            case "max":
+              return "workflow-loop-max";
+            case "each":
+              return "workflow-loop-each";
+            case "merge":
+              return "workflow-loop-merge";
+            case "start_node_id":
+              return "workflow-loop-start-node";
+            case "end_node_id":
+              return "workflow-loop-end-node";
+            default:
+              return "";
+          }
+        }
+
+        function workflowLoopFieldUsesAdvancedPanel(fieldIdOrKey) {
+          var key = normalizeWorkflowLoopFieldKey(fieldIdOrKey);
+          return key === "name" || key === "merge" || key === "start_node_id" || key === "end_node_id";
+        }
+
+        function buildWorkflowLoopStoryText(loopConfig) {
+          var normalized = normalizeWorkflowGuidedLoopContainer(loopConfig, selectedWorkflowLoopId || "loop-1");
+          if (!normalized) {
+            return "Drop a Loop Container tile into the canvas, then drop steps into it.";
+          }
+
+          var each = (normalized.each || "").trim();
+          var max = String(normalized.max || "").trim();
+          var merge = (normalized.merge || "append").trim() || "append";
+          var loopName = normalizeWorkflowLoopName(normalized.name || "");
+          var start = (normalized.start_node_id || "").trim();
+          var end = (normalized.end_node_id || "").trim();
+          var startLabel = start ? workflowNodeDisplayLabel(start) : "";
+          var endLabel = end ? workflowNodeDisplayLabel(end) : "";
+
+          var listPhrase = each ? each : "(choose a list)";
+          var maxPhrase = max ? max : "(choose max items)";
+          var rangePhrase = (start && end)
+            ? ((startLabel || start) + " to " + (endLabel || end))
+            : "(pick start/end steps)";
+          return "Story: Pipeline into iterator " + loopName + ", run steps " + rangePhrase + " for each item in " + listPhrase + ", stop after " + maxPhrase + " item(s), then " + merge + " the outputs.";
+        }
+
+        function getWorkflowLoopInlineEditor(loopId) {
+          var targetLoopId = (loopId || "").trim();
+          if (!targetLoopId) return null;
+          return host.querySelector('[data-workflow-loop-inline-editor][data-loop-id="' + targetLoopId + '"]');
+        }
+
+        function readWorkflowLoopConfigFromInlineEditor(loopId) {
+          var targetLoopId = (loopId || selectedWorkflowLoopId || "").trim();
+          if (!targetLoopId) return null;
+
+          var editor = getWorkflowLoopInlineEditor(targetLoopId);
+          if (!editor) return null;
+
+          var nameNode = editor.querySelector('[data-workflow-loop-inline-field="name"]');
+          var maxNode = editor.querySelector('[data-workflow-loop-inline-field="max"]');
+          var eachNode = editor.querySelector('[data-workflow-loop-inline-field="each"]');
+          var mergeNode = editor.querySelector('[data-workflow-loop-inline-field="merge"]');
+          var startNode = editor.querySelector('[data-workflow-loop-inline-field="start_node_id"]');
+          var endNode = editor.querySelector('[data-workflow-loop-inline-field="end_node_id"]');
+          if (!maxNode || !eachNode || !mergeNode || !startNode || !endNode) return null;
+
+          return normalizeWorkflowGuidedLoopContainer({
+            id: targetLoopId,
+            name: nameNode ? nameNode.value : "",
+            max: maxNode.value,
+            each: eachNode.value,
+            merge: mergeNode.value,
+            start_node_id: startNode.value,
+            end_node_id: endNode.value,
+          }, targetLoopId);
+        }
+
+        function focusWorkflowLoopInlineField(loopId, fieldIdOrKey) {
+          var targetLoopId = (loopId || selectedWorkflowLoopId || "").trim();
+          var fieldKey = normalizeWorkflowLoopFieldKey(fieldIdOrKey);
+          if (!targetLoopId || !fieldKey) return false;
+
+          if (workflowLoopFieldUsesAdvancedPanel(fieldKey) && !isWorkflowLoopSettingsExpanded(targetLoopId)) {
+            setWorkflowLoopSettingsExpanded(targetLoopId, true);
+            hydrateWorkflowGraphState();
+          }
+
+          var selector = '[data-workflow-loop-inline-field="' + fieldKey + '"][data-loop-id="' + targetLoopId + '"]';
+          var target = host.querySelector(selector);
+          if (!target || typeof target.focus !== "function") return false;
+
+          target.focus();
+          if (typeof target.scrollIntoView === "function") {
+            target.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          }
+          return true;
+        }
+
+        function readWorkflowLoopConfigFromInputs(loopId) {
+          var targetLoopId = (loopId || selectedWorkflowLoopId || "").trim();
+          var inlineConfig = readWorkflowLoopConfigFromInlineEditor(targetLoopId);
+          if (inlineConfig) return inlineConfig;
+
           var fields = getWorkflowLoopFieldNodes();
           if (!fields.enabled || !fields.max || !fields.each || !fields.merge || !fields.startNode || !fields.endNode) return null;
           if (!fields.enabled.checked) return null;
@@ -748,27 +1386,30 @@
           var startNodeId = (fields.startNode.value || "").trim();
           var endNodeId = (fields.endNode.value || "").trim();
 
-          return normalizeWorkflowGuidedLoopConfig({
+          return normalizeWorkflowGuidedLoopContainer({
+            id: targetLoopId,
+            name: fields.name ? fields.name.value : "",
             max: fields.max.value,
             each: fields.each.value,
             merge: fields.merge.value,
             start_node_id: startNodeId,
             end_node_id: endNodeId,
-          });
+          }, targetLoopId || "loop-1");
         }
 
         function applyWorkflowLoopConfigToInputs(config) {
           var fields = getWorkflowLoopFieldNodes();
           if (!fields.enabled || !fields.max || !fields.each || !fields.merge || !fields.startNode || !fields.endNode) return;
-          var normalized = normalizeWorkflowGuidedLoopConfig(config);
+          var normalized = normalizeWorkflowGuidedLoopContainer(config, selectedWorkflowLoopId || "loop-1");
           fields.enabled.checked = !!normalized;
+          if (fields.name) {
+            fields.name.value = normalized ? normalized.name : "GuidedLoop";
+          }
           fields.max.value = normalized ? String(normalized.max) : "";
           fields.each.value = normalized ? normalized.each : "";
           fields.merge.value = normalized ? normalized.merge : "";
-          if (normalized) {
-            fields.startNode.value = normalized.start_node_id;
-            fields.endNode.value = normalized.end_node_id;
-          }
+          fields.startNode.value = normalized ? normalized.start_node_id : "";
+          fields.endNode.value = normalized ? normalized.end_node_id : "";
         }
 
         function normalizeWorkflowGraphState(graph, visibleNodeIds) {
@@ -776,6 +1417,7 @@
           (visibleNodeIds || []).forEach(function (nodeId) {
             visibleSet[nodeId] = true;
           });
+          var compileMetadata = normalizeWorkflowGraphCompileMetadata(graph);
 
           var nodes = [];
           if (graph && Array.isArray(graph.nodes)) {
@@ -811,18 +1453,14 @@
 
           if (edges.length === 0 && visibleNodeIds.length > 1) {
             var defaultGraph = buildDefaultLinearGraph(visibleNodeIds);
-            var defaultLoop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
-            if (defaultLoop) {
-              defaultGraph.guided_loop = defaultLoop;
-            }
+            writeWorkflowGuidedLoopsToGraph(defaultGraph, readWorkflowGuidedLoopsFromGraph(graph));
+            applyWorkflowGraphCompileMetadata(defaultGraph, compileMetadata);
             return defaultGraph;
           }
 
           var normalizedGraph = { version: 1, nodes: nodes, edges: edges };
-          var guidedLoop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
-          if (guidedLoop) {
-            normalizedGraph.guided_loop = guidedLoop;
-          }
+          writeWorkflowGuidedLoopsToGraph(normalizedGraph, readWorkflowGuidedLoopsFromGraph(graph));
+          applyWorkflowGraphCompileMetadata(normalizedGraph, compileMetadata);
           return normalizedGraph;
         }
 
@@ -834,36 +1472,74 @@
           }).filter(function (nodeId) { return !!nodeId; });
         }
 
+        function workflowNodeDisplayLabel(nodeId) {
+          var targetId = (nodeId || "").trim();
+          if (!targetId) return "";
+
+          var node = host.querySelector('[data-canvas-node-button][data-node-id="' + targetId + '"]');
+          if (!node) return targetId;
+
+          var labelNode = node.querySelector(".text-sm.font-semibold");
+          var labelText = labelNode && labelNode.textContent ? labelNode.textContent.trim() : "";
+          return labelText || targetId;
+        }
+
+        function workflowLoopScopeSummary(loop, range) {
+          if (!loop || !range) return "Scope not set";
+          var startLabel = workflowNodeDisplayLabel(loop.start_node_id) || "start step";
+          var endLabel = workflowNodeDisplayLabel(loop.end_node_id) || "end step";
+          if (startLabel === endLabel) {
+            return "Scope " + startLabel;
+          }
+          return "Scope " + startLabel + " to " + endLabel;
+        }
+
         function refreshWorkflowLoopNodeOptions(preferredStartNodeId, preferredEndNodeId) {
           var fields = getWorkflowLoopFieldNodes();
-          if (!fields.startNode || !fields.endNode) return;
+          if (!fields.startNode || !fields.endNode) return [];
           var nodeIds = collectVisibleWorkflowNodeIds();
 
           fields.startNode.innerHTML = "";
           fields.endNode.innerHTML = "";
-          if (nodeIds.length === 0) return;
+
+          var startPlaceholder = document.createElement("option");
+          startPlaceholder.value = "";
+          startPlaceholder.textContent = "Select step...";
+          fields.startNode.appendChild(startPlaceholder);
+
+          var endPlaceholder = document.createElement("option");
+          endPlaceholder.value = "";
+          endPlaceholder.textContent = "Select step...";
+          fields.endNode.appendChild(endPlaceholder);
+
+          if (nodeIds.length === 0) {
+            fields.startNode.value = "";
+            fields.endNode.value = "";
+            return nodeIds;
+          }
 
           nodeIds.forEach(function (nodeId) {
             var startOption = document.createElement("option");
             startOption.value = nodeId;
-            startOption.textContent = nodeId;
+            startOption.textContent = workflowNodeDisplayLabel(nodeId);
             fields.startNode.appendChild(startOption);
 
             var endOption = document.createElement("option");
             endOption.value = nodeId;
-            endOption.textContent = nodeId;
+            endOption.textContent = workflowNodeDisplayLabel(nodeId);
             fields.endNode.appendChild(endOption);
           });
 
           var startNodeId = preferredStartNodeId && nodeIds.indexOf(preferredStartNodeId) >= 0
             ? preferredStartNodeId
-            : nodeIds[0];
+            : "";
           var endNodeId = preferredEndNodeId && nodeIds.indexOf(preferredEndNodeId) >= 0
             ? preferredEndNodeId
-            : nodeIds[nodeIds.length - 1];
+            : "";
 
           fields.startNode.value = startNodeId;
           fields.endNode.value = endNodeId;
+          return nodeIds;
         }
 
         function readWorkflowGraphForCurrentContext() {
@@ -1147,17 +1823,39 @@
           });
         }
 
-        function getLoopContainerReadiness() {
-          var readiness = computeWorkflowReadiness();
-          var loopFieldIds = {
-            "workflow-loop-max": true,
-            "workflow-loop-each": true,
-            "workflow-loop-start-node": true,
-            "workflow-loop-end-node": true,
-          };
-          var blockers = (readiness.blockers || []).filter(function (item) {
-            return !!(item && item.fieldId && loopFieldIds[item.fieldId]);
-          });
+        function getLoopContainerReadiness(loop, nodeIds) {
+          var blockers = [];
+          var normalized = normalizeWorkflowGuidedLoopContainer(loop, "");
+          if (!normalized) {
+            blockers.push({
+              message: "Loop config is invalid.",
+              fieldId: "name",
+            });
+            return { canRun: false, blockers: blockers };
+          }
+
+          if (!normalized.each || normalized.each.charAt(0) !== "$") {
+            blockers.push({
+              message: "repeat over this list must start with $.",
+              fieldId: "each",
+            });
+          }
+
+          var maxVal = Number(normalized.max);
+          if (!Number.isFinite(maxVal) || maxVal <= 0) {
+            blockers.push({
+              message: "stop after this many items must be 1 or more.",
+              fieldId: "max",
+            });
+          }
+
+          if (!getWorkflowLoopRange(normalized, nodeIds)) {
+            blockers.push({
+              message: "Drop at least one step into this loop container.",
+              fieldId: "start_node_id",
+            });
+          }
+
           return {
             canRun: blockers.length === 0,
             blockers: blockers,
@@ -1166,10 +1864,11 @@
 
         function resetWorkflowNodeListToFlatOrder(nodeList) {
           if (!nodeList) return;
-          var existingShell = nodeList.querySelector("[data-graph-loop-container-shell]");
-          if (existingShell && existingShell.parentNode) {
-            existingShell.parentNode.removeChild(existingShell);
-          }
+          nodeList.querySelectorAll("[data-graph-loop-container-shell]").forEach(function (shell) {
+            if (shell && shell.parentNode) {
+              shell.parentNode.removeChild(shell);
+            }
+          });
 
           var buttons = Array.prototype.slice.call(
             nodeList.querySelectorAll("[data-canvas-node-button]")
@@ -1186,114 +1885,324 @@
             return left - right;
           });
 
+          var dagOffsets = [0, -18, 16, -10, 8];
+          buttons.forEach(function (button) {
+            var order = Number(button.getAttribute("data-node-order"));
+            if (!Number.isFinite(order)) order = 0;
+            var offset = dagOffsets[Math.abs(order) % dagOffsets.length];
+            button.style.setProperty("--wb-node-offset", String(offset) + "px");
+          });
+
           buttons.forEach(function (button) {
             nodeList.appendChild(button);
           });
         }
 
-        function renderWorkflowLoopContainerShell(graph) {
+        function renderWorkflowLoopContainerShells(graph) {
           var nodeList = host.querySelector("[data-graph-node-list]");
           if (!nodeList) return;
 
           resetWorkflowNodeListToFlatOrder(nodeList);
 
-          var loop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
-          if (!loop) return;
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          if (!loops.length) return;
 
           var nodeIds = collectVisibleWorkflowNodeIds();
-          if (!nodeIds.length) return;
-          var startIndex = nodeIds.indexOf(loop.start_node_id);
-          var endIndex = nodeIds.indexOf(loop.end_node_id);
-          if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) return;
-
-          var scopedIds = nodeIds.slice(startIndex, endIndex + 1);
-          if (!scopedIds.length) return;
-
-          var shell = document.createElement("div");
-          shell.className = "wb-loop-container-shell";
-          shell.setAttribute("data-graph-loop-container-shell", "1");
-
-          var header = document.createElement("div");
-          header.className = "wb-loop-container-header";
-
-          var title = document.createElement("p");
-          title.className = "wb-loop-container-title";
-          title.textContent = "Repeat Container";
-
-          var headerControls = document.createElement("div");
-          headerControls.className = "wb-loop-container-header-controls";
-
-          var loopReadiness = getLoopContainerReadiness();
-          var readinessBadge = document.createElement("span");
-          readinessBadge.className = "wb-loop-readiness-badge" + (loopReadiness.canRun ? "" : " is-blocked");
-          readinessBadge.textContent = loopReadiness.canRun
-            ? "Ready"
-            : (loopReadiness.blockers.length + " fix" + (loopReadiness.blockers.length === 1 ? "" : "es"));
-          headerControls.appendChild(readinessBadge);
-
-          var toggle = document.createElement("button");
-          toggle.type = "button";
-          toggle.className = "btn btn-ghost btn-xs wb-loop-container-toggle";
-          toggle.setAttribute("data-graph-loop-toggle", "1");
-          toggle.textContent = workflowLoopContainerCollapsed ? "Show Steps" : "Hide Steps";
-          headerControls.appendChild(toggle);
-
-          var meta = document.createElement("div");
-          meta.className = "wb-loop-container-meta";
-
-          [
-            "repeat over " + loop.each,
-            "stop after " + loop.max,
-            "combine " + loop.merge,
-            "scope " + loop.start_node_id + " -> " + loop.end_node_id,
-          ].forEach(function (chipText) {
-            var chip = document.createElement("span");
-            chip.className = "wb-loop-container-meta-chip";
-            chip.textContent = chipText;
-            meta.appendChild(chip);
+          var loopOrderById = {};
+          loops.forEach(function (loop, index) {
+            loopOrderById[loop.id] = index + 1;
           });
 
-          header.appendChild(title);
-          header.appendChild(headerControls);
-          header.appendChild(meta);
+          var completeLoops = [];
+          var emptyLoops = [];
+          loops.forEach(function (loop) {
+            var range = getWorkflowLoopRange(loop, nodeIds);
+            if (range) {
+              completeLoops.push({
+                loop: loop,
+                range: range,
+                loopOrder: loopOrderById[loop.id] || 1,
+              });
+            } else {
+              emptyLoops.push({
+                loop: loop,
+                loopOrder: loopOrderById[loop.id] || 1,
+              });
+            }
+          });
 
-          var body = document.createElement("div");
-          body.className = "wb-loop-container-body";
-          body.setAttribute("data-graph-loop-container-body", "1");
-          if (workflowLoopContainerCollapsed) {
-            body.classList.add("is-collapsed");
+          function createLoopInlineInputField(loopId, fieldKey, labelText, inputType, value, placeholder) {
+            var label = document.createElement("label");
+            label.className = "text-xs wb-loop-inline-field";
+            label.textContent = labelText;
+
+            var input = document.createElement("input");
+            input.type = inputType;
+            input.className = "text-xs font-mono p-1 rounded mt-1 w-full wb-loop-inline-input";
+            input.setAttribute("data-workflow-loop-inline-field", fieldKey);
+            input.setAttribute("data-loop-id", loopId);
+            if (placeholder) input.placeholder = placeholder;
+            if (inputType === "number") {
+              input.min = "1";
+              input.step = "1";
+            }
+            input.value = value || "";
+
+            label.appendChild(input);
+            return label;
           }
 
-          var dropHint = document.createElement("p");
-          dropHint.className = "text-xs wb-loop-drop-hint";
-          dropHint.textContent = "Drop a step here to add it inside this repeat scope.";
-          body.appendChild(dropHint);
+          function createLoopInlineSelectField(loopId, fieldKey, labelText, value) {
+            var label = document.createElement("label");
+            label.className = "text-xs wb-loop-inline-field";
+            label.textContent = labelText;
 
-          if (!loopReadiness.canRun) {
-            var readinessList = document.createElement("div");
-            readinessList.className = "wb-loop-readiness-list";
-            loopReadiness.blockers.forEach(function (blocker) {
-              var fixButton = document.createElement("button");
-              fixButton.type = "button";
-              fixButton.className = "btn btn-ghost btn-xs wb-loop-readiness-item";
-              fixButton.textContent = "Do: " + blocker.message;
-              fixButton.setAttribute("data-workflow-readiness-jump", blocker.fieldId);
-              readinessList.appendChild(fixButton);
+            var select = document.createElement("select");
+            select.className = "text-xs font-mono p-1 rounded mt-1 w-full wb-loop-inline-input";
+            select.setAttribute("data-workflow-loop-inline-field", fieldKey);
+            select.setAttribute("data-loop-id", loopId);
+
+            var placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = "Select step...";
+            select.appendChild(placeholder);
+
+            nodeIds.forEach(function (nodeId) {
+              var option = document.createElement("option");
+              option.value = nodeId;
+              option.textContent = workflowNodeDisplayLabel(nodeId);
+              select.appendChild(option);
             });
-            body.appendChild(readinessList);
+
+            var selected = (value || "").trim();
+            if (selected && nodeIds.indexOf(selected) < 0) {
+              var staleOption = document.createElement("option");
+              staleOption.value = selected;
+              staleOption.textContent = selected;
+              select.appendChild(staleOption);
+            }
+            select.value = selected;
+
+            label.appendChild(select);
+            return label;
           }
 
-          shell.appendChild(header);
-          shell.appendChild(body);
+          function buildLoopInlineEditor(loop, range) {
+            var showAdvanced = isWorkflowLoopSettingsExpanded(loop.id);
+            var editor = document.createElement("div");
+            editor.className = "wb-loop-inline-editor";
+            editor.setAttribute("data-workflow-loop-inline-editor", "1");
+            editor.setAttribute("data-loop-id", loop.id);
 
-          var firstNode = nodeList.querySelector('[data-canvas-node-button][data-node-id="' + scopedIds[0] + '"]');
-          if (!firstNode) return;
-          nodeList.insertBefore(shell, firstNode);
+            var topbar = document.createElement("div");
+            topbar.className = "wb-loop-inline-topbar";
 
-          scopedIds.forEach(function (nodeId) {
-            var button = nodeList.querySelector('[data-canvas-node-button][data-node-id="' + nodeId + '"]');
-            if (!button) return;
-            body.appendChild(button);
+            var title = document.createElement("p");
+            title.className = "text-xs wb-loop-inline-title";
+            title.textContent = "Repeat Settings";
+            topbar.appendChild(title);
+
+            var scopeHint = document.createElement("p");
+            scopeHint.className = "text-xs wb-loop-inline-scope";
+            scopeHint.textContent = workflowLoopScopeSummary(loop, range);
+            topbar.appendChild(scopeHint);
+
+            var more = document.createElement("button");
+            more.type = "button";
+            more.className = "btn btn-ghost btn-xs wb-loop-inline-more-btn";
+            more.setAttribute("data-workflow-loop-settings-toggle", "1");
+            more.setAttribute("data-loop-id", loop.id);
+            more.textContent = showAdvanced ? "Less" : "More";
+            topbar.appendChild(more);
+
+            editor.appendChild(topbar);
+
+            var primaryGrid = document.createElement("div");
+            primaryGrid.className = "wb-loop-inline-grid wb-loop-inline-grid-primary";
+            primaryGrid.appendChild(createLoopInlineInputField(loop.id, "each", "repeat over", "text", loop.each, "$current.results"));
+            primaryGrid.appendChild(createLoopInlineInputField(loop.id, "max", "max items", "number", String(loop.max || ""), "3"));
+            editor.appendChild(primaryGrid);
+
+            var advanced = document.createElement("div");
+            advanced.className = "wb-loop-inline-advanced";
+            if (!showAdvanced) {
+              advanced.classList.add("is-collapsed");
+            }
+
+            var advancedGrid = document.createElement("div");
+            advancedGrid.className = "wb-loop-inline-grid wb-loop-inline-grid-advanced";
+            advancedGrid.appendChild(createLoopInlineInputField(loop.id, "name", "loop name", "text", loop.name, "GuidedLoop"));
+            advancedGrid.appendChild(createLoopInlineInputField(loop.id, "merge", "combine", "text", loop.merge, "append"));
+            advancedGrid.appendChild(createLoopInlineSelectField(loop.id, "start_node_id", "first step", loop.start_node_id));
+            advancedGrid.appendChild(createLoopInlineSelectField(loop.id, "end_node_id", "last step", loop.end_node_id));
+            advanced.appendChild(advancedGrid);
+
+            var story = document.createElement("p");
+            story.className = "text-xs wb-loop-inline-note";
+            story.setAttribute("data-workflow-loop-story-inline", "1");
+            story.setAttribute("data-loop-id", loop.id);
+            story.textContent = buildWorkflowLoopStoryText(loop);
+            advanced.appendChild(story);
+
+            editor.appendChild(advanced);
+
+            return editor;
+          }
+
+          function buildLoopShell(loop, scopedNodeIds, range, loopOrder, loopCount) {
+            var isCollapsed = isWorkflowLoopCollapsed(loop.id);
+            var shell = document.createElement("div");
+            shell.className = "wb-loop-container-shell" + (selectedWorkflowLoopId === loop.id ? " is-selected" : "");
+            shell.setAttribute("data-graph-loop-container-shell", "1");
+            shell.setAttribute("data-loop-id", loop.id);
+
+            var header = document.createElement("div");
+            header.className = "wb-loop-container-header";
+
+            var title = document.createElement("p");
+            title.className = "wb-loop-container-title";
+            title.textContent = loop.name;
+
+            var headerControls = document.createElement("div");
+            headerControls.className = "wb-loop-container-header-controls";
+
+            var select = document.createElement("button");
+            select.type = "button";
+            select.className = "btn btn-ghost btn-xs wb-loop-shell-btn" + (selectedWorkflowLoopId === loop.id ? " is-active" : "");
+            select.setAttribute("data-graph-loop-select", "1");
+            select.setAttribute("data-loop-id", loop.id);
+            select.textContent = selectedWorkflowLoopId === loop.id ? "Editing" : "Edit";
+            headerControls.appendChild(select);
+
+            var loopReadiness = getLoopContainerReadiness(loop, nodeIds);
+            var readinessBadge = document.createElement("span");
+            readinessBadge.className = "wb-loop-readiness-badge" + (loopReadiness.canRun ? "" : " is-blocked");
+            readinessBadge.textContent = loopReadiness.canRun
+              ? "Ready"
+              : (loopReadiness.blockers.length + " fix" + (loopReadiness.blockers.length === 1 ? "" : "es"));
+            headerControls.appendChild(readinessBadge);
+
+            var menuWrap = document.createElement("div");
+            menuWrap.className = "wb-loop-menu-wrap";
+            menuWrap.setAttribute("data-graph-loop-menu-wrap", "1");
+
+            var menuToggle = document.createElement("button");
+            menuToggle.type = "button";
+            menuToggle.className = "btn btn-ghost btn-xs wb-loop-shell-btn wb-loop-menu-toggle";
+            menuToggle.setAttribute("data-graph-loop-menu-toggle", "1");
+            menuToggle.setAttribute("data-loop-id", loop.id);
+            menuToggle.setAttribute("aria-expanded", String(openWorkflowLoopMenuId === loop.id));
+            menuToggle.title = "More actions";
+            menuToggle.textContent = "...";
+            menuWrap.appendChild(menuToggle);
+
+            var menu = document.createElement("div");
+            menu.className = "wb-loop-menu" + (openWorkflowLoopMenuId === loop.id ? " is-open" : "");
+            menu.setAttribute("data-graph-loop-menu", "1");
+            menu.setAttribute("data-loop-id", loop.id);
+
+            function appendLoopMenuItem(label, actionAttr, disabled, isDanger) {
+              var menuItem = document.createElement("button");
+              menuItem.type = "button";
+              menuItem.className = "wb-loop-menu-item" + (isDanger ? " is-danger" : "");
+              menuItem.textContent = label;
+              menuItem.setAttribute(actionAttr, "1");
+              menuItem.setAttribute("data-loop-id", loop.id);
+              if (disabled) {
+                menuItem.disabled = true;
+              }
+              menu.appendChild(menuItem);
+            }
+
+            appendLoopMenuItem(isCollapsed ? "Show steps" : "Hide steps", "data-graph-loop-toggle", false, false);
+            appendLoopMenuItem("Move earlier", "data-graph-loop-move-up", loopOrder <= 1, false);
+            appendLoopMenuItem("Move later", "data-graph-loop-move-down", loopOrder >= loopCount, false);
+            appendLoopMenuItem("Duplicate", "data-graph-loop-duplicate", false, false);
+            appendLoopMenuItem("Remove", "data-graph-loop-remove", false, true);
+
+            menuWrap.appendChild(menu);
+            headerControls.appendChild(menuWrap);
+
+            var summary = document.createElement("p");
+            summary.className = "wb-loop-container-summary";
+            var scopeSummary = workflowLoopScopeSummary(loop, range);
+            summary.textContent = "Repeats " + loop.each + " - up to " + loop.max + " item(s). " + scopeSummary + ".";
+            if ((loop.merge || "append") !== "append") {
+              summary.textContent += " Combine: " + loop.merge + ".";
+            }
+
+            header.appendChild(title);
+            header.appendChild(headerControls);
+            header.appendChild(summary);
+
+            var body = document.createElement("div");
+            body.className = "wb-loop-container-body";
+            body.setAttribute("data-graph-loop-container-body", "1");
+            body.setAttribute("data-loop-id", loop.id);
+            if (isCollapsed) {
+              body.classList.add("is-collapsed");
+            }
+
+            var dropHint = document.createElement("p");
+            dropHint.className = "text-xs wb-loop-drop-hint";
+            dropHint.textContent = scopedNodeIds.length
+              ? "Drop a step here to add it inside this repeat scope."
+              : "Drop a step here to start this loop scope.";
+            body.appendChild(dropHint);
+
+            if (selectedWorkflowLoopId === loop.id) {
+              body.appendChild(buildLoopInlineEditor(loop, range));
+            }
+
+            if (!loopReadiness.canRun) {
+              var readinessList = document.createElement("div");
+              readinessList.className = "wb-loop-readiness-list";
+              loopReadiness.blockers.forEach(function (blocker) {
+                var fixButton = document.createElement("button");
+                fixButton.type = "button";
+                fixButton.className = "btn btn-ghost btn-xs wb-loop-readiness-item";
+                fixButton.textContent = "Do: " + blocker.message;
+                if (blocker.fieldId) {
+                  fixButton.setAttribute("data-workflow-readiness-jump", blocker.fieldId);
+                  fixButton.setAttribute("data-workflow-readiness-loop-id", loop.id);
+                } else {
+                  fixButton.disabled = true;
+                }
+                readinessList.appendChild(fixButton);
+              });
+              body.appendChild(readinessList);
+            }
+
+            shell.appendChild(header);
+            shell.appendChild(body);
+            return { shell: shell, body: body };
+          }
+
+          completeLoops.sort(function (left, right) {
+            return right.range.startIndex - left.range.startIndex;
+          });
+
+          completeLoops.forEach(function (entry) {
+            var scopedIds = nodeIds.slice(entry.range.startIndex, entry.range.endIndex + 1);
+            if (!scopedIds.length) return;
+
+            var rendered = buildLoopShell(entry.loop, scopedIds, entry.range, entry.loopOrder, loops.length);
+            var firstNode = nodeList.querySelector('[data-canvas-node-button][data-node-id="' + scopedIds[0] + '"]');
+            if (!firstNode || firstNode.parentNode !== nodeList) {
+              nodeList.appendChild(rendered.shell);
+              return;
+            }
+            nodeList.insertBefore(rendered.shell, firstNode);
+            scopedIds.forEach(function (nodeId) {
+              var button = nodeList.querySelector('[data-canvas-node-button][data-node-id="' + nodeId + '"]');
+              if (!button) return;
+              rendered.body.appendChild(button);
+            });
+          });
+
+          emptyLoops.forEach(function (entry) {
+            var rendered = buildLoopShell(entry.loop, [], null, entry.loopOrder, loops.length);
+            nodeList.appendChild(rendered.shell);
           });
         }
 
@@ -1316,45 +2225,103 @@
 
         function applyWorkflowLoopScopeVisual(graph) {
           clearWorkflowLoopScopeVisual();
-          var loop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
-          if (!loop) return;
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          if (!loops.length) return;
 
           var nodeIds = collectVisibleWorkflowNodeIds();
           if (!nodeIds.length) return;
-          var startIndex = nodeIds.indexOf(loop.start_node_id);
-          var endIndex = nodeIds.indexOf(loop.end_node_id);
-          if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) return;
+
+          var rangeSummaries = [];
+          loops.forEach(function (loop) {
+            var range = getWorkflowLoopRange(loop, nodeIds);
+            if (!range) return;
+            var scopeSummary = workflowLoopScopeSummary(loop, range).replace(/^Scope\s+/, "");
+            rangeSummaries.push(loop.name + ": " + scopeSummary);
+
+            for (var i = range.startIndex; i <= range.endIndex; i++) {
+              var nodeId = nodeIds[i];
+              var nodeButton = host.querySelector('[data-canvas-node-button][data-node-id="' + nodeId + '"]');
+              if (!nodeButton) continue;
+              nodeButton.classList.add("wb-node-loop-scope");
+              if (i === range.startIndex) nodeButton.classList.add("wb-node-loop-start");
+              if (i === range.endIndex) nodeButton.classList.add("wb-node-loop-end");
+
+              var chip = nodeButton.querySelector("[data-node-loop-chip]");
+              if (!chip) continue;
+              var label = "In " + loop.name;
+              if (range.startIndex === range.endIndex) {
+                label = loop.name + " step";
+              } else if (i === range.startIndex) {
+                label = loop.name + " start";
+              } else if (i === range.endIndex) {
+                label = loop.name + " end";
+              }
+              chip.textContent = label;
+              chip.classList.remove("hidden");
+            }
+          });
+
+          if (!rangeSummaries.length) return;
 
           var summary = host.querySelector("[data-workflow-loop-summary]");
           if (summary) {
-            summary.textContent = "Repeat Scope: "
-              + loop.start_node_id + " -> " + loop.end_node_id
-              + " | each " + loop.each
-              + " | max " + loop.max
-              + " | merge " + loop.merge;
+            summary.textContent = "Repeat Scopes: " + rangeSummaries.join(" | ");
             summary.classList.remove("hidden");
           }
+        }
 
-          for (var i = startIndex; i <= endIndex; i++) {
-            var nodeId = nodeIds[i];
-            var nodeButton = host.querySelector('[data-canvas-node-button][data-node-id="' + nodeId + '"]');
-            if (!nodeButton) continue;
-            nodeButton.classList.add("wb-node-loop-scope");
-            if (i === startIndex) nodeButton.classList.add("wb-node-loop-start");
-            if (i === endIndex) nodeButton.classList.add("wb-node-loop-end");
+        function captureWorkflowCanvasInteractionState() {
+          var state = {
+            nodeListScrollTop: 0,
+            loopField: null,
+          };
 
-            var chip = nodeButton.querySelector("[data-node-loop-chip]");
-            if (!chip) continue;
-            var label = "In Loop";
-            if (startIndex === endIndex) {
-              label = "Repeat Step";
-            } else if (i === startIndex) {
-              label = "Repeat Start";
-            } else if (i === endIndex) {
-              label = "Repeat End";
-            }
-            chip.textContent = label;
-            chip.classList.remove("hidden");
+          var nodeList = host.querySelector("[data-graph-node-list]");
+          if (nodeList) {
+            state.nodeListScrollTop = nodeList.scrollTop || 0;
+          }
+
+          var active = document.activeElement;
+          if (!active || !host.contains(active)) {
+            return state;
+          }
+
+          var loopField = active.closest("[data-workflow-loop-inline-field]");
+          if (!loopField) {
+            return state;
+          }
+
+          state.loopField = {
+            loopId: (loopField.getAttribute("data-loop-id") || "").trim(),
+            fieldKey: normalizeWorkflowLoopFieldKey(loopField.getAttribute("data-workflow-loop-inline-field") || ""),
+            selectionStart: typeof loopField.selectionStart === "number" ? loopField.selectionStart : null,
+            selectionEnd: typeof loopField.selectionEnd === "number" ? loopField.selectionEnd : null,
+          };
+
+          return state;
+        }
+
+        function restoreWorkflowCanvasInteractionState(state) {
+          if (!state || typeof state !== "object") return;
+
+          var nodeList = host.querySelector("[data-graph-node-list]");
+          if (nodeList && typeof state.nodeListScrollTop === "number") {
+            nodeList.scrollTop = state.nodeListScrollTop;
+          }
+
+          if (!state.loopField || !state.loopField.loopId || !state.loopField.fieldKey) return;
+
+          var selector = '[data-workflow-loop-inline-field="' + state.loopField.fieldKey + '"][data-loop-id="' + state.loopField.loopId + '"]';
+          var target = host.querySelector(selector);
+          if (!target || typeof target.focus !== "function") return;
+
+          target.focus();
+          if (
+            typeof target.setSelectionRange === "function" &&
+            typeof state.loopField.selectionStart === "number" &&
+            typeof state.loopField.selectionEnd === "number"
+          ) {
+            target.setSelectionRange(state.loopField.selectionStart, state.loopField.selectionEnd);
           }
         }
 
@@ -1363,7 +2330,9 @@
           var svg = host.querySelector("[data-graph-link-layer]");
           if (!canvas || !svg) return;
 
-          renderWorkflowLoopContainerShell(graph);
+          var interactionState = captureWorkflowCanvasInteractionState();
+
+          renderWorkflowLoopContainerShells(graph);
 
           var rect = canvas.getBoundingClientRect();
           svg.setAttribute("viewBox", "0 0 " + Math.max(rect.width, 1) + " " + Math.max(rect.height, 1));
@@ -1415,6 +2384,7 @@
           setWorkflowEdgeInspector(graph, selectedWorkflowEdgeId);
           applyWorkflowLoopScopeVisual(graph);
           positionWorkflowContextPanel();
+          restoreWorkflowCanvasInteractionState(interactionState);
         }
 
         function isWorkflowAdvancedDrawerOpen() {
@@ -1543,6 +2513,7 @@
           if (currentView !== "workflows") return;
           var graph = readWorkflowGraphForCurrentContext();
           if (!graph) return;
+          pruneWorkflowLoopCollapseState(graph);
           if (Array.isArray(graph.edges) && graph.edges.length > 0) {
             var stillExists = graph.edges.some(function (edge) { return edge.id === selectedWorkflowEdgeId; });
             if (!selectedWorkflowEdgeId || !stillExists) {
@@ -1551,11 +2522,12 @@
           } else {
             selectedWorkflowEdgeId = "";
           }
+          var selectedLoop = selectedWorkflowLoopFromGraph(graph);
           refreshWorkflowLoopNodeOptions(
-            graph.guided_loop && graph.guided_loop.start_node_id,
-            graph.guided_loop && graph.guided_loop.end_node_id
+            selectedLoop && selectedLoop.start_node_id,
+            selectedLoop && selectedLoop.end_node_id
           );
-          applyWorkflowLoopConfigToInputs(graph.guided_loop || null);
+          applyWorkflowLoopConfigToInputs(selectedLoop || null);
           persistWorkflowGraphForCurrentContext(graph);
           renderWorkflowGraphLinks(graph);
         }
@@ -1564,85 +2536,493 @@
           if (currentView !== "workflows") return;
           var graph = readWorkflowGraphForCurrentContext();
           if (!graph || typeof graph !== "object") return;
-          var loopConfig = readWorkflowLoopConfigFromInputs();
-          if (loopConfig) {
-            graph.guided_loop = loopConfig;
-          } else {
-            delete graph.guided_loop;
+
+          ensureSelectedWorkflowLoopId(graph);
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          if (!loops.length) {
+            updateWorkflowLoopDetailVisibility();
+            updateWorkflowLoopStory();
+            return;
           }
+
+          var targetIndex = loops.findIndex(function (loop) {
+            return loop.id === selectedWorkflowLoopId;
+          });
+          if (targetIndex < 0) return;
+
+          var loopConfig = readWorkflowLoopConfigFromInputs(selectedWorkflowLoopId);
+          if (!loopConfig) return;
+          loopConfig.id = selectedWorkflowLoopId;
+          loops[targetIndex] = loopConfig;
+
+          writeWorkflowGuidedLoopsToGraph(graph, loops);
+          pruneWorkflowLoopCollapseState(graph);
+          ensureSelectedWorkflowLoopId(graph);
+          applyWorkflowLoopConfigToInputs(loopConfig);
           persistWorkflowGraphForCurrentContext(graph);
           renderWorkflowGraphLinks(graph);
           updateWorkflowLoopDetailVisibility();
           updateWorkflowLoopStory();
         }
 
+        function syncWorkflowLoopConfigFromInlineEditor(loopId) {
+          if (currentView !== "workflows") return;
+          var targetLoopId = (loopId || selectedWorkflowLoopId || "").trim();
+          if (!targetLoopId) return;
+
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph || typeof graph !== "object") return;
+
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          var targetIndex = loops.findIndex(function (loop) {
+            return loop.id === targetLoopId;
+          });
+          if (targetIndex < 0) return;
+
+          selectedWorkflowLoopId = targetLoopId;
+
+          var loopConfig = readWorkflowLoopConfigFromInputs(targetLoopId);
+          if (!loopConfig) return;
+
+          loops[targetIndex] = loopConfig;
+          writeWorkflowGuidedLoopsToGraph(graph, loops);
+          pruneWorkflowLoopCollapseState(graph);
+          applyWorkflowLoopConfigToInputs(loopConfig);
+          persistWorkflowGraphForCurrentContext(graph);
+          renderWorkflowGraphLinks(graph);
+          updateWorkflowReadinessStrip();
+        }
+
         function updateWorkflowLoopDetailVisibility() {
           var details = host.querySelector("[data-workflow-loop-details]");
-          var fields = getWorkflowLoopFieldNodes();
-          if (!details || !fields.enabled) return;
-          details.style.display = fields.enabled.checked ? "flex" : "none";
+          if (!details) return;
+          details.style.display = "none";
         }
 
         function updateWorkflowLoopStory() {
           var storyNode = host.querySelector("[data-workflow-loop-story]");
           if (!storyNode) return;
 
-          var fields = getWorkflowLoopFieldNodes();
-          if (!fields.enabled || !fields.enabled.checked) {
-            storyNode.textContent = "Repeat is off. Turn Repeat On to run selected steps for each item in a list.";
-            return;
-          }
-
-          var each = (fields.each && fields.each.value ? fields.each.value : "").trim();
-          var max = (fields.max && fields.max.value ? fields.max.value : "").trim();
-          var merge = (fields.merge && fields.merge.value ? fields.merge.value : "append").trim() || "append";
-          var start = (fields.startNode && fields.startNode.value ? fields.startNode.value : "").trim();
-          var end = (fields.endNode && fields.endNode.value ? fields.endNode.value : "").trim();
-
-          var listPhrase = each ? each : "(choose a list)";
-          var maxPhrase = max ? max : "(choose max items)";
-          var rangePhrase = (start && end) ? (start + " to " + end) : "(pick start/end steps)";
-          storyNode.textContent = "Story: Run steps " + rangePhrase + " for each item in " + listPhrase + ", stop after " + maxPhrase + " item(s), then " + merge + " the outputs.";
+          var graph = readWorkflowGraphForCurrentContext();
+          var selectedLoop = selectedWorkflowLoopFromGraph(graph);
+          storyNode.textContent = buildWorkflowLoopStoryText(selectedLoop);
         }
 
-        function addRepeatContainerFromSelection() {
-          var fields = getWorkflowLoopFieldNodes();
-          if (!fields.enabled || !fields.each || !fields.max || !fields.merge || !fields.startNode || !fields.endNode) {
-            return;
-          }
+        function addRepeatContainerFromSelection(options) {
+          var createEmpty = !!(options && options.empty);
+          var graph = readWorkflowGraphForCurrentContext();
+          if (!graph || typeof graph !== "object") return;
 
-          fields.enabled.checked = true;
-          fields.each.value = "$current.results";
-          fields.max.value = "5";
-          fields.merge.value = "append";
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          var loopId = nextWorkflowLoopId(loops);
+          var loopName = nextWorkflowLoopName(loops, "GuidedLoop");
+
+          var nextLoop = {
+            id: loopId,
+            name: loopName,
+            each: "$current.results",
+            max: 5,
+            merge: "append",
+            start_node_id: "",
+            end_node_id: "",
+          };
 
           var nodeIds = collectVisibleWorkflowNodeIds();
           var dropzone = host.querySelector("[data-canvas-dropzone]");
           var selectedNodeId = dropzone ? ((dropzone.getAttribute("data-selected-node") || "").trim()) : "";
 
-          if (selectedNodeId && nodeIds.indexOf(selectedNodeId) >= 0) {
-            fields.startNode.value = selectedNodeId;
-            fields.endNode.value = selectedNodeId;
-          } else if (nodeIds.length > 0) {
-            fields.startNode.value = nodeIds[0];
-            fields.endNode.value = nodeIds[nodeIds.length - 1];
+          if (!createEmpty && selectedNodeId && nodeIds.indexOf(selectedNodeId) >= 0) {
+            nextLoop.start_node_id = selectedNodeId;
+            nextLoop.end_node_id = selectedNodeId;
           }
 
-          workflowLoopContainerCollapsed = false;
-          syncWorkflowLoopConfigToGraph();
+          loops.push(nextLoop);
+          writeWorkflowGuidedLoopsToGraph(graph, loops);
+          selectedWorkflowLoopId = nextLoop.id;
+          setWorkflowLoopCollapsed(nextLoop.id, false);
+          setWorkflowLoopSettingsExpanded(nextLoop.id, false);
+          applyWorkflowLoopConfigToInputs(nextLoop);
+
+          persistWorkflowGraphForCurrentContext(graph);
+          hydrateWorkflowGraphState();
           updateWorkflowReadinessStrip();
           updateWorkflowLoopStory();
+        }
+
+        function normalizeWorkflowGraphExecutableKind(raw) {
+          var value = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+          if (value === "mutation") return "mutation";
+          if (value === "query") return "query";
+          return "";
+        }
+
+        function normalizeWorkflowGraphExecutableHint(raw) {
+          if (typeof raw === "string") {
+            var shortName = sanitizeWorkflowExecutableName(raw, "WorkflowExec");
+            return shortName ? { name: shortName } : null;
+          }
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+
+          var nameRaw = typeof raw.name === "string" ? raw.name.trim() : "";
+          if (!nameRaw) return null;
+
+          var normalized = {
+            name: sanitizeWorkflowExecutableName(nameRaw, "WorkflowExec"),
+          };
+
+          var kind = normalizeWorkflowGraphExecutableKind(raw.kind);
+          if (kind) normalized.kind = kind;
+
+          var onScope = typeof raw.on === "string" ? raw.on.trim() : "";
+          if (onScope) normalized.on = onScope;
+
+          var returnsType = typeof raw.returns === "string" ? raw.returns.trim() : "";
+          if (returnsType) normalized.returns = returnsType;
+
+          if (typeof raw.inject_context === "boolean") {
+            normalized.inject_context = raw.inject_context;
+          }
+
+          return normalized;
+        }
+
+        function normalizeWorkflowGraphGlyphHint(raw) {
+          if (raw === undefined || raw === null) return null;
+          if (typeof raw === "boolean") return raw;
+          if (typeof raw === "string") {
+            var expr = raw.trim();
+            return expr || null;
+          }
+          if (typeof raw === "object" && !Array.isArray(raw)) {
+            if (typeof raw.include === "boolean") {
+              return raw.include;
+            }
+            if (typeof raw.expr === "string" && raw.expr.trim()) {
+              return raw.expr.trim();
+            }
+          }
+          return null;
+        }
+
+        function workflowGraphOperationStepKey(step) {
+          if (!step || typeof step !== "object") return "";
+          var expr = typeof step.expr === "string" ? step.expr.trim() : "";
+          if (expr) return "expr:" + expr;
+
+          var op = typeof step.op === "string" ? step.op.trim() : "";
+          if (!op) return "";
+
+          var args = "";
+          if (step.args && typeof step.args === "object" && !Array.isArray(step.args)) {
+            try {
+              args = JSON.stringify(step.args);
+            } catch (e) {
+              args = "";
+            }
+          }
+          return "op:" + op + "::" + args;
+        }
+
+        function appendUniqueWorkflowGraphOperationStep(targetSteps, seen, step) {
+          if (!Array.isArray(targetSteps) || !step) return;
+          var key = workflowGraphOperationStepKey(step);
+          if (!key) return;
+          if (seen && seen[key]) return;
+          if (seen) seen[key] = true;
+          targetSteps.push(step);
+        }
+
+        function extractWorkflowGraphHintFromPayload(payload) {
+          var hint = {
+            args: {},
+            expr: "",
+            prelude: [],
+            exec: null,
+            glyph: null,
+            hasReserved: false,
+          };
+          if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+            return hint;
+          }
+
+          var graphBlock = payload.$graph;
+          if (!graphBlock || typeof graphBlock !== "object" || Array.isArray(graphBlock)) {
+            graphBlock = null;
+          }
+
+          Object.keys(payload).forEach(function (key) {
+            if (isWorkflowGraphReservedPayloadKey(key)) return;
+            hint.args[key] = payload[key];
+          });
+
+          var expr = "";
+          if (typeof payload.$expr === "string") {
+            expr = payload.$expr.trim();
+          } else if (graphBlock && typeof graphBlock.expr === "string") {
+            expr = graphBlock.expr.trim();
+          }
+          if (expr) {
+            hint.expr = expr;
+            hint.hasReserved = true;
+          }
+
+          var prelude = normalizeWorkflowGraphPrelude(payload.$prelude);
+          if (graphBlock) {
+            normalizeWorkflowGraphPrelude(graphBlock.prelude).forEach(function (entry) {
+              if (prelude.indexOf(entry) >= 0) return;
+              prelude.push(entry);
+            });
+          }
+          if (prelude.length > 0) {
+            hint.prelude = prelude;
+            hint.hasReserved = true;
+          }
+
+          var execRaw = payload.$exec;
+          if (execRaw === undefined && graphBlock && Object.prototype.hasOwnProperty.call(graphBlock, "exec")) {
+            execRaw = graphBlock.exec;
+          }
+          var execHint = normalizeWorkflowGraphExecutableHint(execRaw);
+          if (execHint) {
+            hint.exec = execHint;
+            hint.hasReserved = true;
+          }
+
+          var glyphRaw = payload.$glyph;
+          if (glyphRaw === undefined && graphBlock && Object.prototype.hasOwnProperty.call(graphBlock, "glyph")) {
+            glyphRaw = graphBlock.glyph;
+          }
+          if (glyphRaw !== undefined) {
+            hint.glyph = normalizeWorkflowGraphGlyphHint(glyphRaw);
+            hint.hasReserved = true;
+          }
+
+          return hint;
+        }
+
+        function buildWorkflowGraphCompileMetadataFromNodeEditing(graph) {
+          if (!graph || typeof graph !== "object") return null;
+
+          var nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+          if (!nodes.length) return null;
+
+          var functionInputsMap = readWorkflowFunctionInputsStateMap();
+          var preludeSeen = {};
+          var prelude = [];
+          var querySteps = [];
+          var executableOrder = [];
+          var executableBuckets = {};
+          var glyphSteps = [];
+          var glyphSeen = {};
+          var hasReservedHints = false;
+
+          nodes.forEach(function (node) {
+            var nodeId = node && typeof node.id === "string" ? node.id.trim() : "";
+            if (!nodeId) return;
+
+            var parsedNode = parseWorkflowModuleFunctionFromNodeId(nodeId);
+            if (!parsedNode) return;
+
+            var payloadValue = functionInputsMap[nodeId];
+            var payload = null;
+            if (typeof payloadValue === "string") {
+              payload = parseWorkflowJsonObjectValue(payloadValue);
+            } else if (payloadValue && typeof payloadValue === "object" && !Array.isArray(payloadValue)) {
+              payload = payloadValue;
+            }
+
+            var defaultStep = { op: parsedNode.moduleId + "." + parsedNode.functionId };
+            var hint = extractWorkflowGraphHintFromPayload(payload || {});
+            if (hint.hasReserved) {
+              hasReservedHints = true;
+            }
+
+            var step = hint.expr ? { expr: hint.expr } : { op: defaultStep.op };
+            if (!hint.expr) {
+              var argKeys = Object.keys(hint.args);
+              if (argKeys.length > 0) {
+                step.args = hint.args;
+              }
+            }
+
+            if (hint.prelude.length > 0) {
+              hint.prelude.forEach(function (entry) {
+                if (preludeSeen[entry]) return;
+                preludeSeen[entry] = true;
+                prelude.push(entry);
+              });
+            }
+
+            if (hint.exec) {
+              var execName = hint.exec.name;
+              if (!executableBuckets[execName]) {
+                executableBuckets[execName] = {
+                  name: execName,
+                  kind: hint.exec.kind || "",
+                  on: hint.exec.on || "",
+                  returns: hint.exec.returns || "",
+                  inject_context: typeof hint.exec.inject_context === "boolean" ? hint.exec.inject_context : undefined,
+                  steps: [],
+                };
+                executableOrder.push(execName);
+              }
+
+              var bucket = executableBuckets[execName];
+              if (!bucket.kind && hint.exec.kind) bucket.kind = hint.exec.kind;
+              if (!bucket.on && hint.exec.on) bucket.on = hint.exec.on;
+              if (!bucket.returns && hint.exec.returns) bucket.returns = hint.exec.returns;
+              if (typeof bucket.inject_context !== "boolean" && typeof hint.exec.inject_context === "boolean") {
+                bucket.inject_context = hint.exec.inject_context;
+              }
+              bucket.steps.push(step);
+
+              if (hint.glyph === false) {
+                return;
+              }
+
+              if (typeof hint.glyph === "string" && hint.glyph.trim()) {
+                appendUniqueWorkflowGraphOperationStep(glyphSteps, glyphSeen, { expr: hint.glyph.trim() });
+              } else {
+                appendUniqueWorkflowGraphOperationStep(glyphSteps, glyphSeen, { op: execName });
+              }
+              return;
+            }
+
+            querySteps.push(step);
+
+            if (hint.glyph === true) {
+              appendUniqueWorkflowGraphOperationStep(glyphSteps, glyphSeen, step);
+            } else if (typeof hint.glyph === "string" && hint.glyph.trim()) {
+              appendUniqueWorkflowGraphOperationStep(glyphSteps, glyphSeen, { expr: hint.glyph.trim() });
+            }
+          });
+
+          if (!querySteps.length && executableOrder.length > 0) {
+            executableOrder.forEach(function (execName) {
+              querySteps.push({ op: execName });
+            });
+          }
+
+          var executables = executableOrder.map(function (execName) {
+            var bucket = executableBuckets[execName];
+            if (!bucket || !Array.isArray(bucket.steps) || bucket.steps.length === 0) return null;
+
+            var executable = {
+              name: bucket.name,
+              steps: bucket.steps,
+            };
+            if (bucket.kind) executable.kind = bucket.kind;
+            if (bucket.on) executable.on = bucket.on;
+            if (bucket.returns) executable.returns = bucket.returns;
+            if (typeof bucket.inject_context === "boolean") {
+              executable.inject_context = bucket.inject_context;
+            }
+            return executable;
+          }).filter(function (item) { return !!item; });
+
+          if (!glyphSteps.length && executables.length > 0) {
+            executables.forEach(function (executable) {
+              appendUniqueWorkflowGraphOperationStep(glyphSteps, glyphSeen, { op: executable.name });
+            });
+          }
+
+          if (!hasReservedHints && !prelude.length && !executables.length && !glyphSteps.length) {
+            return null;
+          }
+
+          var derived = {};
+          if (prelude.length > 0) {
+            derived.prelude = prelude;
+          }
+          if (executables.length > 0) {
+            derived.executables = executables;
+          }
+          if (glyphSteps.length > 0) {
+            var glyphNameRaw = graph.glyph && typeof graph.glyph === "object"
+              ? graph.glyph.name
+              : "Main";
+            derived.glyph = {
+              name: sanitizeWorkflowExecutableName(glyphNameRaw || "Main", "Main"),
+              steps: glyphSteps,
+            };
+          }
+
+          var nodeIds = nodes
+            .map(function (node) { return node && typeof node.id === "string" ? node.id.trim() : ""; })
+            .filter(function (nodeId) { return !!nodeId; });
+          var hasLoopScope = readWorkflowGuidedLoopsFromGraph(graph).some(function (loop) {
+            return !!getWorkflowLoopRange(loop, nodeIds);
+          });
+
+          if (!hasLoopScope && querySteps.length > 0) {
+            var context = getSelectedWorkflowContext();
+            var workflowId = context && context.workflowId ? context.workflowId : "WorkflowPreview";
+            var existingQuery = graph.query && typeof graph.query === "object" ? graph.query : null;
+            var queryNameRaw = existingQuery && typeof existingQuery.name === "string"
+              ? existingQuery.name
+              : workflowId;
+            var queryOn = existingQuery && typeof existingQuery.on === "string" && existingQuery.on.trim()
+              ? existingQuery.on.trim()
+              : "Any";
+
+            derived.query = {
+              kind: "query",
+              name: sanitizeWorkflowExecutableName(queryNameRaw, "WorkflowPreview"),
+              on: queryOn,
+              inject_context: true,
+              steps: querySteps,
+            };
+          }
+
+          return derived;
         }
 
         function serializeWorkflowGraphStateForRequest() {
           var graph = readWorkflowGraphForCurrentContext();
           if (!graph || typeof graph !== "object") return "";
-          var loopConfig = readWorkflowLoopConfigFromInputs();
-          if (loopConfig) {
-            graph.guided_loop = loopConfig;
-          } else {
-            delete graph.guided_loop;
+
+          ensureSelectedWorkflowLoopId(graph);
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          var selectedIndex = loops.findIndex(function (loop) {
+            return loop.id === selectedWorkflowLoopId;
+          });
+
+          var loopConfig = readWorkflowLoopConfigFromInputs(selectedWorkflowLoopId);
+          if (selectedIndex >= 0) {
+            if (loopConfig) {
+              loopConfig.id = selectedWorkflowLoopId;
+              loops[selectedIndex] = loopConfig;
+            }
           }
+
+          writeWorkflowGuidedLoopsToGraph(graph, loops);
+
+          var existingMetadata = normalizeWorkflowGraphCompileMetadata(graph);
+          applyWorkflowGraphCompileMetadata(graph, existingMetadata);
+
+          var derivedMetadata = buildWorkflowGraphCompileMetadataFromNodeEditing(graph);
+          if (derivedMetadata) {
+            if (Array.isArray(derivedMetadata.prelude) && derivedMetadata.prelude.length > 0) {
+              graph.prelude = derivedMetadata.prelude;
+            }
+
+            if (derivedMetadata.glyph) {
+              graph.glyph = derivedMetadata.glyph;
+            }
+
+            if (Array.isArray(derivedMetadata.executables) && derivedMetadata.executables.length > 0) {
+              graph.executables = derivedMetadata.executables;
+            }
+
+            if (derivedMetadata.query) {
+              graph.query = derivedMetadata.query;
+            } else {
+              delete graph.query;
+            }
+          } else {
+            delete graph.query;
+          }
+
           try {
             return JSON.stringify(graph);
           } catch (e) {
@@ -2111,6 +3491,53 @@
           return target;
         }
 
+        function remapWorkflowGuidedLoopsForInsertedStep(graph, oldSteps, insertIndex, insertedNodeId, targetLoopId) {
+          if (!graph || !insertedNodeId) return;
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          if (!loops.length) return;
+
+          var nextLoops = loops.map(function (loop) {
+            var next = normalizeWorkflowGuidedLoopContainer(loop, loop.id || "loop-1");
+            if (!next) return loop;
+
+            var oldStartIndex = parseWorkflowNodeIndex(next.start_node_id);
+            var oldEndIndex = parseWorkflowNodeIndex(next.end_node_id);
+
+            if (next.start_node_id) {
+              next.start_node_id = remapWorkflowNodeIdForInsertedStep(
+                next.start_node_id,
+                oldSteps,
+                insertIndex
+              );
+            }
+            if (next.end_node_id) {
+              next.end_node_id = remapWorkflowNodeIdForInsertedStep(
+                next.end_node_id,
+                oldSteps,
+                insertIndex
+              );
+            }
+
+            if (next.id === targetLoopId) {
+              if (oldStartIndex < 0 || oldEndIndex < 0 || oldStartIndex > oldEndIndex) {
+                next.start_node_id = insertedNodeId;
+                next.end_node_id = insertedNodeId;
+              } else {
+                if (insertIndex <= oldStartIndex) {
+                  next.start_node_id = insertedNodeId;
+                }
+                if (insertIndex > oldEndIndex) {
+                  next.end_node_id = insertedNodeId;
+                }
+              }
+            }
+
+            return next;
+          });
+
+          writeWorkflowGuidedLoopsToGraph(graph, nextLoops);
+        }
+
         function readWorkflowCanvasMutableState(dropzone) {
           if (!dropzone) return null;
           var queue = dropzone.getAttribute("data-selected-queue") || "";
@@ -2139,94 +3566,111 @@
         }
 
         function applyWorkflowLoopConfigAfterStepRemoval(graph, removeIndex, newSteps) {
-          var loop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
-          if (!loop) return;
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          if (!loops.length) return;
 
-          var startIndex = parseWorkflowNodeIndex(loop.start_node_id);
-          var endIndex = parseWorkflowNodeIndex(loop.end_node_id);
-          if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
-            delete graph.guided_loop;
-            return;
-          }
-
-          if (removeIndex < startIndex) {
-            startIndex -= 1;
-            endIndex -= 1;
-          } else if (removeIndex <= endIndex) {
-            if (startIndex === endIndex) {
-              delete graph.guided_loop;
+          var nextLoops = [];
+          loops.forEach(function (loop) {
+            var complete = normalizeWorkflowGuidedLoopConfig(loop);
+            if (!complete) {
+              nextLoops.push(loop);
               return;
             }
-            endIndex -= 1;
-          }
 
-          if (
-            startIndex < 0 ||
-            endIndex < 0 ||
-            startIndex >= newSteps.length ||
-            endIndex >= newSteps.length ||
-            startIndex > endIndex
-          ) {
-            delete graph.guided_loop;
-            return;
-          }
+            var startIndex = parseWorkflowNodeIndex(complete.start_node_id);
+            var endIndex = parseWorkflowNodeIndex(complete.end_node_id);
+            if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
+              return;
+            }
 
-          var startNodeId = buildWorkflowNodeIdFromStepToken(newSteps[startIndex], startIndex);
-          var endNodeId = buildWorkflowNodeIdFromStepToken(newSteps[endIndex], endIndex);
-          if (!startNodeId || !endNodeId) {
-            delete graph.guided_loop;
-            return;
-          }
+            if (removeIndex < startIndex) {
+              startIndex -= 1;
+              endIndex -= 1;
+            } else if (removeIndex <= endIndex) {
+              if (startIndex === endIndex) {
+                return;
+              }
+              endIndex -= 1;
+            }
 
-          loop.start_node_id = startNodeId;
-          loop.end_node_id = endNodeId;
-          graph.guided_loop = loop;
+            if (
+              startIndex < 0 ||
+              endIndex < 0 ||
+              startIndex >= newSteps.length ||
+              endIndex >= newSteps.length ||
+              startIndex > endIndex
+            ) {
+              return;
+            }
+
+            var startNodeId = buildWorkflowNodeIdFromStepToken(newSteps[startIndex], startIndex);
+            var endNodeId = buildWorkflowNodeIdFromStepToken(newSteps[endIndex], endIndex);
+            if (!startNodeId || !endNodeId) {
+              return;
+            }
+
+            complete.start_node_id = startNodeId;
+            complete.end_node_id = endNodeId;
+            nextLoops.push(complete);
+          });
+
+          writeWorkflowGuidedLoopsToGraph(graph, nextLoops);
+          ensureSelectedWorkflowLoopId(graph);
         }
 
         function applyWorkflowLoopConfigAfterStepMove(graph, oldIndexToNewIndex, newSteps) {
-          var loop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
-          if (!loop) return;
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          if (!loops.length) return;
 
-          var startIndex = parseWorkflowNodeIndex(loop.start_node_id);
-          var endIndex = parseWorkflowNodeIndex(loop.end_node_id);
-          if (startIndex < 0 || endIndex < 0) {
-            delete graph.guided_loop;
-            return;
-          }
+          var nextLoops = [];
+          loops.forEach(function (loop) {
+            var complete = normalizeWorkflowGuidedLoopConfig(loop);
+            if (!complete) {
+              nextLoops.push(loop);
+              return;
+            }
 
-          if (Object.prototype.hasOwnProperty.call(oldIndexToNewIndex, String(startIndex))) {
-            startIndex = oldIndexToNewIndex[String(startIndex)];
-          }
-          if (Object.prototype.hasOwnProperty.call(oldIndexToNewIndex, String(endIndex))) {
-            endIndex = oldIndexToNewIndex[String(endIndex)];
-          }
+            var startIndex = parseWorkflowNodeIndex(complete.start_node_id);
+            var endIndex = parseWorkflowNodeIndex(complete.end_node_id);
+            if (startIndex < 0 || endIndex < 0) {
+              return;
+            }
 
-          if (
-            startIndex < 0 ||
-            endIndex < 0 ||
-            startIndex >= newSteps.length ||
-            endIndex >= newSteps.length
-          ) {
-            delete graph.guided_loop;
-            return;
-          }
+            if (Object.prototype.hasOwnProperty.call(oldIndexToNewIndex, String(startIndex))) {
+              startIndex = oldIndexToNewIndex[String(startIndex)];
+            }
+            if (Object.prototype.hasOwnProperty.call(oldIndexToNewIndex, String(endIndex))) {
+              endIndex = oldIndexToNewIndex[String(endIndex)];
+            }
 
-          if (startIndex > endIndex) {
-            var temp = startIndex;
-            startIndex = endIndex;
-            endIndex = temp;
-          }
+            if (
+              startIndex < 0 ||
+              endIndex < 0 ||
+              startIndex >= newSteps.length ||
+              endIndex >= newSteps.length
+            ) {
+              return;
+            }
 
-          var startNodeId = buildWorkflowNodeIdFromStepToken(newSteps[startIndex], startIndex);
-          var endNodeId = buildWorkflowNodeIdFromStepToken(newSteps[endIndex], endIndex);
-          if (!startNodeId || !endNodeId) {
-            delete graph.guided_loop;
-            return;
-          }
+            if (startIndex > endIndex) {
+              var temp = startIndex;
+              startIndex = endIndex;
+              endIndex = temp;
+            }
 
-          loop.start_node_id = startNodeId;
-          loop.end_node_id = endNodeId;
-          graph.guided_loop = loop;
+            var startNodeId = buildWorkflowNodeIdFromStepToken(newSteps[startIndex], startIndex);
+            var endNodeId = buildWorkflowNodeIdFromStepToken(newSteps[endIndex], endIndex);
+            if (!startNodeId || !endNodeId) {
+              return;
+            }
+
+            complete.start_node_id = startNodeId;
+            complete.end_node_id = endNodeId;
+            nextLoops.push(complete);
+          });
+
+          writeWorkflowGuidedLoopsToGraph(graph, nextLoops);
+          ensureSelectedWorkflowLoopId(graph);
         }
 
         function moveWorkflowStepByNodeId(dropzone, nodeId, offset) {
@@ -2390,17 +3834,19 @@
           if (!moduleId || !functionName) return null;
 
           var graph = readWorkflowGraphForCurrentContext();
-          var loop = normalizeWorkflowGuidedLoopConfig(graph && graph.guided_loop);
-          if (!graph || !loop) return null;
+          if (!graph) return null;
 
           var loopShell = dropHint && dropHint.loopShell ? dropHint.loopShell : null;
           if (!loopShell || !host.contains(loopShell)) return null;
 
-          var visibleNodeIds = collectVisibleWorkflowNodeIds();
-          if (!visibleNodeIds.length) return null;
-          var startIndex = visibleNodeIds.indexOf(loop.start_node_id);
-          var endIndex = visibleNodeIds.indexOf(loop.end_node_id);
-          if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) return null;
+          var targetLoopId = (loopShell.getAttribute("data-loop-id") || "").trim();
+          if (!targetLoopId) return null;
+
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          var targetLoop = loops.find(function (loop) {
+            return loop.id === targetLoopId;
+          }) || null;
+          if (!targetLoop) return null;
 
           var functionStepsNode = document.getElementById("workflow-function-steps-state");
           var modulesNode = document.getElementById("workflow-modules-state");
@@ -2413,15 +3859,38 @@
             : (dropzone.getAttribute("data-custom-modules") || "");
 
           var existingSteps = parseWorkflowFunctionStepsCsv(currentStepsCsv);
-          if (!existingSteps.length) return null;
 
-          var insertIndex = computeWorkflowLoopInsertIndex(
-            loopShell,
-            visibleNodeIds,
-            startIndex,
-            endIndex,
-            dropHint
-          );
+          var visibleNodeIds = collectVisibleWorkflowNodeIds();
+          var targetRange = getWorkflowLoopRange(targetLoop, visibleNodeIds);
+
+          var insertIndex = existingSteps.length;
+          if (targetRange) {
+            insertIndex = computeWorkflowLoopInsertIndex(
+              loopShell,
+              visibleNodeIds,
+              targetRange.startIndex,
+              targetRange.endIndex,
+              dropHint
+            );
+          } else {
+            var hintedTargetNodeId = dropHint && dropHint.targetNodeId
+              ? (dropHint.targetNodeId || "").trim()
+              : "";
+            if (hintedTargetNodeId) {
+              var hintedIndex = visibleNodeIds.indexOf(hintedTargetNodeId);
+              if (hintedIndex >= 0) {
+                var hintedNode = host.querySelector(
+                  '[data-canvas-node-button][data-node-id="' + hintedTargetNodeId + '"]'
+                );
+                if (hintedNode && typeof dropHint.clientY === "number") {
+                  var hintedRect = hintedNode.getBoundingClientRect();
+                  var placeBefore = dropHint.clientY < (hintedRect.top + hintedRect.height / 2);
+                  insertIndex = hintedIndex + (placeBefore ? 0 : 1);
+                }
+              }
+            }
+          }
+
           insertIndex = Math.min(existingSteps.length, Math.max(0, insertIndex));
           var insertedStepToken = moduleId + "." + functionName;
           var updatedSteps = existingSteps.slice();
@@ -2441,28 +3910,14 @@
           var insertedNodeId = buildWorkflowNodeIdFromStepToken(insertedStepToken, insertIndex);
           if (!insertedNodeId) return null;
 
-          var updatedLoop = normalizeWorkflowGuidedLoopConfig(loop);
-          if (!updatedLoop) return null;
-
-          var remappedStartNodeId = remapWorkflowNodeIdForInsertedStep(
-            updatedLoop.start_node_id,
+          selectedWorkflowLoopId = targetLoopId;
+          remapWorkflowGuidedLoopsForInsertedStep(
+            graph,
             existingSteps,
-            insertIndex
+            insertIndex,
+            insertedNodeId,
+            targetLoopId
           );
-          var remappedEndNodeId = remapWorkflowNodeIdForInsertedStep(
-            updatedLoop.end_node_id,
-            existingSteps,
-            insertIndex
-          );
-
-          updatedLoop.start_node_id = insertIndex <= startIndex
-            ? insertedNodeId
-            : (remappedStartNodeId || updatedLoop.start_node_id);
-          updatedLoop.end_node_id = insertIndex > endIndex
-            ? insertedNodeId
-            : (remappedEndNodeId || updatedLoop.end_node_id);
-
-          graph.guided_loop = updatedLoop;
           persistWorkflowGraphForCurrentContext(graph);
 
           if (functionStepsNode) functionStepsNode.value = updatedStepsCsv;
@@ -2605,7 +4060,7 @@
           var paramInputs = host.querySelectorAll('[data-function-param-input][data-node-id="' + nodeId + '"]');
           if (!paramInputs || paramInputs.length === 0) return;
 
-          var payload = {};
+          var payload = preserveWorkflowGraphPayloadMetadata(editor.value || "");
           paramInputs.forEach(function (input) {
             var key = (input.getAttribute("data-param-key") || "").trim();
             if (!key) return;
@@ -2725,42 +4180,19 @@
             }
           }
 
-          var loopFields = getWorkflowLoopFieldNodes();
-          var loopEnabled = !!(loopFields.enabled && loopFields.enabled.checked);
-          if (loopEnabled) {
-            var maxVal = Number(loopFields.max && loopFields.max.value);
-            if (!Number.isFinite(maxVal) || maxVal <= 0) {
-              blockers.push({ message: "Set stop-after items to 1 or more.", fieldId: "workflow-loop-max" });
-            }
-
-            var eachVal = (loopFields.each && loopFields.each.value ? loopFields.each.value : "").trim();
-            if (!eachVal || eachVal.charAt(0) !== "$") {
-              blockers.push({ message: "Choose a repeat list (example: $current.results).", fieldId: "workflow-loop-each" });
-            }
-
-            var startNodeId = (loopFields.startNode && loopFields.startNode.value ? loopFields.startNode.value : "").trim();
-            var endNodeId = (loopFields.endNode && loopFields.endNode.value ? loopFields.endNode.value : "").trim();
-            if (!startNodeId) {
-              blockers.push({ message: "Pick the first repeated step.", fieldId: "workflow-loop-start-node" });
-            }
-            if (!endNodeId) {
-              blockers.push({ message: "Pick the last repeated step.", fieldId: "workflow-loop-end-node" });
-            }
-
-            if (startNodeId && endNodeId) {
-              var startIdx = visibleNodeIds.indexOf(startNodeId);
-              var endIdx = visibleNodeIds.indexOf(endNodeId);
-              if (startIdx < 0) {
-                blockers.push({ message: "Re-select the first repeated step.", fieldId: "workflow-loop-start-node" });
-              }
-              if (endIdx < 0) {
-                blockers.push({ message: "Re-select the last repeated step.", fieldId: "workflow-loop-end-node" });
-              }
-              if (startIdx >= 0 && endIdx >= 0 && startIdx > endIdx) {
-                blockers.push({ message: "Move first repeated step above last repeated step.", fieldId: "workflow-loop-start-node" });
-              }
-            }
-          }
+          var graph = readWorkflowGraphForCurrentContext();
+          var loops = readWorkflowGuidedLoopsFromGraph(graph);
+          loops.forEach(function (loop) {
+            var loopReadiness = getLoopContainerReadiness(loop, visibleNodeIds);
+            if (loopReadiness.canRun) return;
+            loopReadiness.blockers.forEach(function (blocker) {
+              blockers.push({
+                message: loop.name + ": " + blocker.message,
+                fieldId: blocker.fieldId,
+                loopId: loop.id,
+              });
+            });
+          });
 
           return {
             canRun: blockers.length === 0,
@@ -2799,6 +4231,9 @@
             button.textContent = "Do: " + blocker.message;
             if (blocker.fieldId) {
               button.setAttribute("data-workflow-readiness-jump", blocker.fieldId);
+              if (blocker.loopId) {
+                button.setAttribute("data-workflow-readiness-loop-id", blocker.loopId);
+              }
             } else {
               button.disabled = true;
             }
@@ -3038,6 +4473,44 @@
             return;
           }
 
+          var loopMenuToggleTrigger = event.target.closest("[data-graph-loop-menu-toggle]");
+          if (loopMenuToggleTrigger) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            var menuLoopId = (loopMenuToggleTrigger.getAttribute("data-loop-id") || "").trim();
+            if (!menuLoopId) return;
+
+            var shouldOpen = openWorkflowLoopMenuId !== menuLoopId;
+            openWorkflowLoopMenuId = shouldOpen ? menuLoopId : "";
+
+            host.querySelectorAll("[data-graph-loop-menu].is-open").forEach(function (menu) {
+              menu.classList.remove("is-open");
+            });
+
+            var wrap = loopMenuToggleTrigger.closest("[data-graph-loop-menu-wrap]");
+            var menu = wrap ? wrap.querySelector("[data-graph-loop-menu]") : null;
+            if (menu && shouldOpen) {
+              menu.classList.add("is-open");
+            }
+
+            host.querySelectorAll("[data-graph-loop-menu-toggle]").forEach(function (toggleButton) {
+              var loopId = (toggleButton.getAttribute("data-loop-id") || "").trim();
+              toggleButton.setAttribute("aria-expanded", String(loopId && loopId === openWorkflowLoopMenuId));
+            });
+            return;
+          }
+
+          if (openWorkflowLoopMenuId && !event.target.closest("[data-graph-loop-menu-wrap]")) {
+            openWorkflowLoopMenuId = "";
+            host.querySelectorAll("[data-graph-loop-menu].is-open").forEach(function (menu) {
+              menu.classList.remove("is-open");
+            });
+            host.querySelectorAll("[data-graph-loop-menu-toggle]").forEach(function (toggleButton) {
+              toggleButton.setAttribute("aria-expanded", "false");
+            });
+          }
+
           var paramRowTrigger = event.target.closest("[data-function-param-row]");
           if (paramRowTrigger) {
             clearWorkflowParamRowFocus(paramRowTrigger);
@@ -3061,7 +4534,7 @@
           var canvasUnselectTrigger = event.target.closest("[data-canvas-dropzone]");
           if (canvasUnselectTrigger) {
             var canvasInteractive = event.target.closest(
-              "[data-canvas-node-button], [data-graph-output-handle], [data-graph-input-handle], [data-graph-edge-id], [data-graph-loop-toggle], [data-workflow-loop-config], [data-workflow-readiness-jump], [data-node-context-panel], [data-step-advanced-drawer], [data-step-advanced-open], [data-step-advanced-close], [data-state-explorer-path]"
+              "[data-canvas-node-button], [data-graph-output-handle], [data-graph-input-handle], [data-graph-edge-id], [data-graph-loop-toggle], [data-graph-loop-select], [data-graph-loop-menu-wrap], [data-graph-loop-menu-toggle], [data-graph-loop-menu], [data-graph-loop-container-shell], [data-workflow-loop-config], [data-workflow-readiness-jump], [data-node-context-panel], [data-step-advanced-drawer], [data-step-advanced-open], [data-step-advanced-close], [data-state-explorer-path]"
             );
             if (!canvasInteractive) {
               event.preventDefault();
@@ -3103,8 +4576,25 @@
             event.preventDefault();
             event.stopPropagation();
             var jumpFieldId = readinessJump.getAttribute("data-workflow-readiness-jump") || "";
+            var jumpLoopId = (readinessJump.getAttribute("data-workflow-readiness-loop-id") || "").trim();
+            if (jumpLoopId) {
+              selectedWorkflowLoopId = jumpLoopId;
+              setWorkflowLoopCollapsed(jumpLoopId, false);
+              if (workflowLoopFieldUsesAdvancedPanel(jumpFieldId)) {
+                setWorkflowLoopSettingsExpanded(jumpLoopId, true);
+              }
+              hydrateWorkflowGraphState();
+            } else if (workflowLoopFieldUsesAdvancedPanel(jumpFieldId) && selectedWorkflowLoopId) {
+              setWorkflowLoopSettingsExpanded(selectedWorkflowLoopId, true);
+              hydrateWorkflowGraphState();
+            }
             if (jumpFieldId) {
-              var jumpField = document.getElementById(jumpFieldId);
+              if (focusWorkflowLoopInlineField(jumpLoopId || selectedWorkflowLoopId, jumpFieldId)) {
+                return;
+              }
+
+              var legacyFieldId = workflowLoopLegacyFieldId(jumpFieldId) || jumpFieldId;
+              var jumpField = document.getElementById(legacyFieldId);
               if (jumpField && typeof jumpField.focus === "function") {
                 jumpField.focus();
                 if (typeof jumpField.scrollIntoView === "function") {
@@ -3112,6 +4602,18 @@
                 }
               }
             }
+            return;
+          }
+
+          var loopSettingsToggle = event.target.closest("[data-workflow-loop-settings-toggle]");
+          if (loopSettingsToggle) {
+            event.preventDefault();
+            event.stopPropagation();
+            var settingsLoopId = (loopSettingsToggle.getAttribute("data-loop-id") || "").trim();
+            if (!settingsLoopId) return;
+            openWorkflowLoopMenuId = "";
+            setWorkflowLoopSettingsExpanded(settingsLoopId, !isWorkflowLoopSettingsExpanded(settingsLoopId));
+            hydrateWorkflowGraphState();
             return;
           }
 
@@ -3127,8 +4629,73 @@
           if (loopContainerToggle) {
             event.preventDefault();
             event.stopPropagation();
-            workflowLoopContainerCollapsed = !workflowLoopContainerCollapsed;
+            var toggleLoopId = (loopContainerToggle.getAttribute("data-loop-id") || "").trim();
+            if (!toggleLoopId) return;
+            openWorkflowLoopMenuId = "";
+            setWorkflowLoopCollapsed(toggleLoopId, !isWorkflowLoopCollapsed(toggleLoopId));
             hydrateWorkflowGraphState();
+            return;
+          }
+
+          var loopContainerMoveUp = event.target.closest("[data-graph-loop-move-up]");
+          if (loopContainerMoveUp) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (loopContainerMoveUp.disabled) return;
+            var moveUpLoopId = (loopContainerMoveUp.getAttribute("data-loop-id") || "").trim();
+            if (!moveUpLoopId) return;
+            openWorkflowLoopMenuId = "";
+            moveWorkflowLoopContainer(moveUpLoopId, -1);
+            return;
+          }
+
+          var loopContainerMoveDown = event.target.closest("[data-graph-loop-move-down]");
+          if (loopContainerMoveDown) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (loopContainerMoveDown.disabled) return;
+            var moveDownLoopId = (loopContainerMoveDown.getAttribute("data-loop-id") || "").trim();
+            if (!moveDownLoopId) return;
+            openWorkflowLoopMenuId = "";
+            moveWorkflowLoopContainer(moveDownLoopId, 1);
+            return;
+          }
+
+          var loopContainerDuplicate = event.target.closest("[data-graph-loop-duplicate]");
+          if (loopContainerDuplicate) {
+            event.preventDefault();
+            event.stopPropagation();
+            var duplicateLoopId = (loopContainerDuplicate.getAttribute("data-loop-id") || "").trim();
+            if (!duplicateLoopId) return;
+            openWorkflowLoopMenuId = "";
+            duplicateWorkflowLoopContainer(duplicateLoopId);
+            return;
+          }
+
+          var loopContainerRemove = event.target.closest("[data-graph-loop-remove]");
+          if (loopContainerRemove) {
+            event.preventDefault();
+            event.stopPropagation();
+            var removeLoopId = (loopContainerRemove.getAttribute("data-loop-id") || "").trim();
+            if (!removeLoopId) return;
+            openWorkflowLoopMenuId = "";
+            if (!window.confirm("Remove this loop container?")) return;
+            removeWorkflowLoopContainer(removeLoopId);
+            return;
+          }
+
+          var loopContainerSelect = event.target.closest("[data-graph-loop-select]");
+          if (loopContainerSelect) {
+            event.preventDefault();
+            event.stopPropagation();
+            var loopId = (loopContainerSelect.getAttribute("data-loop-id") || "").trim();
+            if (!loopId) return;
+            selectedWorkflowLoopId = loopId;
+            openWorkflowLoopMenuId = "";
+            setWorkflowLoopCollapsed(loopId, false);
+            hydrateWorkflowGraphState();
+            updateWorkflowLoopDetailVisibility();
+            updateWorkflowLoopStory();
             return;
           }
 
@@ -3268,6 +4835,12 @@
         });
 
         document.addEventListener("input", function (event) {
+          var loopInlineInput = event.target.closest("[data-workflow-loop-inline-field]");
+          if (loopInlineInput) {
+            syncWorkflowLoopConfigFromInlineEditor(loopInlineInput.getAttribute("data-loop-id") || "");
+            return;
+          }
+
           var loopInput = event.target.closest("[data-workflow-loop-field]");
           if (loopInput) {
             syncWorkflowLoopConfigToGraph();
@@ -3315,6 +4888,12 @@
         });
 
         document.addEventListener("change", function (event) {
+          var loopInlineField = event.target.closest("[data-workflow-loop-inline-field]");
+          if (loopInlineField) {
+            syncWorkflowLoopConfigFromInlineEditor(loopInlineField.getAttribute("data-loop-id") || "");
+            return;
+          }
+
           var loopField = event.target.closest("[data-workflow-loop-field]");
           if (loopField) {
             syncWorkflowLoopConfigToGraph();
@@ -3440,6 +5019,13 @@
         });
 
         document.addEventListener("dragstart", function (event) {
+          var loopTile = event.target.closest("[data-workflow-loop-component-tile]");
+          if (loopTile && event.dataTransfer) {
+            event.dataTransfer.effectAllowed = "copy";
+            event.dataTransfer.setData("text/workflow-loop-container", "1");
+            return;
+          }
+
           var tile = event.target.closest("[data-module-tile]");
           if (!tile || !event.dataTransfer) return;
           event.dataTransfer.effectAllowed = "copy";
@@ -3474,6 +5060,12 @@
           clearWorkflowLoopDropTargetHighlight();
 
           if (!event.dataTransfer) return;
+          var loopContainerToken = event.dataTransfer.getData("text/workflow-loop-container");
+          if (loopContainerToken === "1") {
+            addRepeatContainerFromSelection({ empty: true });
+            return;
+          }
+
           var kind = event.dataTransfer.getData("text/workflow-module-kind");
           var functionId = event.dataTransfer.getData("text/workflow-function-id");
           var queue = dropzone.getAttribute("data-selected-queue") || "";

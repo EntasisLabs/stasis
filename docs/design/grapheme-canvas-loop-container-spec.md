@@ -26,10 +26,12 @@ A Repeat Container has:
 
 ## Compile Mapping
 Guided loop container maps to graph state and compile path as:
-- `guided_loop.each` -> iterator `each`
-- `guided_loop.max` -> iterator `max`
-- `guided_loop.merge` -> iterator `merge`
-- `guided_loop.start_node_id`, `guided_loop.end_node_id` -> iterator body range
+- `guided_loops[].each` -> iterator `each`
+- `guided_loops[].max` -> iterator `max`
+- `guided_loops[].merge` -> iterator `merge`
+- `guided_loops[].name` -> iterator name and query pipeline invocation token
+- `guided_loops[].start_node_id`, `guided_loops[].end_node_id` -> iterator body range
+- query body now chains iterator references (`|> LoopName`) in topological order.
 
 No additional generic execution semantics are introduced.
 
@@ -42,7 +44,9 @@ No additional generic execution semantics are introduced.
 - Hover does not open config; selection is the only primary trigger.
 - Contextual Step Card exposes only high-signal inputs first, with deep editing behind a guided drawer or advanced-mode inspector.
 - Repeat Container body acts as a mini-canvas zone where users can drop additional steps.
-- Multiple containers are a future phase; first slice supports one guided container.
+- Action Library exposes Loop Container as a draggable component tile.
+- Dropping Loop Container creates an empty scoped shell that can later receive step drops.
+- Multiple independent containers are supported and compile to multiple iterator blocks.
 
 ## Validation Model
 Readiness strip should block run when:
@@ -62,28 +66,28 @@ Validation copy stays user-readable while rooted in Grapheme constraints.
 
 ## First Good Slice (Implemented in this sprint)
 Scope:
-- Single Repeat Container shell rendered in canvas from existing guided loop config.
+- Multiple Repeat Container shells rendered in canvas from `guided_loops` config.
 - Steps in loop range are grouped visually into container body.
 - Loop story and readiness remain in place.
 - Existing save/run and compile behavior unchanged.
-- Action Library includes explicit `Add Repeat Container` affordance.
+- Action Library includes explicit `Add Repeat Container` affordance and draggable `Loop Container` tile.
 - Repeat Container supports collapse/expand.
 - Repeat Container header/body display loop-scoped readiness with jump-to-fix links.
 
 Out of scope:
 - Nested containers
-- Multiple independent containers
 - Drag-to-create container by marquee selection
 
 ## Acceptance Criteria
-- Enabling Repeat creates a visible container around target steps.
-- Changing start/end updates container bounds immediately.
-- Disabling Repeat removes container and restores flat step list.
+- Dropping a Loop Container tile creates an empty visible shell in canvas.
+- Dropping steps into a shell materializes scope bounds and updates iterator body range immediately.
+- Multiple non-overlapping shells can coexist and compile to multiple named iterators.
+- Changing selected shell settings updates only that shell.
 - Save/Test Run behavior remains backward compatible.
 - Grapheme compile mode/output remains unchanged from current semantics.
 
 ## Hero-Path Polish Rules (Steve Pass)
-- Guided mode centers one path: Add step -> Add Repeat Container -> choose list -> choose range -> Test Run.
+- Guided mode centers one path: Add step -> Drop Loop Container -> drop scoped steps -> choose list -> Test Run.
 - Guided mode hides non-hero controls (theme and execute actions, low-level data-flow internals).
 - Readiness language is directive (`Do: ...`) and always one-click fixable.
 - Repeat vocabulary is consistent across the guided surface.
@@ -96,6 +100,9 @@ Out of scope:
 - Loop container now shows explicit drop-target affordance during drag operations.
 - Dropping a step into the loop mini-canvas now inserts that step into loop scope and extends loop end bound.
 - Loop mini-canvas drop placement is position-aware: top-half drop inserts before a step, bottom-half drop inserts after.
+- Loop container shells are selectable; the selected shell drives loop settings editing.
+- Multiple loop containers compile as chained iterator invocations in query body (`|> LoopName`).
+- Empty loop shells are allowed during authoring and are ignored by compile until scope is defined.
 - Guided step card now uses an ultra-compact footprint (narrow width, reduced copy, and denser input rows).
 - Quick Inputs stay scrollable inside the card so canvas space stays open while inputs remain editable.
 - Parameter rows stay minimal by default and expand into full controls when focused.

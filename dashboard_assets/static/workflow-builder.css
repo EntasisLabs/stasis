@@ -134,22 +134,73 @@
   background-size: 16px 16px, 100% 100%;
 }
 
+.wb-root [data-graph-node-list] {
+  align-items: center;
+  gap: 0.68rem;
+}
+
+.wb-root [data-graph-node-list] > .wb-loop-container-shell {
+  width: min(100%, 940px);
+  margin-inline: auto;
+}
+
+.wb-root [data-graph-node-list] > .wb-node-card,
+.wb-loop-container-body > .wb-node-card {
+  width: min(100%, clamp(232px, 42vw, 362px));
+  margin-inline-start: var(--wb-node-offset, 0px);
+}
+
 .wb-node-card {
+  position: relative;
   border: 1px solid var(--wb-border-soft);
-  background: var(--wb-surface-1);
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--wb-surface-1) 96%, var(--wb-surface-2)) 0%,
+    color-mix(in srgb, var(--wb-surface-1) 88%, var(--wb-surface-0)) 100%
+  );
+  padding: 0.72rem 0.9rem;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--wb-surface-2) 42%, transparent);
   transition: border-color var(--wb-motion-standard) var(--wb-ease-enter),
     box-shadow var(--wb-motion-standard) var(--wb-ease-enter),
     transform var(--wb-motion-fast) var(--wb-ease-enter);
 }
 
 .wb-node-card:hover {
-  border-color: var(--wb-border-strong);
+  border-color: color-mix(in srgb, var(--wb-border-strong) 74%, var(--wb-focus));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--wb-surface-2) 56%, transparent),
+    0 12px 24px -26px color-mix(in srgb, var(--foreground) 50%, transparent);
   transform: translateY(-1px);
 }
 
 .wb-node-card.is-selected {
-  border: 2px solid var(--wb-focus);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-focus) 18%, transparent);
+  border-color: color-mix(in srgb, var(--wb-focus) 80%, var(--wb-border-strong));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--wb-focus) 12%, var(--wb-surface-1)) 0%,
+    color-mix(in srgb, var(--wb-focus) 6%, var(--wb-surface-1)) 100%
+  );
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-focus) 18%, transparent),
+    0 16px 30px -26px color-mix(in srgb, var(--wb-focus) 40%, transparent);
+}
+
+.wb-node-card [data-graph-input-handle],
+.wb-node-card [data-graph-output-handle] {
+  opacity: 0.14;
+  pointer-events: none;
+  transition: opacity var(--wb-motion-standard) var(--wb-ease-enter),
+    box-shadow var(--wb-motion-standard) var(--wb-ease-enter);
+}
+
+.wb-node-card:hover [data-graph-input-handle],
+.wb-node-card:hover [data-graph-output-handle],
+.wb-node-card:focus-within [data-graph-input-handle],
+.wb-node-card:focus-within [data-graph-output-handle],
+.wb-node-card.is-selected [data-graph-input-handle],
+.wb-node-card.is-selected [data-graph-output-handle] {
+  opacity: 1;
+  pointer-events: auto;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-focus) 18%, transparent);
 }
 
 .wb-loop-summary {
@@ -193,6 +244,19 @@
   align-items: center;
   gap: 0.2rem;
   margin-left: 0.12rem;
+  opacity: 0;
+  transform: translateX(4px);
+  pointer-events: none;
+  transition: opacity var(--wb-motion-standard) var(--wb-ease-enter),
+    transform var(--wb-motion-standard) var(--wb-ease-enter);
+}
+
+.wb-node-card:hover .wb-node-inline-actions,
+.wb-node-card:focus-within .wb-node-inline-actions,
+.wb-node-card.is-selected .wb-node-inline-actions {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
 }
 
 .wb-node-action-btn {
@@ -270,11 +334,31 @@
   background: color-mix(in srgb, var(--wb-running) 6%, var(--wb-surface-1));
   margin-bottom: 0.5rem;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-running) 16%, transparent);
+  transition: border-color var(--wb-motion-standard) var(--wb-ease-enter),
+    box-shadow var(--wb-motion-standard) var(--wb-ease-enter),
+    transform var(--wb-motion-standard) var(--wb-ease-enter);
+}
+
+.wb-loop-container-shell:hover {
+  border-color: color-mix(in srgb, var(--wb-running) 60%, var(--wb-border-strong));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-running) 24%, transparent),
+    0 10px 24px -22px color-mix(in srgb, var(--foreground) 55%, transparent);
 }
 
 .wb-loop-container-shell.is-drop-target {
   border-color: var(--wb-focus);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-focus) 22%, transparent);
+}
+
+.wb-loop-container-shell.is-selected {
+  border-color: color-mix(in srgb, var(--wb-focus) 72%, var(--wb-border-strong));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--wb-focus) 10%, var(--wb-surface-1)) 0%,
+    color-mix(in srgb, var(--wb-running) 6%, var(--wb-surface-1)) 100%
+  );
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-focus) 24%, transparent),
+    0 18px 32px -28px color-mix(in srgb, var(--wb-focus) 38%, transparent);
 }
 
 .wb-loop-drop-hint {
@@ -316,13 +400,140 @@
 .wb-loop-container-title {
   font-size: 0.78rem;
   font-weight: 700;
+  letter-spacing: 0.01em;
+  margin: 0;
   color: var(--wb-text-primary);
 }
 
 .wb-loop-container-header-controls {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.28rem;
+}
+
+.wb-loop-menu-wrap {
+  position: relative;
+}
+
+.wb-loop-menu-toggle {
+  width: 1.55rem;
+  min-width: 1.55rem;
+  padding: 0;
+  font-size: 0.92rem;
+  line-height: 1;
+}
+
+.wb-loop-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 152px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.25rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--wb-border-strong) 78%, transparent);
+  background: color-mix(in srgb, var(--wb-surface-0) 90%, var(--wb-surface-2));
+  box-shadow: 0 14px 34px -26px color-mix(in srgb, var(--foreground) 58%, transparent);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-4px) scale(0.98);
+  transform-origin: top right;
+  transition: opacity var(--wb-motion-standard) var(--wb-ease-enter),
+    transform var(--wb-motion-standard) var(--wb-ease-enter),
+    visibility 0s linear var(--wb-motion-standard);
+}
+
+.wb-loop-menu.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  transition-delay: 0s;
+}
+
+.wb-loop-menu-item {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--wb-text-primary);
+  text-align: left;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding: 0.3rem 0.44rem;
+  cursor: pointer;
+  transition: background-color var(--wb-motion-fast) var(--wb-ease-enter),
+    border-color var(--wb-motion-fast) var(--wb-ease-enter),
+    color var(--wb-motion-fast) var(--wb-ease-enter);
+}
+
+.wb-loop-menu-item:hover {
+  border-color: color-mix(in srgb, var(--wb-border-soft) 78%, transparent);
+  background: color-mix(in srgb, var(--wb-surface-2) 76%, transparent);
+}
+
+.wb-loop-menu-item:disabled,
+.wb-loop-menu-item:disabled:hover {
+  opacity: 0.46;
+  border-color: transparent;
+  background: transparent;
+  cursor: default;
+}
+
+.wb-loop-menu-item.is-danger {
+  color: color-mix(in srgb, var(--wb-blocking) 76%, var(--wb-text-primary));
+}
+
+.wb-loop-menu-item.is-danger:hover {
+  border-color: color-mix(in srgb, var(--wb-blocking) 46%, var(--wb-border-soft));
+  background: color-mix(in srgb, var(--wb-blocking) 12%, transparent);
+}
+
+.wb-loop-shell-btn {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  color: var(--wb-text-secondary);
+  transition: background-color var(--wb-motion-standard) var(--wb-ease-enter),
+    border-color var(--wb-motion-standard) var(--wb-ease-enter),
+    color var(--wb-motion-standard) var(--wb-ease-enter),
+    transform var(--wb-motion-standard) var(--wb-ease-enter);
+}
+
+.wb-loop-shell-btn:hover {
+  border-color: color-mix(in srgb, var(--wb-border-soft) 70%, transparent);
+  color: var(--wb-text-primary);
+}
+
+.wb-loop-shell-btn:active {
+  transform: translateY(1px);
+}
+
+.wb-loop-shell-btn:disabled,
+.wb-loop-shell-btn:disabled:hover {
+  opacity: 0.4;
+  border-color: transparent;
+  background: transparent;
+  color: var(--wb-text-secondary);
+  cursor: default;
+  transform: none;
+}
+
+.wb-loop-shell-btn.is-active {
+  border-color: color-mix(in srgb, var(--wb-focus) 68%, var(--wb-border-soft));
+  background: color-mix(in srgb, var(--wb-focus) 16%, transparent);
+  color: var(--wb-text-primary);
+}
+
+.wb-loop-shell-btn.is-danger {
+  color: color-mix(in srgb, var(--wb-blocking) 70%, var(--wb-text-primary));
+}
+
+.wb-loop-shell-btn.is-danger:hover {
+  border-color: color-mix(in srgb, var(--wb-blocking) 42%, var(--wb-border-soft));
+  background: color-mix(in srgb, var(--wb-blocking) 13%, transparent);
 }
 
 .wb-loop-container-toggle {
@@ -330,24 +541,20 @@
   padding: 0.18rem 0.46rem;
 }
 
-.wb-loop-container-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.wb-loop-container-meta-chip {
+.wb-loop-container-summary {
+  margin: 0;
+  flex-basis: 100%;
   font-size: 0.68rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--wb-running) 44%, var(--wb-border-soft));
-  background: color-mix(in srgb, var(--wb-running) 20%, transparent);
-  color: var(--wb-text-primary);
+  color: var(--wb-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wb-loop-container-body {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 0.5rem;
   padding: 0.5rem;
   max-height: 1200px;
@@ -363,6 +570,107 @@
   opacity: 0;
   padding-top: 0;
   padding-bottom: 0;
+}
+
+.wb-loop-container-body > :not(.wb-node-card) {
+  width: 100%;
+}
+
+.wb-loop-inline-editor {
+  border: 1px solid color-mix(in srgb, var(--wb-border-soft) 78%, transparent);
+  border-radius: 12px;
+  padding: 0.4rem;
+  background: color-mix(in srgb, var(--wb-surface-1) 84%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.wb-loop-inline-topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title more"
+    "scope more";
+  align-items: center;
+  column-gap: 0.35rem;
+  row-gap: 0.1rem;
+}
+
+.wb-loop-inline-title {
+  grid-area: title;
+  margin: 0;
+  color: var(--wb-text-primary);
+  letter-spacing: 0.01em;
+  font-weight: 600;
+}
+
+.wb-loop-inline-scope {
+  grid-area: scope;
+  margin: 0;
+  color: var(--wb-text-secondary);
+}
+
+.wb-loop-inline-more-btn {
+  grid-area: more;
+  justify-self: end;
+}
+
+.wb-loop-inline-grid {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.wb-loop-inline-grid-primary {
+  grid-template-columns: minmax(0, 1fr) 110px;
+}
+
+.wb-loop-inline-grid-advanced {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 768px) {
+  .wb-loop-inline-grid-advanced {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.wb-loop-inline-field {
+  color: var(--wb-text-secondary);
+  display: block;
+}
+
+.wb-loop-inline-advanced {
+  border-top: 1px dashed color-mix(in srgb, var(--wb-border-soft) 72%, transparent);
+  padding-top: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.wb-loop-inline-advanced.is-collapsed {
+  display: none;
+}
+
+.wb-loop-inline-input {
+  border: 1px solid color-mix(in srgb, var(--wb-border-soft) 72%, transparent);
+  background: color-mix(in srgb, var(--wb-surface-2) 66%, transparent);
+  color: var(--wb-text-primary);
+  transition: border-color var(--wb-motion-standard) var(--wb-ease-enter),
+    box-shadow var(--wb-motion-standard) var(--wb-ease-enter),
+    background-color var(--wb-motion-standard) var(--wb-ease-enter);
+}
+
+.wb-loop-inline-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--wb-focus) 72%, var(--wb-border-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-focus) 20%, transparent);
+  background: color-mix(in srgb, var(--wb-surface-2) 82%, transparent);
+}
+
+.wb-loop-inline-note {
+  margin: 0;
+  color: var(--wb-text-secondary);
 }
 
 .wb-loop-readiness-badge {
@@ -680,6 +988,16 @@
   .wb-builder-grid,
   .wb-canvas-inspector-grid {
     gap: 12px;
+  }
+
+  .wb-root [data-graph-node-list] {
+    align-items: stretch;
+  }
+
+  .wb-root [data-graph-node-list] > .wb-node-card,
+  .wb-loop-container-body > .wb-node-card {
+    width: 100%;
+    margin-inline-start: 0;
   }
 
   .wb-inspector-contextual {
