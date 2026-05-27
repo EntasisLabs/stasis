@@ -713,6 +713,7 @@ fn stringify_json_field(value: Option<&Value>) -> String {
 #[derive(Clone, Debug, Deserialize)]
 struct WorkflowGraphCompileSpec {
     intent_goal: Option<String>,
+    initial_state: Option<serde_json::Value>,
     prelude: Option<Vec<String>>,
     glyph: Option<WorkflowGraphGlyphSpec>,
     executables: Option<Vec<WorkflowGraphExecutableSpec>>,
@@ -766,6 +767,7 @@ struct WorkflowGraphTopologySpec {
     edges: Option<Vec<WorkflowGraphTopologyEdgeSpec>>,
     guided_loops: Option<Vec<WorkflowGraphTopologyLoopSpec>>,
     guided_loop: Option<WorkflowGraphTopologyLoopSpec>,
+    initial_state: Option<serde_json::Value>,
     prelude: Option<Vec<String>>,
     glyph: Option<WorkflowGraphGlyphSpec>,
     executables: Option<Vec<WorkflowGraphExecutableSpec>>,
@@ -933,6 +935,7 @@ fn build_compile_spec_from_topology_graph(
     function_inputs: Option<&BTreeMap<String, String>>,
 ) -> Option<WorkflowGraphCompileSpec> {
     let spec = serde_json::from_str::<WorkflowGraphTopologySpec>(graph_state_json).ok()?;
+    let topology_initial_state = spec.initial_state.clone();
     let topology_prelude = spec.prelude.clone();
     let topology_glyph = spec.glyph.clone();
     let topology_executables = spec.executables.clone();
@@ -941,9 +944,6 @@ fn build_compile_spec_from_topology_graph(
         && let Some(single_loop) = spec.guided_loop.clone()
     {
         loop_configs.push(single_loop);
-    }
-    if loop_configs.is_empty() {
-        return None;
     }
 
     let ordered_nodes = topology_ordered_node_ids(&spec);
@@ -964,6 +964,27 @@ fn build_compile_spec_from_topology_graph(
         .collect::<Vec<_>>();
     if ordered_ops.is_empty() {
         return None;
+    }
+
+    let build_linear_spec = |intent_goal: &str| WorkflowGraphCompileSpec {
+        intent_goal: Some(intent_goal.to_string()),
+        initial_state: topology_initial_state.clone(),
+        prelude: topology_prelude.clone(),
+        glyph: topology_glyph.clone(),
+        executables: topology_executables.clone(),
+        query: WorkflowGraphExecutableSpec {
+            kind: Some("query".to_string()),
+            name: Some(sanitize_executable_name(workflow_id)),
+            on: Some("Any".to_string()),
+            returns: None,
+            inject_context: Some(true),
+            steps: ordered_ops.clone(),
+        },
+        iterators: None,
+    };
+
+    if loop_configs.is_empty() {
+        return Some(build_linear_spec("Guided topology authoring"));
     }
 
     let mut ranges = loop_configs
@@ -1007,7 +1028,7 @@ fn build_compile_spec_from_topology_graph(
         .collect::<Vec<_>>();
 
     if ranges.is_empty() {
-        return None;
+        return Some(build_linear_spec("Guided topology authoring"));
     }
 
     ranges.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
@@ -1035,7 +1056,7 @@ fn build_compile_spec_from_topology_graph(
     }
 
     if sanitized_ranges.is_empty() {
-        return None;
+        return Some(build_linear_spec("Guided topology authoring"));
     }
 
     let mut query_steps = Vec::<WorkflowGraphOperationSpec>::new();
@@ -1076,12 +1097,13 @@ fn build_compile_spec_from_topology_graph(
         cursor += 1;
     }
 
-    if query_steps.is_empty() || iterators.is_empty() {
-        return None;
+    if query_steps.is_empty() {
+        return Some(build_linear_spec("Guided topology authoring"));
     }
 
     Some(WorkflowGraphCompileSpec {
         intent_goal: Some("Guided loop authoring".to_string()),
+        initial_state: topology_initial_state,
         prelude: topology_prelude,
         glyph: topology_glyph,
         executables: topology_executables,
@@ -1093,7 +1115,11 @@ fn build_compile_spec_from_topology_graph(
             inject_context: Some(true),
             steps: query_steps,
         },
-        iterators: Some(iterators),
+        iterators: if iterators.is_empty() {
+            None
+        } else {
+            Some(iterators)
+        },
     })
 }
 
@@ -1173,6 +1199,40 @@ fn render_graph_call_args(args: Option<&serde_json::Value>) -> String {
         "()".to_string()
     } else {
         format!("({rendered})")
+    }
+}
+
+fn render_graph_set_state(initial_state: Option<&serde_json::Value>) -> Option<String> {
+    let value = initial_state?;
+    let object = value.as_object()?;
+    if object.is_empty() {
+        return None;
+    }
+
+    let mut entries = object.iter().collect::<Vec<_>>();
+    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    let rendered = entries
+        .into_iter()
+        .map(|(key, value)| {
+            let key_rendered = if key
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+                && key.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            {
+                key.to_string()
+            } else {
+                serde_json::to_string(key).unwrap_or_else(|_| "\"key\"".to_string())
+            };
+            format!("{key_rendered}: {}", render_graph_literal(value))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if rendered.trim().is_empty() {
+        None
+    } else {
+        Some(rendered)
     }
 }
 
@@ -1262,7 +1322,7 @@ fn render_graph_executable_block(
     returns: Option<&str>,
     inject_context: bool,
     steps: &[String],
-    workflow_context: Option<(&str, &str)>,
+    initial_state: Option<&serde_json::Value>,
 ) -> Option<String> {
     if steps.is_empty() {
         return None;
@@ -1280,17 +1340,14 @@ fn render_graph_executable_block(
         .unwrap_or_default();
 
     let body = if inject_context && kind == "query" {
-        let Some((workflow_id, queue)) = workflow_context else {
-            return None;
-        };
-        format!(
-            "  set {{ workflow_id: {workflow_id_literal}, queue: {queue_literal} }}\n    |> {steps}",
-            workflow_id_literal = serde_json::to_string(workflow_id)
-                .unwrap_or_else(|_| "\"workflow\"".to_string()),
-            queue_literal = serde_json::to_string(queue)
-                .unwrap_or_else(|_| "\"default\"".to_string()),
-            steps = steps.join("\n    |> "),
-        )
+        if let Some(initial_state_body) = render_graph_set_state(initial_state) {
+            format!(
+                "  set {{ {initial_state_body} }}\n    |> {steps}",
+                steps = steps.join("\n    |> "),
+            )
+        } else {
+            format!("  {}", steps.join("\n  |> "))
+        }
     } else {
         format!("  {}", steps.join("\n  |> "))
     };
@@ -1315,7 +1372,7 @@ fn render_graph_glyph_block(name: &str, steps: &[String]) -> Option<String> {
 
 fn compile_grapheme_source_from_graph_state(
     workflow_id: &str,
-    queue: &str,
+    _queue: &str,
     graph_state_json: &str,
     function_inputs_json: Option<&str>,
 ) -> Option<String> {
@@ -1332,6 +1389,7 @@ fn compile_grapheme_source_from_graph_state(
     if spec.query.steps.is_empty() {
         return None;
     }
+    let initial_state = spec.initial_state.clone();
 
     let mut import_modules = BTreeSet::<String>::new();
     let query_steps = collect_graph_rendered_steps(&spec.query.steps, &mut import_modules);
@@ -1376,7 +1434,7 @@ fn compile_grapheme_source_from_graph_state(
                 executable.returns.as_deref(),
                 executable.inject_context.unwrap_or(false),
                 &steps,
-                Some((workflow_id, queue)),
+                initial_state.as_ref(),
             )
         })
         .collect::<Vec<_>>();
@@ -1452,7 +1510,7 @@ fn compile_grapheme_source_from_graph_state(
         spec.query.returns.as_deref(),
         spec.query.inject_context.unwrap_or(true),
         &query_steps,
-        Some((workflow_id, queue)),
+        initial_state.as_ref(),
     )?;
 
     if let Some(intent_goal) = spec
@@ -1504,7 +1562,7 @@ fn format_function_title(function_id: &str) -> String {
 
 fn compile_grapheme_source_from_function_steps(
     workflow_id: &str,
-    queue: &str,
+    _queue: &str,
     function_steps_csv: &str,
     function_inputs_json: Option<&str>,
 ) -> Option<String> {
@@ -1613,13 +1671,10 @@ fn compile_grapheme_source_from_function_steps(
             format!("{module_id}.{function_id}{args}")
         })
         .collect::<Vec<_>>()
-        .join("\n    |> ");
+        .join("\n  |> ");
 
     Some(format!(
-        "{import_block}\n\nquery {executable_name} {{\n  set {{ workflow_id: {workflow_id_literal}, queue: {queue_literal} }}\n    |> {pipeline_steps}\n}}\n",
-        workflow_id_literal = serde_json::to_string(workflow_id)
-            .unwrap_or_else(|_| "\"workflow\"".to_string()),
-        queue_literal = serde_json::to_string(queue).unwrap_or_else(|_| "\"default\"".to_string())
+        "{import_block}\n\nquery {executable_name} {{\n  {pipeline_steps}\n}}\n"
     ))
 }
 
@@ -4144,8 +4199,9 @@ mod tests {
 
         assert!(source.contains("import web from \"grapheme/web\""));
         assert!(source.contains("import textops from \"grapheme/textops\""));
-        assert!(source.contains("|> web.duckduckgo(query: \"rust async\")"));
+        assert!(source.contains("web.duckduckgo(query: \"rust async\")"));
         assert!(source.contains("|> textops.to_markdown()"));
+        assert!(!source.contains("set { workflow_id:"));
         assert!(!source.contains("core.echo(message: \"workflow:"));
     }
 
@@ -4159,7 +4215,7 @@ mod tests {
         )
         .expect("source should compile");
 
-        assert!(source.contains("|> web.duckduckgo()"));
+        assert!(source.contains("web.duckduckgo()"));
     }
 
     #[test]
@@ -4172,7 +4228,7 @@ mod tests {
         )
         .expect("source should compile");
 
-        assert!(source.contains("|> web.duckduckgo(query: $current.message)"));
+        assert!(source.contains("web.duckduckgo(query: $current.message)"));
         assert!(!source.contains("query: \"$current.message\""));
     }
 
@@ -4183,6 +4239,10 @@ mod tests {
             "default",
             r#"{
                 "intent_goal":"Find the best rust runtime patterns",
+                "initial_state":{
+                    "workflow_id":"wf-search",
+                    "queue":"default"
+                },
                 "query":{
                     "name":"Q",
                     "on":"Any",
@@ -4208,13 +4268,37 @@ mod tests {
 
         assert!(source.contains("import websearch from \"grapheme/websearch\""));
         assert!(source.contains("query Q on Any"));
-        assert!(source.contains("set { workflow_id: \"wf-search\", queue: \"default\" }"));
+        assert!(source.contains("set {"));
+        assert!(source.contains("workflow_id: \"wf-search\""));
+        assert!(source.contains("queue: \"default\""));
         assert!(source.contains("|> websearch.search(max_results: 3, query: \"Rust async runtime patterns\")"));
         assert!(source.contains("iterator ParseResults on Any @loop(max: 3, each: $current.results, merge: \"append\")"));
         assert!(source.contains("http.get("));
         assert!(source.contains("$current.url"));
         assert!(source.contains("|> html.to_md("));
         assert!(source.contains("$current.body"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_skips_context_set_when_initial_state_missing() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-search",
+            "default",
+            r#"{
+                "query":{
+                    "name":"Q",
+                    "on":"Any",
+                    "steps":[
+                        {"op":"websearch.search","args":{"query":"Rust async runtime patterns","max_results":3}}
+                    ]
+                }
+            }"#,
+            None,
+        )
+        .expect("graph source should compile");
+
+        assert!(!source.contains("set {"));
+        assert!(source.contains("websearch.search(max_results: 3, query: \"Rust async runtime patterns\")"));
     }
 
     #[test]
@@ -4298,7 +4382,7 @@ mod tests {
         .expect("expr graph source should compile");
 
         assert!(source.contains("import core from \"grapheme/core\""));
-        assert!(source.contains("|> core.pick(fields: [\"title\", \"url\"])"));
+        assert!(source.contains("core.pick(fields: [\"title\", \"url\"])") );
     }
 
     #[test]
@@ -4365,6 +4449,85 @@ mod tests {
         assert!(source.contains("iterator GuidedLoop on Any @loop(max: 3, each: $current.results, merge: \"append\")"));
         assert!(source.contains("http.get()"));
         assert!(source.contains("html.to_markdown()"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_supports_linear_topology_without_loops() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-none",
+            "default",
+            r#"{
+                "version": 1,
+                "nodes": [
+                    {"id": "node-fn-core-echo-1"}
+                ],
+                "edges": []
+            }"#,
+            Some(r#"{"node-fn-core-echo-1":"{\"message\":{\"$state\":\"$current.query\"}}"}"#),
+        )
+        .expect("linear topology should compile");
+
+        assert!(source.contains("import core from \"grapheme/core\""));
+        assert!(source.contains("query wf_none on Any"));
+        assert!(source.contains("core.echo(message: $current.query)"));
+        assert!(!source.contains("set { workflow_id:"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_applies_initial_state_to_linear_topology() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-none",
+            "default",
+            r#"{
+                "version": 1,
+                "nodes": [
+                    {"id": "node-fn-core-echo-1"}
+                ],
+                "edges": [],
+                "initial_state": {
+                    "query": "rust async"
+                }
+            }"#,
+            Some(r#"{"node-fn-core-echo-1":"{\"message\":{\"$state\":\"$current.query\"}}"}"#),
+        )
+        .expect("linear topology with initial state should compile");
+
+        assert!(source.contains("set { query: \"rust async\" }"));
+        assert!(source.contains("core.echo(message: $current.query)"));
+    }
+
+    #[test]
+    fn compile_grapheme_source_from_graph_state_applies_initial_state_to_guided_topology_query() {
+        let source = super::compile_grapheme_source_from_graph_state(
+            "wf-guided-loop",
+            "default",
+            r#"{
+                "version": 1,
+                "nodes": [
+                    {"id": "node-fn-core-websearch-1"},
+                    {"id": "node-fn-http-get-2"}
+                ],
+                "edges": [
+                    {"from": "node-fn-core-websearch-1", "to": "node-fn-http-get-2"}
+                ],
+                "guided_loop": {
+                    "max": 2,
+                    "each": "$current.results",
+                    "merge": "append",
+                    "start_node_id": "node-fn-http-get-2",
+                    "end_node_id": "node-fn-http-get-2"
+                },
+                "initial_state": {
+                    "query": "rust async"
+                }
+            }"#,
+            None,
+        )
+        .expect("guided topology should compile with initial state");
+
+        assert!(source.contains("set { query: \"rust async\" }"));
+        assert!(source.contains("core.websearch()"));
+        assert!(source.contains("iterator GuidedLoop on Any @loop(max: 2, each: $current.results, merge: \"append\")"));
     }
 
     #[test]
@@ -4437,7 +4600,7 @@ mod tests {
         )
         .expect("multi loop topology should compile");
 
-        assert!(source.contains("|> core.websearch()"));
+        assert!(source.contains("core.websearch()"));
         assert!(source.contains("|> FetchPages"));
         assert!(source.contains("|> RenderMarkdown"));
         assert!(source.contains("iterator FetchPages on Any @loop(max: 3, each: $current.results, merge: \"append\")"));

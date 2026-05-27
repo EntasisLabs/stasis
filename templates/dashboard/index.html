@@ -279,6 +279,7 @@
         var workflowLoopSettingsExpandedMap = {};
         var workflowLoopSettingsPopoverOpenMap = {};
         var openWorkflowLoopMenuId = "";
+        var workflowStartObjectPopoverOpen = false;
         var workflowNodeMotionPrimed = false;
         var workflowNodeMotionOrderMap = {};
 
@@ -857,9 +858,24 @@
           return normalized;
         }
 
+        function normalizeWorkflowGraphInitialState(raw) {
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+
+          var normalized = {};
+          Object.keys(raw).forEach(function (key) {
+            if (typeof key !== "string") return;
+            var trimmedKey = key.trim();
+            if (!trimmedKey) return;
+            normalized[trimmedKey] = raw[key];
+          });
+
+          return Object.keys(normalized).length > 0 ? normalized : null;
+        }
+
         function normalizeWorkflowGraphCompileMetadata(graph) {
           if (!graph || typeof graph !== "object") return null;
 
+          var initialState = normalizeWorkflowGraphInitialState(graph.initial_state);
           var prelude = normalizeWorkflowGraphPrelude(graph.prelude);
           var glyph = normalizeWorkflowGraphGlyphSpec(graph.glyph);
           var executables = Array.isArray(graph.executables)
@@ -868,11 +884,12 @@
               .filter(function (item) { return !!item; })
             : [];
 
-          if (!prelude.length && !glyph && !executables.length) {
+          if (!initialState && !prelude.length && !glyph && !executables.length) {
             return null;
           }
 
           return {
+            initial_state: initialState,
             prelude: prelude,
             glyph: glyph,
             executables: executables,
@@ -883,10 +900,18 @@
           if (!graph || typeof graph !== "object") return;
 
           if (!metadata) {
+            delete graph.initial_state;
             delete graph.prelude;
             delete graph.glyph;
             delete graph.executables;
             return;
+          }
+
+          var initialState = normalizeWorkflowGraphInitialState(metadata.initial_state);
+          if (initialState) {
+            graph.initial_state = initialState;
+          } else {
+            delete graph.initial_state;
           }
 
           if (Array.isArray(metadata.prelude) && metadata.prelude.length > 0) {
@@ -1136,6 +1161,78 @@
 
         function hasOpenWorkflowLoopSettingsPopover() {
           return Object.keys(workflowLoopSettingsPopoverOpenMap).length > 0;
+        }
+
+        function getWorkflowStartingObjectNodes() {
+          return {
+            toggle: host.querySelector("[data-workflow-start-object-toggle]"),
+            popover: host.querySelector("[data-workflow-start-object-popover]"),
+            editor: host.querySelector("[data-workflow-start-object-editor]"),
+            status: host.querySelector("[data-workflow-start-object-status]"),
+            clear: host.querySelector("[data-workflow-start-object-clear]"),
+          };
+        }
+
+        function parseWorkflowStartingObjectEditorValue(raw) {
+          var text = typeof raw === "string" ? raw.trim() : "";
+          if (!text) {
+            return { empty: true, value: null, error: "" };
+          }
+
+          try {
+            var parsed = JSON.parse(text);
+            var normalized = normalizeWorkflowGraphInitialState(parsed);
+            if (!normalized) {
+              return {
+                empty: false,
+                value: null,
+                error: "Starting Object must be a JSON object.",
+              };
+            }
+            return { empty: false, value: normalized, error: "" };
+          } catch (e) {
+            return {
+              empty: false,
+              value: null,
+              error: "Starting Object must be valid JSON.",
+            };
+          }
+        }
+
+        function setWorkflowStartingObjectStatus(message, isError) {
+          var nodes = getWorkflowStartingObjectNodes();
+          if (!nodes.status) return;
+          nodes.status.textContent = message || "Optional";
+          nodes.status.classList.toggle("is-error", !!isError);
+        }
+
+        function syncWorkflowStartingObjectControls(graph) {
+          var nodes = getWorkflowStartingObjectNodes();
+          var hasControls = !!(nodes.toggle || nodes.popover || nodes.editor || nodes.status || nodes.clear);
+          if (!hasControls) return;
+
+          var normalized = normalizeWorkflowGraphInitialState(graph && graph.initial_state);
+          var hasInitialState = !!normalized;
+
+          if (nodes.toggle) {
+            nodes.toggle.setAttribute("aria-expanded", String(workflowStartObjectPopoverOpen));
+            nodes.toggle.classList.toggle("is-active", hasInitialState);
+          }
+
+          if (nodes.popover) {
+            nodes.popover.classList.toggle("hidden", !workflowStartObjectPopoverOpen);
+            nodes.popover.classList.toggle("is-open", workflowStartObjectPopoverOpen);
+          }
+
+          if (nodes.editor && document.activeElement !== nodes.editor) {
+            nodes.editor.value = hasInitialState ? JSON.stringify(normalized, null, 2) : "";
+          }
+
+          if (nodes.clear) {
+            nodes.clear.disabled = !hasInitialState;
+          }
+
+          setWorkflowStartingObjectStatus(hasInitialState ? "Seed ready" : "Optional", false);
         }
 
         function nextWorkflowLoopId(loops) {
@@ -2653,6 +2750,7 @@
             selectedLoop && selectedLoop.end_node_id
           );
           applyWorkflowLoopConfigToInputs(selectedLoop || null);
+          syncWorkflowStartingObjectControls(graph);
           persistWorkflowGraphForCurrentContext(graph);
           renderWorkflowGraphLinks(graph);
         }
@@ -3053,7 +3151,7 @@
             });
           }
 
-          if (!hasReservedHints && !prelude.length && !executables.length && !glyphSteps.length) {
+          if (!hasReservedHints && !prelude.length && !executables.length && !glyphSteps.length && !querySteps.length) {
             return null;
           }
 
@@ -4693,6 +4791,35 @@
             hydrateWorkflowGraphState();
           }
 
+          var startObjectToggle = event.target.closest("[data-workflow-start-object-toggle]");
+          if (startObjectToggle) {
+            event.preventDefault();
+            event.stopPropagation();
+            workflowStartObjectPopoverOpen = !workflowStartObjectPopoverOpen;
+            syncWorkflowStartingObjectControls(readWorkflowGraphForCurrentContext());
+            return;
+          }
+
+          var startObjectClear = event.target.closest("[data-workflow-start-object-clear]");
+          if (startObjectClear) {
+            event.preventDefault();
+            event.stopPropagation();
+            var clearGraph = readWorkflowGraphForCurrentContext();
+            if (!clearGraph || typeof clearGraph !== "object") return;
+            delete clearGraph.initial_state;
+            persistWorkflowGraphForCurrentContext(clearGraph);
+            syncWorkflowStartingObjectControls(clearGraph);
+            return;
+          }
+
+          if (
+            workflowStartObjectPopoverOpen
+            && !event.target.closest("[data-workflow-start-object-popover], [data-workflow-start-object-toggle]")
+          ) {
+            workflowStartObjectPopoverOpen = false;
+            syncWorkflowStartingObjectControls(readWorkflowGraphForCurrentContext());
+          }
+
           var paramRowTrigger = event.target.closest("[data-function-param-row]");
           if (paramRowTrigger) {
             clearWorkflowParamRowFocus(paramRowTrigger);
@@ -4716,7 +4843,7 @@
           var canvasUnselectTrigger = event.target.closest("[data-canvas-dropzone]");
           if (canvasUnselectTrigger) {
             var canvasInteractive = event.target.closest(
-              "[data-canvas-node-button], [data-graph-output-handle], [data-graph-input-handle], [data-graph-edge-id], [data-graph-loop-toggle], [data-graph-loop-select], [data-graph-loop-menu-wrap], [data-graph-loop-menu-toggle], [data-graph-loop-menu], [data-graph-loop-container-shell], [data-workflow-loop-config], [data-workflow-readiness-jump], [data-node-context-panel], [data-step-advanced-drawer], [data-step-advanced-open], [data-step-advanced-close], [data-state-explorer-path], [data-action-post]"
+              "[data-canvas-node-button], [data-graph-output-handle], [data-graph-input-handle], [data-graph-edge-id], [data-graph-loop-toggle], [data-graph-loop-select], [data-graph-loop-menu-wrap], [data-graph-loop-menu-toggle], [data-graph-loop-menu], [data-graph-loop-container-shell], [data-workflow-loop-config], [data-workflow-readiness-jump], [data-workflow-start-object-toggle], [data-workflow-start-object-popover], [data-workflow-start-object-editor], [data-workflow-start-object-clear], [data-node-context-panel], [data-step-advanced-drawer], [data-step-advanced-open], [data-step-advanced-close], [data-state-explorer-path], [data-action-post]"
             );
             if (!canvasInteractive) {
               event.preventDefault();
@@ -5048,6 +5175,29 @@
         });
 
         document.addEventListener("input", function (event) {
+          var startingObjectEditor = event.target.closest("[data-workflow-start-object-editor]");
+          if (startingObjectEditor) {
+            if (currentView !== "workflows") return;
+            var graph = readWorkflowGraphForCurrentContext();
+            if (!graph || typeof graph !== "object") return;
+
+            var parsedStartingObject = parseWorkflowStartingObjectEditorValue(startingObjectEditor.value || "");
+            if (parsedStartingObject.error) {
+              setWorkflowStartingObjectStatus(parsedStartingObject.error, true);
+              return;
+            }
+
+            if (parsedStartingObject.empty || !parsedStartingObject.value) {
+              delete graph.initial_state;
+            } else {
+              graph.initial_state = parsedStartingObject.value;
+            }
+
+            persistWorkflowGraphForCurrentContext(graph);
+            syncWorkflowStartingObjectControls(graph);
+            return;
+          }
+
           var loopInlineInput = event.target.closest("[data-workflow-loop-inline-field]");
           if (loopInlineInput) {
             syncWorkflowLoopConfigFromInlineEditor(loopInlineInput.getAttribute("data-loop-id") || "");

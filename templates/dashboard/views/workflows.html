@@ -171,6 +171,27 @@
                     Save
                   </button>
                   <button
+                    class="btn btn-outline btn-sm wb-starting-object-toggle"
+                    type="button"
+                    data-workflow-start-object-toggle
+                    aria-expanded="false"
+                  >
+                    Starting Object
+                  </button>
+                  <div class="hidden wb-starting-object-popover" data-workflow-start-object-popover>
+                    <p class="wb-starting-object-popover-title">Seed initial <span class="font-mono">$current</span></p>
+                    <textarea
+                      class="wb-starting-object-editor"
+                      data-workflow-start-object-editor
+                      spellcheck="false"
+                      placeholder='{"query":"rust async runtime","attempt":1}'
+                    ></textarea>
+                    <div class="wb-starting-object-popover-footer">
+                      <span class="wb-starting-object-status" data-workflow-start-object-status>Optional</span>
+                      <button type="button" class="btn btn-ghost btn-xs" data-workflow-start-object-clear>Clear</button>
+                    </div>
+                  </div>
+                  <button
                     type="button"
                     class="btn btn-outline btn-sm wb-advanced-toggle"
                     data-workflow-advanced-toggle
