@@ -5,47 +5,6 @@
   <input type="hidden" id="workflow-function-steps-state" value="{{ custom_function_steps_csv }}" />
   <input type="hidden" id="workflow-function-inputs-state" value="{{ custom_function_inputs_json }}" />
   <input type="hidden" id="workflow-graph-state" value="{{ saved_graph_state_json }}" />
-  <div class="flex items-center justify-between wb-topbar">
-    <div>
-      <h2 class="text-2xl font-semibold tracking-tight" style="color: var(--foreground);">Workflow Builder</h2>
-      <p class="text-sm mt-1" style="color: var(--muted-foreground);">Add steps. Add Repeat. Test Run.</p>
-    </div>
-    <div class="flex gap-2">
-      {% if advanced_mode %}
-      <button class="btn btn-outline btn-sm" type="button" data-theme-toggle>
-        Theme
-      </button>
-      {% endif %}
-      <button class="btn btn-outline btn-sm" type="button"
-        data-action-post="/action/workflows/run-draft"
-        data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'
-        data-action-source-selector="{% if advanced_mode %}#workflow-source-editor{% else %}#workflow-source-guided{% endif %}"
-        data-action-modules-selector="#workflow-modules-state"
-        data-action-function-steps-selector="#workflow-function-steps-state"
-        data-action-function-inputs-selector="#workflow-function-inputs-state">
-        <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m0 0l-4-4m4 4l-4 4"/></svg>
-        Test Run
-      </button>
-      <button class="btn btn-outline btn-sm" type="button"
-        data-action-post="/action/workflows/save"
-        data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'
-        data-action-source-selector="{% if advanced_mode %}#workflow-source-editor{% else %}#workflow-source-guided{% endif %}"
-        data-action-modules-selector="#workflow-modules-state"
-        data-action-function-steps-selector="#workflow-function-steps-state"
-        data-action-function-inputs-selector="#workflow-function-inputs-state">
-        <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
-        Save
-      </button>
-      {% if advanced_mode %}
-      <button class="btn btn-primary btn-sm" type="button"
-        data-action-post="/action/workflows/execute"
-        data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'>
-        <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        Execute
-      </button>
-      {% endif %}
-    </div>
-  </div>
 
   <div class="hidden rounded-lg p-3" data-workflow-readiness-strip style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 45%, transparent);">
     <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -188,7 +147,47 @@
               data-custom-function-inputs="{{ custom_function_inputs_json }}"
               data-selected-module-catalog="{{ selected_module_catalog }}"
             >
-              <h4 class="text-sm font-semibold mb-3">Step Flow</h4>
+              <div class="wb-canvas-toolbar">
+                <h4 class="text-sm font-semibold">Step Flow</h4>
+                <div class="wb-canvas-actions">
+                  <button class="btn btn-outline btn-sm" type="button"
+                    data-action-post="/action/workflows/run-draft"
+                    data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'
+                    data-action-source-selector="{% if advanced_mode %}#workflow-source-editor{% else %}#workflow-source-guided{% endif %}"
+                    data-action-modules-selector="#workflow-modules-state"
+                    data-action-function-steps-selector="#workflow-function-steps-state"
+                    data-action-function-inputs-selector="#workflow-function-inputs-state">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m0 0l-4-4m4 4l-4 4"/></svg>
+                    Test Run
+                  </button>
+                  <button class="btn btn-outline btn-sm" type="button"
+                    data-action-post="/action/workflows/save"
+                    data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'
+                    data-action-source-selector="{% if advanced_mode %}#workflow-source-editor{% else %}#workflow-source-guided{% endif %}"
+                    data-action-modules-selector="#workflow-modules-state"
+                    data-action-function-steps-selector="#workflow-function-steps-state"
+                    data-action-function-inputs-selector="#workflow-function-inputs-state">
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-outline btn-sm wb-advanced-toggle"
+                    data-workflow-advanced-toggle
+                    aria-expanded="{% if advanced_mode %}true{% else %}false{% endif %}"
+                  >
+                    <span data-workflow-advanced-toggle-label>{% if advanced_mode %}Hide Advanced View{% else %}Advanced View{% endif %}</span>
+                  </button>
+                  {% if advanced_mode %}
+                  <button class="btn btn-primary btn-sm" type="button"
+                    data-action-post="/action/workflows/execute"
+                    data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'>
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    Execute
+                  </button>
+                  {% endif %}
+                </div>
+              </div>
               <div class="hidden mb-2 rounded px-2 py-1 wb-loop-summary" data-workflow-loop-summary></div>
               <div class="relative" data-graph-canvas>
                 <svg
@@ -624,111 +623,115 @@
         </div>
       </div>
 
-      <div id="workflow-draft-run-results" class="card mt-4">
-        <div class="card-header">
-          <h3 class="card-title">Test Run Output</h3>
-          <p class="card-description">Test Run to view clean engine output and workflow lineage without leaving the builder.</p>
+      <div class="wb-workflow-advanced-shell {% if !advanced_mode %}hidden{% endif %}" data-workflow-advanced-shell>
+        <div id="workflow-draft-run-results" class="card mt-4">
+          <div class="card-header">
+            <h3 class="card-title">Test Run Output</h3>
+            <p class="card-description">Test Run to view clean engine output and workflow lineage without leaving the builder.</p>
+          </div>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="card wb-builder-workspace" {% if advanced_mode %}data-builder-tab-group{% endif %}>
-    <textarea id="workflow-source-guided" class="hidden" aria-hidden="true">{{ grapheme_source_preview }}</textarea>
-    <div class="card-header">
-      <div class="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h3 class="card-title">Builder Workspace</h3>
-          <p class="card-description">{% if advanced_mode %}Advanced mode is enabled for source and diagnostics tooling.{% else %}Guided mode keeps workflow building visual-first. Advanced tools are optional.{% endif %}</p>
-        </div>
-        {% if advanced_mode %}
-        <div class="inline-flex rounded-lg p-1" style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 55%, transparent);">
-          <button
-            type="button"
-            class="btn btn-sm"
-            data-builder-tab-trigger="guided"
-            style="background: var(--primary); color: var(--primary-foreground);"
+  <div class="wb-workflow-advanced-shell {% if !advanced_mode %}hidden{% endif %}" data-workflow-advanced-shell>
+    <div class="card wb-builder-workspace" {% if advanced_mode %}data-builder-tab-group{% endif %}>
+      <textarea id="workflow-source-guided" class="hidden" aria-hidden="true">{{ grapheme_source_preview }}</textarea>
+      <div class="card-header">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h3 class="card-title">Builder Workspace</h3>
+            <p class="card-description">{% if advanced_mode %}Advanced mode is enabled for source and diagnostics tooling.{% else %}Guided mode keeps workflow building visual-first. Advanced tools are optional.{% endif %}</p>
+          </div>
+          {% if advanced_mode %}
+          <div class="inline-flex rounded-lg p-1" style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 55%, transparent);">
+            <button
+              type="button"
+              class="btn btn-sm"
+              data-builder-tab-trigger="guided"
+              style="background: var(--primary); color: var(--primary-foreground);"
+            >
+              Guided
+            </button>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              data-builder-tab-trigger="advanced"
+              style="color: var(--muted-foreground);"
+            >
+              Advanced Tools
+            </button>
+          </div>
+          {% else %}
+          <a
+            href="#"
+            class="btn btn-outline btn-sm"
+            hx-get="/view/workflows?queue={{ selected_queue }}&node={% match selected_node %}{% when Some with (node) %}{{ node.id }}{% when None %}{% endmatch %}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode=advanced&module_catalog={{ selected_module_catalog }}"
+            hx-target="#dashboard-view"
+            hx-swap="innerHTML"
           >
-            Guided
-          </button>
-          <button
-            type="button"
+            Open Advanced Tools
+          </a>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card-content" {% if advanced_mode %}data-builder-tab-panel="guided"{% endif %}>
+        <h4 class="text-sm font-semibold mb-2">Flow Blueprint</h4>
+        <p class="text-xs mb-3" style="color: var(--muted-foreground);">Quick textual summary of the currently selected workflow lane.</p>
+        <pre class="text-xs font-mono p-4 rounded-lg overflow-x-auto" style="background: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--foreground);">{{ dsl_preview }}</pre>
+      </div>
+
+      {% if advanced_mode %}
+      <div class="card-content hidden wb-advanced-panel" data-builder-tab-panel="advanced">
+        <p class="card-description mb-3">Edit source and inspect deep flow insights in-place.</p>
+        <div class="mb-3">
+          <a
+            href="#"
             class="btn btn-ghost btn-sm"
-            data-builder-tab-trigger="advanced"
-            style="color: var(--muted-foreground);"
+            hx-get="/view/workflows?queue={{ selected_queue }}&node={% match selected_node %}{% when Some with (node) %}{{ node.id }}{% when None %}{% endmatch %}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode=guided&module_catalog={{ selected_module_catalog }}"
+            hx-target="#dashboard-view"
+            hx-swap="innerHTML"
           >
-            Advanced Tools
-          </button>
+            Back To Guided Mode
+          </a>
         </div>
-        {% else %}
-        <a
-          href="#"
-          class="btn btn-outline btn-sm"
-          hx-get="/view/workflows?queue={{ selected_queue }}&node={% match selected_node %}{% when Some with (node) %}{{ node.id }}{% when None %}{% endmatch %}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode=advanced&module_catalog={{ selected_module_catalog }}"
-          hx-target="#dashboard-view"
+        <form
+          class="flex flex-col gap-3"
+          data-hx-get="/stream/workflow-reflection"
+          hx-target="#workflow-reflection-panel"
           hx-swap="innerHTML"
         >
-          Open Advanced Tools
-        </a>
-        {% endif %}
-      </div>
-    </div>
+          <input type="hidden" name="workflow_id" value="{{ selected_workflow_id }}" />
+          <input type="hidden" name="queue" value="{{ selected_queue }}" />
+          <input type="hidden" name="mode" value="advanced" />
+          <textarea
+            id="workflow-source-editor"
+            name="source"
+            class="text-xs font-mono p-3 rounded-lg wb-source-editor"
+            style="min-height: 220px;"
+            spellcheck="false"
+          >{{ grapheme_source_preview }}</textarea>
+          <div class="flex items-center justify-between gap-3">
+            <p class="text-xs" style="color: var(--muted-foreground);">Use Refresh Flow Insights after edits to inspect module and executable impacts.</p>
+            <button type="submit" class="btn btn-primary btn-sm">Refresh Flow Insights</button>
+          </div>
+        </form>
 
-    <div class="card-content" {% if advanced_mode %}data-builder-tab-panel="guided"{% endif %}>
-      <h4 class="text-sm font-semibold mb-2">Flow Blueprint</h4>
-      <p class="text-xs mb-3" style="color: var(--muted-foreground);">Quick textual summary of the currently selected workflow lane.</p>
-      <pre class="text-xs font-mono p-4 rounded-lg overflow-x-auto" style="background: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--foreground);">{{ dsl_preview }}</pre>
-    </div>
-
-    {% if advanced_mode %}
-    <div class="card-content hidden wb-advanced-panel" data-builder-tab-panel="advanced">
-      <p class="card-description mb-3">Edit source and inspect deep flow insights in-place.</p>
-      <div class="mb-3">
-        <a
-          href="#"
-          class="btn btn-ghost btn-sm"
-          hx-get="/view/workflows?queue={{ selected_queue }}&node={% match selected_node %}{% when Some with (node) %}{{ node.id }}{% when None %}{% endmatch %}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode=guided&module_catalog={{ selected_module_catalog }}"
-          hx-target="#dashboard-view"
+        <div
+          id="workflow-reflection-panel"
+          class="mt-4"
+          hx-get="/stream/workflow-reflection?workflow_id={{ selected_workflow_id }}&queue={{ selected_queue }}&mode=advanced"
+          hx-trigger="load"
           hx-swap="innerHTML"
         >
-          Back To Guided Mode
-        </a>
-      </div>
-      <form
-        class="flex flex-col gap-3"
-        data-hx-get="/stream/workflow-reflection"
-        hx-target="#workflow-reflection-panel"
-        hx-swap="innerHTML"
-      >
-        <input type="hidden" name="workflow_id" value="{{ selected_workflow_id }}" />
-        <input type="hidden" name="queue" value="{{ selected_queue }}" />
-        <input type="hidden" name="mode" value="advanced" />
-        <textarea
-          id="workflow-source-editor"
-          name="source"
-          class="text-xs font-mono p-3 rounded-lg wb-source-editor"
-          style="min-height: 220px;"
-          spellcheck="false"
-        >{{ grapheme_source_preview }}</textarea>
-        <div class="flex items-center justify-between gap-3">
-          <p class="text-xs" style="color: var(--muted-foreground);">Use Refresh Flow Insights after edits to inspect module and executable impacts.</p>
-          <button type="submit" class="btn btn-primary btn-sm">Refresh Flow Insights</button>
-        </div>
-      </form>
-
-      <div
-        id="workflow-reflection-panel"
-        class="mt-4"
-        hx-get="/stream/workflow-reflection?workflow_id={{ selected_workflow_id }}&queue={{ selected_queue }}&mode=advanced"
-        hx-trigger="load"
-        hx-swap="innerHTML"
-      >
-        <div class="card-content pt-0">
-          <h3 class="card-title">Flow Insights</h3>
-          <p class="card-description">Loading module and executable introspection...</p>
+          <div class="card-content pt-0">
+            <h3 class="card-title">Flow Insights</h3>
+            <p class="card-description">Loading module and executable introspection...</p>
+          </div>
         </div>
       </div>
+      {% endif %}
     </div>
-    {% endif %}
   </div>
 </div>

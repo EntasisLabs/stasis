@@ -277,7 +277,10 @@
         var graphLinkDraft = null;
         var workflowLoopContainerCollapsedMap = {};
         var workflowLoopSettingsExpandedMap = {};
+        var workflowLoopSettingsPopoverOpenMap = {};
         var openWorkflowLoopMenuId = "";
+        var workflowNodeMotionPrimed = false;
+        var workflowNodeMotionOrderMap = {};
 
         function emitDashboardEvent(name, payload) {
           var detail = {
@@ -589,6 +592,8 @@
           currentView = viewName;
           if (viewName !== "workflows") {
             closeWorkflowAdvancedDrawer();
+            workflowNodeMotionPrimed = false;
+            workflowNodeMotionOrderMap = {};
           }
           host.style.opacity = "0.4";
           host.style.transition = "opacity 0.15s ease";
@@ -1063,6 +1068,11 @@
               delete workflowLoopSettingsExpandedMap[loopId];
             }
           });
+          Object.keys(workflowLoopSettingsPopoverOpenMap).forEach(function (loopId) {
+            if (!keep[loopId]) {
+              delete workflowLoopSettingsPopoverOpenMap[loopId];
+            }
+          });
           if (openWorkflowLoopMenuId && !keep[openWorkflowLoopMenuId]) {
             openWorkflowLoopMenuId = "";
           }
@@ -1098,6 +1108,34 @@
           } else {
             delete workflowLoopSettingsExpandedMap[key];
           }
+        }
+
+        function isWorkflowLoopSettingsPopoverOpen(loopId) {
+          var key = (loopId || "").trim();
+          if (!key) return false;
+          return !!workflowLoopSettingsPopoverOpenMap[key];
+        }
+
+        function setWorkflowLoopSettingsPopoverOpen(loopId, open) {
+          var key = (loopId || "").trim();
+          if (!key) return;
+          if (open) {
+            workflowLoopSettingsPopoverOpenMap[key] = true;
+          } else {
+            delete workflowLoopSettingsPopoverOpenMap[key];
+          }
+        }
+
+        function closeWorkflowLoopSettingsPopovers(exceptLoopId) {
+          var keepId = (exceptLoopId || "").trim();
+          Object.keys(workflowLoopSettingsPopoverOpenMap).forEach(function (loopId) {
+            if (keepId && loopId === keepId) return;
+            delete workflowLoopSettingsPopoverOpenMap[loopId];
+          });
+        }
+
+        function hasOpenWorkflowLoopSettingsPopover() {
+          return Object.keys(workflowLoopSettingsPopoverOpenMap).length > 0;
         }
 
         function nextWorkflowLoopId(loops) {
@@ -1151,6 +1189,7 @@
           loops.splice(removeIndex, 1);
           delete workflowLoopContainerCollapsedMap[targetId];
           delete workflowLoopSettingsExpandedMap[targetId];
+          delete workflowLoopSettingsPopoverOpenMap[targetId];
 
           writeWorkflowGuidedLoopsToGraph(graph, loops);
 
@@ -1197,6 +1236,8 @@
           selectedWorkflowLoopId = sourceLoop.id;
           setWorkflowLoopCollapsed(sourceLoop.id, false);
           setWorkflowLoopSettingsExpanded(sourceLoop.id, false);
+          closeWorkflowLoopSettingsPopovers("");
+          setWorkflowLoopSettingsPopoverOpen(sourceLoop.id, true);
 
           persistWorkflowGraphForCurrentContext(graph);
           hydrateWorkflowGraphState();
@@ -1358,8 +1399,24 @@
           var fieldKey = normalizeWorkflowLoopFieldKey(fieldIdOrKey);
           if (!targetLoopId || !fieldKey) return false;
 
+          var shouldHydrate = false;
+          if (selectedWorkflowLoopId !== targetLoopId) {
+            selectedWorkflowLoopId = targetLoopId;
+            shouldHydrate = true;
+          }
+
+          if (!isWorkflowLoopSettingsPopoverOpen(targetLoopId)) {
+            closeWorkflowLoopSettingsPopovers("");
+            setWorkflowLoopSettingsPopoverOpen(targetLoopId, true);
+            shouldHydrate = true;
+          }
+
           if (workflowLoopFieldUsesAdvancedPanel(fieldKey) && !isWorkflowLoopSettingsExpanded(targetLoopId)) {
             setWorkflowLoopSettingsExpanded(targetLoopId, true);
+            shouldHydrate = true;
+          }
+
+          if (shouldHydrate) {
             hydrateWorkflowGraphState();
           }
 
@@ -1862,6 +1919,52 @@
           };
         }
 
+        function queueWorkflowNodeMotion(node, className) {
+          if (!node || !className) return;
+          node.classList.remove(className);
+          // Force reflow so repeated queueing can replay the keyframe.
+          void node.offsetWidth;
+          node.classList.add(className);
+          window.setTimeout(function () {
+            node.classList.remove(className);
+          }, 360);
+        }
+
+        function markWorkflowNodeMotion(nodeList) {
+          if (!nodeList) return;
+
+          var buttons = Array.prototype.slice.call(
+            nodeList.querySelectorAll("[data-canvas-node-button]")
+          );
+          var nextOrderMap = {};
+
+          if (!workflowNodeMotionPrimed) {
+            buttons.forEach(function (button, index) {
+              var nodeId = (button.getAttribute("data-node-id") || "").trim();
+              if (!nodeId) return;
+              nextOrderMap[nodeId] = index;
+            });
+            workflowNodeMotionOrderMap = nextOrderMap;
+            workflowNodeMotionPrimed = true;
+            return;
+          }
+
+          buttons.forEach(function (button, index) {
+            var nodeId = (button.getAttribute("data-node-id") || "").trim();
+            if (!nodeId) return;
+
+            var previousIndex = workflowNodeMotionOrderMap[nodeId];
+            if (typeof previousIndex !== "number") {
+              queueWorkflowNodeMotion(button, "wb-node-enter");
+            } else if (previousIndex !== index) {
+              queueWorkflowNodeMotion(button, "wb-node-shift");
+            }
+            nextOrderMap[nodeId] = index;
+          });
+
+          workflowNodeMotionOrderMap = nextOrderMap;
+        }
+
         function resetWorkflowNodeListToFlatOrder(nodeList) {
           if (!nodeList) return;
           nodeList.querySelectorAll("[data-graph-loop-container-shell]").forEach(function (shell) {
@@ -1885,7 +1988,7 @@
             return left - right;
           });
 
-          var dagOffsets = [0, -18, 16, -10, 8];
+          var dagOffsets = [0, -10, 9, -6, 4];
           buttons.forEach(function (button) {
             var order = Number(button.getAttribute("data-node-order"));
             if (!Number.isFinite(order)) order = 0;
@@ -1905,7 +2008,10 @@
           resetWorkflowNodeListToFlatOrder(nodeList);
 
           var loops = readWorkflowGuidedLoopsFromGraph(graph);
-          if (!loops.length) return;
+          if (!loops.length) {
+            markWorkflowNodeMotion(nodeList);
+            return;
+          }
 
           var nodeIds = collectVisibleWorkflowNodeIds();
           var loopOrderById = {};
@@ -2010,7 +2116,7 @@
             var more = document.createElement("button");
             more.type = "button";
             more.className = "btn btn-ghost btn-xs wb-loop-inline-more-btn";
-            more.setAttribute("data-workflow-loop-settings-toggle", "1");
+            more.setAttribute("data-workflow-loop-settings-detail-toggle", "1");
             more.setAttribute("data-loop-id", loop.id);
             more.textContent = showAdvanced ? "Less" : "More";
             topbar.appendChild(more);
@@ -2051,8 +2157,10 @@
 
           function buildLoopShell(loop, scopedNodeIds, range, loopOrder, loopCount) {
             var isCollapsed = isWorkflowLoopCollapsed(loop.id);
+            var isSelectedLoop = selectedWorkflowLoopId === loop.id;
+            var isSettingsPopoverOpen = isSelectedLoop && isWorkflowLoopSettingsPopoverOpen(loop.id);
             var shell = document.createElement("div");
-            shell.className = "wb-loop-container-shell" + (selectedWorkflowLoopId === loop.id ? " is-selected" : "");
+            shell.className = "wb-loop-container-shell" + (isSelectedLoop ? " is-selected" : "");
             shell.setAttribute("data-graph-loop-container-shell", "1");
             shell.setAttribute("data-loop-id", loop.id);
 
@@ -2068,11 +2176,20 @@
 
             var select = document.createElement("button");
             select.type = "button";
-            select.className = "btn btn-ghost btn-xs wb-loop-shell-btn" + (selectedWorkflowLoopId === loop.id ? " is-active" : "");
+            select.className = "btn btn-ghost btn-xs wb-loop-shell-btn" + (isSelectedLoop ? " is-active" : "");
             select.setAttribute("data-graph-loop-select", "1");
             select.setAttribute("data-loop-id", loop.id);
-            select.textContent = selectedWorkflowLoopId === loop.id ? "Editing" : "Edit";
+            select.textContent = isSelectedLoop ? "Selected" : "Select";
             headerControls.appendChild(select);
+
+            var settingsToggle = document.createElement("button");
+            settingsToggle.type = "button";
+            settingsToggle.className = "btn btn-ghost btn-xs wb-loop-shell-btn" + (isSettingsPopoverOpen ? " is-active" : "");
+            settingsToggle.setAttribute("data-workflow-loop-settings-popover-toggle", "1");
+            settingsToggle.setAttribute("data-loop-id", loop.id);
+            settingsToggle.setAttribute("aria-expanded", String(isSettingsPopoverOpen));
+            settingsToggle.textContent = isSettingsPopoverOpen ? "Close" : "Settings";
+            headerControls.appendChild(settingsToggle);
 
             var loopReadiness = getLoopContainerReadiness(loop, nodeIds);
             var readinessBadge = document.createElement("span");
@@ -2125,10 +2242,10 @@
 
             var summary = document.createElement("p");
             summary.className = "wb-loop-container-summary";
-            var scopeSummary = workflowLoopScopeSummary(loop, range);
-            summary.textContent = "Repeats " + loop.each + " - up to " + loop.max + " item(s). " + scopeSummary + ".";
+            var scopeSummary = workflowLoopScopeSummary(loop, range).replace(/^Scope\s+/, "");
+            summary.textContent = "each " + loop.each + " · max " + loop.max + " · " + scopeSummary;
             if ((loop.merge || "append") !== "append") {
-              summary.textContent += " Combine: " + loop.merge + ".";
+              summary.textContent += " · merge " + loop.merge;
             }
 
             header.appendChild(title);
@@ -2146,13 +2263,9 @@
             var dropHint = document.createElement("p");
             dropHint.className = "text-xs wb-loop-drop-hint";
             dropHint.textContent = scopedNodeIds.length
-              ? "Drop a step here to add it inside this repeat scope."
-              : "Drop a step here to start this loop scope.";
+              ? "Drop a node to keep this chain in the loop."
+              : "Drop a node to start this loop.";
             body.appendChild(dropHint);
-
-            if (selectedWorkflowLoopId === loop.id) {
-              body.appendChild(buildLoopInlineEditor(loop, range));
-            }
 
             if (!loopReadiness.canRun) {
               var readinessList = document.createElement("div");
@@ -2175,6 +2288,16 @@
 
             shell.appendChild(header);
             shell.appendChild(body);
+
+            if (isSelectedLoop) {
+              var settingsPopover = document.createElement("div");
+              settingsPopover.className = "wb-loop-settings-popover" + (isSettingsPopoverOpen ? " is-open" : "");
+              settingsPopover.setAttribute("data-workflow-loop-settings-popover", "1");
+              settingsPopover.setAttribute("data-loop-id", loop.id);
+              settingsPopover.appendChild(buildLoopInlineEditor(loop, range));
+              shell.appendChild(settingsPopover);
+            }
+
             return { shell: shell, body: body };
           }
 
@@ -2204,6 +2327,8 @@
             var rendered = buildLoopShell(entry.loop, [], null, entry.loopOrder, loops.length);
             nodeList.appendChild(rendered.shell);
           });
+
+          markWorkflowNodeMotion(nodeList);
         }
 
         function clearWorkflowLoopScopeVisual() {
@@ -2641,6 +2766,8 @@
           selectedWorkflowLoopId = nextLoop.id;
           setWorkflowLoopCollapsed(nextLoop.id, false);
           setWorkflowLoopSettingsExpanded(nextLoop.id, false);
+          closeWorkflowLoopSettingsPopovers("");
+          setWorkflowLoopSettingsPopoverOpen(nextLoop.id, true);
           applyWorkflowLoopConfigToInputs(nextLoop);
 
           persistWorkflowGraphForCurrentContext(graph);
@@ -3327,6 +3454,7 @@
         function hydrateWorkflowStateBindingUx() {
           if (currentView !== "workflows") return;
           hydrateWorkflowGraphState();
+          syncWorkflowAdvancedToggleState(isWorkflowAdvancedViewOpen());
           populateStatePathPickers();
           renderStateExplorerPaths();
           var row = getStateBindingTargetRow();
@@ -3736,7 +3864,7 @@
 
           var oldSteps = parseWorkflowFunctionStepsCsv(state.functionStepsCsv);
           if (oldSteps.length <= 1) {
-            var targetPanel = document.getElementById("workflow-draft-run-results") || document.getElementById("inspector-panel");
+            var targetPanel = document.getElementById("inspector-panel") || document.getElementById("workflow-draft-run-results");
             renderInlineActionError(
               targetPanel,
               "Cannot Remove Final Step",
@@ -4346,6 +4474,47 @@
           });
         }
 
+        function workflowAdvancedShellNodes() {
+          return Array.prototype.slice.call(
+            host.querySelectorAll("[data-workflow-advanced-shell]")
+          );
+        }
+
+        function isWorkflowAdvancedViewOpen() {
+          var shells = workflowAdvancedShellNodes();
+          if (!shells.length) return false;
+          return shells.some(function (shell) {
+            return !shell.classList.contains("hidden");
+          });
+        }
+
+        function syncWorkflowAdvancedToggleState(open) {
+          host.querySelectorAll("[data-workflow-advanced-toggle]").forEach(function (button) {
+            var isOpen = !!open;
+            button.classList.toggle("is-open", isOpen);
+            button.setAttribute("aria-expanded", String(isOpen));
+
+            var label = button.querySelector("[data-workflow-advanced-toggle-label]");
+            if (label) {
+              label.textContent = isOpen ? "Hide Advanced View" : "Advanced View";
+            }
+          });
+        }
+
+        function setWorkflowAdvancedViewOpen(open) {
+          var shells = workflowAdvancedShellNodes();
+          if (!shells.length) return;
+
+          shells.forEach(function (shell) {
+            shell.classList.toggle("hidden", !open);
+          });
+          syncWorkflowAdvancedToggleState(open);
+        }
+
+        function toggleWorkflowAdvancedView() {
+          setWorkflowAdvancedViewOpen(!isWorkflowAdvancedViewOpen());
+        }
+
         document.querySelectorAll(".nav-item").forEach(function (item) {
           item.addEventListener("click", function (event) {
             event.preventDefault();
@@ -4379,6 +4548,13 @@
           if (draftRunTabTrigger) {
             event.preventDefault();
             activateDraftRunTab(draftRunTabTrigger);
+            return;
+          }
+
+          var workflowAdvancedToggleTrigger = event.target.closest("[data-workflow-advanced-toggle]");
+          if (workflowAdvancedToggleTrigger) {
+            event.preventDefault();
+            toggleWorkflowAdvancedView();
             return;
           }
 
@@ -4511,6 +4687,12 @@
             });
           }
 
+          var clickedInsideLoopSettings = event.target.closest("[data-workflow-loop-settings-popover], [data-workflow-loop-settings-popover-toggle], [data-workflow-readiness-jump]");
+          if (!clickedInsideLoopSettings && hasOpenWorkflowLoopSettingsPopover()) {
+            closeWorkflowLoopSettingsPopovers("");
+            hydrateWorkflowGraphState();
+          }
+
           var paramRowTrigger = event.target.closest("[data-function-param-row]");
           if (paramRowTrigger) {
             clearWorkflowParamRowFocus(paramRowTrigger);
@@ -4534,7 +4716,7 @@
           var canvasUnselectTrigger = event.target.closest("[data-canvas-dropzone]");
           if (canvasUnselectTrigger) {
             var canvasInteractive = event.target.closest(
-              "[data-canvas-node-button], [data-graph-output-handle], [data-graph-input-handle], [data-graph-edge-id], [data-graph-loop-toggle], [data-graph-loop-select], [data-graph-loop-menu-wrap], [data-graph-loop-menu-toggle], [data-graph-loop-menu], [data-graph-loop-container-shell], [data-workflow-loop-config], [data-workflow-readiness-jump], [data-node-context-panel], [data-step-advanced-drawer], [data-step-advanced-open], [data-step-advanced-close], [data-state-explorer-path]"
+              "[data-canvas-node-button], [data-graph-output-handle], [data-graph-input-handle], [data-graph-edge-id], [data-graph-loop-toggle], [data-graph-loop-select], [data-graph-loop-menu-wrap], [data-graph-loop-menu-toggle], [data-graph-loop-menu], [data-graph-loop-container-shell], [data-workflow-loop-config], [data-workflow-readiness-jump], [data-node-context-panel], [data-step-advanced-drawer], [data-step-advanced-open], [data-step-advanced-close], [data-state-explorer-path], [data-action-post]"
             );
             if (!canvasInteractive) {
               event.preventDefault();
@@ -4580,12 +4762,15 @@
             if (jumpLoopId) {
               selectedWorkflowLoopId = jumpLoopId;
               setWorkflowLoopCollapsed(jumpLoopId, false);
+              closeWorkflowLoopSettingsPopovers("");
+              setWorkflowLoopSettingsPopoverOpen(jumpLoopId, true);
               if (workflowLoopFieldUsesAdvancedPanel(jumpFieldId)) {
                 setWorkflowLoopSettingsExpanded(jumpLoopId, true);
               }
               hydrateWorkflowGraphState();
             } else if (workflowLoopFieldUsesAdvancedPanel(jumpFieldId) && selectedWorkflowLoopId) {
               setWorkflowLoopSettingsExpanded(selectedWorkflowLoopId, true);
+              setWorkflowLoopSettingsPopoverOpen(selectedWorkflowLoopId, true);
               hydrateWorkflowGraphState();
             }
             if (jumpFieldId) {
@@ -4605,14 +4790,34 @@
             return;
           }
 
-          var loopSettingsToggle = event.target.closest("[data-workflow-loop-settings-toggle]");
-          if (loopSettingsToggle) {
+          var loopSettingsPopoverToggle = event.target.closest("[data-workflow-loop-settings-popover-toggle]");
+          if (loopSettingsPopoverToggle) {
             event.preventDefault();
             event.stopPropagation();
-            var settingsLoopId = (loopSettingsToggle.getAttribute("data-loop-id") || "").trim();
+            var popoverLoopId = (loopSettingsPopoverToggle.getAttribute("data-loop-id") || "").trim();
+            if (!popoverLoopId) return;
+
+            var shouldOpenPopover = !(selectedWorkflowLoopId === popoverLoopId && isWorkflowLoopSettingsPopoverOpen(popoverLoopId));
+            selectedWorkflowLoopId = popoverLoopId;
+            setWorkflowLoopCollapsed(popoverLoopId, false);
+            closeWorkflowLoopSettingsPopovers("");
+            if (shouldOpenPopover) {
+              setWorkflowLoopSettingsPopoverOpen(popoverLoopId, true);
+            }
+            hydrateWorkflowGraphState();
+            return;
+          }
+
+          var loopSettingsDetailToggle = event.target.closest("[data-workflow-loop-settings-detail-toggle]");
+          if (loopSettingsDetailToggle) {
+            event.preventDefault();
+            event.stopPropagation();
+            var settingsLoopId = (loopSettingsDetailToggle.getAttribute("data-loop-id") || "").trim();
             if (!settingsLoopId) return;
             openWorkflowLoopMenuId = "";
             setWorkflowLoopSettingsExpanded(settingsLoopId, !isWorkflowLoopSettingsExpanded(settingsLoopId));
+            closeWorkflowLoopSettingsPopovers("");
+            setWorkflowLoopSettingsPopoverOpen(settingsLoopId, true);
             hydrateWorkflowGraphState();
             return;
           }
@@ -4769,11 +4974,19 @@
                 }
               }
             }
+
+            if (url === "/action/workflows/run-draft") {
+              setWorkflowAdvancedViewOpen(true);
+            }
+
             var inspector = document.getElementById("inspector-panel");
             var draftRunResults = document.getElementById("workflow-draft-run-results");
             var targetPanel = (url === "/action/workflows/run-draft" && draftRunResults)
               ? draftRunResults
               : inspector;
+            if (!targetPanel) {
+              targetPanel = draftRunResults || inspector;
+            }
 
             if ((url === "/action/workflows/save" || url === "/action/workflows/run-draft") && body.function_inputs) {
               var validation = validateFunctionInputsForSave(body.function_inputs);
