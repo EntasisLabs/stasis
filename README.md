@@ -273,3 +273,7 @@ Serve locally:
 ```bash
 mdbook serve docs-book --open
 ```
+
+## Codebase Health Analysis Provided by ACC
+<img width="1854" height="838" alt="image" src="https://github.com/user-attachments/assets/d8e74f74-d5f8-4b25-b327-7aa415d0b847" />
+
