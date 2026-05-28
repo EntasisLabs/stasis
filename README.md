@@ -212,6 +212,16 @@ CI-friendly smoke harness:
 
 You can embed the dashboard into your existing Axum app behind an optional feature flag.
 
+### Main View
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/b1a083f5-79b9-4a7b-ae4b-70310da81840" />
+
+### Grapheme Workflow Builder
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/e74345fc-cbf3-4c4e-80cb-6f0a5b779c25" />
+
+### Job Scheduler
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/38fd383b-874f-4ecf-a40c-866dda5c6ea6" />
+
+
 Enable feature:
 
 ```bash
