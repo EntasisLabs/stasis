@@ -1,8 +1,8 @@
+mod support;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use stasis::domain::errors::Result;
-use stasis::stasis_tool;
+use stasis_macros::stasis_tool;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 struct Input {
@@ -14,9 +14,9 @@ struct Output {
     value: String,
 }
 
-#[stasis_tool(name = "fail_non_async")]
-fn fail_non_async(input: Input) -> Result<Output> {
-    Ok(Output { value: input.value })
+#[stasis_tool(name = "fail_return_type", crate_path = "crate::support::fake_stasis")]
+async fn fail_return_type(input: Input) -> Output {
+    Output { value: input.value }
 }
 
 fn main() {}

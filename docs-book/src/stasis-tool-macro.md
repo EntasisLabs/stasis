@@ -83,4 +83,4 @@ The generated `StasisTool` implementation:
 
 ## UI Contract Tests
 
-Compile-fail and compile-pass cases are covered by trybuild tests under `tests/ui/stasis_tool`.
+Compile-fail and compile-pass cases are covered by trybuild tests under `stasis-macros/tests/ui`.

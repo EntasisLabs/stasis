@@ -1,0 +1,37 @@
+error: stasis_tool function must accept exactly one typed argument
+  --> tests/ui/fail_multiple_args.rs:20:29
+   |
+20 | async fn fail_multiple_args(a: Input, b: Input) -> fake_stasis::domain::errors::Result<Output> {
+   |                             ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `async_trait`
+ --> tests/ui/support.rs
+  |
+  |         pub use async_trait;
+  |                 ^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `schemars`
+ --> tests/ui/support.rs
+  |
+  |         pub use schemars;
+  |                 ^^^^^^^^
+
+warning: unused import: `serde`
+ --> tests/ui/support.rs
+  |
+  |         pub use serde;
+  |                 ^^^^^
+
+warning: unused import: `serde_json`
+ --> tests/ui/support.rs
+  |
+  |         pub use serde_json;
+  |                 ^^^^^^^^^^
+
+warning: unused import: `support::fake_stasis`
+ --> tests/ui/fail_multiple_args.rs:7:5
+  |
+7 | use support::fake_stasis;
+  |     ^^^^^^^^^^^^^^^^^^^^

@@ -2,6 +2,8 @@
 
 Stasis is a Rust framework for AI orchestration with durable runtime jobs, cluster-aware control plane primitives, and memory integration hooks.
 
+Package note: the crates.io package is `stasis-rs` while Rust imports use `stasis`.
+
 ## Architecture
 
 - `domain`: Runtime models, policies, events, and error contracts.
@@ -140,7 +142,7 @@ You can embed the dashboard into your existing Axum app behind an optional featu
 Enable feature:
 
 ```bash
-cargo add stasis --features dashboard-embedded
+cargo add stasis-rs --features dashboard-embedded
 ```
 
 Mount dashboard routes in your app code:

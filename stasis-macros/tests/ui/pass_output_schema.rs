@@ -1,9 +1,11 @@
+mod support;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use stasis_macros::stasis_tool;
 
-use stasis::application::orchestration::tool_registry::StasisTool;
-use stasis::domain::errors::Result;
-use stasis::stasis_tool;
+use support::fake_stasis;
+use support::fake_stasis::application::orchestration::tool_registry::StasisTool;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 struct Input {
@@ -18,9 +20,10 @@ struct Output {
 #[stasis_tool(
     name = "pass_output_schema",
     description = "passes output schema",
-    output_schema = true
+    output_schema = true,
+    crate_path = "crate::support::fake_stasis"
 )]
-async fn pass_output_schema(input: Input) -> Result<Output> {
+async fn pass_output_schema(input: Input) -> fake_stasis::domain::errors::Result<Output> {
     Ok(Output { value: input.value })
 }
 

@@ -1,0 +1,31 @@
+error: stasis_tool function must return Result<OutputType>
+  --> tests/ui/fail_return_type.rs:18:44
+   |
+18 | async fn fail_return_type(input: Input) -> Output {
+   |                                            ^^^^^^
+
+warning: unused import: `async_trait`
+ --> tests/ui/support.rs
+  |
+  |         pub use async_trait;
+  |                 ^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `schemars`
+ --> tests/ui/support.rs
+  |
+  |         pub use schemars;
+  |                 ^^^^^^^^
+
+warning: unused import: `serde`
+ --> tests/ui/support.rs
+  |
+  |         pub use serde;
+  |                 ^^^^^
+
+warning: unused import: `serde_json`
+ --> tests/ui/support.rs
+  |
+  |         pub use serde_json;
+  |                 ^^^^^^^^^^

@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1abcc4a6.js";
+            window.path_to_searchindex_js = "searchindex-cf74aef5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4a089ed3.js"></script>
+        <script src="toc-1439a5de.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -3720,15 +3720,18 @@ pub trait StasisTool: Send + Sync {
     fn name(&amp;self) -&gt; &amp;'static str;
     fn description(&amp;self) -&gt; Option&lt;&amp;'static str&gt; { None }
     fn input_schema(&amp;self) -&gt; Option&lt;Value&gt; { None }
+    fn output_schema(&amp;self) -&gt; Option&lt;Value&gt; { None }
     async fn invoke(&amp;self, input: Value) -&gt; Result&lt;Value&gt;;
 }
 <span class="boring">}</span></code></pre>
 <p><strong>Stasis guarantees:</strong></p>
 <ul>
 <li><code>input_schema</code> is used to validate tool input at invocation time. Schema validation enforces: <code>required</code> fields, <code>type</code> constraints, <code>enum</code> values, and <code>additionalProperties</code>.</li>
+<li><code>output_schema</code> is optional and intended for documentation/inspection contracts.</li>
 <li><code>name</code> must be unique across all registered tools. Duplicate registration returns a <code>PortFailure</code> error.</li>
 <li><code>description</code> and <code>input_schema</code> are exposed to the model via the <code>genai</code> tool interface — descriptive values improve model tool-call accuracy.</li>
 </ul>
+<p>For lower-boilerplate implementations, prefer <code>#[stasis_tool(...)]</code> documented in <a href="#stasis-tool-macro">Stasis Tool Macro</a>.</p>
 <p><strong>Wiring:</strong></p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
@@ -3761,6 +3764,82 @@ pub trait StasisTool: Send + Sync {
 </table>
 </div>
 <p>No port is strictly required. The runtime boots with all defaults when <code>StasisRuntimeBuilder::new(backend).build().await?</code> is called with no additional configuration.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="stasis-tool-macro"><a class="header" href="#stasis-tool-macro">Stasis Tool Macro</a></h1>
+<h2 id="outcome"><a class="header" href="#outcome">Outcome</a></h2>
+<p>Use <code>#[stasis_tool(...)]</code> to generate <code>StasisTool</code> implementations from typed async functions with compile-time contract checks.</p>
+<h2 id="why-this-exists"><a class="header" href="#why-this-exists">Why This Exists</a></h2>
+<p><code>genai</code> exposes runtime tool metadata and schema wiring (<code>Tool::new(...).with_schema(...)</code>), but does not currently provide a function-signature-driven proc macro for Stasis runtime registration.</p>
+<p>The Stasis macro adds that ergonomics layer while preserving explicit JSON contracts.</p>
+<h2 id="basic-usage"><a class="header" href="#basic-usage">Basic Usage</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use stasis::domain::errors::Result;
+use stasis::stasis_tool;
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+struct SearchInput {
+    query: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct SearchOutput {
+    summary: String,
+}
+
+#[stasis_tool(
+    name = "search_docs",
+    description = "Search internal knowledge base",
+    output_schema = true
+)]
+async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
+    Ok(SearchOutput {
+        summary: format!("query={}", input.query),
+    })
+}
+
+// Generated symbols:
+// - struct SearchDocsTool;
+// - fn search_docs_tool() -&gt; SearchDocsTool;
+<span class="boring">}</span></code></pre>
+<p>Register generated tool with runtime builder:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    .with_locus_memory()
+    .with_tool(search_docs_tool())?;
+<span class="boring">}</span></code></pre>
+<h2 id="attribute-arguments"><a class="header" href="#attribute-arguments">Attribute Arguments</a></h2>
+<ul>
+<li><code>name = "..."</code> (required): advertised tool name.</li>
+<li><code>description = "..."</code> (optional): LLM-visible tool description.</li>
+<li><code>output_schema = true|false</code> (optional, default <code>false</code>): generate <code>output_schema()</code> from output type.</li>
+<li><code>crate_path = "..."</code> (optional): override crate path for macro expansion in advanced/internal scenarios.</li>
+</ul>
+<h2 id="compile-time-contract"><a class="header" href="#compile-time-contract">Compile-Time Contract</a></h2>
+<p>The macro enforces:</p>
+<ol>
+<li>Function is <code>async</code>.</li>
+<li>Function has exactly one typed input argument.</li>
+<li>Function is non-generic.</li>
+<li>Return type is <code>Result&lt;OutputType&gt;</code>.</li>
+<li>Input type implements <code>Deserialize + JsonSchema</code>.</li>
+<li>Output type implements <code>Serialize</code>.</li>
+<li>When <code>output_schema = true</code>, output type also implements <code>JsonSchema</code>.</li>
+</ol>
+<h2 id="generated-behavior"><a class="header" href="#generated-behavior">Generated Behavior</a></h2>
+<p>The generated <code>StasisTool</code> implementation:</p>
+<ul>
+<li>Exposes <code>name</code>, <code>description</code>, and input schema.</li>
+<li>Optionally exposes output schema.</li>
+<li>Deserializes runtime JSON input into your typed input struct.</li>
+<li>Calls your function and maps output back to JSON.</li>
+<li>Maps serde conversion failures to <code>StasisError::PortFailure</code> with tool-scoped messages.</li>
+</ul>
+<h2 id="ui-contract-tests"><a class="header" href="#ui-contract-tests">UI Contract Tests</a></h2>
+<p>Compile-fail and compile-pass cases are covered by trybuild tests under <code>stasis-macros/tests/ui</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="control-plane-and-endpoint-routing"><a class="header" href="#control-plane-and-endpoint-routing">Control Plane and Endpoint Routing</a></h1>
 <h2 id="document-metadata-14"><a class="header" href="#document-metadata-14">Document Metadata</a></h2>
@@ -4503,7 +4582,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="production-agentic-workflows"><a class="header" href="#production-agentic-workflows">Production Agentic Workflows</a></h1>
-<h2 id="outcome"><a class="header" href="#outcome">Outcome</a></h2>
+<h2 id="outcome-1"><a class="header" href="#outcome-1">Outcome</a></h2>
 <p>Run production-style agentic jobs with real LLM providers, durable runtime wiring, memory controls, and orchestration patterns teams can copy directly.</p>
 <h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
 <p>Set provider and auth environment variables before running these patterns.</p>
@@ -4537,7 +4616,7 @@ struct FetchKnowledgeBaseInput {
     topic: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 struct FetchKnowledgeBaseOutput {
     topic: String,
     playbook: Vec&lt;String&gt;,
@@ -4545,7 +4624,8 @@ struct FetchKnowledgeBaseOutput {
 
 #[stasis_tool(
     name = "fetch_knowledge_base",
-    description = "Returns internal playbook snippets for an operation topic"
+    description = "Returns internal playbook snippets for an operation topic",
+    output_schema = true
 )]
 async fn fetch_knowledge_base(input: FetchKnowledgeBaseInput) -&gt; Result&lt;FetchKnowledgeBaseOutput&gt; {
     Ok(FetchKnowledgeBaseOutput {
@@ -4935,7 +5015,7 @@ STASIS_EXAMPLE_DRY_RUN=1 STASIS_EXAMPLE_TEAM_PROFILE=support cargo run --example
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="runtime-and-dashboard-bootstrap"><a class="header" href="#runtime-and-dashboard-bootstrap">Runtime and Dashboard Bootstrap</a></h1>
-<h2 id="outcome-1"><a class="header" href="#outcome-1">Outcome</a></h2>
+<h2 id="outcome-2"><a class="header" href="#outcome-2">Outcome</a></h2>
 <p>Bring up a production-like Stasis runtime with dashboard observability and secured action routes.</p>
 <h2 id="recipe"><a class="header" href="#recipe">Recipe</a></h2>
 <h3 id="1-pick-runtime-backend-and-configure-environment"><a class="header" href="#1-pick-runtime-backend-and-configure-environment">1. Pick runtime backend and configure environment</a></h3>
@@ -4999,7 +5079,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="workflow-builder-starting-object"><a class="header" href="#workflow-builder-starting-object">Workflow Builder Starting Object</a></h1>
-<h2 id="outcome-2"><a class="header" href="#outcome-2">Outcome</a></h2>
+<h2 id="outcome-3"><a class="header" href="#outcome-3">Outcome</a></h2>
 <p>Create a deterministic workflow draft or saved revision that seeds initial $current state through the Starting Object control.</p>
 <h2 id="why-this-matters"><a class="header" href="#why-this-matters">Why this matters</a></h2>
 <p>Starting Object lets you seed stable context for each run without hardcoding context set blocks into source templates.</p>
@@ -5083,7 +5163,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="identity-memory-change-control"><a class="header" href="#identity-memory-change-control">Identity Memory Change Control</a></h1>
-<h2 id="outcome-3"><a class="header" href="#outcome-3">Outcome</a></h2>
+<h2 id="outcome-4"><a class="header" href="#outcome-4">Outcome</a></h2>
 <p>Apply governed identity relationship updates with tier-aware proposal splitting, explicit approvals, and version-safe commits.</p>
 <h2 id="recipe-2"><a class="header" href="#recipe-2">Recipe</a></h2>
 <h3 id="1-seed-baseline-relationship-state"><a class="header" href="#1-seed-baseline-relationship-state">1. Seed baseline relationship state</a></h3>
@@ -5261,7 +5341,7 @@ println!("rolled_back={}", rollback.rolled_back);
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="memory-maintenance-and-rollups"><a class="header" href="#memory-maintenance-and-rollups">Memory Maintenance and Rollups</a></h1>
-<h2 id="outcome-4"><a class="header" href="#outcome-4">Outcome</a></h2>
+<h2 id="outcome-5"><a class="header" href="#outcome-5">Outcome</a></h2>
 <p>Run routine memory health operations for aggregate visibility, embedding maintenance, and monthly rollup compaction.</p>
 <h2 id="recipe-3"><a class="header" href="#recipe-3">Recipe</a></h2>
 <h3 id="1-create-memory-operations-adapter"><a class="header" href="#1-create-memory-operations-adapter">1. Create memory operations adapter</a></h3>
