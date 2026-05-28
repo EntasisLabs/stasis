@@ -70,7 +70,7 @@
   justify-content: space-between;
   gap: 0.75rem;
   flex-wrap: wrap;
-  margin-bottom: 0.7rem;
+  margin-bottom: 0.55rem;
 }
 
 .wb-canvas-toolbar h4 {
@@ -81,9 +81,13 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.45rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
   position: relative;
+}
+
+.wb-action-primary {
+  box-shadow: 0 9px 20px -16px color-mix(in srgb, var(--wb-focus) 55%, transparent);
 }
 
 .wb-starting-object-toggle.is-active {
@@ -102,7 +106,7 @@
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--wb-focus) 34%, var(--wb-border-soft));
   background: color-mix(in srgb, var(--wb-surface-0) 92%, var(--wb-surface-2));
-  box-shadow: 0 18px 38px -28px color-mix(in srgb, var(--foreground) 64%, transparent);
+  box-shadow: 0 14px 30px -24px color-mix(in srgb, var(--foreground) 58%, transparent);
   opacity: 0;
   pointer-events: none;
   transform: translateY(-6px) scale(0.985);
@@ -164,6 +168,93 @@
   color: var(--wb-blocking);
 }
 
+.wb-starting-object-inline {
+  margin-bottom: 0.48rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--wb-focus) 34%, var(--wb-border-soft));
+  background: color-mix(in srgb, var(--wb-focus) 8%, var(--wb-surface-1));
+  border-radius: 10px;
+  padding: 0.34rem 0.46rem;
+}
+
+.wb-starting-object-inline-label {
+  font-size: 0.66rem;
+  line-height: 1.35;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--wb-text-secondary);
+  white-space: nowrap;
+}
+
+.wb-starting-object-inline-value {
+  display: block;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--wb-text-primary);
+  white-space: normal;
+  word-break: break-word;
+}
+
+.wb-saved-workflows-toggle.is-open {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--wb-focus) 62%, var(--wb-border-soft));
+  background: color-mix(in srgb, var(--wb-focus) 12%, transparent);
+  color: var(--wb-text-primary);
+}
+
+.wb-saved-workflows-popover {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 41;
+  width: min(360px, calc(100vw - 2.6rem));
+  padding: 0.56rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--wb-focus) 28%, var(--wb-border-soft));
+  background: color-mix(in srgb, var(--wb-surface-0) 94%, var(--wb-surface-2));
+  box-shadow: 0 14px 30px -24px color-mix(in srgb, var(--foreground) 58%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px) scale(0.985);
+  transform-origin: top right;
+  transition: opacity var(--wb-motion-standard) var(--wb-ease-enter),
+    transform var(--wb-motion-standard) var(--wb-ease-enter);
+}
+
+.wb-saved-workflows-popover.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.wb-saved-workflows-popover-title {
+  margin: 0 0 0.44rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--wb-text-secondary);
+}
+
+.wb-saved-workflows-list {
+  max-height: 300px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.wb-saved-workflow-item {
+  border: 1px solid color-mix(in srgb, var(--wb-border-soft) 80%, transparent);
+  background: color-mix(in srgb, var(--wb-surface-1) 92%, transparent);
+}
+
+.wb-saved-workflow-item:hover {
+  border-color: color-mix(in srgb, var(--wb-border-strong) 78%, var(--wb-focus));
+  background: color-mix(in srgb, var(--wb-focus) 10%, var(--wb-surface-1));
+}
+
 .wb-advanced-toggle {
   border-style: dashed;
 }
@@ -200,7 +291,10 @@
 }
 
 .wb-module-tile {
-  border: 1px solid var(--wb-border-soft);
+  --wb-module-accent: #6f7a8a;
+  --wb-module-icon-bg: color-mix(in srgb, var(--wb-module-accent) 16%, var(--wb-surface-1));
+  --wb-module-icon-fg: color-mix(in srgb, var(--wb-module-accent) 84%, var(--wb-text-primary));
+  border: 1px solid color-mix(in srgb, var(--wb-module-accent) 16%, var(--wb-border-soft));
   background: color-mix(in srgb, var(--wb-surface-1) 90%, var(--wb-surface-0));
   transition: border-color var(--wb-motion-fast) var(--wb-ease-enter),
     transform var(--wb-motion-fast) var(--wb-ease-enter),
@@ -208,8 +302,58 @@
 }
 
 .wb-module-tile:hover {
-  border-color: var(--wb-border-strong);
+  border-color: color-mix(in srgb, var(--wb-module-accent) 34%, var(--wb-border-strong));
+  background: color-mix(in srgb, var(--wb-module-accent) 6%, var(--wb-surface-1));
   transform: translateY(-2px);
+}
+
+.wb-module-icon-wrap {
+  background: var(--wb-module-icon-bg);
+  border: 1px solid color-mix(in srgb, var(--wb-module-accent) 24%, transparent);
+}
+
+.wb-module-icon {
+  color: var(--wb-module-icon-fg);
+}
+
+.wb-module-tile[data-module-brand="core"] {
+  --wb-module-accent: #2a6bf2;
+}
+
+.wb-module-tile[data-module-brand="discovery"] {
+  --wb-module-accent: #0f8a72;
+}
+
+.wb-module-tile[data-module-brand="transport"] {
+  --wb-module-accent: #c46a1f;
+}
+
+.wb-module-tile[data-module-brand="data"] {
+  --wb-module-accent: #2463b2;
+}
+
+.wb-module-tile[data-module-brand="text"] {
+  --wb-module-accent: #6d4dd4;
+}
+
+.wb-module-tile[data-module-brand="memory"] {
+  --wb-module-accent: #b26a16;
+}
+
+.wb-module-tile[data-module-brand="runtime"] {
+  --wb-module-accent: #3f4cd8;
+}
+
+.wb-module-tile[data-module-brand="io"] {
+  --wb-module-accent: #00819a;
+}
+
+.wb-module-tile[data-module-brand="health"] {
+  --wb-module-accent: #2f8f4e;
+}
+
+.wb-module-tile[data-module-brand="neutral"] {
+  --wb-module-accent: #6f7a8a;
 }
 
 .wb-repeat-action {
@@ -232,17 +376,17 @@
   color: var(--wb-focus);
 }
 
-.wb-canvas-surface,
 .wb-inspector-surface:not(.wb-inspector-contextual) {
   min-height: 420px;
 }
 
 .wb-canvas-surface {
+  min-height: clamp(540px, 72vh, 820px);
   border: 1px solid var(--wb-border-soft);
   background:
-    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--wb-border-soft) 50%, transparent) 1px, transparent 0),
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--wb-border-soft) 26%, transparent) 1px, transparent 0),
     linear-gradient(180deg, var(--wb-surface-0) 0%, var(--wb-surface-2) 100%);
-  background-size: 16px 16px, 100% 100%;
+  background-size: 22px 22px, 100% 100%;
 }
 
 .wb-root [data-graph-node-list] {
@@ -252,7 +396,7 @@
 }
 
 .wb-root [data-graph-node-list]::before {
-  content: "";
+  content: none;
   position: absolute;
   left: 50%;
   top: 0.3rem;
@@ -291,8 +435,8 @@
   );
   padding: 0.56rem 0.66rem;
   min-height: 74px;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--wb-surface-2) 42%, transparent),
-    0 10px 22px -26px color-mix(in srgb, var(--foreground) 52%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--wb-surface-2) 34%, transparent),
+    0 8px 18px -24px color-mix(in srgb, var(--foreground) 42%, transparent);
   transition: border-color var(--wb-motion-standard) var(--wb-ease-enter),
     box-shadow var(--wb-motion-standard) var(--wb-ease-enter),
     transform var(--wb-motion-fast) var(--wb-ease-enter);
@@ -300,8 +444,8 @@
 
 .wb-node-card:hover {
   border-color: color-mix(in srgb, var(--wb-border-strong) 74%, var(--wb-focus));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--wb-surface-2) 56%, transparent),
-    0 16px 30px -26px color-mix(in srgb, var(--foreground) 58%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--wb-surface-2) 45%, transparent),
+    0 12px 22px -24px color-mix(in srgb, var(--foreground) 46%, transparent);
   transform: translateY(-1.5px) scale(1.005);
 }
 
@@ -312,8 +456,8 @@
     color-mix(in srgb, var(--wb-focus) 12%, var(--wb-surface-1)) 0%,
     color-mix(in srgb, var(--wb-focus) 6%, var(--wb-surface-1)) 100%
   );
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-focus) 20%, transparent),
-    0 20px 34px -28px color-mix(in srgb, var(--wb-focus) 42%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-focus) 18%, transparent),
+    0 14px 26px -24px color-mix(in srgb, var(--wb-focus) 30%, transparent);
 }
 
 @keyframes wb-node-enter-keyframe {
@@ -513,7 +657,7 @@
   border-radius: 10px;
   background: color-mix(in srgb, var(--wb-running) 6%, var(--wb-surface-1));
   margin-bottom: 0.36rem;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-running) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-running) 12%, transparent);
   transition: border-color var(--wb-motion-standard) var(--wb-ease-enter),
     box-shadow var(--wb-motion-standard) var(--wb-ease-enter),
     transform var(--wb-motion-standard) var(--wb-ease-enter);
@@ -521,8 +665,8 @@
 
 .wb-loop-container-shell:hover {
   border-color: color-mix(in srgb, var(--wb-running) 60%, var(--wb-border-strong));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-running) 24%, transparent),
-    0 10px 24px -22px color-mix(in srgb, var(--foreground) 55%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-running) 18%, transparent),
+    0 8px 18px -20px color-mix(in srgb, var(--foreground) 42%, transparent);
 }
 
 .wb-loop-container-shell.is-drop-target {
@@ -537,8 +681,8 @@
     color-mix(in srgb, var(--wb-focus) 10%, var(--wb-surface-1)) 0%,
     color-mix(in srgb, var(--wb-running) 6%, var(--wb-surface-1)) 100%
   );
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-focus) 24%, transparent),
-    0 16px 30px -28px color-mix(in srgb, var(--wb-focus) 36%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-focus) 20%, transparent),
+    0 10px 20px -20px color-mix(in srgb, var(--wb-focus) 28%, transparent);
 }
 
 .wb-loop-drop-hint {
@@ -1245,6 +1389,13 @@
     top: calc(100% + 5px);
   }
 
+  .wb-saved-workflows-popover {
+    right: 0.2rem;
+    left: 0.2rem;
+    width: auto;
+    top: calc(100% + 5px);
+  }
+
   .wb-inspector-contextual {
     position: static;
     width: 100%;
@@ -1252,7 +1403,10 @@
     z-index: auto;
   }
 
-  .wb-canvas-surface,
+  .wb-canvas-surface {
+    min-height: 420px;
+  }
+
   .wb-inspector-surface:not(.wb-inspector-contextual) {
     min-height: 320px;
   }
@@ -1292,6 +1446,10 @@
   }
 
   .wb-starting-object-popover {
+    transition: none !important;
+  }
+
+  .wb-saved-workflows-popover {
     transition: none !important;
   }
 }

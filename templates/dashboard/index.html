@@ -212,7 +212,7 @@
           <div class="flex items-center gap-3">
             <button id="theme-toggle" class="btn btn-sm btn-outline" type="button"
               aria-label="Switch theme">Dark</button>
-            <span class="badge badge-outline font-mono">{{ refreshed_at }}</span>
+            <span class="badge badge-outline">{{ refreshed_at }}</span>
           </div>
         </header>
 
@@ -280,6 +280,7 @@
         var workflowLoopSettingsPopoverOpenMap = {};
         var openWorkflowLoopMenuId = "";
         var workflowStartObjectPopoverOpen = false;
+        var workflowSavedWorkflowsPopoverOpen = false;
         var workflowNodeMotionPrimed = false;
         var workflowNodeMotionOrderMap = {};
 
@@ -1170,7 +1171,47 @@
             editor: host.querySelector("[data-workflow-start-object-editor]"),
             status: host.querySelector("[data-workflow-start-object-status]"),
             clear: host.querySelector("[data-workflow-start-object-clear]"),
+            inline: host.querySelector("[data-workflow-start-object-inline]"),
+            inlineValue: host.querySelector("[data-workflow-start-object-inline-value]"),
           };
+        }
+
+        function getWorkflowSavedWorkflowsNodes() {
+          return {
+            toggle: host.querySelector("[data-workflow-saved-workflows-toggle]"),
+            popover: host.querySelector("[data-workflow-saved-workflows-popover]"),
+          };
+        }
+
+        function syncWorkflowSavedWorkflowsPopover() {
+          var nodes = getWorkflowSavedWorkflowsNodes();
+          var hasControls = !!(nodes.toggle || nodes.popover);
+          if (!hasControls) return;
+
+          if (nodes.toggle) {
+            nodes.toggle.setAttribute("aria-expanded", String(workflowSavedWorkflowsPopoverOpen));
+            nodes.toggle.classList.toggle("is-open", workflowSavedWorkflowsPopoverOpen);
+          }
+
+          if (nodes.popover) {
+            nodes.popover.classList.toggle("hidden", !workflowSavedWorkflowsPopoverOpen);
+            nodes.popover.classList.toggle("is-open", workflowSavedWorkflowsPopoverOpen);
+          }
+        }
+
+        function summarizeWorkflowStartingObject(value) {
+          if (!value || typeof value !== "object") return "";
+          var rendered = "";
+          try {
+            rendered = JSON.stringify(value);
+          } catch (e) {
+            rendered = "";
+          }
+          if (!rendered) return "";
+          if (rendered.length > 180) {
+            return rendered.slice(0, 177) + "...";
+          }
+          return rendered;
         }
 
         function parseWorkflowStartingObjectEditorValue(raw) {
@@ -1232,7 +1273,17 @@
             nodes.clear.disabled = !hasInitialState;
           }
 
-          setWorkflowStartingObjectStatus(hasInitialState ? "Seed ready" : "Optional", false);
+          if (nodes.inline) {
+            nodes.inline.classList.toggle("hidden", !hasInitialState);
+          }
+
+          if (nodes.inlineValue) {
+            nodes.inlineValue.textContent = hasInitialState
+              ? summarizeWorkflowStartingObject(normalized)
+              : "";
+          }
+
+          setWorkflowStartingObjectStatus(hasInitialState ? "Seed active" : "Optional", false);
         }
 
         function nextWorkflowLoopId(loops) {
@@ -2202,7 +2253,7 @@
 
             var title = document.createElement("p");
             title.className = "text-xs wb-loop-inline-title";
-            title.textContent = "Repeat Settings";
+            title.textContent = "Loop Settings";
             topbar.appendChild(title);
 
             var scopeHint = document.createElement("p");
@@ -2276,7 +2327,7 @@
             select.className = "btn btn-ghost btn-xs wb-loop-shell-btn" + (isSelectedLoop ? " is-active" : "");
             select.setAttribute("data-graph-loop-select", "1");
             select.setAttribute("data-loop-id", loop.id);
-            select.textContent = isSelectedLoop ? "Selected" : "Select";
+            select.textContent = isSelectedLoop ? "Active Loop" : "Make Active";
             headerControls.appendChild(select);
 
             var settingsToggle = document.createElement("button");
@@ -2285,15 +2336,15 @@
             settingsToggle.setAttribute("data-workflow-loop-settings-popover-toggle", "1");
             settingsToggle.setAttribute("data-loop-id", loop.id);
             settingsToggle.setAttribute("aria-expanded", String(isSettingsPopoverOpen));
-            settingsToggle.textContent = isSettingsPopoverOpen ? "Close" : "Settings";
+            settingsToggle.textContent = isSettingsPopoverOpen ? "Hide Settings" : "Loop Settings";
             headerControls.appendChild(settingsToggle);
 
             var loopReadiness = getLoopContainerReadiness(loop, nodeIds);
             var readinessBadge = document.createElement("span");
             readinessBadge.className = "wb-loop-readiness-badge" + (loopReadiness.canRun ? "" : " is-blocked");
             readinessBadge.textContent = loopReadiness.canRun
-              ? "Ready"
-              : (loopReadiness.blockers.length + " fix" + (loopReadiness.blockers.length === 1 ? "" : "es"));
+              ? "Ready to run"
+              : ("Needs " + loopReadiness.blockers.length + " fix" + (loopReadiness.blockers.length === 1 ? "" : "es"));
             headerControls.appendChild(readinessBadge);
 
             var menuWrap = document.createElement("div");
@@ -2487,7 +2538,7 @@
 
           var summary = host.querySelector("[data-workflow-loop-summary]");
           if (summary) {
-            summary.textContent = "Repeat Scopes: " + rangeSummaries.join(" | ");
+            summary.textContent = "Active Repeat Scopes: " + rangeSummaries.join(" | ");
             summary.classList.remove("hidden");
           }
         }
@@ -2751,6 +2802,7 @@
           );
           applyWorkflowLoopConfigToInputs(selectedLoop || null);
           syncWorkflowStartingObjectControls(graph);
+          syncWorkflowSavedWorkflowsPopover();
           persistWorkflowGraphForCurrentContext(graph);
           renderWorkflowGraphLinks(graph);
         }
@@ -4795,8 +4847,21 @@
           if (startObjectToggle) {
             event.preventDefault();
             event.stopPropagation();
+            workflowSavedWorkflowsPopoverOpen = false;
             workflowStartObjectPopoverOpen = !workflowStartObjectPopoverOpen;
+            syncWorkflowSavedWorkflowsPopover();
             syncWorkflowStartingObjectControls(readWorkflowGraphForCurrentContext());
+            return;
+          }
+
+          var savedWorkflowsToggle = event.target.closest("[data-workflow-saved-workflows-toggle]");
+          if (savedWorkflowsToggle) {
+            event.preventDefault();
+            event.stopPropagation();
+            workflowStartObjectPopoverOpen = false;
+            workflowSavedWorkflowsPopoverOpen = !workflowSavedWorkflowsPopoverOpen;
+            syncWorkflowStartingObjectControls(readWorkflowGraphForCurrentContext());
+            syncWorkflowSavedWorkflowsPopover();
             return;
           }
 
@@ -4818,6 +4883,14 @@
           ) {
             workflowStartObjectPopoverOpen = false;
             syncWorkflowStartingObjectControls(readWorkflowGraphForCurrentContext());
+          }
+
+          if (
+            workflowSavedWorkflowsPopoverOpen
+            && !event.target.closest("[data-workflow-saved-workflows-popover], [data-workflow-saved-workflows-toggle]")
+          ) {
+            workflowSavedWorkflowsPopoverOpen = false;
+            syncWorkflowSavedWorkflowsPopover();
           }
 
           var paramRowTrigger = event.target.closest("[data-function-param-row]");
@@ -4843,7 +4916,7 @@
           var canvasUnselectTrigger = event.target.closest("[data-canvas-dropzone]");
           if (canvasUnselectTrigger) {
             var canvasInteractive = event.target.closest(
-              "[data-canvas-node-button], [data-graph-output-handle], [data-graph-input-handle], [data-graph-edge-id], [data-graph-loop-toggle], [data-graph-loop-select], [data-graph-loop-menu-wrap], [data-graph-loop-menu-toggle], [data-graph-loop-menu], [data-graph-loop-container-shell], [data-workflow-loop-config], [data-workflow-readiness-jump], [data-workflow-start-object-toggle], [data-workflow-start-object-popover], [data-workflow-start-object-editor], [data-workflow-start-object-clear], [data-node-context-panel], [data-step-advanced-drawer], [data-step-advanced-open], [data-step-advanced-close], [data-state-explorer-path], [data-action-post]"
+              "[data-canvas-node-button], [data-graph-output-handle], [data-graph-input-handle], [data-graph-edge-id], [data-graph-loop-toggle], [data-graph-loop-select], [data-graph-loop-menu-wrap], [data-graph-loop-menu-toggle], [data-graph-loop-menu], [data-graph-loop-container-shell], [data-workflow-loop-config], [data-workflow-readiness-jump], [data-workflow-start-object-toggle], [data-workflow-start-object-popover], [data-workflow-start-object-editor], [data-workflow-start-object-clear], [data-workflow-saved-workflows-toggle], [data-workflow-saved-workflows-popover], [data-node-context-panel], [data-step-advanced-drawer], [data-step-advanced-open], [data-step-advanced-close], [data-state-explorer-path], [data-action-post]"
             );
             if (!canvasInteractive) {
               event.preventDefault();
@@ -5155,6 +5228,12 @@
           if (trigger.tagName === "A" || trigger.tagName === "BUTTON") event.preventDefault();
 
           var hxUrl = trigger.getAttribute("hx-get") || "";
+
+          if (trigger.closest("[data-workflow-saved-workflows-popover]")) {
+            workflowSavedWorkflowsPopoverOpen = false;
+            syncWorkflowSavedWorkflowsPopover();
+          }
+
           if (
             !telemetryState.advancedModeOpened &&
             hxUrl.indexOf("/view/workflows") === 0 &&

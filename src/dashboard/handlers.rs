@@ -162,7 +162,7 @@ async fn root() -> Redirect {
 
 async fn dashboard() -> Result<Html<String>, (StatusCode, String)> {
     render_template(DashboardPageTemplate {
-        refreshed_at: Utc::now().to_rfc3339(),
+        refreshed_at: Utc::now().format("Updated %Y-%m-%d %H:%M UTC").to_string(),
     })
 }
 
@@ -507,6 +507,82 @@ fn grapheme_module_catalog() -> Vec<(&'static str, &'static str)> {
         ("textops", "Grapheme TextOps"),
         ("healthcheck", "Grapheme Healthcheck"),
     ]
+}
+
+struct WorkflowModuleVisualToken {
+    brand_token: &'static str,
+    icon_token: &'static str,
+}
+
+fn workflow_module_visual_token(module_id: &str) -> WorkflowModuleVisualToken {
+    match module_id {
+        "core" => WorkflowModuleVisualToken {
+            brand_token: "core",
+            icon_token: "core",
+        },
+        "web" | "websearch" => WorkflowModuleVisualToken {
+            brand_token: "discovery",
+            icon_token: "search",
+        },
+        "http" | "tcp" | "smtp" => WorkflowModuleVisualToken {
+            brand_token: "transport",
+            icon_token: "transport",
+        },
+        "html" | "json" | "yaml" | "csv" | "sql" | "surreal" => WorkflowModuleVisualToken {
+            brand_token: "data",
+            icon_token: "data",
+        },
+        "textops" | "docs" => WorkflowModuleVisualToken {
+            brand_token: "text",
+            icon_token: "text",
+        },
+        "memory" | "secrets" => WorkflowModuleVisualToken {
+            brand_token: "memory",
+            icon_token: "vault",
+        },
+        "runtime" => WorkflowModuleVisualToken {
+            brand_token: "runtime",
+            icon_token: "runtime",
+        },
+        "io" => WorkflowModuleVisualToken {
+            brand_token: "io",
+            icon_token: "io",
+        },
+        "healthcheck" => WorkflowModuleVisualToken {
+            brand_token: "health",
+            icon_token: "health",
+        },
+        _ => WorkflowModuleVisualToken {
+            brand_token: "neutral",
+            icon_token: "generic",
+        },
+    }
+}
+
+fn build_workflow_function_tile_dto(
+    module_id: &str,
+    function_id: &str,
+    title: String,
+    purpose: String,
+    input_schema_ref: Option<String>,
+    output_schema_ref: Option<String>,
+    effect: String,
+    stability: String,
+) -> WorkflowFunctionTileDto {
+    let visual = workflow_module_visual_token(module_id);
+
+    WorkflowFunctionTileDto {
+        module_id: module_id.to_string(),
+        function_id: function_id.to_string(),
+        title,
+        purpose,
+        brand_token: visual.brand_token.to_string(),
+        icon_token: visual.icon_token.to_string(),
+        input_schema_ref,
+        output_schema_ref,
+        effect,
+        stability,
+    }
 }
 
 fn is_supported_grapheme_module(module_id: &str) -> bool {
@@ -1884,7 +1960,7 @@ async fn view_section(
                     .entry(job.queue.clone())
                     .or_insert_with(|| WorkflowLaneDto {
                         workflow_id: format!("wf-{}", job.queue.replace('.', "-")),
-                        workflow_name: format!("{} Pipeline", job.queue),
+                        workflow_name: format!("{} Workflow", job.queue),
                         lane: job.queue.clone(),
                         total_jobs: 0,
                         running_jobs: 0,
@@ -1918,7 +1994,7 @@ async fn view_section(
             let selected_name = selected
                 .as_ref()
                 .map(|lane| lane.workflow_name.clone())
-                .unwrap_or_else(|| "Workflow Pipeline".to_string());
+                .unwrap_or_else(|| "Workflow".to_string());
             let selected_id = selected
                 .as_ref()
                 .map(|lane| lane.workflow_id.clone())
@@ -1943,13 +2019,6 @@ async fn view_section(
                 })
                 .collect::<Vec<_>>();
 
-            let accent = match selected_module_catalog.as_str() {
-                "textops" => "purple",
-                "healthcheck" => "green",
-                _ => "blue",
-            }
-            .to_string();
-
             let reflected_function_tiles = state
                 .service
                 .workflow_module_info(selected_module_catalog.as_str())
@@ -1960,19 +2029,20 @@ async fn view_section(
                     info.exported_ops
                         .into_iter()
                         .take(12)
-                        .map(|op| WorkflowFunctionTileDto {
-                            module_id: selected_module_catalog.clone(),
-                            function_id: op.op.clone(),
-                            title: format_function_title(op.op.as_str()),
-                            purpose: format!(
-                                "{} operation with {} stability.",
-                                selected_module_catalog, op.stability
-                            ),
-                            accent: accent.clone(),
-                            input_schema_ref: op.input_schema_ref.clone(),
-                            output_schema_ref: op.output_schema_ref.clone(),
-                            effect: op.effect.clone(),
-                            stability: op.stability.clone(),
+                        .map(|op| {
+                            build_workflow_function_tile_dto(
+                                selected_module_catalog.as_str(),
+                                op.op.as_str(),
+                                format_function_title(op.op.as_str()),
+                                format!(
+                                    "{} operation with {} stability.",
+                                    selected_module_catalog, op.stability
+                                ),
+                                op.input_schema_ref.clone(),
+                                op.output_schema_ref.clone(),
+                                op.effect.clone(),
+                                op.stability.clone(),
+                            )
                         })
                         .collect::<Vec<_>>()
                 })
@@ -1981,117 +2051,101 @@ async fn view_section(
             let function_tiles = if reflected_function_tiles.is_empty() {
                 match selected_module_catalog.as_str() {
                 "textops" => vec![
-                    WorkflowFunctionTileDto {
-                        module_id: "textops".to_string(),
-                        function_id: "normalize".to_string(),
-                        title: "Normalize Text".to_string(),
-                        purpose: "Clean and normalize input text before downstream steps."
-                            .to_string(),
-                        accent: "purple".to_string(),
-                        input_schema_ref: None,
-                        output_schema_ref: None,
-                        effect: "Read".to_string(),
-                        stability: "stable".to_string(),
-                    },
-                    WorkflowFunctionTileDto {
-                        module_id: "textops".to_string(),
-                        function_id: "to_markdown".to_string(),
-                        title: "Transform To Markdown".to_string(),
-                        purpose: "Convert extracted content into markdown-friendly output."
-                            .to_string(),
-                        accent: "purple".to_string(),
-                        input_schema_ref: None,
-                        output_schema_ref: None,
-                        effect: "Read".to_string(),
-                        stability: "stable".to_string(),
-                    },
-                    WorkflowFunctionTileDto {
-                        module_id: "textops".to_string(),
-                        function_id: "truncate".to_string(),
-                        title: "Trim Length".to_string(),
-                        purpose: "Limit token-heavy output before handing off to the model."
-                            .to_string(),
-                        accent: "purple".to_string(),
-                        input_schema_ref: None,
-                        output_schema_ref: None,
-                        effect: "Read".to_string(),
-                        stability: "stable".to_string(),
-                    },
+                    build_workflow_function_tile_dto(
+                        "textops",
+                        "normalize",
+                        "Normalize Text".to_string(),
+                        "Clean and normalize input text before downstream steps.".to_string(),
+                        None,
+                        None,
+                        "Read".to_string(),
+                        "stable".to_string(),
+                    ),
+                    build_workflow_function_tile_dto(
+                        "textops",
+                        "to_markdown",
+                        "Transform To Markdown".to_string(),
+                        "Convert extracted content into markdown-friendly output.".to_string(),
+                        None,
+                        None,
+                        "Read".to_string(),
+                        "stable".to_string(),
+                    ),
+                    build_workflow_function_tile_dto(
+                        "textops",
+                        "truncate",
+                        "Trim Length".to_string(),
+                        "Limit token-heavy output before handing off to the model.".to_string(),
+                        None,
+                        None,
+                        "Read".to_string(),
+                        "stable".to_string(),
+                    ),
                 ],
                 "healthcheck" => vec![
-                    WorkflowFunctionTileDto {
-                        module_id: "healthcheck".to_string(),
-                        function_id: "runtime_ready".to_string(),
-                        title: "Runtime Ready Check".to_string(),
-                        purpose: "Verify runtime prerequisites before execution.".to_string(),
-                        accent: "green".to_string(),
-                        input_schema_ref: None,
-                        output_schema_ref: None,
-                        effect: "Read".to_string(),
-                        stability: "stable".to_string(),
-                    },
-                    WorkflowFunctionTileDto {
-                        module_id: "healthcheck".to_string(),
-                        function_id: "provider_probe".to_string(),
-                        title: "Provider Probe".to_string(),
-                        purpose: "Validate external provider availability for this run."
-                            .to_string(),
-                        accent: "green".to_string(),
-                        input_schema_ref: None,
-                        output_schema_ref: None,
-                        effect: "Read".to_string(),
-                        stability: "stable".to_string(),
-                    },
-                    WorkflowFunctionTileDto {
-                        module_id: "healthcheck".to_string(),
-                        function_id: "queue_access".to_string(),
-                        title: "Queue Access Check".to_string(),
-                        purpose: "Confirm queue bindings and permissions are valid."
-                            .to_string(),
-                        accent: "green".to_string(),
-                        input_schema_ref: None,
-                        output_schema_ref: None,
-                        effect: "Read".to_string(),
-                        stability: "stable".to_string(),
-                    },
+                    build_workflow_function_tile_dto(
+                        "healthcheck",
+                        "runtime_ready",
+                        "Runtime Ready Check".to_string(),
+                        "Verify runtime prerequisites before execution.".to_string(),
+                        None,
+                        None,
+                        "Read".to_string(),
+                        "stable".to_string(),
+                    ),
+                    build_workflow_function_tile_dto(
+                        "healthcheck",
+                        "provider_probe",
+                        "Provider Probe".to_string(),
+                        "Validate external provider availability for this run.".to_string(),
+                        None,
+                        None,
+                        "Read".to_string(),
+                        "stable".to_string(),
+                    ),
+                    build_workflow_function_tile_dto(
+                        "healthcheck",
+                        "queue_access",
+                        "Queue Access Check".to_string(),
+                        "Confirm queue bindings and permissions are valid.".to_string(),
+                        None,
+                        None,
+                        "Read".to_string(),
+                        "stable".to_string(),
+                    ),
                 ],
                 _ => vec![
-                    WorkflowFunctionTileDto {
-                        module_id: "core".to_string(),
-                        function_id: "echo".to_string(),
-                        title: "Echo Message".to_string(),
-                        purpose: "Pass message context forward as a baseline function step."
+                    build_workflow_function_tile_dto(
+                        "core",
+                        "echo",
+                        "Echo Message".to_string(),
+                        "Pass message context forward as a baseline function step.".to_string(),
+                        None,
+                        None,
+                        "Read".to_string(),
+                        "stable".to_string(),
+                    ),
+                    build_workflow_function_tile_dto(
+                        "core",
+                        "websearch",
+                        "Web Search".to_string(),
+                        "Fetch web results as input for extraction and synthesis steps."
                             .to_string(),
-                        accent: "blue".to_string(),
-                        input_schema_ref: None,
-                        output_schema_ref: None,
-                        effect: "Read".to_string(),
-                        stability: "stable".to_string(),
-                    },
-                    WorkflowFunctionTileDto {
-                        module_id: "core".to_string(),
-                        function_id: "websearch".to_string(),
-                        title: "Web Search".to_string(),
-                        purpose: "Fetch web results as input for extraction and synthesis steps."
-                            .to_string(),
-                        accent: "blue".to_string(),
-                        input_schema_ref: None,
-                        output_schema_ref: None,
-                        effect: "Read".to_string(),
-                        stability: "stable".to_string(),
-                    },
-                    WorkflowFunctionTileDto {
-                        module_id: "core".to_string(),
-                        function_id: "extract_html".to_string(),
-                        title: "Extract HTML Elements".to_string(),
-                        purpose: "Collect structured fragments from fetched HTML content."
-                            .to_string(),
-                        accent: "blue".to_string(),
-                        input_schema_ref: None,
-                        output_schema_ref: None,
-                        effect: "Read".to_string(),
-                        stability: "stable".to_string(),
-                    },
+                        None,
+                        None,
+                        "Read".to_string(),
+                        "stable".to_string(),
+                    ),
+                    build_workflow_function_tile_dto(
+                        "core",
+                        "extract_html",
+                        "Extract HTML Elements".to_string(),
+                        "Collect structured fragments from fetched HTML content.".to_string(),
+                        None,
+                        None,
+                        "Read".to_string(),
+                        "stable".to_string(),
+                    ),
                 ],
                 }
             } else {
@@ -4979,7 +5033,8 @@ struct WorkflowFunctionTileDto {
     function_id: String,
     title: String,
     purpose: String,
-    accent: String,
+    brand_token: String,
+    icon_token: String,
     input_schema_ref: Option<String>,
     output_schema_ref: Option<String>,
     effect: String,

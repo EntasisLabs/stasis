@@ -6,21 +6,12 @@
   <input type="hidden" id="workflow-function-inputs-state" value="{{ custom_function_inputs_json }}" />
   <input type="hidden" id="workflow-graph-state" value="{{ saved_graph_state_json }}" />
 
-  <div class="hidden rounded-lg p-3" data-workflow-readiness-strip style="border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 45%, transparent);">
-    <div class="flex items-center justify-between gap-2 flex-wrap">
-      <p class="text-sm font-semibold" data-workflow-readiness-status style="color: var(--foreground);">Action Needed</p>
-    </div>
-    <div class="mt-2 hidden" data-workflow-readiness-blockers>
-      <ul class="mt-1 flex flex-col gap-1" data-workflow-readiness-list></ul>
-    </div>
-  </div>
-
   <div class="grid grid-cols-1 gap-6 wb-builder-grid">
     <div class="wb-left-column flex flex-col gap-4">
       <div class="card wb-left-rail-card">
         <div class="card-header">
           <h3 class="card-title">Action Library</h3>
-          <p class="card-description">Drag steps into the canvas.</p>
+          <p class="card-description">Build your flow. Drag steps onto the canvas.</p>
         </div>
         <div class="card-content flex flex-col gap-2">
           <button
@@ -28,7 +19,7 @@
             class="btn btn-outline btn-sm wb-repeat-action"
             data-workflow-add-repeat
           >
-            + Add Repeat Container
+            + New Repeat Scope
           </button>
 
           <div
@@ -38,11 +29,11 @@
             tabindex="0"
           >
             <div class="p-2 rounded bg-green-100">
-              <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h10v10H7z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 12h3m10 0h3"/></svg>
+              <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8a4 4 0 014-4h8M20 16a4 4 0 01-4 4H8"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4l2.5 2.5L8 9M16 20l-2.5-2.5L16 15"/></svg>
             </div>
             <div class="flex flex-col">
-              <span class="text-sm font-medium">Loop Container</span>
-              <span class="text-xs" style="color: var(--muted-foreground);">Drop onto canvas to create an empty repeat scope.</span>
+              <span class="text-sm font-medium">Repeat Scope</span>
+              <span class="text-xs" style="color: var(--muted-foreground);">Drop on the canvas to start a repeat section.</span>
               <span class="text-xs font-mono" style="color: var(--muted-foreground);">iterator</span>
             </div>
           </div>
@@ -78,12 +69,33 @@
             draggable="true"
             data-module-tile
             data-module-kind="{{ tile.module_id }}"
+            data-module-brand="{{ tile.brand_token }}"
             data-function-id="{{ tile.function_id }}"
             data-module-label="{{ tile.title }}"
             tabindex="0"
           >
-            <div class="p-2 rounded {% if tile.accent == "purple" %}bg-purple-100{% else if tile.accent == "green" %}bg-green-100{% else %}bg-blue-100{% endif %}">
-              <svg class="w-4 h-4 {% if tile.accent == "purple" %}text-purple-600{% else if tile.accent == "green" %}text-green-600{% else %}text-blue-600{% endif %}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            <div class="p-2 rounded wb-module-icon-wrap">
+              {% if tile.icon_token == "core" %}
+              <svg class="w-4 h-4 wb-module-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9h6M9 12h6M9 15h4"/></svg>
+              {% else if tile.icon_token == "search" %}
+              <svg class="w-4 h-4 wb-module-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 20l-4.2-4.2"/></svg>
+              {% else if tile.icon_token == "transport" %}
+              <svg class="w-4 h-4 wb-module-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h10M7 16h6"/><rect x="4" y="5" width="16" height="14" rx="2" stroke-width="2"/></svg>
+              {% else if tile.icon_token == "data" %}
+              <svg class="w-4 h-4 wb-module-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 8l-4 4 4 4M15 8l4 4-4 4"/></svg>
+              {% else if tile.icon_token == "text" %}
+              <svg class="w-4 h-4 wb-module-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12M6 12h12M6 17h8"/></svg>
+              {% else if tile.icon_token == "vault" %}
+              <svg class="w-4 h-4 wb-module-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="9" rx="2" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V8a4 4 0 118 0v3"/></svg>
+              {% else if tile.icon_token == "runtime" %}
+              <svg class="w-4 h-4 wb-module-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 3l-7 10h5l-1 8 7-10h-5l1-8z"/></svg>
+              {% else if tile.icon_token == "io" %}
+              <svg class="w-4 h-4 wb-module-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v11m0 0l-3-3m3 3l3-3"/></svg>
+              {% else if tile.icon_token == "health" %}
+              <svg class="w-4 h-4 wb-module-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3l7 3v6c0 5-3.5 7.8-7 9-3.5-1.2-7-4-7-9V6l7-3z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4"/></svg>
+              {% else %}
+              <svg class="w-4 h-4 wb-module-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" stroke-width="2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M18.4 5.6L17 7m-10 10l-1.4 1.4"/></svg>
+              {% endif %}
             </div>
             <div class="flex flex-col">
               <span class="text-sm font-medium">{{ tile.title }}</span>
@@ -104,24 +116,6 @@
               {% endif %}
             </div>
           </div>
-          {% endfor %}
-        </div>
-      </div>
-
-      <div class="card wb-left-rail-card">
-        <div class="card-header">
-          <h3 class="card-title">Saved Workflows</h3>
-        </div>
-        <div class="card-content flex flex-col gap-1">
-          {% for lane in lanes %}
-          <a href="#"
-            class="p-3 rounded-lg block transition-colors wb-saved-lane {% if lane.selected %}is-selected{% endif %}"
-            hx-get="/view/workflows?queue={{ lane.lane }}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode={{ mode_query }}&module_catalog={{ selected_module_catalog }}"
-            hx-target="#dashboard-view"
-            hx-swap="innerHTML">
-            <p class="text-sm font-medium">{{ lane.workflow_name }}</p>
-            <p class="text-xs mt-0.5" style="color: var(--muted-foreground);">{{ lane.total_jobs }} jobs &bull; {{ lane.lane }}</p>
-          </a>
           {% endfor %}
         </div>
       </div>
@@ -148,9 +142,9 @@
               data-selected-module-catalog="{{ selected_module_catalog }}"
             >
               <div class="wb-canvas-toolbar">
-                <h4 class="text-sm font-semibold">Step Flow</h4>
+                <h4 class="text-sm font-semibold">Canvas</h4>
                 <div class="wb-canvas-actions">
-                  <button class="btn btn-outline btn-sm" type="button"
+                  <button class="btn btn-primary btn-sm wb-action-primary" type="button"
                     data-action-post="/action/workflows/run-draft"
                     data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'
                     data-action-source-selector="{% if advanced_mode %}#workflow-source-editor{% else %}#workflow-source-guided{% endif %}"
@@ -193,6 +187,33 @@
                   </div>
                   <button
                     type="button"
+                    class="btn btn-outline btn-sm wb-saved-workflows-toggle"
+                    data-workflow-saved-workflows-toggle
+                    aria-expanded="false"
+                  >
+                    Saved Workflows
+                  </button>
+                  <div class="hidden wb-saved-workflows-popover" data-workflow-saved-workflows-popover>
+                    <p class="wb-saved-workflows-popover-title">Saved Workflows</p>
+                    <div class="wb-saved-workflows-list">
+                      {% if lanes.is_empty() %}
+                      <p class="text-xs" style="color: var(--muted-foreground);">No saved workflows yet.</p>
+                      {% endif %}
+                      {% for lane in lanes %}
+                      <a href="#"
+                        class="p-2 rounded-lg block transition-colors wb-saved-lane wb-saved-workflow-item {% if lane.selected %}is-selected{% endif %}"
+                        data-workflow-saved-workflow-link
+                        hx-get="/view/workflows?queue={{ lane.lane }}&modules={{ custom_modules_csv|urlencode }}&function_steps={{ custom_function_steps_csv|urlencode }}&function_inputs={{ custom_function_inputs_json|urlencode }}&mode={{ mode_query }}&module_catalog={{ selected_module_catalog }}"
+                        hx-target="#dashboard-view"
+                        hx-swap="innerHTML">
+                        <p class="text-xs font-semibold">{{ lane.workflow_name }}</p>
+                        <p class="text-xs mt-0.5" style="color: var(--muted-foreground);">{{ lane.total_jobs }} jobs &bull; {{ lane.lane }}</p>
+                      </a>
+                      {% endfor %}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
                     class="btn btn-outline btn-sm wb-advanced-toggle"
                     data-workflow-advanced-toggle
                     aria-expanded="{% if advanced_mode %}true{% else %}false{% endif %}"
@@ -200,7 +221,7 @@
                     <span data-workflow-advanced-toggle-label>{% if advanced_mode %}Hide Advanced View{% else %}Advanced View{% endif %}</span>
                   </button>
                   {% if advanced_mode %}
-                  <button class="btn btn-primary btn-sm" type="button"
+                  <button class="btn btn-outline btn-sm" type="button"
                     data-action-post="/action/workflows/execute"
                     data-action-body='{"workflow_id":"{{ selected_workflow_id }}","queue":"{{ selected_queue }}"}'>
                     <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -208,6 +229,10 @@
                   </button>
                   {% endif %}
                 </div>
+              </div>
+              <div class="hidden wb-starting-object-inline" data-workflow-start-object-inline>
+                <span class="wb-starting-object-inline-label">Starting Object</span>
+                <code class="wb-starting-object-inline-value" data-workflow-start-object-inline-value></code>
               </div>
               <div class="hidden mb-2 rounded px-2 py-1 wb-loop-summary" data-workflow-loop-summary></div>
               <div class="relative" data-graph-canvas>
@@ -287,7 +312,7 @@
                 </button>
                 {% endfor %}
                 {% if graph_nodes.is_empty() %}
-                <p class="text-xs" style="color: var(--muted-foreground);">No function steps yet. Drag a function from the module rail to start your Grapheme flow.</p>
+                <p class="text-xs" style="color: var(--muted-foreground);">No steps yet. Drag one from Action Library to begin.</p>
                 {% endif %}
                 </div>
               </div>
