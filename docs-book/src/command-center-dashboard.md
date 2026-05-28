@@ -4,6 +4,8 @@
 
 This page documents an operator-facing command center surface for runtime control and observability.
 
+For implemented route contracts, auth controls, and workflow builder behavior, use the [Dashboard Operations Guide](./dashboard-operations-guide.md).
+
 It is intentionally a concept slice focused on:
 
 1. cluster situational awareness.

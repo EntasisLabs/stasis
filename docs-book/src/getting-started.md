@@ -87,3 +87,6 @@ async fn main() -> stasis::domain::errors::Result<()> {
 1. [Runtime Builder and Wiring Guide](./runtime-builder.md) for all builder options.
 2. [Job Runtime Design](./runtime-job-design.md) for lifecycle and durability semantics.
 3. [Extension Points and Port Contracts](./extension-points.md) for custom adapters.
+4. [Production Agentic Workflows](./cookbook/production-agentic-workflows.md) for real-provider loop and orchestration examples.
+5. [Dashboard Operations Guide](./dashboard-operations-guide.md) for operator workflows and route contracts.
+6. [Cookbook Overview](./cookbook.md) for copy/paste production recipes.

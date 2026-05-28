@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0c0f251d.js";
+            window.path_to_searchindex_js = "searchindex-1abcc4a6.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-de86f825.js"></script>
+        <script src="toc-4a089ed3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -180,7 +180,7 @@
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-05-25</li>
 <li>Verified Against:
 <ul>
 <li>docs/adr/README.md</li>
@@ -201,6 +201,7 @@
 <tr><td>ADR-0002</td><td>Event-Driven Orchestration with Local CoR</td><td>Accepted</td><td>2026-05-07</td></tr>
 <tr><td>ADR-0003</td><td>STTP Reference-Only Job Context Contract</td><td>Accepted</td><td>2026-05-07</td></tr>
 <tr><td>ADR-0004</td><td>Recurring Jobs via Materialized Schedule Definitions</td><td>Accepted</td><td>2026-05-07</td></tr>
+<tr><td>ADR-0005</td><td>Agentic Workflow Skill Graph Contract</td><td>Accepted</td><td>2026-05-25</td></tr>
 </tbody>
 </table>
 </div>
@@ -209,6 +210,8 @@
   A1[ADR-0001 Durable Job Runtime] --&gt; A2[ADR-0002 Event-Driven Orchestration]
   A1 --&gt; A3[ADR-0003 STTP Reference Contract]
   A1 --&gt; A4[ADR-0004 Recurring Definitions]
+  A2 --&gt; A5[ADR-0005 Agentic Workflow Skill Graph Contract]
+  A4 --&gt; A5
   A3 --&gt; A2
   A4 --&gt; A2
 </pre>
@@ -258,6 +261,18 @@
 <ul>
 <li>Positive: unified runtime semantics for one-off and recurring jobs.</li>
 <li>Tradeoff: scheduler lock and drift monitoring required.</li>
+</ul>
+</li>
+</ul>
+<h2 id="adr-0005-agentic-workflow-skill-graph-contract"><a class="header" href="#adr-0005-agentic-workflow-skill-graph-contract">ADR-0005 Agentic Workflow Skill Graph Contract</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Workflow builder semantics drifted between visual placeholders and source-first implementation details.</li>
+<li>Decision: Define workflow as a versioned AI skill graph where nodes are Grapheme function steps and edges are piped function contracts; compile graph to Grapheme source and execute via trigger-bound jobs referencing immutable workflow revisions.</li>
+<li>Consequences:
+<ul>
+<li>Positive: deterministic graph-&gt;source-&gt;runtime parity and clearer product semantics.</li>
+<li>Tradeoff: requires graph schema/versioning, compiler determinism, and round-trip policy for advanced source edits.</li>
 </ul>
 </li>
 </ul>

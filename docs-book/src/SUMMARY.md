@@ -25,6 +25,7 @@
 ## Memory
 
 - [Memory Operations Reference](./memory-operations.md)
+- [Identity Memory Layer](./identity-memory-layer.md)
 
 ## Integration
 
@@ -34,6 +35,16 @@
 ## Command Center
 
 - [Dashboard Concept](./command-center-dashboard.md)
+- [Dashboard Operations Guide](./dashboard-operations-guide.md)
+
+## Cookbook
+
+- [Cookbook Overview](./cookbook.md)
+- [Production Agentic Workflows](./cookbook/production-agentic-workflows.md)
+- [Runtime and Dashboard Bootstrap](./cookbook/runtime-dashboard-bootstrap.md)
+- [Workflow Builder Starting Object](./cookbook/workflow-builder-starting-object.md)
+- [Identity Memory Change Control](./cookbook/identity-memory-change-control.md)
+- [Memory Maintenance and Rollups](./cookbook/memory-maintenance-rollups.md)
 
 ## Data Contracts
 

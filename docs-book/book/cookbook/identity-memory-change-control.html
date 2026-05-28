@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Introduction - Stasis Architecture Book</title>
+        <title>Identity Memory Change Control - Stasis Architecture Book</title>
 
 
         <!-- Custom HTML head -->
@@ -12,33 +12,33 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon-de23e50b.svg">
-        <link rel="shortcut icon" href="favicon-8114d1fc.png">
-        <link rel="stylesheet" href="css/variables-8adf115d.css">
-        <link rel="stylesheet" href="css/general-2459343d.css">
-        <link rel="stylesheet" href="css/chrome-ae938929.css">
-        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
-        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
-        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
 
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "";
+            const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1abcc4a6.js";
+            window.path_to_searchindex_js = "../searchindex-1abcc4a6.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4a089ed3.js"></script>
+        <script src="../toc-4a089ed3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -105,7 +105,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -140,7 +140,7 @@
                     <h1 class="menu-title">Stasis Architecture Book</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
 
@@ -174,33 +174,193 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
-<p>Stasis is an agentic framework SDK with a durable job orchestration runtime.</p>
-<p>If you are new to Stasis, start with <a href="./getting-started.html">Getting Started</a> before diving into architecture details.</p>
-<p>This book is the architecture reference for the runtime and covers:</p>
+                        <h1 id="identity-memory-change-control"><a class="header" href="#identity-memory-change-control">Identity Memory Change Control</a></h1>
+<h2 id="outcome"><a class="header" href="#outcome">Outcome</a></h2>
+<p>Apply governed identity relationship updates with tier-aware proposal splitting, explicit approvals, and version-safe commits.</p>
+<h2 id="recipe"><a class="header" href="#recipe">Recipe</a></h2>
+<h3 id="1-seed-baseline-relationship-state"><a class="header" href="#1-seed-baseline-relationship-state">1. Seed baseline relationship state</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use chrono::Utc;
+use std::sync::Arc;
+
+use stasis::infrastructure::memory::in_memory_identity_memory_store::InMemoryIdentityMemoryStore;
+use stasis::ports::outbound::memory::identity_memory_models::{
+    EntityRef, RelationshipEntity, RelationshipStatus, UpdateSource,
+};
+
+fn seed_relationship(store: &amp;InMemoryIdentityMemoryStore) -&gt; stasis::domain::errors::Result&lt;()&gt; {
+    store.upsert_relationship(RelationshipEntity {
+        relationship_id: "rel-1".to_string(),
+        source_entity_ref: EntityRef {
+            entity_type: "PersonaEntity".to_string(),
+            entity_id: "persona:default".to_string(),
+        },
+        target_entity_ref: EntityRef {
+            entity_type: "UserEntity".to_string(),
+            entity_id: "user-123".to_string(),
+        },
+        relationship_kind: "assistant_user".to_string(),
+        status: RelationshipStatus::Active,
+        trust_level: 0.50,
+        confidence: 0.80,
+        strength_score: 0.80,
+        recency_score: 0.60,
+        autonomy_scope: Default::default(),
+        approval_profile_id: None,
+        interruption_policy: Default::default(),
+        escalation_policy: Default::default(),
+        policy_tags: vec![],
+        provenance: UpdateSource::UserDirect,
+        parent_relationship_id: None,
+        governing_relationship_ids: vec![],
+        derived_from_relationship_id: None,
+        last_transition_reason: None,
+        transition_receipt_id: None,
+        version: 1,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    })
+}
+<span class="boring">}</span></code></pre>
+<h3 id="2-initialize-store-and-service"><a class="header" href="#2-initialize-store-and-service">2. Initialize store and service</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::use_cases::identity_memory_service::IdentityMemoryService;
+
+let store = Arc::new(InMemoryIdentityMemoryStore::default());
+seed_relationship(store.as_ref())?;
+
+let service = IdentityMemoryService::new(store);
+<span class="boring">}</span></code></pre>
+<h3 id="3-propose-mixed-tier-patch"><a class="header" href="#3-propose-mixed-tier-patch">3. Propose mixed-tier patch</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use serde_json::json;
+
+use stasis::ports::outbound::memory::identity_memory_models::{
+    IdentityEntityType, ProposeEntityUpdateRequest, UpdateSource,
+};
+
+let proposed = service
+    .propose_entity_update(&amp;ProposeEntityUpdateRequest {
+        entity_type: IdentityEntityType::RelationshipEntity,
+        entity_id: "rel-1".to_string(),
+        patch: json!({
+            "recency_score": 0.90,
+            "autonomy_scope.allow": ["external_posting"]
+        }),
+        source: UpdateSource::ModelInferred,
+        confidence: 0.82,
+        reason: "post interaction update".to_string(),
+        actor: "model".to_string(),
+        receipt_id: None,
+        expires_at: None,
+    })
+    .await?;
+
+println!("split_patch={}", proposed.split_patch);
+println!("tiers={:?}", proposed.tiers);
+<span class="boring">}</span></code></pre>
+<p>Expected behavior:</p>
 <ol>
-<li>System architecture and decision boundaries.</li>
-<li>Runtime behavior and reliability semantics.</li>
-<li>SurrealDB schema contracts.</li>
-<li>Architecture Decision Records (ADRs).</li>
+<li>Patch is split into multiple proposals because tiers differ.</li>
+<li>recency_score proposal is AutoCommit tier.</li>
+<li>autonomy_scope.allow proposal is ApprovalRequired tier.</li>
 </ol>
-<h2 id="how-to-read-this-book"><a class="header" href="#how-to-read-this-book">How to Read This Book</a></h2>
+<h3 id="4-auto-commit-safe-tiers"><a class="header" href="#4-auto-commit-safe-tiers">4. Auto-commit safe tiers</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::use_cases::identity_memory_service::{
+    IdentityMemoryService, ProposeAndCommitRequest,
+};
+
+let auto = service
+    .propose_and_commit_autocommit(&amp;ProposeAndCommitRequest {
+        proposal_request: ProposeEntityUpdateRequest {
+            entity_type: IdentityEntityType::RelationshipEntity,
+            entity_id: "rel-1".to_string(),
+            patch: json!({ "recency_score": 0.88 }),
+            source: UpdateSource::ModelInferred,
+            confidence: 0.80,
+            reason: "freshness update".to_string(),
+            actor: "model".to_string(),
+            receipt_id: None,
+            expires_at: None,
+        },
+        expected_version: 1,
+        approver: Some("owner".to_string()),
+    })
+    .await?;
+
+println!("commits={}", auto.commits.len());
+<span class="boring">}</span></code></pre>
+<h3 id="5-commit-approval-required-proposal"><a class="header" href="#5-commit-approval-required-proposal">5. Commit approval-required proposal</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::ports::outbound::memory::identity_memory_models::CommitEntityUpdateRequest;
+
+let approval_proposal_id = proposed.proposal_ids[1].clone();
+
+let commit = service
+    .commit_entity_update(&amp;CommitEntityUpdateRequest {
+        proposal_id: approval_proposal_id,
+        expected_version: 2,
+        approver: Some("owner".to_string()),
+    })
+    .await?;
+
+println!("committed={}", commit.committed);
+println!("code={:?}", commit.code);
+println!("new_version={:?}", commit.new_version);
+<span class="boring">}</span></code></pre>
+<h3 id="6-inspect-history-and-rollback-if-needed"><a class="header" href="#6-inspect-history-and-rollback-if-needed">6. Inspect history and rollback if needed</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::ports::outbound::memory::identity_memory_models::{
+    ListEntityHistoryRequest, RollbackEntityVersionRequest,
+};
+
+let history = service
+    .list_entity_history(&amp;ListEntityHistoryRequest {
+        entity_type: IdentityEntityType::RelationshipEntity,
+        entity_id: "rel-1".to_string(),
+        limit: 50,
+    })
+    .await?;
+
+println!("proposal_count={}", history.proposals.len());
+println!("transition_count={}", history.transitions.len());
+
+let rollback = service
+    .rollback_entity_version(&amp;RollbackEntityVersionRequest {
+        entity_type: IdentityEntityType::RelationshipEntity,
+        entity_id: "rel-1".to_string(),
+        target_version: 2,
+        reason: "operator rollback".to_string(),
+        approver: "owner".to_string(),
+    })
+    .await?;
+
+println!("rolled_back={}", rollback.rolled_back);
+<span class="boring">}</span></code></pre>
+<h2 id="operational-notes"><a class="header" href="#operational-notes">Operational Notes</a></h2>
 <ol>
-<li>Start with Getting Started for a first end-to-end run.</li>
-<li>Read Runtime Builder and Job Runtime Design for runtime behavior.</li>
-<li>Read Architecture Overview to understand system boundaries and flow.</li>
-<li>Use SurrealDB Schema as the source of truth for data contracts.</li>
-<li>Review Extension Points for integration contracts and ADRs for rationale.</li>
+<li>Always pass expected_version from latest read to avoid stale writes.</li>
+<li>Treat ApprovalRequired proposals as explicit human checkpoints.</li>
+<li>Persist proposal and transition history to support audits.</li>
+<li>Watch for PolicyDenied outcomes and adjust patch strategy accordingly.</li>
 </ol>
-<h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
-<p>This book documents V1 runtime architecture and operational semantics. It does not define production deployment topology or UI dashboard design.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../cookbook/workflow-builder-starting-object.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
 
-                            <a rel="next prefetch" href="getting-started.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../cookbook/memory-maintenance-rollups.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -210,8 +370,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../cookbook/workflow-builder-starting-object.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
 
-                    <a rel="next prefetch" href="getting-started.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../cookbook/memory-maintenance-rollups.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -231,17 +394,17 @@
         </script>
 
 
-        <script src="elasticlunr-ef4e11c1.min.js"></script>
-        <script src="mark-09e88c2c.min.js"></script>
-        <script src="searcher-c2a407aa.js"></script>
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
 
-        <script src="clipboard-1626706a.min.js"></script>
-        <script src="highlight-abc7f01d.js"></script>
-        <script src="book-a0b12cfe.js"></script>
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="mermaid-eefea253.min.js"></script>
-        <script src="mermaid-init-ccf746f1.js"></script>
+        <script src="../mermaid-eefea253.min.js"></script>
+        <script src="../mermaid-init-ccf746f1.js"></script>
 
 
 

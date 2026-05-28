@@ -19,14 +19,13 @@ Stasis is a Rust framework for AI orchestration with durable runtime jobs, clust
 ## Quick Start
 
 ```rust
-use stasis::sdk_prelude::{
-    InvokeAgentRequest, InMemoryAgentRepository, MockLlmGateway, RegisterAgentRequest, StasisSdk,
-};
+use stasis::sdk_prelude::{InvokeAgentRequest, InMemoryAgentRepository, RegisterAgentRequest, StasisSdk};
+use stasis::sdk_prelude_ext::GenaiLlmGateway;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> stasis::domain::errors::Result<()> {
     let repo = InMemoryAgentRepository::default();
-    let llm = MockLlmGateway::new("mock response");
+    let llm = GenaiLlmGateway::from_env();
     let sdk = StasisSdk::new(repo, llm);
 
     sdk.register_agent(RegisterAgentRequest {
@@ -34,20 +33,21 @@ async fn main() {
         name: "Planner".into(),
         system_prompt: "Break tasks into steps".into(),
     })
-    .await
-    .unwrap();
+    .await?;
 
     let out = sdk
         .invoke_agent(InvokeAgentRequest {
             agent_id: "planner".into(),
             user_prompt: "Plan a sprint kickoff".into(),
         })
-        .await
-        .unwrap();
+        .await?;
 
     println!("{}", out.completion);
+    Ok(())
 }
 ```
+
+For a deterministic local smoke test (no provider dependency), use [examples/simple_agent.rs](examples/simple_agent.rs).
 
 Prelude tiers:
 
@@ -75,6 +75,51 @@ Provider-specific overrides are supported:
 - `STASIS_OLLAMA_API_KEY`
 
 Runtime examples are available in [examples](examples).
+
+### Tool Macro (Signature-Driven)
+
+`StasisTool` can be generated from a typed async function using `#[stasis_tool(...)]`:
+
+```rust
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use stasis::domain::errors::Result;
+use stasis::stasis_tool;
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+struct SearchInput {
+    query: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SearchOutput {
+    summary: String,
+}
+
+#[stasis_tool(name = "search_docs", description = "Searches internal docs")]
+async fn search_docs(input: SearchInput) -> Result<SearchOutput> {
+    Ok(SearchOutput {
+        summary: format!("query={}", input.query),
+    })
+}
+
+// Generated symbols:
+// - struct SearchDocsTool;
+// - fn search_docs_tool() -> SearchDocsTool;
+```
+
+This avoids repetitive manual trait implementations while preserving strict JSON-schema-based validation.
+
+Production-focused entry points:
+
+- [examples/simple_agent_production.rs](examples/simple_agent_production.rs): minimal real-provider invocation.
+- [examples/agentic_workflows_production.rs](examples/agentic_workflows_production.rs): full workflow set with `STASIS_EXAMPLE_TEAM_PROFILE` (`all|sre|product|support`), `STASIS_EXAMPLE_RUNTIME_BACKEND` (`in-memory|surreal-mem|surreal-ws|surreal-kv`), and `STASIS_EXAMPLE_DRY_RUN=1` for provider-safe smoke runs.
+- [examples/runtime_backends_profiles.rs](examples/runtime_backends_profiles.rs): backend profile bootstrap for in-memory, Surreal websocket, and Surreal KV modes.
+- [examples/team_role_workflows.rs](examples/team_role_workflows.rs): role-specific scenario packs for SRE incident, product planning, and support triage loops.
+
+CI-friendly smoke harness:
+
+- [scripts/smoke-agentic-workflows.sh](scripts/smoke-agentic-workflows.sh)
 
 ## Embedded Dashboard
 

@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0c0f251d.js";
+            window.path_to_searchindex_js = "searchindex-1abcc4a6.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-de86f825.js"></script>
+        <script src="toc-4a089ed3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -280,6 +280,9 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <li><a href="#runtime-builder-and-wiring-guide">Runtime Builder and Wiring Guide</a> for all builder options.</li>
 <li><a href="#stasis-job-runtime-design">Job Runtime Design</a> for lifecycle and durability semantics.</li>
 <li><a href="#extension-points-and-port-contracts">Extension Points and Port Contracts</a> for custom adapters.</li>
+<li><a href="#production-agentic-workflows">Production Agentic Workflows</a> for real-provider loop and orchestration examples.</li>
+<li><a href="#dashboard-operations-guide">Dashboard Operations Guide</a> for operator workflows and route contracts.</li>
+<li><a href="#cookbook-overview">Cookbook Overview</a> for copy/paste production recipes.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="stasis-architecture-overview"><a class="header" href="#stasis-architecture-overview">Stasis Architecture Overview</a></h1>
@@ -968,6 +971,8 @@ Dedicated memory operation handlers support aggregate, transform, rollup, and sc
 <tbody>
 <tr><td><code>RuntimeBackend::InMemory</code></td><td>In-process store. No persistence across restarts. Use for testing and development.</td></tr>
 <tr><td><code>RuntimeBackend::SurrealMem { namespace, database }</code></td><td>Surreal in-memory engine with explicit namespace/database. Useful for integration tests and durable-runtime behavior validation.</td></tr>
+<tr><td><code>RuntimeBackend::SurrealWs { endpoint, namespace, database }</code></td><td>Remote SurrealDB over websocket. Use for shared/dev/staging environments where runtime state is centralized.</td></tr>
+<tr><td><code>RuntimeBackend::SurrealKv { path, namespace, database }</code></td><td>Embedded SurrealKV on local disk. Use for durable single-node deployments without a remote Surreal service.</td></tr>
 </tbody>
 </table>
 </div>
@@ -983,6 +988,20 @@ let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
     namespace: "stasis".to_string(),
     database: "runtime".to_string(),
 });
+
+// Remote websocket backend
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
+    endpoint: "ws://127.0.0.1:8000/rpc".to_string(),
+    namespace: "stasis".to_string(),
+    database: "runtime".to_string(),
+});
+
+// Embedded SurrealKV backend
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
+    path: "./data/stasis-runtime".to_string(),
+    namespace: "stasis".to_string(),
+    database: "runtime".to_string(),
+});
 <span class="boring">}</span></code></pre>
 <hr>
 <h2 id="minimal-working-setup"><a class="header" href="#minimal-working-setup">Minimal Working Setup</a></h2>
@@ -994,6 +1013,19 @@ let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
     .await?;
 <span class="boring">}</span></code></pre>
 <p>All handler groups are active. No middleware is applied beyond the chat client itself.</p>
+<hr>
+<h2 id="production-environment-variables"><a class="header" href="#production-environment-variables">Production Environment Variables</a></h2>
+<p>When using the default chat client (<code>GenaiChatClient::from_env()</code>), configure provider and model routing via environment variables:</p>
+<pre><code class="language-bash">export STASIS_LLM_PROVIDER=openai
+export STASIS_LLM_MODEL=gpt-4o-mini
+</code></pre>
+<p>Then provide credentials using either the generic fallback key or provider-specific keys:</p>
+<pre><code class="language-bash">export STASIS_LLM_API_KEY=...
+# or one of:
+export STASIS_OPENAI_API_KEY=...
+export STASIS_ANTHROPIC_API_KEY=...
+export STASIS_OLLAMA_API_KEY=...
+</code></pre>
 <hr>
 <h2 id="chat-client"><a class="header" href="#chat-client">Chat Client</a></h2>
 <p>Provide a custom <code>AiChatClient</code> implementation or rely on the default:</p>
@@ -3145,8 +3177,191 @@ pub trait MemoryOperations: Send + Sync {
 <li><code>MemoryContextReader</code> and <code>MemoryContextWriter</code> are separate interfaces from <code>MemoryOperations</code> by design — readers/writers can be wired without enabling bulk operation handlers.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="extension-points-and-port-contracts"><a class="header" href="#extension-points-and-port-contracts">Extension Points and Port Contracts</a></h1>
+<h1 id="identity-memory-layer"><a class="header" href="#identity-memory-layer">Identity Memory Layer</a></h1>
 <h2 id="document-metadata-12"><a class="header" href="#document-metadata-12">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Architecture and Operations Guide</li>
+<li>Audience: Engineer, Runtime Owner, Platform Team</li>
+<li>Stability: Active</li>
+<li>Last Verified: 2026-05-27</li>
+<li>Verified Against:
+<ul>
+<li>src/ports/outbound/memory/identity_memory_store.rs</li>
+<li>src/ports/outbound/memory/identity_memory_models.rs</li>
+<li>src/application/use_cases/identity_memory_service.rs</li>
+<li>src/application/runtime/identity_context_compiler.rs</li>
+<li>src/application/runtime/prompt_chat_job_handler.rs</li>
+<li>src/application/runtime/stasis_runtime_builder.rs</li>
+<li>src/infrastructure/memory/in_memory_identity_memory_store.rs</li>
+<li>src/infrastructure/memory/surreal_identity_memory_store.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-10"><a class="header" href="#purpose-10">Purpose</a></h2>
+<p>The identity memory layer gives Stasis durable, policy-aware identity context for runtime decisions. It complements the Locus memory plane:</p>
+<ol>
+<li>Locus memory handles conversational and resonance retrieval.</li>
+<li>Identity memory handles relationship, policy, trust, and governance state.</li>
+</ol>
+<p>Use this layer when actor identity, trust state, approval workflows, or relationship continuity must influence execution behavior.</p>
+<h2 id="scope-and-responsibilities"><a class="header" href="#scope-and-responsibilities">Scope and Responsibilities</a></h2>
+<p>Identity memory in Stasis currently provides:</p>
+<ol>
+<li>Identity context retrieval via get_identity_context.</li>
+<li>Governed mutation workflow via propose_entity_update and commit_entity_update.</li>
+<li>Version and transition history for audit and rollback.</li>
+<li>Relationship continuity constraints (for revoked and replacement links).</li>
+<li>Bridge node generation for material relationship transitions.</li>
+</ol>
+<h2 id="core-port-contract"><a class="header" href="#core-port-contract">Core Port Contract</a></h2>
+<p><code>IdentityMemoryStore</code> defines five operations:</p>
+<ol>
+<li>get_identity_context</li>
+<li>propose_entity_update</li>
+<li>commit_entity_update</li>
+<li>list_entity_history</li>
+<li>rollback_entity_version</li>
+</ol>
+<p>Reference: src/ports/outbound/memory/identity_memory_store.rs</p>
+<h2 id="data-model-overview"><a class="header" href="#data-model-overview">Data Model Overview</a></h2>
+<p>Primary model families are defined in src/ports/outbound/memory/identity_memory_models.rs.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Family</th><th>Examples</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>Identity entities</td><td>PersonaEntity, UserEntity, ChannelProfileEntity, PolicyProfileEntity, RelationshipEntity</td><td>Core state read by get_identity_context</td></tr>
+<tr><td>Governance enums</td><td>UpdateTier, ProposalState, CommitOutcomeCode, RelationshipStatus, UpdateSource</td><td>Used for policy and approval semantics</td></tr>
+<tr><td>Workflow records</td><td>EntityUpdateProposalRecord, RelationshipTransitionEvent</td><td>Persistent audit trail for proposal and state change lifecycle</td></tr>
+<tr><td>IO contracts</td><td>GetIdentityContextRequest/Response, ProposeEntityUpdateRequest/Response, CommitEntityUpdateRequest/Response</td><td>Boundary contracts used by services and adapters</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="governance-model"><a class="header" href="#governance-model">Governance Model</a></h2>
+<p>Patch fields are classified into policy tiers before proposal records are created.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tier</th><th>Behavior</th><th>Representative fields</th></tr>
+</thead>
+<tbody>
+<tr><td>AutoCommit</td><td>Can be committed automatically</td><td>recency_score, confidence, strength_score</td></tr>
+<tr><td>ConfirmRequired</td><td>Requires explicit confirm flow</td><td>interruption_policy.quiet_hours, escalation_policy.fallback, policy_tags</td></tr>
+<tr><td>ApprovalRequired</td><td>Requires explicit approver</td><td>status, trust_level, autonomy_scope.allow, autonomy_scope.deny, approval_profile_id</td></tr>
+</tbody>
+</table>
+</div>
+<p>Important behavior:</p>
+<ol>
+<li>Mixed-tier patches are split into multiple proposals.</li>
+<li>Propose response reports split_patch and per-proposal tiers.</li>
+<li>ApprovalRequired commits are rejected without approver.</li>
+</ol>
+<p>Reference: src/infrastructure/memory/in_memory_identity_memory_store.rs</p>
+<h2 id="commit-and-rollback-semantics"><a class="header" href="#commit-and-rollback-semantics">Commit and Rollback Semantics</a></h2>
+<p>Current implementation status:</p>
+<ol>
+<li>RelationshipEntity has a full commit path.</li>
+<li>Non-relationship entity commit currently returns InvalidPatch rationale.</li>
+<li>Relationship rollback is supported by version snapshot restore.</li>
+<li>Non-relationship rollback currently returns not implemented rationale.</li>
+</ol>
+<p>Commit outcomes include:</p>
+<ul>
+<li>Ok</li>
+<li>StaleState</li>
+<li>ApprovalRequired</li>
+<li>PolicyDenied</li>
+<li>InvalidPatch</li>
+<li>ExpiredProposal</li>
+<li>NotFound</li>
+</ul>
+<h2 id="runtime-integration-path"><a class="header" href="#runtime-integration-path">Runtime Integration Path</a></h2>
+<p>When an identity store is wired into runtime handlers:</p>
+<ol>
+<li>Runtime loads identity summary before prompt execution.</li>
+<li>Summary is prepended to user prompt as an identity snapshot header.</li>
+<li>Diagnostics include identity_context attempted, summary, and error information.</li>
+</ol>
+<p>Defaults and resolution rules:</p>
+<ol>
+<li>user_id is sourced from correlation_id.</li>
+<li>persona_id defaults to STASIS_DEFAULT_PERSONA_ID or persona:default.</li>
+<li>channel_id defaults to STASIS_DEFAULT_CHANNEL_ID or channel:default.</li>
+<li>If policy_profile exists, channel_id is derived as channel:{policy_profile}.</li>
+</ol>
+<p>Reference:</p>
+<ul>
+<li>src/application/runtime/identity_context_compiler.rs</li>
+<li>src/application/runtime/prompt_chat_job_handler.rs</li>
+</ul>
+<h2 id="wiring-patterns"><a class="header" href="#wiring-patterns">Wiring Patterns</a></h2>
+<h3 id="in-memory-runtime-with-identity-store"><a class="header" href="#in-memory-runtime-with-identity-store">In-memory runtime with identity store</a></h3>
+<pre class="playground"><code class="language-rust">use std::sync::Arc;
+
+use stasis::application::runtime::runtime_factory::RuntimeBackend;
+use stasis::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
+use stasis::infrastructure::memory::in_memory_identity_memory_store::InMemoryIdentityMemoryStore;
+
+#[tokio::main]
+async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
+    let identity_store = Arc::new(InMemoryIdentityMemoryStore::default());
+
+    let _composition = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_locus_memory()
+        .with_identity_memory_store(identity_store)
+        .build()
+        .await?;
+
+    Ok(())
+}</code></pre>
+<h3 id="surreal-backed-identity-store"><a class="header" href="#surreal-backed-identity-store">Surreal-backed identity store</a></h3>
+<pre class="playground"><code class="language-rust">use std::sync::Arc;
+
+use surrealdb::Surreal;
+use surrealdb::engine::any::Any;
+use stasis::infrastructure::memory::surreal_identity_memory_store::SurrealIdentityMemoryStore;
+
+#[tokio::main]
+async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
+    let db = Surreal::&lt;Any&gt;::init();
+    db.connect("mem://").await?;
+    db.use_ns("stasis").use_db("runtime").await?;
+
+    let identity_store = SurrealIdentityMemoryStore::new(db.clone());
+    identity_store.ensure_schema().await?;
+
+    let _identity_store_arc = Arc::new(identity_store);
+    Ok(())
+}</code></pre>
+<h2 id="production-checklist"><a class="header" href="#production-checklist">Production Checklist</a></h2>
+<ol>
+<li>Decide ownership model for approver identities and receipt IDs.</li>
+<li>Enforce expected_version checks in all write paths.</li>
+<li>Keep relationship_limit bounded for predictable latency.</li>
+<li>Track CommitOutcomeCode rates and stale-state frequency.</li>
+<li>Validate transition and proposal history retention policies.</li>
+<li>Alert on repeated PolicyDenied or ApprovalRequired failures.</li>
+</ol>
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Symptom</th><th>Likely cause</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td>commit returns StaleState</td><td>expected_version mismatch</td><td>Reload current entity version and retry with updated expected_version</td></tr>
+<tr><td>commit returns ApprovalRequired</td><td>proposal tier needs approver</td><td>Re-submit commit with approver set</td></tr>
+<tr><td>commit returns PolicyDenied</td><td>guardrail violation</td><td>Inspect rationale, patch fields, and relationship continuity constraints</td></tr>
+<tr><td>identity context missing in diagnostics</td><td>store not wired</td><td>Ensure with_identity_memory_store is used in StasisRuntimeBuilder</td></tr>
+<tr><td>summary not prepended to prompt</td><td>identity read failure</td><td>Check identity store health and identity_context diagnostics section</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="extension-points-and-port-contracts"><a class="header" href="#extension-points-and-port-contracts">Extension Points and Port Contracts</a></h1>
+<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
@@ -3173,7 +3388,7 @@ pub trait MemoryOperations: Send + Sync {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-10"><a class="header" href="#purpose-10">Purpose</a></h2>
+<h2 id="purpose-11"><a class="header" href="#purpose-11">Purpose</a></h2>
 <p>Document all port contracts that SDK consumers can implement to extend or replace Stasis infrastructure. Each entry covers the trait signature, what Stasis guarantees about call semantics, and the built-in implementation(s) provided.</p>
 <p>This reference includes both outbound ports and selected inbound control-plane contracts used to drive runtime operations.</p>
 <h2 id="architecture-principle"><a class="header" href="#architecture-principle">Architecture Principle</a></h2>
@@ -3548,7 +3763,7 @@ pub trait StasisTool: Send + Sync {
 <p>No port is strictly required. The runtime boots with all defaults when <code>StasisRuntimeBuilder::new(backend).build().await?</code> is called with no additional configuration.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="control-plane-and-endpoint-routing"><a class="header" href="#control-plane-and-endpoint-routing">Control Plane and Endpoint Routing</a></h1>
-<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
+<h2 id="document-metadata-14"><a class="header" href="#document-metadata-14">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture and Delivery Reference</li>
 <li>Audience: Engineer, Platform, SRE, Architect</li>
@@ -3568,7 +3783,7 @@ pub trait StasisTool: Send + Sync {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-11"><a class="header" href="#purpose-11">Purpose</a></h2>
+<h2 id="purpose-12"><a class="header" href="#purpose-12">Purpose</a></h2>
 <p>Document the command-center foundation for Stasis runtime operations and outbound delivery routing.</p>
 <p>This reference covers:</p>
 <ol>
@@ -3685,8 +3900,9 @@ pub trait StasisTool: Send + Sync {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="command-center-dashboard-concept"><a class="header" href="#command-center-dashboard-concept">Command Center Dashboard Concept</a></h1>
-<h2 id="purpose-12"><a class="header" href="#purpose-12">Purpose</a></h2>
+<h2 id="purpose-13"><a class="header" href="#purpose-13">Purpose</a></h2>
 <p>This page documents an operator-facing command center surface for runtime control and observability.</p>
+<p>For implemented route contracts, auth controls, and workflow builder behavior, use the <a href="#dashboard-operations-guide">Dashboard Operations Guide</a>.</p>
 <p>It is intentionally a concept slice focused on:</p>
 <ol>
 <li>cluster situational awareness.</li>
@@ -4031,8 +4247,1135 @@ pub trait StasisTool: Send + Sync {
 }
 </style>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="dashboard-operations-guide"><a class="header" href="#dashboard-operations-guide">Dashboard Operations Guide</a></h1>
+<h2 id="document-metadata-15"><a class="header" href="#document-metadata-15">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Operations Guide</li>
+<li>Audience: Operator, SRE, Runtime Engineer</li>
+<li>Stability: Active</li>
+<li>Last Verified: 2026-05-27</li>
+<li>Verified Against:
+<ul>
+<li>src/bin/stasis_dashboard.rs</li>
+<li>src/dashboard/handlers.rs</li>
+<li>src/dashboard/service.rs</li>
+<li>src/dashboard/integration.rs</li>
+<li>templates/dashboard/views/workflows.html</li>
+<li>templates/dashboard/index.html</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-14"><a class="header" href="#purpose-14">Purpose</a></h2>
+<p>This page documents the implemented dashboard behavior for production operators.</p>
+<p>Use this guide for:</p>
+<ol>
+<li>Mounting and securing dashboard routes.</li>
+<li>Running standalone dashboard service in production-like mode.</li>
+<li>Understanding workflow builder payload contracts and compile behavior.</li>
+<li>Operating scheduler, replay, and workflow actions safely.</li>
+</ol>
+<h2 id="deployment-modes"><a class="header" href="#deployment-modes">Deployment Modes</a></h2>
+<h3 id="standalone-binary"><a class="header" href="#standalone-binary">Standalone binary</a></h3>
+<p>Run the dedicated server:</p>
+<pre><code class="language-bash">cargo run --bin stasis_dashboard
+</code></pre>
+<p>Defaults:</p>
+<ol>
+<li>Bind address: 127.0.0.1:3007</li>
+<li>Backend: in-memory unless overridden</li>
+</ol>
+<p>Backend environment variables:</p>
+<ol>
+<li>STASIS_DASHBOARD_RUNTIME_BACKEND=in-memory|surreal-mem|surreal-ws|surreal-kv</li>
+<li>STASIS_DASHBOARD_SURREAL_NAMESPACE (default stasis)</li>
+<li>STASIS_DASHBOARD_SURREAL_DATABASE (default runtime)</li>
+<li>STASIS_DASHBOARD_SURREAL_ENDPOINT (required for surreal-ws)</li>
+<li>STASIS_DASHBOARD_SURREAL_KV_PATH (required for surreal-kv)</li>
+</ol>
+<p>Optional demo seed (in-memory only):</p>
+<ol>
+<li>STASIS_DASHBOARD_DEMO_SEED=true</li>
+</ol>
+<h3 id="embedded-routes-in-existing-axum-app"><a class="header" href="#embedded-routes-in-existing-axum-app">Embedded routes in existing Axum app</a></h3>
+<p>Use DashboardRouterExt:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use std::sync::Arc;
+
+use axum::Router;
+use stasis::dashboard::{DashboardRouterExt, RuntimeDashboardQueryService};
+
+fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
+    Router::new().add_dashboard_with(service, |state| {
+        state
+            .with_action_auth_bearer_token("replace-me")
+            .with_action_required_role("scheduler.admin")
+    })
+}
+<span class="boring">}</span></code></pre>
+<p>Reference: src/dashboard/integration.rs</p>
+<h2 id="route-map"><a class="header" href="#route-map">Route Map</a></h2>
+<h3 id="ui-and-stream-routes"><a class="header" href="#ui-and-stream-routes">UI and stream routes</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Route</th><th>Method</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>/</td><td>GET</td><td>Redirects to /dashboard</td></tr>
+<tr><td>/dashboard</td><td>GET</td><td>Main shell</td></tr>
+<tr><td>/view/{name}</td><td>GET</td><td>Section content swap</td></tr>
+<tr><td>/stream/jobs</td><td>GET</td><td>Live jobs panel</td></tr>
+<tr><td>/stream/outbox</td><td>GET</td><td>Live outbox panel</td></tr>
+<tr><td>/stream/nodes</td><td>GET</td><td>Live cluster nodes panel</td></tr>
+<tr><td>/stream/workflow-reflection</td><td>GET</td><td>Reflection preview stream</td></tr>
+<tr><td>/inspect/job/{id}</td><td>GET</td><td>Job inspector</td></tr>
+<tr><td>/inspect/attempt/{id}</td><td>GET</td><td>Attempt inspector</td></tr>
+<tr><td>/inspect/node/{id}</td><td>GET</td><td>Node inspector</td></tr>
+<tr><td>/inspect/endpoint/{id}</td><td>GET</td><td>Endpoint inspector</td></tr>
+<tr><td>/inspect/event/{id}</td><td>GET</td><td>Event inspector</td></tr>
+<tr><td>/assets/{name}</td><td>GET</td><td>Static dashboard assets</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="action-routes"><a class="header" href="#action-routes">Action routes</a></h3>
+<p>All action routes are under /action and can be auth-protected.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Route</th><th>Method</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>/action/scheduler/materialize</td><td>POST</td><td>Materialize recurring jobs now</td></tr>
+<tr><td>/action/scheduler/process</td><td>POST</td><td>Process one queue tick</td></tr>
+<tr><td>/action/scheduler/publish</td><td>POST</td><td>Publish pending outbox events</td></tr>
+<tr><td>/action/scheduler/replay</td><td>POST</td><td>Replay dead-letter job</td></tr>
+<tr><td>/action/workflows/run-draft</td><td>POST</td><td>Compile and run draft workflow without save</td></tr>
+<tr><td>/action/workflows/save</td><td>POST</td><td>Compile and persist workflow definition</td></tr>
+<tr><td>/action/workflows/execute</td><td>POST</td><td>Execute saved workflow definition</td></tr>
+</tbody>
+</table>
+</div>
+<p>Reference: src/dashboard/handlers.rs</p>
+<h2 id="action-authorization-model"><a class="header" href="#action-authorization-model">Action Authorization Model</a></h2>
+<p>If neither token nor role is configured, action routes are open.</p>
+<p>If configured:</p>
+<ol>
+<li>Bearer token is checked from Authorization header.</li>
+<li>Required role is checked from configurable role-claim header.</li>
+</ol>
+<p>Configuration methods on DashboardState:</p>
+<ol>
+<li>with_action_auth_bearer_token</li>
+<li>with_action_required_role</li>
+<li>with_action_role_claim_header</li>
+</ol>
+<p>Standalone environment variables:</p>
+<ol>
+<li>STASIS_DASHBOARD_ACTION_AUTH_BEARER</li>
+<li>STASIS_DASHBOARD_ACTION_REQUIRED_ROLE</li>
+<li>STASIS_DASHBOARD_ACTION_ROLE_CLAIM_HEADER</li>
+</ol>
+<h2 id="workflow-builder-contract"><a class="header" href="#workflow-builder-contract">Workflow Builder Contract</a></h2>
+<p>Workflow actions accept this request shape:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>workflow_id</td><td>string</td><td>yes</td><td>Non-empty</td></tr>
+<tr><td>queue</td><td>string</td><td>yes</td><td>Non-empty</td></tr>
+<tr><td>source</td><td>string</td><td>conditional</td><td>Used when no graph/step compile result is produced</td></tr>
+<tr><td>modules</td><td>string</td><td>no</td><td>CSV module ids</td></tr>
+<tr><td>function_steps</td><td>string</td><td>no</td><td>CSV module.function tokens</td></tr>
+<tr><td>function_inputs</td><td>string</td><td>no</td><td>JSON object where values are string payloads</td></tr>
+<tr><td>graph_state</td><td>string</td><td>no</td><td>JSON string representing compile/topology graph</td></tr>
+</tbody>
+</table>
+</div>
+<p>Reference: src/dashboard/handlers.rs and src/dashboard/service.rs</p>
+<h3 id="compile-precedence-and-mode"><a class="header" href="#compile-precedence-and-mode">Compile precedence and mode</a></h3>
+<p>Save and draft-run compile in this order:</p>
+<ol>
+<li>graph_state compile path</li>
+<li>legacy function_steps compile path</li>
+<li>source passthrough</li>
+</ol>
+<p>Compile mode hints used by save:</p>
+<ol>
+<li>graph_compiled</li>
+<li>legacy_function_steps</li>
+<li>source_passthrough</li>
+</ol>
+<h3 id="graph-state-validation"><a class="header" href="#graph-state-validation">Graph state validation</a></h3>
+<p>Two graph shapes are supported.</p>
+<p>Compile-shape contract requires:</p>
+<ol>
+<li>query.steps array exists and is non-empty.</li>
+<li>Optional iterators entries must include bounded loop.max and loop.each path starting with $.</li>
+</ol>
+<p>Topology-shape contract requires:</p>
+<ol>
+<li>nodes array.</li>
+<li>edges array.</li>
+<li>Each node has non-empty id.</li>
+</ol>
+<p>If graph_state contains both shapes, both validations apply.</p>
+<h2 id="starting-object-behavior"><a class="header" href="#starting-object-behavior">Starting Object Behavior</a></h2>
+<p>The workflow canvas exposes a Starting Object editor.</p>
+<p>Frontend behavior:</p>
+<ol>
+<li>Input must be valid JSON object.</li>
+<li>Empty input is allowed (optional state).</li>
+<li>Value is stored in graph_state as initial_state.</li>
+</ol>
+<p>Backend compile behavior:</p>
+<ol>
+<li>If initial_state exists, query body emits a set block before pipeline steps.</li>
+<li>If initial_state is missing, no set block is emitted.</li>
+</ol>
+<p>This keeps Starting Object optional while supporting deterministic seeded runs.</p>
+<h2 id="save-vs-draft-run"><a class="header" href="#save-vs-draft-run">Save vs Draft Run</a></h2>
+<h3 id="save"><a class="header" href="#save">Save</a></h3>
+<ol>
+<li>Compiles source using precedence rules.</li>
+<li>Persists workflow revision and graph state fields.</li>
+<li>Returns status fragment summarizing revision and executable count.</li>
+</ol>
+<h3 id="run-draft"><a class="header" href="#run-draft">Run draft</a></h3>
+<ol>
+<li>Compiles source using the same precedence rules.</li>
+<li>Executes immediately without persisting definition.</li>
+<li>Returns draft result fragment including outcome and final state payload.</li>
+</ol>
+<h2 id="example-action-call"><a class="header" href="#example-action-call">Example Action Call</a></h2>
+<p>Action routes return HTML fragments suitable for HTMX swap targets.</p>
+<pre><code class="language-bash">curl -sS -X POST http://127.0.0.1:3007/action/workflows/run-draft \
+  -H 'content-type: application/json' \
+  -H 'authorization: Bearer replace-me' \
+  -d '{
+    "workflow_id": "wf-search",
+    "queue": "default",
+    "graph_state": "{\"version\":1,\"nodes\":[{\"id\":\"node-fn-core-echo-1\"}],\"edges\":[],\"initial_state\":{\"query\":\"rust async runtime\",\"attempt\":1}}"
+  }'
+</code></pre>
+<h2 id="production-hardening-checklist"><a class="header" href="#production-hardening-checklist">Production Hardening Checklist</a></h2>
+<ol>
+<li>Always enable bearer token and required role for action routes.</li>
+<li>Prefer surreal-ws or surreal-kv backend for durable operations.</li>
+<li>Keep workflow IDs and queue naming conventions explicit and stable.</li>
+<li>Track action failure rates for scheduler replay, save, and draft run endpoints.</li>
+<li>Validate graph_state payload generation in CI when changing frontend serializer logic.</li>
+<li>Periodically smoke-test /stream/workflow-reflection for reflection backend health.</li>
+</ol>
+<h2 id="related-pages"><a class="header" href="#related-pages">Related Pages</a></h2>
+<ol>
+<li><a href="#command-center-dashboard-concept">Dashboard Concept</a></li>
+<li><a href="#grapheme-workflow-handlers">Grapheme Workflow Handlers</a></li>
+<li><a href="#lineage-and-observability">Lineage and Observability</a></li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="cookbook-overview"><a class="header" href="#cookbook-overview">Cookbook Overview</a></h1>
+<h2 id="purpose-15"><a class="header" href="#purpose-15">Purpose</a></h2>
+<p>This cookbook provides implementation-first recipes for teams taking Stasis from local experiments to production deployment.</p>
+<p>Each recipe is:</p>
+<ol>
+<li>Grounded in the current codebase.</li>
+<li>Focused on practical outcomes.</li>
+<li>Written so you can copy, adapt, and automate.</li>
+</ol>
+<h2 id="how-to-use-this-section"><a class="header" href="#how-to-use-this-section">How To Use This Section</a></h2>
+<ol>
+<li>Start with Production Agentic Workflows for real-provider loop, backend profile commands, and team-role orchestration examples.</li>
+<li>Use Runtime and Dashboard Bootstrap to stand up an operator surface.</li>
+<li>Use Workflow Builder Starting Object to standardize deterministic graph runs.</li>
+<li>Apply Identity Memory Change Control for governed relationship updates.</li>
+<li>Use Memory Maintenance and Rollups for long-term memory hygiene.</li>
+</ol>
+<h2 id="recipe-index"><a class="header" href="#recipe-index">Recipe Index</a></h2>
+<ol>
+<li><a href="#production-agentic-workflows">Production Agentic Workflows</a></li>
+<li><a href="#runtime-and-dashboard-bootstrap">Runtime and Dashboard Bootstrap</a></li>
+<li><a href="#workflow-builder-starting-object">Workflow Builder Starting Object</a></li>
+<li><a href="#identity-memory-change-control">Identity Memory Change Control</a></li>
+<li><a href="#memory-maintenance-and-rollups">Memory Maintenance and Rollups</a></li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="production-agentic-workflows"><a class="header" href="#production-agentic-workflows">Production Agentic Workflows</a></h1>
+<h2 id="outcome"><a class="header" href="#outcome">Outcome</a></h2>
+<p>Run production-style agentic jobs with real LLM providers, durable runtime wiring, memory controls, and orchestration patterns teams can copy directly.</p>
+<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
+<p>Set provider and auth environment variables before running these patterns.</p>
+<p>OpenAI example:</p>
+<pre><code class="language-bash">export STASIS_LLM_PROVIDER=openai
+export STASIS_LLM_MODEL=gpt-4o-mini
+export STASIS_OPENAI_API_KEY=your-key
+</code></pre>
+<p>Anthropic example:</p>
+<pre><code class="language-bash">export STASIS_LLM_PROVIDER=anthropic
+export STASIS_LLM_MODEL=claude-3-5-haiku-latest
+export STASIS_ANTHROPIC_API_KEY=your-key
+</code></pre>
+<p>Global fallback key is also supported:</p>
+<pre><code class="language-bash">export STASIS_LLM_API_KEY=your-key
+</code></pre>
+<h2 id="runtime-bootstrap-real-provider-tool-loop-ready"><a class="header" href="#runtime-bootstrap-real-provider-tool-loop-ready">Runtime Bootstrap (real provider, tool loop ready)</a></h2>
+<pre class="playground"><code class="language-rust">use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+use stasis::application::orchestration::runtime_job_payloads::{
+    AgentToolCallMode, MemoryFallbackPolicyPayload, MemoryPolicyPayload,
+    MemoryStoreModePayload, MemoryStrictnessModePayload,
+};
+use stasis::domain::errors::Result;
+use stasis::prelude::{RuntimeBackend, RuntimeSdk, StasisRuntimeBuilder};
+use stasis::stasis_tool;
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+struct FetchKnowledgeBaseInput {
+    topic: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FetchKnowledgeBaseOutput {
+    topic: String,
+    playbook: Vec&lt;String&gt;,
+}
+
+#[stasis_tool(
+    name = "fetch_knowledge_base",
+    description = "Returns internal playbook snippets for an operation topic"
+)]
+async fn fetch_knowledge_base(input: FetchKnowledgeBaseInput) -&gt; Result&lt;FetchKnowledgeBaseOutput&gt; {
+    Ok(FetchKnowledgeBaseOutput {
+        topic: input.topic,
+        playbook: vec![
+            "Validate preconditions".to_string(),
+            "Apply staged rollout".to_string(),
+            "Capture diagnostics and rollback plan".to_string(),
+        ],
+    })
+}
+
+fn production_memory_policy() -&gt; MemoryPolicyPayload {
+    MemoryPolicyPayload {
+        session_ids: None,
+        tiers: Some(vec!["summary".to_string(), "episodic".to_string()]),
+        from_utc: None,
+        to_utc: None,
+        limit: Some(12),
+        alpha: Some(0.7),
+        beta: Some(0.3),
+        fallback_policy: Some(MemoryFallbackPolicyPayload::OnEmpty),
+        strictness: Some(MemoryStrictnessModePayload::Balanced),
+        query_text: None,
+        include_explain: Some(true),
+        store_mode: Some(MemoryStoreModePayload::SummaryOnly),
+    }
+}
+
+#[tokio::main]
+async fn main() -&gt; Result&lt;()&gt; {
+    let backend = RuntimeBackend::InMemory;
+    let builder = StasisRuntimeBuilder::new(backend).with_locus_memory();
+    let builder = builder.with_tool(FetchKnowledgeBaseTool)?;
+
+    let runtime = RuntimeSdk::from_builder(builder).await?;
+    let _policy = production_memory_policy();
+
+    // Keep this runtime instance and enqueue one or more jobs shown below.
+    let _ = runtime;
+    Ok(())
+}</code></pre>
+<h2 id="prompt-workflow-job"><a class="header" href="#prompt-workflow-job">Prompt Workflow Job</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::orchestration::runtime_job_payloads::PromptJobPayload;
+use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
+
+let prompt_payload = PromptJobPayload {
+    user_prompt: "Summarize queue saturation risks for this release".to_string(),
+    system_prompt: Some("You are a reliability engineer. Be concise and actionable.".to_string()),
+    policy_profile: Some("prod.sre".to_string()),
+    model_hint: Some("fast-reasoning".to_string()),
+    memory_policy: Some(production_memory_policy()),
+};
+
+let job = RuntimeWorkflowJobBuilder::for_prompt("job-prompt-prod-001", &amp;prompt_payload)?
+    .with_queue("default")
+    .with_correlation_id("thread-prod-001")
+    .with_sttp_input_node_id("sttp:in:prod:prompt:001")
+    .build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<h2 id="tool-loop-workflow-job"><a class="header" href="#tool-loop-workflow-job">Tool Loop Workflow Job</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::orchestration::runtime_job_payloads::{
+    AgentToolCallMode, ToolLoopJobPayload,
+};
+use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
+
+let tool_payload = ToolLoopJobPayload {
+    user_prompt: "Use the tool and then produce an execution-ready rollout checklist.".to_string(),
+    system_prompt: Some("Call tools when needed and cite tool output in the final answer.".to_string()),
+    policy_profile: Some("prod.ops".to_string()),
+    model_hint: Some("tool-use".to_string()),
+    tool_name: "fetch_knowledge_base".to_string(),
+    tool_input: Some(serde_json::json!({ "topic": "release rollout" })),
+    tool_call_mode: Some(AgentToolCallMode::Strict),
+    memory_policy: Some(production_memory_policy()),
+};
+
+let job = RuntimeWorkflowJobBuilder::for_tool_loop("job-tool-loop-prod-001", &amp;tool_payload)?
+    .with_queue("default")
+    .with_correlation_id("thread-prod-001")
+    .with_sttp_input_node_id("sttp:in:prod:tool-loop:001")
+    .build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<h2 id="agent-turn-workflow-job"><a class="header" href="#agent-turn-workflow-job">Agent Turn Workflow Job</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::orchestration::runtime_job_payloads::AgentTurnJobPayload;
+use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
+
+let turn_payload = AgentTurnJobPayload {
+    agent_id: "incident_commander".to_string(),
+    thread_id: Some("thread-prod-incident-42".to_string()),
+    user_prompt: "Draft the first incident update for stakeholders.".to_string(),
+    system_prompt: Some("Prioritize clarity, impact, and next checkpoint.".to_string()),
+    policy_profile: Some("prod.incident".to_string()),
+    model_hint: Some("balanced".to_string()),
+    tool_name: "fetch_knowledge_base".to_string(),
+    tool_input: Some(serde_json::json!({ "topic": "incident communications" })),
+    tool_call_mode: Some(AgentToolCallMode::Auto),
+    memory_policy: Some(production_memory_policy()),
+};
+
+let job = RuntimeWorkflowJobBuilder::for_agent_turn("job-agent-turn-prod-001", &amp;turn_payload)?
+    .with_queue("default")
+    .with_correlation_id("thread-prod-incident-42")
+    .with_sttp_input_node_id("sttp:in:prod:agent-turn:001")
+    .build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<h2 id="agent-session-workflow-job-multi-participant"><a class="header" href="#agent-session-workflow-job-multi-participant">Agent Session Workflow Job (multi-participant)</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::orchestration::runtime_job_payloads::{
+    AgentSessionJobPayload, AgentSessionParticipantPayload,
+};
+use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
+
+let session_payload = AgentSessionJobPayload {
+    thread_id: Some("thread-prod-design-review-1".to_string()),
+    initial_user_prompt: "Review this deployment plan for risk and sequencing.".to_string(),
+    participants: vec![
+        AgentSessionParticipantPayload {
+            agent_id: "planner".to_string(),
+            system_prompt: Some("Break the plan into milestones and dependencies.".to_string()),
+            tool_name: "fetch_knowledge_base".to_string(),
+            tool_input: Some(serde_json::json!({ "topic": "deployment sequencing" })),
+        },
+        AgentSessionParticipantPayload {
+            agent_id: "sre_reviewer".to_string(),
+            system_prompt: Some("Focus on blast radius and rollback readiness.".to_string()),
+            tool_name: "fetch_knowledge_base".to_string(),
+            tool_input: Some(serde_json::json!({ "topic": "rollback policy" })),
+        },
+    ],
+    policy_profile: Some("prod.review".to_string()),
+    model_hint: Some("balanced".to_string()),
+    max_turns: Some(4),
+    tool_call_mode: Some(AgentToolCallMode::Auto),
+    memory_policy: Some(production_memory_policy()),
+};
+
+let job = RuntimeWorkflowJobBuilder::for_agent_session("job-agent-session-prod-001", &amp;session_payload)?
+    .with_queue("default")
+    .with_correlation_id("thread-prod-design-review-1")
+    .with_sttp_input_node_id("sttp:in:prod:agent-session:001")
+    .build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<h2 id="sequential-pattern-workflow-job"><a class="header" href="#sequential-pattern-workflow-job">Sequential Pattern Workflow Job</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::orchestration::runtime_job_payloads::{
+    SequentialPatternJobPayload, SequentialStageJobPayload,
+};
+use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
+
+let sequential_payload = SequentialPatternJobPayload {
+    thread_id: Some("thread-prod-seq-1".to_string()),
+    initial_user_prompt: "Ship a safe canary rollout for service A".to_string(),
+    policy_profile: Some("prod.release".to_string()),
+    model_hint: Some("balanced".to_string()),
+    stages: vec![
+        SequentialStageJobPayload {
+            stage_id: "plan".to_string(),
+            user_prompt_template: "{{input}}\nGenerate a rollout plan with milestones.".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        },
+        SequentialStageJobPayload {
+            stage_id: "risk".to_string(),
+            user_prompt_template: "{{input}}\nList top 5 risks and mitigations.".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        },
+    ],
+};
+
+let job = RuntimeWorkflowJobBuilder::for_orchestration_sequential(
+    "job-orch-sequential-prod-001",
+    &amp;sequential_payload,
+)?
+.with_queue("default")
+.with_correlation_id("thread-prod-seq-1")
+.with_sttp_input_node_id("sttp:in:prod:sequential:001")
+.build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<h2 id="concurrent-pattern-workflow-job"><a class="header" href="#concurrent-pattern-workflow-job">Concurrent Pattern Workflow Job</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::orchestration::runtime_job_payloads::{
+    ConcurrentBranchJobPayload, ConcurrentPatternJobPayload,
+};
+use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
+
+let concurrent_payload = ConcurrentPatternJobPayload {
+    thread_id: Some("thread-prod-concurrent-1".to_string()),
+    initial_user_prompt: "Assess release quality from three angles".to_string(),
+    policy_profile: Some("prod.release".to_string()),
+    model_hint: Some("balanced".to_string()),
+    merge_strategy: Some("append".to_string()),
+    branches: vec![
+        ConcurrentBranchJobPayload {
+            branch_id: "security".to_string(),
+            user_prompt_template: "{{input}}\nPerform a security review.".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        },
+        ConcurrentBranchJobPayload {
+            branch_id: "performance".to_string(),
+            user_prompt_template: "{{input}}\nPerform a performance review.".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        },
+    ],
+};
+
+let job = RuntimeWorkflowJobBuilder::for_orchestration_concurrent(
+    "job-orch-concurrent-prod-001",
+    &amp;concurrent_payload,
+)?
+.with_queue("default")
+.with_correlation_id("thread-prod-concurrent-1")
+.with_sttp_input_node_id("sttp:in:prod:concurrent:001")
+.build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<h2 id="handoff-pattern-workflow-job"><a class="header" href="#handoff-pattern-workflow-job">Handoff Pattern Workflow Job</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::orchestration::runtime_job_payloads::{
+    HandoffPatternJobPayload, HandoffTurnJobPayload,
+};
+use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
+
+let handoff_payload = HandoffPatternJobPayload {
+    thread_id: Some("thread-prod-handoff-1".to_string()),
+    initial_user_prompt: "Create launch communication pack".to_string(),
+    policy_profile: Some("prod.launch".to_string()),
+    model_hint: Some("balanced".to_string()),
+    turns: vec![
+        HandoffTurnJobPayload {
+            actor_id: "planner".to_string(),
+            user_prompt_template: "{{input}}\nDraft the launch plan.".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        },
+        HandoffTurnJobPayload {
+            actor_id: "editor".to_string(),
+            user_prompt_template: "{{input}}\nPolish tone and clarity for executive audience.".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        },
+    ],
+};
+
+let job = RuntimeWorkflowJobBuilder::for_orchestration_handoff(
+    "job-orch-handoff-prod-001",
+    &amp;handoff_payload,
+)?
+.with_queue("default")
+.with_correlation_id("thread-prod-handoff-1")
+.with_sttp_input_node_id("sttp:in:prod:handoff:001")
+.build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<h2 id="orchestrator-pattern-workflow-job"><a class="header" href="#orchestrator-pattern-workflow-job">Orchestrator Pattern Workflow Job</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::orchestration::runtime_job_payloads::{
+    OrchestratorPatternJobPayload, OrchestratorRouteJobPayload,
+};
+use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
+
+let orchestrator_payload = OrchestratorPatternJobPayload {
+    thread_id: Some("thread-prod-orchestrator-1".to_string()),
+    initial_user_prompt: "Need guidance for a high-risk release with potential rollback".to_string(),
+    policy_profile: Some("prod.release".to_string()),
+    model_hint: Some("balanced".to_string()),
+    routes: vec![
+        OrchestratorRouteJobPayload {
+            route_id: "incident_path".to_string(),
+            selector_keywords: vec!["rollback".to_string(), "incident".to_string()],
+            user_prompt_template: "{{input}}\nRun incident-first release strategy.".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        },
+        OrchestratorRouteJobPayload {
+            route_id: "standard_path".to_string(),
+            selector_keywords: vec!["normal".to_string(), "routine".to_string()],
+            user_prompt_template: "{{input}}\nRun standard release checklist.".to_string(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+        },
+    ],
+};
+
+let job = RuntimeWorkflowJobBuilder::for_orchestration_orchestrator(
+    "job-orch-orchestrator-prod-001",
+    &amp;orchestrator_payload,
+)?
+.with_queue("default")
+.with_correlation_id("thread-prod-orchestrator-1")
+.with_sttp_input_node_id("sttp:in:prod:orchestrator:001")
+.build();
+
+runtime.enqueue(job).await?;
+<span class="boring">}</span></code></pre>
+<h2 id="worker-loop-and-snapshot"><a class="header" href="#worker-loop-and-snapshot">Worker Loop and Snapshot</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>while runtime.process_once("default", "worker-prod-1").await?.is_some() {}
+
+let stats = runtime.stats_snapshot(100).await?;
+println!(
+    "enqueued={} running={} succeeded={} failed={} dead_letter={}",
+    stats.enqueued_jobs,
+    stats.running_jobs,
+    stats.succeeded_jobs,
+    stats.failed_jobs,
+    stats.dead_letter_jobs
+);
+<span class="boring">}</span></code></pre>
+<h2 id="backend-profiles-in-memory-surreal-ws-surreal-kv"><a class="header" href="#backend-profiles-in-memory-surreal-ws-surreal-kv">Backend Profiles (In-Memory, Surreal WS, Surreal KV)</a></h2>
+<p>Use the dedicated profile bootstrap example when validating runtime storage wiring.</p>
+<pre><code class="language-bash"># In-memory
+STASIS_EXAMPLE_RUNTIME_BACKEND=in-memory \
+    cargo run --example runtime_backends_profiles
+
+# Surreal websocket
+STASIS_EXAMPLE_RUNTIME_BACKEND=surreal-ws \
+STASIS_EXAMPLE_SURREAL_ENDPOINT=ws://127.0.0.1:8000/rpc \
+STASIS_EXAMPLE_SURREAL_NAMESPACE=stasis \
+STASIS_EXAMPLE_SURREAL_DATABASE=runtime \
+    cargo run --example runtime_backends_profiles
+
+# Surreal embedded KV
+STASIS_EXAMPLE_RUNTIME_BACKEND=surreal-kv \
+STASIS_EXAMPLE_SURREAL_KV_PATH=./data/runtime-surreal \
+STASIS_EXAMPLE_SURREAL_NAMESPACE=stasis \
+STASIS_EXAMPLE_SURREAL_DATABASE=runtime \
+    cargo run --example runtime_backends_profiles
+</code></pre>
+<h2 id="team-role-scenario-packs"><a class="header" href="#team-role-scenario-packs">Team Role Scenario Packs</a></h2>
+<p>Run a role-specific scenario bundle:</p>
+<pre><code class="language-bash">STASIS_EXAMPLE_DRY_RUN=1 STASIS_EXAMPLE_TEAM_PROFILE=sre cargo run --example team_role_workflows
+STASIS_EXAMPLE_DRY_RUN=1 STASIS_EXAMPLE_TEAM_PROFILE=product cargo run --example team_role_workflows
+STASIS_EXAMPLE_DRY_RUN=1 STASIS_EXAMPLE_TEAM_PROFILE=support cargo run --example team_role_workflows
+</code></pre>
+<p>Run the broader production workflow set with profile selection:</p>
+<pre><code class="language-bash">STASIS_EXAMPLE_DRY_RUN=1 STASIS_EXAMPLE_TEAM_PROFILE=all cargo run --example agentic_workflows_production
+</code></pre>
+<p>Unset <code>STASIS_EXAMPLE_DRY_RUN</code> and provide provider credentials to process queued jobs end-to-end.</p>
+<h2 id="ci-smoke-harness"><a class="header" href="#ci-smoke-harness">CI Smoke Harness</a></h2>
+<p>Use the smoke script for provider-safe checks in CI or pre-merge validation:</p>
+<pre><code class="language-bash">./scripts/smoke-agentic-workflows.sh
+</code></pre>
+<p>The harness runs example checks, dry-run execution for production examples, targeted integration tests, and <code>mdbook build</code> when <code>mdbook</code> is available.</p>
+<h2 id="production-notes"><a class="header" href="#production-notes">Production Notes</a></h2>
+<ol>
+<li>Use durable backends for shared environments (surreal-ws or surreal-kv).</li>
+<li>Keep policy_profile values stable and environment-specific.</li>
+<li>Use explicit correlation_id values to keep cross-job memory continuity predictable.</li>
+<li>Turn on memory include_explain while tuning retrieval, then reduce noise for steady-state.</li>
+<li>Keep tool schemas strict with additionalProperties set to false.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="runtime-and-dashboard-bootstrap"><a class="header" href="#runtime-and-dashboard-bootstrap">Runtime and Dashboard Bootstrap</a></h1>
+<h2 id="outcome-1"><a class="header" href="#outcome-1">Outcome</a></h2>
+<p>Bring up a production-like Stasis runtime with dashboard observability and secured action routes.</p>
+<h2 id="recipe"><a class="header" href="#recipe">Recipe</a></h2>
+<h3 id="1-pick-runtime-backend-and-configure-environment"><a class="header" href="#1-pick-runtime-backend-and-configure-environment">1. Pick runtime backend and configure environment</a></h3>
+<p>In-memory quick start:</p>
+<pre><code class="language-bash">export STASIS_DASHBOARD_RUNTIME_BACKEND=in-memory
+export STASIS_DASHBOARD_ADDR=127.0.0.1:3007
+</code></pre>
+<p>Surreal websocket example:</p>
+<pre><code class="language-bash">export STASIS_DASHBOARD_RUNTIME_BACKEND=surreal-ws
+export STASIS_DASHBOARD_SURREAL_ENDPOINT=ws://127.0.0.1:8000/rpc
+export STASIS_DASHBOARD_SURREAL_NAMESPACE=stasis
+export STASIS_DASHBOARD_SURREAL_DATABASE=runtime
+export STASIS_DASHBOARD_ADDR=127.0.0.1:3007
+</code></pre>
+<h3 id="2-secure-action-routes"><a class="header" href="#2-secure-action-routes">2. Secure action routes</a></h3>
+<pre><code class="language-bash">export STASIS_DASHBOARD_ACTION_AUTH_BEARER=replace-me
+export STASIS_DASHBOARD_ACTION_REQUIRED_ROLE=scheduler.admin
+export STASIS_DASHBOARD_ACTION_ROLE_CLAIM_HEADER=x-stasis-role
+</code></pre>
+<h3 id="3-launch-dashboard-server"><a class="header" href="#3-launch-dashboard-server">3. Launch dashboard server</a></h3>
+<pre><code class="language-bash">cargo run --bin stasis_dashboard
+</code></pre>
+<p>Open:</p>
+<ol>
+<li>http://127.0.0.1:3007/dashboard</li>
+</ol>
+<h3 id="4-smoke-test-protected-action-route"><a class="header" href="#4-smoke-test-protected-action-route">4. Smoke-test protected action route</a></h3>
+<pre><code class="language-bash">curl -i -X POST http://127.0.0.1:3007/action/scheduler/materialize
+</code></pre>
+<p>Expected result without auth: 401 Unauthorized.</p>
+<p>Then call with auth:</p>
+<pre><code class="language-bash">curl -i -X POST http://127.0.0.1:3007/action/scheduler/materialize \
+  -H 'authorization: Bearer replace-me' \
+  -H 'x-stasis-role: scheduler.admin'
+</code></pre>
+<p>Expected result: 200 and HTML action status fragment.</p>
+<h2 id="embedded-variant"><a class="header" href="#embedded-variant">Embedded Variant</a></h2>
+<p>Mount dashboard routes into your existing Axum application.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use std::sync::Arc;
+
+use axum::Router;
+use stasis::dashboard::{DashboardRouterExt, RuntimeDashboardQueryService};
+
+fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
+    Router::new().add_dashboard_with(service, |state| {
+        state
+            .with_action_auth_bearer_token("replace-me")
+            .with_action_required_role("scheduler.admin")
+            .with_action_role_claim_header("x-stasis-role")
+    })
+}
+<span class="boring">}</span></code></pre>
+<h2 id="production-notes-1"><a class="header" href="#production-notes-1">Production Notes</a></h2>
+<ol>
+<li>Prefer surreal-ws or surreal-kv for durable job and workflow history.</li>
+<li>Keep STASIS_DASHBOARD_ACTION_AUTH_BEARER in secret storage, not source control.</li>
+<li>Add health checks for /dashboard and one stream endpoint such as /stream/jobs.</li>
+<li>Alert on repeated non-200 responses from /action routes.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="workflow-builder-starting-object"><a class="header" href="#workflow-builder-starting-object">Workflow Builder Starting Object</a></h1>
+<h2 id="outcome-2"><a class="header" href="#outcome-2">Outcome</a></h2>
+<p>Create a deterministic workflow draft or saved revision that seeds initial $current state through the Starting Object control.</p>
+<h2 id="why-this-matters"><a class="header" href="#why-this-matters">Why this matters</a></h2>
+<p>Starting Object lets you seed stable context for each run without hardcoding context set blocks into source templates.</p>
+<p>For end-to-end production loop and orchestration examples, see <a href="#production-agentic-workflows">Production Agentic Workflows</a>.</p>
+<h2 id="recipe-1"><a class="header" href="#recipe-1">Recipe</a></h2>
+<h3 id="1-build-a-simple-graph-in-the-canvas"><a class="header" href="#1-build-a-simple-graph-in-the-canvas">1. Build a simple graph in the canvas</a></h3>
+<ol>
+<li>Open Workflows view in dashboard.</li>
+<li>Drag at least one module tile into canvas.</li>
+<li>Optionally connect nodes with edges for linear flow.</li>
+</ol>
+<h3 id="2-add-starting-object-json"><a class="header" href="#2-add-starting-object-json">2. Add Starting Object JSON</a></h3>
+<ol>
+<li>Click Starting Object in the canvas toolbar.</li>
+<li>Paste a JSON object, for example:</li>
+</ol>
+<pre><code class="language-json">{
+  "query": "rust async runtime",
+  "attempt": 1,
+  "filters": {
+    "region": "us-east"
+  }
+}
+</code></pre>
+<ol start="3">
+<li>Save or Test Run.</li>
+</ol>
+<p>Validation rules:</p>
+<ol>
+<li>Empty value is allowed.</li>
+<li>Value must be valid JSON object when provided.</li>
+<li>Non-object JSON is rejected by the UI parser.</li>
+</ol>
+<h3 id="3-understand-serialized-graph_state"><a class="header" href="#3-understand-serialized-graph_state">3. Understand serialized graph_state</a></h3>
+<p>The frontend stores Starting Object under graph_state.initial_state.</p>
+<p>Topology-shaped example:</p>
+<pre><code class="language-json">{
+  "version": 1,
+  "nodes": [
+    { "id": "node-fn-core-echo-1" },
+    { "id": "node-fn-websearch-search-2" }
+  ],
+  "edges": [
+    { "from": "node-fn-core-echo-1", "to": "node-fn-websearch-search-2" }
+  ],
+  "initial_state": {
+    "query": "rust async runtime",
+    "attempt": 1,
+    "filters": { "region": "us-east" }
+  }
+}
+</code></pre>
+<h3 id="4-verify-compile-behavior"><a class="header" href="#4-verify-compile-behavior">4. Verify compile behavior</a></h3>
+<p>When initial_state exists, compiled query includes a set block before pipeline steps.</p>
+<p>When initial_state is absent, no set block is emitted.</p>
+<p>This keeps seeded state optional and explicit.</p>
+<h2 id="api-first-variant"><a class="header" href="#api-first-variant">API-first variant</a></h2>
+<p>Action endpoints expect graph_state as a JSON string field.</p>
+<pre><code class="language-bash">curl -sS -X POST http://127.0.0.1:3007/action/workflows/run-draft \
+  -H 'content-type: application/json' \
+  -H 'authorization: Bearer replace-me' \
+  -H 'x-stasis-role: scheduler.admin' \
+  -d '{
+    "workflow_id": "wf-search",
+    "queue": "default",
+    "graph_state": "{\"version\":1,\"nodes\":[{\"id\":\"node-fn-core-echo-1\"}],\"edges\":[],\"initial_state\":{\"query\":\"rust async runtime\",\"attempt\":1}}"
+  }'
+</code></pre>
+<h2 id="troubleshooting-1"><a class="header" href="#troubleshooting-1">Troubleshooting</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+</thead>
+<tbody>
+<tr><td>Starting Object status shows error</td><td>Invalid JSON</td><td>Provide valid JSON object</td></tr>
+<tr><td>Save returns graph_state contract error</td><td>Missing required nodes/edges or invalid query shape</td><td>Ensure graph_state includes required arrays and valid node ids</td></tr>
+<tr><td>Compiled output has no set block</td><td>initial_state missing or invalid</td><td>Confirm graph_state.initial_state is an object</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="identity-memory-change-control"><a class="header" href="#identity-memory-change-control">Identity Memory Change Control</a></h1>
+<h2 id="outcome-3"><a class="header" href="#outcome-3">Outcome</a></h2>
+<p>Apply governed identity relationship updates with tier-aware proposal splitting, explicit approvals, and version-safe commits.</p>
+<h2 id="recipe-2"><a class="header" href="#recipe-2">Recipe</a></h2>
+<h3 id="1-seed-baseline-relationship-state"><a class="header" href="#1-seed-baseline-relationship-state">1. Seed baseline relationship state</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use chrono::Utc;
+use std::sync::Arc;
+
+use stasis::infrastructure::memory::in_memory_identity_memory_store::InMemoryIdentityMemoryStore;
+use stasis::ports::outbound::memory::identity_memory_models::{
+    EntityRef, RelationshipEntity, RelationshipStatus, UpdateSource,
+};
+
+fn seed_relationship(store: &amp;InMemoryIdentityMemoryStore) -&gt; stasis::domain::errors::Result&lt;()&gt; {
+    store.upsert_relationship(RelationshipEntity {
+        relationship_id: "rel-1".to_string(),
+        source_entity_ref: EntityRef {
+            entity_type: "PersonaEntity".to_string(),
+            entity_id: "persona:default".to_string(),
+        },
+        target_entity_ref: EntityRef {
+            entity_type: "UserEntity".to_string(),
+            entity_id: "user-123".to_string(),
+        },
+        relationship_kind: "assistant_user".to_string(),
+        status: RelationshipStatus::Active,
+        trust_level: 0.50,
+        confidence: 0.80,
+        strength_score: 0.80,
+        recency_score: 0.60,
+        autonomy_scope: Default::default(),
+        approval_profile_id: None,
+        interruption_policy: Default::default(),
+        escalation_policy: Default::default(),
+        policy_tags: vec![],
+        provenance: UpdateSource::UserDirect,
+        parent_relationship_id: None,
+        governing_relationship_ids: vec![],
+        derived_from_relationship_id: None,
+        last_transition_reason: None,
+        transition_receipt_id: None,
+        version: 1,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    })
+}
+<span class="boring">}</span></code></pre>
+<h3 id="2-initialize-store-and-service"><a class="header" href="#2-initialize-store-and-service">2. Initialize store and service</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::use_cases::identity_memory_service::IdentityMemoryService;
+
+let store = Arc::new(InMemoryIdentityMemoryStore::default());
+seed_relationship(store.as_ref())?;
+
+let service = IdentityMemoryService::new(store);
+<span class="boring">}</span></code></pre>
+<h3 id="3-propose-mixed-tier-patch"><a class="header" href="#3-propose-mixed-tier-patch">3. Propose mixed-tier patch</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use serde_json::json;
+
+use stasis::ports::outbound::memory::identity_memory_models::{
+    IdentityEntityType, ProposeEntityUpdateRequest, UpdateSource,
+};
+
+let proposed = service
+    .propose_entity_update(&amp;ProposeEntityUpdateRequest {
+        entity_type: IdentityEntityType::RelationshipEntity,
+        entity_id: "rel-1".to_string(),
+        patch: json!({
+            "recency_score": 0.90,
+            "autonomy_scope.allow": ["external_posting"]
+        }),
+        source: UpdateSource::ModelInferred,
+        confidence: 0.82,
+        reason: "post interaction update".to_string(),
+        actor: "model".to_string(),
+        receipt_id: None,
+        expires_at: None,
+    })
+    .await?;
+
+println!("split_patch={}", proposed.split_patch);
+println!("tiers={:?}", proposed.tiers);
+<span class="boring">}</span></code></pre>
+<p>Expected behavior:</p>
+<ol>
+<li>Patch is split into multiple proposals because tiers differ.</li>
+<li>recency_score proposal is AutoCommit tier.</li>
+<li>autonomy_scope.allow proposal is ApprovalRequired tier.</li>
+</ol>
+<h3 id="4-auto-commit-safe-tiers"><a class="header" href="#4-auto-commit-safe-tiers">4. Auto-commit safe tiers</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::application::use_cases::identity_memory_service::{
+    IdentityMemoryService, ProposeAndCommitRequest,
+};
+
+let auto = service
+    .propose_and_commit_autocommit(&amp;ProposeAndCommitRequest {
+        proposal_request: ProposeEntityUpdateRequest {
+            entity_type: IdentityEntityType::RelationshipEntity,
+            entity_id: "rel-1".to_string(),
+            patch: json!({ "recency_score": 0.88 }),
+            source: UpdateSource::ModelInferred,
+            confidence: 0.80,
+            reason: "freshness update".to_string(),
+            actor: "model".to_string(),
+            receipt_id: None,
+            expires_at: None,
+        },
+        expected_version: 1,
+        approver: Some("owner".to_string()),
+    })
+    .await?;
+
+println!("commits={}", auto.commits.len());
+<span class="boring">}</span></code></pre>
+<h3 id="5-commit-approval-required-proposal"><a class="header" href="#5-commit-approval-required-proposal">5. Commit approval-required proposal</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::ports::outbound::memory::identity_memory_models::CommitEntityUpdateRequest;
+
+let approval_proposal_id = proposed.proposal_ids[1].clone();
+
+let commit = service
+    .commit_entity_update(&amp;CommitEntityUpdateRequest {
+        proposal_id: approval_proposal_id,
+        expected_version: 2,
+        approver: Some("owner".to_string()),
+    })
+    .await?;
+
+println!("committed={}", commit.committed);
+println!("code={:?}", commit.code);
+println!("new_version={:?}", commit.new_version);
+<span class="boring">}</span></code></pre>
+<h3 id="6-inspect-history-and-rollback-if-needed"><a class="header" href="#6-inspect-history-and-rollback-if-needed">6. Inspect history and rollback if needed</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::ports::outbound::memory::identity_memory_models::{
+    ListEntityHistoryRequest, RollbackEntityVersionRequest,
+};
+
+let history = service
+    .list_entity_history(&amp;ListEntityHistoryRequest {
+        entity_type: IdentityEntityType::RelationshipEntity,
+        entity_id: "rel-1".to_string(),
+        limit: 50,
+    })
+    .await?;
+
+println!("proposal_count={}", history.proposals.len());
+println!("transition_count={}", history.transitions.len());
+
+let rollback = service
+    .rollback_entity_version(&amp;RollbackEntityVersionRequest {
+        entity_type: IdentityEntityType::RelationshipEntity,
+        entity_id: "rel-1".to_string(),
+        target_version: 2,
+        reason: "operator rollback".to_string(),
+        approver: "owner".to_string(),
+    })
+    .await?;
+
+println!("rolled_back={}", rollback.rolled_back);
+<span class="boring">}</span></code></pre>
+<h2 id="operational-notes"><a class="header" href="#operational-notes">Operational Notes</a></h2>
+<ol>
+<li>Always pass expected_version from latest read to avoid stale writes.</li>
+<li>Treat ApprovalRequired proposals as explicit human checkpoints.</li>
+<li>Persist proposal and transition history to support audits.</li>
+<li>Watch for PolicyDenied outcomes and adjust patch strategy accordingly.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="memory-maintenance-and-rollups"><a class="header" href="#memory-maintenance-and-rollups">Memory Maintenance and Rollups</a></h1>
+<h2 id="outcome-4"><a class="header" href="#outcome-4">Outcome</a></h2>
+<p>Run routine memory health operations for aggregate visibility, embedding maintenance, and monthly rollup compaction.</p>
+<h2 id="recipe-3"><a class="header" href="#recipe-3">Recipe</a></h2>
+<h3 id="1-create-memory-operations-adapter"><a class="header" href="#1-create-memory-operations-adapter">1. Create memory operations adapter</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use std::sync::Arc;
+
+use stasis::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
+use stasis::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
+use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
+
+let store = LocusNodeStoreFactory::in_memory().await?;
+let ops = Arc::new(LocusMemoryOperations::new(store, None));
+<span class="boring">}</span></code></pre>
+<h3 id="2-run-aggregate-health-snapshot"><a class="header" href="#2-run-aggregate-health-snapshot">2. Run aggregate health snapshot</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::ports::outbound::memory::memory_models::{MemoryAggregateRequest, MemoryScope};
+
+let aggregate = ops
+    .aggregate(&amp;MemoryAggregateRequest {
+        scope: MemoryScope::default(),
+        max_groups: 30,
+        max_nodes: 5000,
+    })
+    .await?;
+
+println!("groups={} scanned={}", aggregate.total_groups, aggregate.scanned_nodes);
+<span class="boring">}</span></code></pre>
+<h3 id="3-preview-embedding-transform"><a class="header" href="#3-preview-embedding-transform">3. Preview embedding transform</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::ports::outbound::memory::memory_models::{
+    MemoryScope, MemoryTransformOperation, MemoryTransformRequest,
+};
+
+let preview = ops
+    .transform(&amp;MemoryTransformRequest {
+        scope: MemoryScope::default(),
+        operation: MemoryTransformOperation::EmbedBackfill,
+        dry_run: true,
+        batch_size: 100,
+        max_nodes: 5000,
+        provider_id: None,
+        model: None,
+    })
+    .await?;
+
+println!(
+    "preview scanned={} selected={} updated={} failed={}",
+    preview.scanned, preview.selected, preview.updated, preview.failed
+);
+<span class="boring">}</span></code></pre>
+<h3 id="4-apply-transform"><a class="header" href="#4-apply-transform">4. Apply transform</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let apply = ops
+    .transform(&amp;MemoryTransformRequest {
+        scope: MemoryScope::default(),
+        operation: MemoryTransformOperation::EmbedBackfill,
+        dry_run: false,
+        batch_size: 100,
+        max_nodes: 5000,
+        provider_id: None,
+        model: None,
+    })
+    .await?;
+
+println!(
+    "apply scanned={} selected={} updated={} failed={}",
+    apply.scanned, apply.selected, apply.updated, apply.failed
+);
+<span class="boring">}</span></code></pre>
+<h3 id="5-run-monthly-rollup"><a class="header" href="#5-run-monthly-rollup">5. Run monthly rollup</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::ports::outbound::memory::memory_models::{MemoryRollupRequest, MemoryScope};
+
+let rollup = ops
+    .rollup(&amp;MemoryRollupRequest {
+        scope: MemoryScope::default(),
+        max_days: 30,
+        max_nodes: 5000,
+    })
+    .await?;
+
+println!("rollup groups={} scanned={}", rollup.total_groups, rollup.scanned_nodes);
+<span class="boring">}</span></code></pre>
+<h3 id="6-validate-current-schema-descriptor"><a class="header" href="#6-validate-current-schema-descriptor">6. Validate current schema descriptor</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let schema = ops.schema().await?;
+
+println!("schema_version={}", schema.schema_version);
+println!("transform_ops={:?}", schema.transform_operations);
+<span class="boring">}</span></code></pre>
+<h2 id="operational-cadence"><a class="header" href="#operational-cadence">Operational Cadence</a></h2>
+<p>Suggested baseline:</p>
+<ol>
+<li>Aggregate daily.</li>
+<li>Transform preview daily, apply during controlled windows.</li>
+<li>Rollup weekly or monthly depending on retrieval noise profile.</li>
+<li>Schema check in CI and before major migration windows.</li>
+</ol>
+<h2 id="guardrails"><a class="header" href="#guardrails">Guardrails</a></h2>
+<ol>
+<li>Keep dry_run=true in automation until preview quality is verified.</li>
+<li>Bound max_nodes to avoid unplanned long-running batches.</li>
+<li>Persist transform failure lists for follow-up remediation.</li>
+<li>Use scoped operations for large multi-tenant deployments.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
-<h2 id="document-metadata-14"><a class="header" href="#document-metadata-14">Document Metadata</a></h2>
+<h2 id="document-metadata-16"><a class="header" href="#document-metadata-16">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
@@ -4050,7 +5393,7 @@ pub trait StasisTool: Send + Sync {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-13"><a class="header" href="#purpose-13">Purpose</a></h2>
+<h2 id="purpose-16"><a class="header" href="#purpose-16">Purpose</a></h2>
 <p>Define the V1 SurrealDB schema and indexing strategy for Stasis durable job orchestration.</p>
 <h2 id="design-constraints"><a class="header" href="#design-constraints">Design Constraints</a></h2>
 <ol>
@@ -4338,12 +5681,12 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture-decision-records"><a class="header" href="#architecture-decision-records">Architecture Decision Records</a></h1>
-<h2 id="document-metadata-15"><a class="header" href="#document-metadata-15">Document Metadata</a></h2>
+<h2 id="document-metadata-17"><a class="header" href="#document-metadata-17">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-05-25</li>
 <li>Verified Against:
 <ul>
 <li>docs/adr/README.md</li>
@@ -4351,7 +5694,7 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 </ul>
 </li>
 </ul>
-<h2 id="purpose-14"><a class="header" href="#purpose-14">Purpose</a></h2>
+<h2 id="purpose-17"><a class="header" href="#purpose-17">Purpose</a></h2>
 <p>Track major architectural decisions with rationale, alternatives, and consequences.</p>
 <h2 id="adr-index"><a class="header" href="#adr-index">ADR Index</a></h2>
 <div class="table-wrapper">
@@ -4364,6 +5707,7 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 <tr><td>ADR-0002</td><td>Event-Driven Orchestration with Local CoR</td><td>Accepted</td><td>2026-05-07</td></tr>
 <tr><td>ADR-0003</td><td>STTP Reference-Only Job Context Contract</td><td>Accepted</td><td>2026-05-07</td></tr>
 <tr><td>ADR-0004</td><td>Recurring Jobs via Materialized Schedule Definitions</td><td>Accepted</td><td>2026-05-07</td></tr>
+<tr><td>ADR-0005</td><td>Agentic Workflow Skill Graph Contract</td><td>Accepted</td><td>2026-05-25</td></tr>
 </tbody>
 </table>
 </div>
@@ -4372,6 +5716,8 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
   A1[ADR-0001 Durable Job Runtime] --&gt; A2[ADR-0002 Event-Driven Orchestration]
   A1 --&gt; A3[ADR-0003 STTP Reference Contract]
   A1 --&gt; A4[ADR-0004 Recurring Definitions]
+  A2 --&gt; A5[ADR-0005 Agentic Workflow Skill Graph Contract]
+  A4 --&gt; A5
   A3 --&gt; A2
   A4 --&gt; A2
 </pre>
@@ -4421,6 +5767,18 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 <ul>
 <li>Positive: unified runtime semantics for one-off and recurring jobs.</li>
 <li>Tradeoff: scheduler lock and drift monitoring required.</li>
+</ul>
+</li>
+</ul>
+<h2 id="adr-0005-agentic-workflow-skill-graph-contract"><a class="header" href="#adr-0005-agentic-workflow-skill-graph-contract">ADR-0005 Agentic Workflow Skill Graph Contract</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Workflow builder semantics drifted between visual placeholders and source-first implementation details.</li>
+<li>Decision: Define workflow as a versioned AI skill graph where nodes are Grapheme function steps and edges are piped function contracts; compile graph to Grapheme source and execute via trigger-bound jobs referencing immutable workflow revisions.</li>
+<li>Consequences:
+<ul>
+<li>Positive: deterministic graph-&gt;source-&gt;runtime parity and clearer product semantics.</li>
+<li>Tradeoff: requires graph schema/versioning, compiler determinism, and round-trip policy for advanced source edits.</li>
 </ul>
 </li>
 </ul>

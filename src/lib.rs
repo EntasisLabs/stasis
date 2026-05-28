@@ -9,6 +9,16 @@ pub mod infrastructure;
 pub mod ports;
 pub mod sdk;
 
+pub use stasis_macros::stasis_tool;
+
+#[doc(hidden)]
+pub mod macro_support {
+    pub use async_trait;
+    pub use schemars;
+    pub use serde;
+    pub use serde_json;
+}
+
 /// Minimal runtime imports for consumers integrating job handlers and runtime wiring.
 pub mod runtime_prelude {
     pub use crate::application::runtime::in_memory_runtime::{
