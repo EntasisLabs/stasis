@@ -1,11 +1,20 @@
 # Stasis
 
-Stasis is a Rust framework for AI orchestration with durable runtime jobs, cluster-aware control plane primitives (queue ownership, endpoint routing, scheduler operations), and memory integration hooks (recall/store/rollup adapters).
+Stasis is a Rust framework for building long-running AI systems that behave like distributed applications.
 
+It provides durable runtime orchestration, background workflows, recurring scheduling, multi-agent coordination, memory integration, and cluster-aware control plane primitives while still scaling down cleanly to simple chat-style agent execution.
 
-Stasis is designed for long-running AI systems that behave like distributed applications, not just request/response prompt calls. It supports background workflows, recurring schedules, multi-agent coordination, and operator-facing control surfaces.
+Unlike prompt orchestration frameworks focused primarily on request/response composition, Stasis is designed for operational reliability:
 
-It also scales down cleanly for simple chat use-cases. You can start with only `StasisSdk` (in-memory agents + direct prompt invocation), then add runtime and control-plane layers only when your system needs durable, distributed orchestration.
+- durable execution    
+- queue ownership and worker coordination    
+- endpoint routing    
+- runtime observability    
+- scheduling and retries
+- typed tool contracts
+- distributed runtime control
+
+Start with lightweight in-memory agents using `StasisSdk`, then progressively adopt runtime and control-plane capabilities as your system evolves.
 
 ## Why Stasis?
 
@@ -27,6 +36,7 @@ Most AI frameworks optimize for prompt composition. Stasis optimizes for product
 - `infrastructure`: Adapters for in-memory, SurrealDB, networking, and providers.
 - `sdk`: Consumer-facing facades (`StasisSdk`, `RuntimeSdk`, `ControlPlaneSdk`).
 
+### Layout
 ```text
 Client App
     |
@@ -44,6 +54,19 @@ Infrastructure Adapters (LLM, memory, storage, transport, workflow engine)
     |
     v
 Providers / Surreal Backends / Cluster Integrations
+```
+
+### Process Flow
+```text
+Request/Trigger
+      ↓
+Workflow Runtime
+      ↓
+Durable Job Queue
+      ↓
+Workers / Agents
+      ↓
+Memory + Tool + LLM Adapters
 ```
 
 ## SDK Surface
