@@ -78,3 +78,4 @@ stasis-macros = { version = "0.1.0", path = "stasis-macros" }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+trybuild = "1"

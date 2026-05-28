@@ -91,12 +91,16 @@ struct SearchInput {
     query: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 struct SearchOutput {
     summary: String,
 }
 
-#[stasis_tool(name = "search_docs", description = "Searches internal docs")]
+#[stasis_tool(
+    name = "search_docs",
+    description = "Searches internal docs",
+    output_schema = true
+)]
 async fn search_docs(input: SearchInput) -> Result<SearchOutput> {
     Ok(SearchOutput {
         summary: format!("query={}", input.query),
@@ -109,6 +113,14 @@ async fn search_docs(input: SearchInput) -> Result<SearchOutput> {
 ```
 
 This avoids repetitive manual trait implementations while preserving strict JSON-schema-based validation.
+
+Macro contract:
+
+- Function must be `async` and take exactly one typed input argument.
+- Return type must be `Result<OutputType>`.
+- Input type must implement `Deserialize + JsonSchema`.
+- Output type must implement `Serialize`.
+- When `output_schema = true`, output type must also implement `JsonSchema`.
 
 Production-focused entry points:
 

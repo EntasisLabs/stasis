@@ -336,14 +336,18 @@ pub trait StasisTool: Send + Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> Option<&'static str> { None }
     fn input_schema(&self) -> Option<Value> { None }
+    fn output_schema(&self) -> Option<Value> { None }
     async fn invoke(&self, input: Value) -> Result<Value>;
 }
 ```
 
 **Stasis guarantees:**
 - `input_schema` is used to validate tool input at invocation time. Schema validation enforces: `required` fields, `type` constraints, `enum` values, and `additionalProperties`.
+- `output_schema` is optional and intended for documentation/inspection contracts.
 - `name` must be unique across all registered tools. Duplicate registration returns a `PortFailure` error.
 - `description` and `input_schema` are exposed to the model via the `genai` tool interface — descriptive values improve model tool-call accuracy.
+
+For lower-boilerplate implementations, prefer `#[stasis_tool(...)]` documented in [Stasis Tool Macro](./stasis-tool-macro.md).
 
 **Wiring:**
 

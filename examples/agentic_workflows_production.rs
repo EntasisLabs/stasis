@@ -40,7 +40,7 @@ struct FetchKnowledgeBaseInput {
     topic: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 struct FetchKnowledgeBaseOutput {
     topic: String,
     playbook: Vec<String>,
@@ -48,7 +48,8 @@ struct FetchKnowledgeBaseOutput {
 
 #[stasis_tool(
     name = "fetch_knowledge_base",
-    description = "Returns internal playbook snippets for an operation topic"
+    description = "Returns internal playbook snippets for an operation topic",
+    output_schema = true
 )]
 async fn fetch_knowledge_base(input: FetchKnowledgeBaseInput) -> Result<FetchKnowledgeBaseOutput> {
     Ok(FetchKnowledgeBaseOutput {

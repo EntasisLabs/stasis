@@ -72,7 +72,7 @@ struct FetchKnowledgeBaseInput {
     topic: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 struct FetchKnowledgeBaseOutput {
     topic: String,
     notes: Vec<String>,
@@ -80,7 +80,8 @@ struct FetchKnowledgeBaseOutput {
 
 #[stasis_tool(
     name = "fetch_knowledge_base",
-    description = "Returns curated snippets for release operations topics"
+    description = "Returns curated snippets for release operations topics",
+    output_schema = true
 )]
 async fn fetch_knowledge_base(input: FetchKnowledgeBaseInput) -> Result<FetchKnowledgeBaseOutput> {
     Ok(FetchKnowledgeBaseOutput {

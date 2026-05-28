@@ -18,6 +18,7 @@ pub fn stasis_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut tool_name: Option<LitStr> = None;
     let mut description: Option<LitStr> = None;
     let mut crate_path_literal: Option<LitStr> = None;
+    let mut output_schema_enabled = false;
 
     for arg in args {
         if arg.path.is_ident("name") {
@@ -77,9 +78,29 @@ pub fn stasis_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
             continue;
         }
 
+        if arg.path.is_ident("output_schema") {
+            match arg.value {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Bool(value),
+                    ..
+                }) => {
+                    output_schema_enabled = value.value;
+                }
+                _ => {
+                    return syn::Error::new_spanned(
+                        arg.value,
+                        "output_schema must be a bool literal",
+                    )
+                    .to_compile_error()
+                    .into();
+                }
+            }
+            continue;
+        }
+
         return syn::Error::new_spanned(
             arg.path,
-            "unsupported attribute key (expected: name, description, crate_path)",
+            "unsupported attribute key (expected: name, description, crate_path, output_schema)",
         )
         .to_compile_error()
         .into();
@@ -156,6 +177,20 @@ pub fn stasis_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
         None => quote! { ::core::option::Option::None },
     };
 
+    let output_schema_impl = if output_schema_enabled {
+        quote! {
+            fn output_schema(&self) -> ::core::option::Option<#crate_path::macro_support::serde_json::Value> {
+                fn __assert_output_schema_traits<T: #crate_path::macro_support::schemars::JsonSchema>() {}
+                __assert_output_schema_traits::<#output_ty>();
+
+                let schema = #crate_path::macro_support::schemars::schema_for!(#output_ty);
+                #crate_path::macro_support::serde_json::to_value(schema.schema).ok()
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let expanded = quote! {
         #item_fn
 
@@ -179,6 +214,8 @@ pub fn stasis_tool(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let schema = #crate_path::macro_support::schemars::schema_for!(#input_ty);
                 #crate_path::macro_support::serde_json::to_value(schema.schema).ok()
             }
+
+            #output_schema_impl
 
             async fn invoke(
                 &self,

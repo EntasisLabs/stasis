@@ -2,7 +2,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use stasis::application::orchestration::tool_registry::{InMemoryToolRegistry, ToolRegistry};
+use stasis::application::orchestration::tool_registry::{
+    InMemoryToolRegistry, StasisTool, ToolRegistry,
+};
 use stasis::domain::errors::Result;
 use stasis::stasis_tool;
 
@@ -11,12 +13,16 @@ struct EchoInput {
     text: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 struct EchoOutput {
     upper: String,
 }
 
-#[stasis_tool(name = "echo_upper", description = "Uppercases text")]
+#[stasis_tool(
+    name = "echo_upper",
+    description = "Uppercases text",
+    output_schema = true
+)]
 async fn echo_upper(input: EchoInput) -> Result<EchoOutput> {
     Ok(EchoOutput {
         upper: input.text.to_uppercase(),
@@ -25,9 +31,16 @@ async fn echo_upper(input: EchoInput) -> Result<EchoOutput> {
 
 #[tokio::test]
 async fn stasis_tool_macro_generates_registry_compatible_tool() {
+    let generated_tool = echo_upper_tool();
+    let output_schema = generated_tool
+        .output_schema()
+        .expect("output schema should be generated when output_schema=true");
+    assert_eq!(output_schema["type"], "object");
+    assert_eq!(output_schema["properties"]["upper"]["type"], "string");
+
     let registry = InMemoryToolRegistry::default();
     registry
-        .register_tool(echo_upper_tool())
+        .register_tool(generated_tool)
         .expect("macro-generated tool should register");
 
     let tools = registry

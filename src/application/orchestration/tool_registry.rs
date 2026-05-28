@@ -16,6 +16,9 @@ pub trait StasisTool: Send + Sync {
     fn input_schema(&self) -> Option<Value> {
         None
     }
+    fn output_schema(&self) -> Option<Value> {
+        None
+    }
     async fn invoke(&self, input: Value) -> Result<Value>;
 }
 
