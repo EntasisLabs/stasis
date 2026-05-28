@@ -14,96 +14,6 @@ Unlike prompt orchestration frameworks focused primarily on request/response com
 - typed tool contracts
 - distributed runtime control
 
-Start with lightweight in-memory agents using `StasisSdk`, then progressively adopt runtime and control-plane capabilities as your system evolves.
-
-## Why Stasis?
-
-Most AI frameworks optimize for prompt composition. Stasis optimizes for production runtime behavior:
-
-- Durable execution across backend choices.
-- Orchestration reliability with explicit queues, workers, and policies.
-- Runtime observability and operational diagnostics.
-- Cluster coordination and endpoint routing support.
-- Typed tool contracts with schema-aware invocation.
-- Built-In WASM Compatible Workflow Engine with no code builder. Powered by [Grapheme](https://github.com/EntasisLabs/grapheme) 
-- Memory-aware workflows with recall, store, aggregate, and rollup paths. Powered by [Locus](https://github.com/EntasisLabs/locus)
-
-## Architecture
-
-- `domain`: Runtime models, policies, events, and error contracts.
-- `application`: Use-cases, orchestration pipelines, and runtime handlers.
-- `ports`: Stable inbound/outbound interfaces.
-- `infrastructure`: Adapters for in-memory, SurrealDB, networking, and providers.
-- `sdk`: Consumer-facing facades (`StasisSdk`, `RuntimeSdk`, `ControlPlaneSdk`).
-
-### Layout
-```text
-Client App
-    |
-    v
-StasisSdk / RuntimeSdk / ControlPlaneSdk
-    |
-    v
-Application Runtime + Orchestration
-    |
-    v
-Ports
-    |
-    v
-Infrastructure Adapters (LLM, memory, storage, transport, workflow engine)
-    |
-    v
-Providers / Surreal Backends / Cluster Integrations
-```
-
-### Process Flow
-```text
-Request/Trigger
-      ↓
-Workflow Runtime
-      ↓
-Durable Job Queue
-      ↓
-Workers / Agents
-      ↓
-Memory + Tool + LLM Adapters
-```
-
-## SDK Surface
-
-- `StasisSdk`: agent registration and prompt invocation flows.
-- `RuntimeSdk`: enqueue, process, publish, recurring materialization, runtime stats.
-- `ControlPlaneSdk`: endpoint and cluster coordination commands.
-
-## When To Use Which SDK
-
-Use this as a practical selection guide:
-
-- `StasisSdk`:
-    - Best for chat-style assistants, lightweight copilots, and direct request/response flows.
-    - Start here when you do not need background workers, scheduling, or queue durability.
-- `RuntimeSdk`:
-    - Add when work must run asynchronously, survive retries/failures, or execute on schedules.
-    - Use for workflow pipelines, outbox delivery, and operational runtime visibility.
-- `ControlPlaneSdk`:
-    - Add when orchestration is distributed across nodes/endpoints and needs coordination commands.
-    - Use for endpoint routing, cluster ownership, and control-plane driven operations.
-
-Typical adoption path:
-
-1. Start with `StasisSdk` for simple chat and agent prompts.
-2. Add `RuntimeSdk` when workloads become asynchronous or policy-driven.
-3. Add `ControlPlaneSdk` when operating multi-node or cluster-aware deployments.
-
-## Runtime Capabilities
-
-- Durable backend options for queue/thread state (`surreal-ws` / `surreal-kv`), with `in-memory` for local runs.
-- Retry and failure-policy aware job execution with bounded attempts.
-- Recurring schedule materialization and worker-driven queue processing.
-- Outbox publication workflows for delivery and endpoint diagnostics.
-- Runtime stats snapshots for enqueued/running/succeeded/failed/dead-letter visibility.
-- Cluster/control-plane primitives for node and endpoint coordination.
-
 ## Quick Start
 
 ```rust
@@ -281,6 +191,98 @@ Dashboard runtime backend selection (for `stasis_dashboard`):
 Demo seeding remains opt-in and only applies to in-memory mode:
 
 - `STASIS_DASHBOARD_DEMO_SEED=true`
+
+
+## Why Stasis?
+
+Most AI frameworks optimize for prompt composition. Stasis optimizes for production runtime behavior:
+
+- Durable execution across backend choices.
+- Orchestration reliability with explicit queues, workers, and policies.
+- Runtime observability and operational diagnostics.
+- Cluster coordination and endpoint routing support.
+- Typed tool contracts with schema-aware invocation.
+- Built-In WASM Compatible Workflow Engine with no code builder. Powered by [Grapheme](https://github.com/EntasisLabs/grapheme) 
+- Memory-aware workflows with recall, store, aggregate, and rollup paths. Powered by [Locus](https://github.com/EntasisLabs/locus)
+
+## Architecture
+
+- `domain`: Runtime models, policies, events, and error contracts.
+- `application`: Use-cases, orchestration pipelines, and runtime handlers.
+- `ports`: Stable inbound/outbound interfaces.
+- `infrastructure`: Adapters for in-memory, SurrealDB, networking, and providers.
+- `sdk`: Consumer-facing facades (`StasisSdk`, `RuntimeSdk`, `ControlPlaneSdk`).
+
+### Layout
+
+```text
+Client App
+    |
+    v
+StasisSdk / RuntimeSdk / ControlPlaneSdk
+    |
+    v
+Application Runtime + Orchestration
+    |
+    v
+Ports
+    |
+    v
+Infrastructure Adapters (LLM, memory, storage, transport, workflow engine)
+    |
+    v
+Providers / Surreal Backends / Cluster Integrations
+```
+
+### Process Flow
+
+```text
+Request/Trigger
+      ↓
+Workflow Runtime
+      ↓
+Durable Job Queue
+      ↓
+Workers / Agents
+      ↓
+Memory + Tool + LLM Adapters
+```
+
+## SDK Surface
+
+- `StasisSdk`: agent registration and prompt invocation flows.
+- `RuntimeSdk`: enqueue, process, publish, recurring materialization, runtime stats.
+- `ControlPlaneSdk`: endpoint and cluster coordination commands.
+
+## When To Use Which SDK
+
+Use this as a practical selection guide:
+
+- `StasisSdk`:
+    - Best for chat-style assistants, lightweight copilots, and direct request/response flows.
+    - Start here when you do not need background workers, scheduling, or queue durability.
+- `RuntimeSdk`:
+    - Add when work must run asynchronously, survive retries/failures, or execute on schedules.
+    - Use for workflow pipelines, outbox delivery, and operational runtime visibility.
+- `ControlPlaneSdk`:
+    - Add when orchestration is distributed across nodes/endpoints and needs coordination commands.
+    - Use for endpoint routing, cluster ownership, and control-plane driven operations.
+
+Typical adoption path:
+
+1. Start with `StasisSdk` for simple chat and agent prompts.
+2. Add `RuntimeSdk` when workloads become asynchronous or policy-driven.
+3. Add `ControlPlaneSdk` when operating multi-node or cluster-aware deployments.
+
+## Runtime Capabilities
+
+- Durable backend options for queue/thread state (`surreal-ws` / `surreal-kv`), with `in-memory` for local runs.
+- Retry and failure-policy aware job execution with bounded attempts.
+- Recurring schedule materialization and worker-driven queue processing.
+- Outbox publication workflows for delivery and endpoint diagnostics.
+- Runtime stats snapshots for enqueued/running/succeeded/failed/dead-letter visibility.
+- Cluster/control-plane primitives for node and endpoint coordination.
+
 
 ## Documentation
 
