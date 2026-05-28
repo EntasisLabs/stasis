@@ -1,8 +1,23 @@
 # Stasis
 
-Stasis is a Rust framework for AI orchestration with durable runtime jobs, cluster-aware control plane primitives, and memory integration hooks.
+Stasis is a Rust framework for AI orchestration with durable runtime jobs, cluster-aware control plane primitives (queue ownership, endpoint routing, scheduler operations), and memory integration hooks (recall/store/rollup adapters).
 
-Package note: the crates.io package is `stasis-rs` while Rust imports use `stasis`.
+
+Stasis is designed for long-running AI systems that behave like distributed applications, not just request/response prompt calls. It supports background workflows, recurring schedules, multi-agent coordination, and operator-facing control surfaces.
+
+It also scales down cleanly for simple chat use-cases. You can start with only `StasisSdk` (in-memory agents + direct prompt invocation), then add runtime and control-plane layers only when your system needs durable, distributed orchestration.
+
+## Why Stasis?
+
+Most AI frameworks optimize for prompt composition. Stasis optimizes for production runtime behavior:
+
+- Durable execution across backend choices.
+- Orchestration reliability with explicit queues, workers, and policies.
+- Runtime observability and operational diagnostics.
+- Cluster coordination and endpoint routing support.
+- Typed tool contracts with schema-aware invocation.
+- Built-In WASM Compatible Workflow Engine with no code builder. Powered by [Grapheme](https://github.com/EntasisLabs/grapheme) 
+- Memory-aware workflows with recall, store, aggregate, and rollup paths. Powered by [Locus](https://github.com/EntasisLabs/locus)
 
 ## Architecture
 
@@ -12,11 +27,59 @@ Package note: the crates.io package is `stasis-rs` while Rust imports use `stasi
 - `infrastructure`: Adapters for in-memory, SurrealDB, networking, and providers.
 - `sdk`: Consumer-facing facades (`StasisSdk`, `RuntimeSdk`, `ControlPlaneSdk`).
 
+```text
+Client App
+    |
+    v
+StasisSdk / RuntimeSdk / ControlPlaneSdk
+    |
+    v
+Application Runtime + Orchestration
+    |
+    v
+Ports
+    |
+    v
+Infrastructure Adapters (LLM, memory, storage, transport, workflow engine)
+    |
+    v
+Providers / Surreal Backends / Cluster Integrations
+```
+
 ## SDK Surface
 
 - `StasisSdk`: agent registration and prompt invocation flows.
 - `RuntimeSdk`: enqueue, process, publish, recurring materialization, runtime stats.
 - `ControlPlaneSdk`: endpoint and cluster coordination commands.
+
+## When To Use Which SDK
+
+Use this as a practical selection guide:
+
+- `StasisSdk`:
+    - Best for chat-style assistants, lightweight copilots, and direct request/response flows.
+    - Start here when you do not need background workers, scheduling, or queue durability.
+- `RuntimeSdk`:
+    - Add when work must run asynchronously, survive retries/failures, or execute on schedules.
+    - Use for workflow pipelines, outbox delivery, and operational runtime visibility.
+- `ControlPlaneSdk`:
+    - Add when orchestration is distributed across nodes/endpoints and needs coordination commands.
+    - Use for endpoint routing, cluster ownership, and control-plane driven operations.
+
+Typical adoption path:
+
+1. Start with `StasisSdk` for simple chat and agent prompts.
+2. Add `RuntimeSdk` when workloads become asynchronous or policy-driven.
+3. Add `ControlPlaneSdk` when operating multi-node or cluster-aware deployments.
+
+## Runtime Capabilities
+
+- Durable backend options for queue/thread state (`surreal-ws` / `surreal-kv`), with `in-memory` for local runs.
+- Retry and failure-policy aware job execution with bounded attempts.
+- Recurring schedule materialization and worker-driven queue processing.
+- Outbox publication workflows for delivery and endpoint diagnostics.
+- Runtime stats snapshots for enqueued/running/succeeded/failed/dead-letter visibility.
+- Cluster/control-plane primitives for node and endpoint coordination.
 
 ## Quick Start
 
@@ -49,6 +112,14 @@ async fn main() -> stasis::domain::errors::Result<()> {
 }
 ```
 
+In this example:
+
+- Agents are stored in-memory.
+- Prompt execution uses the configured provider gateway from environment variables.
+- Runtime state is local and ephemeral.
+- No external infrastructure is required.
+- This is `StasisSdk`-only mode (the simplest operating model).
+
 For a deterministic local smoke test (no provider dependency), use [examples/simple_agent.rs](examples/simple_agent.rs).
 
 Prelude tiers:
@@ -77,6 +148,8 @@ Provider-specific overrides are supported:
 - `STASIS_OLLAMA_API_KEY`
 
 Runtime examples are available in [examples](examples).
+
+Package note: the crates.io package is `stasis-rs` while Rust imports use `stasis`.
 
 ### Tool Macro (Signature-Driven)
 
