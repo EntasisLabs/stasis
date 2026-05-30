@@ -1,4 +1,12 @@
+
 # Stasis
+
+<div align="center">
+    
+<img width="416" height="388" alt="image" src="https://github.com/user-attachments/assets/fd3f91cd-e248-4f8d-9b1e-14a648c99af6" />
+</div>
+
+---
 
 Stasis is a Rust framework for building long-running AI systems that behave like distributed applications.
 
