@@ -82,7 +82,7 @@ Provider-specific overrides are supported:
 
 Runtime examples are available in [examples](examples).
 
-Package note: the crates.io package is `stasis-rs` while Rust imports use `stasis`.
+**Package note:** the crates.io package is `stasis-rs` while Rust imports use `stasis`.
 
 ### Tool Macro (Signature-Driven)
 
@@ -137,9 +137,6 @@ Production-focused entry points:
 - [examples/runtime_backends_profiles.rs](examples/runtime_backends_profiles.rs): backend profile bootstrap for in-memory, Surreal websocket, and Surreal KV modes.
 - [examples/team_role_workflows.rs](examples/team_role_workflows.rs): role-specific scenario packs for SRE incident, product planning, and support triage loops.
 
-CI-friendly smoke harness:
-
-- [scripts/smoke-agentic-workflows.sh](scripts/smoke-agentic-workflows.sh)
 
 ## Embedded Dashboard
 
@@ -287,7 +284,6 @@ Typical adoption path:
 ## Documentation
 
 - Docs index: [docs/README.md](docs/README.md)
-- V1 draft: [docs/v1-runtime-draft.md](docs/v1-runtime-draft.md)
 - Runtime design: [docs/design/job-runtime-design.md](docs/design/job-runtime-design.md)
 - Architecture overview: [docs/architecture/overview.md](docs/architecture/overview.md)
 - ADR index: [docs/adr/README.md](docs/adr/README.md)
