@@ -1,6 +1,6 @@
 use chrono::Utc;
 
-use crate::application::runtime::runtime_factory::RuntimeBackend;
+use crate::application::runtime::runtime_factory::{RuntimeBackend, SurrealAuth};
 use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
 use crate::application::runtime::runtime_factory::RuntimeComposition;
 use crate::domain::errors::Result;
@@ -47,10 +47,10 @@ impl RuntimeSdk {
         namespace: impl Into<String>,
         database: impl Into<String>,
     ) -> Result<Self> {
-        Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-            namespace: namespace.into(),
-            database: database.into(),
-        }))
+        Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem(
+            namespace,
+            database,
+        )))
         .await
     }
 
@@ -60,12 +60,21 @@ impl RuntimeSdk {
         namespace: impl Into<String>,
         database: impl Into<String>,
     ) -> Result<Self> {
-        Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
-            endpoint: endpoint.into(),
-            namespace: namespace.into(),
-            database: database.into(),
-        }))
-        .await
+        Self::surreal_ws_with_auth(endpoint, namespace, database, None).await
+    }
+
+    /// Builds a remote websocket surreal runtime facade with optional database credentials.
+    pub async fn surreal_ws_with_auth(
+        endpoint: impl Into<String>,
+        namespace: impl Into<String>,
+        database: impl Into<String>,
+        auth: Option<SurrealAuth>,
+    ) -> Result<Self> {
+        let mut backend = RuntimeBackend::surreal_ws(endpoint, namespace, database);
+        if let Some(auth) = auth {
+            backend = backend.with_surreal_auth(auth);
+        }
+        Self::from_builder(StasisRuntimeBuilder::new(backend)).await
     }
 
     /// Builds an embedded surreal-kv runtime facade with default wiring.
@@ -74,12 +83,34 @@ impl RuntimeSdk {
         namespace: impl Into<String>,
         database: impl Into<String>,
     ) -> Result<Self> {
-        Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
-            path: path.into(),
-            namespace: namespace.into(),
-            database: database.into(),
-        }))
-        .await
+        Self::surreal_kv_with_auth(path, namespace, database, None).await
+    }
+
+    /// Builds an embedded surreal-kv runtime facade with optional database credentials.
+    pub async fn surreal_kv_with_auth(
+        path: impl Into<String>,
+        namespace: impl Into<String>,
+        database: impl Into<String>,
+        auth: Option<SurrealAuth>,
+    ) -> Result<Self> {
+        let mut backend = RuntimeBackend::surreal_kv(path, namespace, database);
+        if let Some(auth) = auth {
+            backend = backend.with_surreal_auth(auth);
+        }
+        Self::from_builder(StasisRuntimeBuilder::new(backend)).await
+    }
+
+    /// Builds a surreal-mem runtime facade with optional database credentials.
+    pub async fn surreal_mem_with_auth(
+        namespace: impl Into<String>,
+        database: impl Into<String>,
+        auth: Option<SurrealAuth>,
+    ) -> Result<Self> {
+        let mut backend = RuntimeBackend::surreal_mem(namespace, database);
+        if let Some(auth) = auth {
+            backend = backend.with_surreal_auth(auth);
+        }
+        Self::from_builder(StasisRuntimeBuilder::new(backend)).await
     }
 
     /// Builds a runtime facade from a fully configured runtime builder.

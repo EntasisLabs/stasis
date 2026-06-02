@@ -95,10 +95,7 @@ async fn production_example_dry_run_jobs_enqueue_without_provider() {
 #[tokio::test]
 async fn surreal_mem_runtime_profile_boots_for_smoke() {
     let runtime = RuntimeSdk::from_builder(
-        StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-            namespace: "ci-smoke".to_string(),
-            database: "runtime".to_string(),
-        })
+        StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem("ci-smoke", "runtime"))
         .with_locus_memory(),
     )
     .await

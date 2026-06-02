@@ -249,10 +249,10 @@ mod tests {
 
     #[tokio::test]
     async fn add_dashboard_mounts_with_surreal_mem_runtime_service() {
-        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
-            namespace: "stasis".to_string(),
-            database: "dashboard_integration_test".to_string(),
-        })
+        let runtime = RuntimeFactory::build(RuntimeBackend::surreal_mem(
+            "stasis",
+            "dashboard_integration_test",
+        ))
         .await
         .expect("surreal mem runtime should build");
 
@@ -275,10 +275,10 @@ mod tests {
 
     #[tokio::test]
     async fn add_dashboard_exposes_workflow_reflection_stream_route() {
-        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
-            namespace: "stasis".to_string(),
-            database: "dashboard_reflection_route_test".to_string(),
-        })
+        let runtime = RuntimeFactory::build(RuntimeBackend::surreal_mem(
+            "stasis",
+            "dashboard_reflection_route_test",
+        ))
         .await
         .expect("surreal mem runtime should build");
 
@@ -311,10 +311,10 @@ mod tests {
 
     #[tokio::test]
     async fn add_dashboard_exposes_workflow_reflection_module_drill_down_route() {
-        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
-            namespace: "stasis".to_string(),
-            database: "dashboard_reflection_drilldown_test".to_string(),
-        })
+        let runtime = RuntimeFactory::build(RuntimeBackend::surreal_mem(
+            "stasis",
+            "dashboard_reflection_drilldown_test",
+        ))
         .await
         .expect("surreal mem runtime should build");
 
@@ -344,10 +344,10 @@ mod tests {
 
     #[tokio::test]
     async fn add_dashboard_exposes_workflow_reflection_filter_empty_state() {
-        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
-            namespace: "stasis".to_string(),
-            database: "dashboard_reflection_filter_test".to_string(),
-        })
+        let runtime = RuntimeFactory::build(RuntimeBackend::surreal_mem(
+            "stasis",
+            "dashboard_reflection_filter_test",
+        ))
         .await
         .expect("surreal mem runtime should build");
 
@@ -376,10 +376,10 @@ mod tests {
 
     #[tokio::test]
     async fn add_dashboard_exposes_workflow_reflection_source_override_content() {
-        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
-            namespace: "stasis".to_string(),
-            database: "dashboard_reflection_source_override_test".to_string(),
-        })
+        let runtime = RuntimeFactory::build(RuntimeBackend::surreal_mem(
+            "stasis",
+            "dashboard_reflection_source_override_test",
+        ))
         .await
         .expect("surreal mem runtime should build");
 
@@ -408,10 +408,10 @@ mod tests {
 
     #[tokio::test]
     async fn add_dashboard_reflection_preserves_filters_and_source_across_module_cycle() {
-        let runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
-            namespace: "stasis".to_string(),
-            database: "dashboard_reflection_source_filter_cycle_test".to_string(),
-        })
+        let runtime = RuntimeFactory::build(RuntimeBackend::surreal_mem(
+            "stasis",
+            "dashboard_reflection_source_filter_cycle_test",
+        ))
         .await
         .expect("surreal mem runtime should build");
 

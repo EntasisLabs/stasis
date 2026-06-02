@@ -5,8 +5,11 @@ use chrono::{Duration, Utc};
 use stasis::application::dto::{
     HeartbeatClusterNodeRequest, RegisterClusterNodeRequest, RegisterDeliveryEndpointRequest,
 };
+use stasis::application::composition::surreal_backend_config::{
+    resolve_surreal_auth_from_env, resolve_surreal_database_from_env, resolve_surreal_namespace_from_env,
+};
 use stasis::application::runtime::runtime_factory::{
-    RuntimeBackend, RuntimeComposition, RuntimeFactory,
+    RuntimeBackend, RuntimeComposition, RuntimeFactory, SurrealAuth,
 };
 use stasis::application::runtime::in_memory_runtime::{
     InMemoryRuntime, JobExecutionOutcome, JobHandler,
@@ -331,32 +334,32 @@ fn resolve_dashboard_runtime_backend() -> RuntimeBackend {
 
     match backend.as_str() {
         "in-memory" | "inmemory" => RuntimeBackend::InMemory,
-        "surreal-mem" | "mem" => RuntimeBackend::SurrealMem {
-            namespace: dashboard_surreal_namespace(),
-            database: dashboard_surreal_database(),
-        },
-        "surreal-ws" | "ws" => RuntimeBackend::SurrealWs {
-            endpoint: std::env::var("STASIS_DASHBOARD_SURREAL_ENDPOINT")
+        "surreal-mem" | "mem" => apply_surreal_auth(RuntimeBackend::surreal_mem(
+            dashboard_surreal_namespace(),
+            dashboard_surreal_database(),
+        )),
+        "surreal-ws" | "ws" => apply_surreal_auth(RuntimeBackend::surreal_ws(
+            std::env::var("STASIS_DASHBOARD_SURREAL_ENDPOINT")
                 .ok()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
                 .expect(
                     "STASIS_DASHBOARD_SURREAL_ENDPOINT is required when STASIS_DASHBOARD_RUNTIME_BACKEND=surreal-ws",
                 ),
-            namespace: dashboard_surreal_namespace(),
-            database: dashboard_surreal_database(),
-        },
-        "surreal-kv" | "kv" => RuntimeBackend::SurrealKv {
-            path: std::env::var("STASIS_DASHBOARD_SURREAL_KV_PATH")
+            dashboard_surreal_namespace(),
+            dashboard_surreal_database(),
+        )),
+        "surreal-kv" | "kv" => apply_surreal_auth(RuntimeBackend::surreal_kv(
+            std::env::var("STASIS_DASHBOARD_SURREAL_KV_PATH")
                 .ok()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
                 .expect(
                     "STASIS_DASHBOARD_SURREAL_KV_PATH is required when STASIS_DASHBOARD_RUNTIME_BACKEND=surreal-kv",
                 ),
-            namespace: dashboard_surreal_namespace(),
-            database: dashboard_surreal_database(),
-        },
+            dashboard_surreal_namespace(),
+            dashboard_surreal_database(),
+        )),
         other => {
             println!(
                 "unknown STASIS_DASHBOARD_RUNTIME_BACKEND='{}', falling back to in-memory",
@@ -368,17 +371,25 @@ fn resolve_dashboard_runtime_backend() -> RuntimeBackend {
 }
 
 fn dashboard_surreal_namespace() -> String {
-    std::env::var("STASIS_DASHBOARD_SURREAL_NAMESPACE")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "stasis".to_string())
+    resolve_surreal_namespace_from_env("STASIS_DASHBOARD_SURREAL_NAMESPACE", None, "stasis")
 }
 
 fn dashboard_surreal_database() -> String {
-    std::env::var("STASIS_DASHBOARD_SURREAL_DATABASE")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "runtime".to_string())
+    resolve_surreal_database_from_env("STASIS_DASHBOARD_SURREAL_DATABASE", None, "runtime")
+}
+
+fn dashboard_surreal_auth() -> Option<SurrealAuth> {
+    resolve_surreal_auth_from_env(
+        "STASIS_DASHBOARD_SURREAL_USERNAME",
+        "STASIS_DASHBOARD_SURREAL_PASSWORD",
+        None,
+        None,
+    )
+}
+
+fn apply_surreal_auth(backend: RuntimeBackend) -> RuntimeBackend {
+    match dashboard_surreal_auth() {
+        Some(auth) => backend.with_surreal_auth(auth),
+        None => backend,
+    }
 }

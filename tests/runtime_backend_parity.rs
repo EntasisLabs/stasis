@@ -3662,11 +3662,11 @@ async fn surreal_kv_runtime_builder_with_locus_memory_registers_memory_schema_ha
     let path = env::temp_dir().join(format!("stasis-locus-kv-{nanos}"));
     let path_str = path.to_string_lossy().into_owned();
 
-    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
-        path: path_str,
-        namespace: "test".to_string(),
-        database: format!("runtime_backend_parity_locus_kv_{nanos}"),
-    })
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::surreal_kv(
+        path_str,
+        "test",
+        format!("runtime_backend_parity_locus_kv_{nanos}"),
+    ))
     .with_chat_client(Arc::new(ScriptedChatClient::new(vec![])))
     .with_locus_memory()
     .without_grapheme_handlers()
@@ -3744,11 +3744,11 @@ async fn surreal_ws_runtime_builder_with_locus_memory_registers_memory_schema_ha
         .expect("system clock should be after epoch")
         .as_nanos();
 
-    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::surreal_ws(
         endpoint,
-        namespace: "test".to_string(),
-        database: format!("runtime_backend_parity_locus_ws_{nanos}"),
-    })
+        "test",
+        format!("runtime_backend_parity_locus_ws_{nanos}"),
+    ))
     .with_chat_client(Arc::new(ScriptedChatClient::new(vec![])))
     .with_locus_memory()
     .without_grapheme_handlers()
@@ -3901,10 +3901,10 @@ async fn surreal_runtime_builder_middleware_chain_enables_cache_telemetry_and_in
     let cache = Arc::new(stasis::infrastructure::runtime::in_memory_ai_chat_response_cache::InMemoryAiChatResponseCache::default());
     let interceptor = Arc::new(RecordingToolCallInterceptor::default());
 
-    let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-        namespace: "test".to_string(),
-        database: "runtime_backend_parity_middleware_chain".to_string(),
-    })
+    let builder = StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem(
+        "test",
+        "runtime_backend_parity_middleware_chain",
+    ))
     .with_chat_client(chat_client.clone())
     .with_chat_middleware(
         ToolCallInterceptionChatMiddleware::new(interceptor.clone()).with_metrics(metrics.clone()),
@@ -4097,10 +4097,10 @@ async fn in_memory_orchestration_sequential_pattern_executes_all_stages() {
 #[tokio::test]
 async fn surreal_orchestration_sequential_pattern_policy_violation_dead_letters_job() {
     let now = Utc::now();
-    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-        namespace: "test".to_string(),
-        database: "runtime_backend_parity_orchestration_sequential_failure".to_string(),
-    })
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem(
+        "test",
+        "runtime_backend_parity_orchestration_sequential_failure",
+    ))
     .with_chat_client(Arc::new(PlainScriptedChatClient::new(vec![
         "unused".to_string(),
     ])))
@@ -4180,10 +4180,10 @@ async fn surreal_orchestration_sequential_pattern_policy_violation_dead_letters_
 #[tokio::test]
 async fn surreal_orchestration_concurrent_pattern_executes_all_branches() {
     let now = Utc::now();
-    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-        namespace: "test".to_string(),
-        database: "runtime_backend_parity_orchestration_concurrent_success".to_string(),
-    })
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem(
+        "test",
+        "runtime_backend_parity_orchestration_concurrent_success",
+    ))
     .with_chat_client(Arc::new(EchoPromptChatClient))
     .without_grapheme_handlers()
     .without_prompt_handler()
@@ -4556,10 +4556,10 @@ async fn in_memory_orchestration_handoff_pattern_executes_turns_and_emits_transi
 #[tokio::test]
 async fn surreal_orchestration_handoff_pattern_policy_violation_dead_letters_job() {
     let now = Utc::now();
-    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-        namespace: "test".to_string(),
-        database: "runtime_backend_parity_orchestration_handoff_failure".to_string(),
-    })
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem(
+        "test",
+        "runtime_backend_parity_orchestration_handoff_failure",
+    ))
     .with_chat_client(Arc::new(EchoPromptChatClient))
     .without_grapheme_handlers()
     .without_prompt_handler()
@@ -4741,10 +4741,10 @@ async fn in_memory_orchestration_orchestrator_pattern_selects_matching_route() {
 #[tokio::test]
 async fn surreal_orchestration_orchestrator_pattern_policy_violation_dead_letters_job() {
     let now = Utc::now();
-    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-        namespace: "test".to_string(),
-        database: "runtime_backend_parity_orchestration_orchestrator_failure".to_string(),
-    })
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem(
+        "test",
+        "runtime_backend_parity_orchestration_orchestrator_failure",
+    ))
     .with_chat_client(Arc::new(EchoPromptChatClient))
     .without_grapheme_handlers()
     .without_prompt_handler()
@@ -7263,10 +7263,10 @@ async fn lineage_investigator_root_thread_selector_expands_descendants_in_memory
 #[tokio::test]
 async fn lineage_investigator_root_thread_selector_expands_descendants_surreal() {
     let now = Utc::now();
-    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-        namespace: "test".to_string(),
-        database: "runtime_backend_parity_lineage_root_expand_surreal".to_string(),
-    })
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem(
+        "test",
+        "runtime_backend_parity_lineage_root_expand_surreal",
+    ))
     .with_chat_client(Arc::new(EchoPromptChatClient))
     .without_grapheme_handlers()
     .without_prompt_handler()

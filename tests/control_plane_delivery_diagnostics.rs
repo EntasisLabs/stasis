@@ -122,10 +122,10 @@ impl EndpointTransportPublisher for FailAlwaysTransport {
 #[tokio::test]
 async fn surreal_runtime_persists_endpoint_delivery_status_and_control_plane_queries_it() {
     let now = Utc::now();
-    let backend = RuntimeBackend::SurrealMem {
-        namespace: format!("ns_{}", now.timestamp_nanos_opt().unwrap_or_default()),
-        database: "stasis_delivery_diag".to_string(),
-    };
+    let backend = RuntimeBackend::surreal_mem(
+        format!("ns_{}", now.timestamp_nanos_opt().unwrap_or_default()),
+        "stasis_delivery_diag",
+    );
 
     let calls = Arc::new(RwLock::new(Vec::<String>::new()));
     let runtime = StasisRuntimeBuilder::new(backend)
@@ -252,10 +252,10 @@ async fn surreal_runtime_persists_endpoint_delivery_status_and_control_plane_que
 #[tokio::test]
 async fn surreal_runtime_records_retry_backoff_then_recovery_for_endpoint_delivery() {
     let now = Utc::now();
-    let backend = RuntimeBackend::SurrealMem {
-        namespace: format!("ns_{}", now.timestamp_nanos_opt().unwrap_or_default()),
-        database: "stasis_delivery_backoff".to_string(),
-    };
+    let backend = RuntimeBackend::surreal_mem(
+        format!("ns_{}", now.timestamp_nanos_opt().unwrap_or_default()),
+        "stasis_delivery_backoff",
+    );
 
     let runtime = StasisRuntimeBuilder::new(backend)
         .with_extra_handler(SuccessHandler)
@@ -411,10 +411,10 @@ async fn surreal_runtime_records_retry_backoff_then_recovery_for_endpoint_delive
 #[tokio::test]
 async fn surreal_runtime_marks_outbox_failed_after_max_publish_attempts() {
     let now = Utc::now();
-    let backend = RuntimeBackend::SurrealMem {
-        namespace: format!("ns_{}", now.timestamp_nanos_opt().unwrap_or_default()),
-        database: "stasis_delivery_terminal_failure".to_string(),
-    };
+    let backend = RuntimeBackend::surreal_mem(
+        format!("ns_{}", now.timestamp_nanos_opt().unwrap_or_default()),
+        "stasis_delivery_terminal_failure",
+    );
 
     let runtime = StasisRuntimeBuilder::new(backend)
         .with_extra_handler(SuccessHandler)

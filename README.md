@@ -190,6 +190,7 @@ Dashboard runtime backend selection (for `stasis_dashboard`):
 - `STASIS_DASHBOARD_RUNTIME_BACKEND=in-memory|surreal-mem|surreal-ws|surreal-kv`
 - `STASIS_DASHBOARD_SURREAL_NAMESPACE` (default: `stasis`)
 - `STASIS_DASHBOARD_SURREAL_DATABASE` (default: `runtime`)
+- `STASIS_DASHBOARD_SURREAL_USERNAME` / `STASIS_DASHBOARD_SURREAL_PASSWORD` (optional; database sign-in for remote Surreal backends)
 - `STASIS_DASHBOARD_SURREAL_ENDPOINT` (required for `surreal-ws`)
 - `STASIS_DASHBOARD_SURREAL_KV_PATH` (required for `surreal-kv`)
 

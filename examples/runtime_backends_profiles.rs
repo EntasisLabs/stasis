@@ -1,22 +1,39 @@
+use stasis::application::composition::surreal_backend_config::{
+    resolve_surreal_auth_from_env, resolve_surreal_database_from_env, resolve_surreal_namespace_from_env,
+};
 use stasis::domain::errors::{Result, StasisError};
-use stasis::prelude::{RuntimeBackend, RuntimeSdk, StasisRuntimeBuilder};
+use stasis::prelude::{RuntimeBackend, RuntimeSdk, StasisRuntimeBuilder, SurrealAuth};
 
 fn resolve_surreal_namespace() -> String {
-    std::env::var("STASIS_EXAMPLE_SURREAL_NAMESPACE")
-        .ok()
-        .or_else(|| std::env::var("STASIS_DASHBOARD_SURREAL_NAMESPACE").ok())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "stasis".to_string())
+    resolve_surreal_namespace_from_env(
+        "STASIS_EXAMPLE_SURREAL_NAMESPACE",
+        Some("STASIS_DASHBOARD_SURREAL_NAMESPACE"),
+        "stasis",
+    )
 }
 
 fn resolve_surreal_database() -> String {
-    std::env::var("STASIS_EXAMPLE_SURREAL_DATABASE")
-        .ok()
-        .or_else(|| std::env::var("STASIS_DASHBOARD_SURREAL_DATABASE").ok())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "runtime".to_string())
+    resolve_surreal_database_from_env(
+        "STASIS_EXAMPLE_SURREAL_DATABASE",
+        Some("STASIS_DASHBOARD_SURREAL_DATABASE"),
+        "runtime",
+    )
+}
+
+fn resolve_surreal_auth() -> Option<SurrealAuth> {
+    resolve_surreal_auth_from_env(
+        "STASIS_EXAMPLE_SURREAL_USERNAME",
+        "STASIS_EXAMPLE_SURREAL_PASSWORD",
+        Some("STASIS_DASHBOARD_SURREAL_USERNAME"),
+        Some("STASIS_DASHBOARD_SURREAL_PASSWORD"),
+    )
+}
+
+fn apply_surreal_auth(backend: RuntimeBackend) -> RuntimeBackend {
+    match resolve_surreal_auth() {
+        Some(auth) => backend.with_surreal_auth(auth),
+        None => backend,
+    }
 }
 
 fn resolve_runtime_backend_from_env() -> Result<RuntimeBackend> {
@@ -27,10 +44,10 @@ fn resolve_runtime_backend_from_env() -> Result<RuntimeBackend> {
 
     match backend.as_str() {
         "in-memory" | "inmemory" => Ok(RuntimeBackend::InMemory),
-        "surreal-mem" | "mem" => Ok(RuntimeBackend::SurrealMem {
-            namespace: resolve_surreal_namespace(),
-            database: resolve_surreal_database(),
-        }),
+        "surreal-mem" | "mem" => Ok(apply_surreal_auth(RuntimeBackend::surreal_mem(
+            resolve_surreal_namespace(),
+            resolve_surreal_database(),
+        ))),
         "surreal-ws" | "ws" => {
             let endpoint = std::env::var("STASIS_EXAMPLE_SURREAL_ENDPOINT")
                 .ok()
@@ -44,11 +61,11 @@ fn resolve_runtime_backend_from_env() -> Result<RuntimeBackend> {
                     )
                 })?;
 
-            Ok(RuntimeBackend::SurrealWs {
+            Ok(apply_surreal_auth(RuntimeBackend::surreal_ws(
                 endpoint,
-                namespace: resolve_surreal_namespace(),
-                database: resolve_surreal_database(),
-            })
+                resolve_surreal_namespace(),
+                resolve_surreal_database(),
+            )))
         }
         "surreal-kv" | "kv" => {
             let path = std::env::var("STASIS_EXAMPLE_SURREAL_KV_PATH")
@@ -63,11 +80,11 @@ fn resolve_runtime_backend_from_env() -> Result<RuntimeBackend> {
                     )
                 })?;
 
-            Ok(RuntimeBackend::SurrealKv {
+            Ok(apply_surreal_auth(RuntimeBackend::surreal_kv(
                 path,
-                namespace: resolve_surreal_namespace(),
-                database: resolve_surreal_database(),
-            })
+                resolve_surreal_namespace(),
+                resolve_surreal_database(),
+            )))
         }
         other => Err(StasisError::PortFailure(format!(
             "unsupported STASIS_EXAMPLE_RUNTIME_BACKEND='{other}'"
@@ -81,6 +98,7 @@ fn describe_backend(backend: &RuntimeBackend) -> String {
         RuntimeBackend::SurrealMem {
             namespace,
             database,
+            ..
         } => {
             format!("surreal-mem ns={namespace} db={database}")
         }
@@ -88,6 +106,7 @@ fn describe_backend(backend: &RuntimeBackend) -> String {
             endpoint,
             namespace,
             database,
+            ..
         } => {
             format!("surreal-ws endpoint={endpoint} ns={namespace} db={database}")
         }
@@ -95,6 +114,7 @@ fn describe_backend(backend: &RuntimeBackend) -> String {
             path,
             namespace,
             database,
+            ..
         } => {
             format!("surreal-kv path={path} ns={namespace} db={database}")
         }

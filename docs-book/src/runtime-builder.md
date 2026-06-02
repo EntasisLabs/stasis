@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
 - Stability: Evolving
-- Last Verified: 2026-05-15
+- Last Verified: 2026-06-02
 - Verified Against:
   - src/application/runtime/stasis_runtime_builder.rs
     - src/application/composition/runtime_composition.rs
@@ -36,9 +36,13 @@ Document the `StasisRuntimeBuilder` API — the single composition point for wir
 | Variant | Description |
 |---|---|
 | `RuntimeBackend::InMemory` | In-process store. No persistence across restarts. Use for testing and development. |
-| `RuntimeBackend::SurrealMem { namespace, database }` | Surreal in-memory engine with explicit namespace/database. Useful for integration tests and durable-runtime behavior validation. |
-| `RuntimeBackend::SurrealWs { endpoint, namespace, database }` | Remote SurrealDB over websocket. Use for shared/dev/staging environments where runtime state is centralized. |
-| `RuntimeBackend::SurrealKv { path, namespace, database }` | Embedded SurrealKV on local disk. Use for durable single-node deployments without a remote Surreal service. |
+| `RuntimeBackend::SurrealMem { namespace, database, auth }` | Surreal in-memory engine with explicit namespace/database and optional database credentials. |
+| `RuntimeBackend::SurrealWs { endpoint, namespace, database, auth }` | Remote SurrealDB over websocket. Use for shared/dev/staging environments where runtime state is centralized. |
+| `RuntimeBackend::SurrealKv { path, namespace, database, auth }` | Embedded SurrealKV on local disk. Use for durable single-node deployments without a remote Surreal service. |
+
+Helper constructors (`RuntimeBackend::surreal_mem`, `surreal_ws`, `surreal_kv`) default `auth` to `None`. Use `.with_surreal_auth(SurrealAuth::new(user, pass))` for authenticated remote databases.
+
+When `auth` is set, Stasis signs in with SurrealDB database credentials (`namespace`, `database`, `username`, `password`) before selecting the namespace/database session.
 
 ```rust
 use stasis::prelude::*;
@@ -47,23 +51,46 @@ use stasis::prelude::*;
 let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory);
 
 // Surreal-backed behavior tests
-let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-    namespace: "stasis".to_string(),
-    database: "runtime".to_string(),
-});
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem("stasis", "runtime"));
 
-// Remote websocket backend
+// Remote websocket backend with database credentials
+let backend = RuntimeBackend::surreal_ws(
+    "ws://127.0.0.1:8000/rpc",
+    "stasis",
+    "runtime",
+)
+.with_surreal_auth(SurrealAuth::new("runtime_user", "runtime_pass"));
+let builder = StasisRuntimeBuilder::new(backend);
+
+// Embedded SurrealKV backend
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::surreal_kv(
+    "./data/stasis-runtime",
+    "stasis",
+    "runtime",
+));
+```
+
+Environment variables (dashboard and examples):
+
+| Variable | Purpose |
+|---|---|
+| `STASIS_DASHBOARD_SURREAL_NAMESPACE` / `STASIS_EXAMPLE_SURREAL_NAMESPACE` | Namespace (default: `stasis`) |
+| `STASIS_DASHBOARD_SURREAL_DATABASE` / `STASIS_EXAMPLE_SURREAL_DATABASE` | Database (default: `runtime`) |
+| `STASIS_DASHBOARD_SURREAL_USERNAME` / `STASIS_EXAMPLE_SURREAL_USERNAME` | Database user for sign-in |
+| `STASIS_DASHBOARD_SURREAL_PASSWORD` / `STASIS_EXAMPLE_SURREAL_PASSWORD` | Database password for sign-in |
+| `STASIS_DASHBOARD_SURREAL_ENDPOINT` | Websocket endpoint (required for `surreal-ws`) |
+| `STASIS_DASHBOARD_SURREAL_KV_PATH` | Local KV path (required for `surreal-kv`) |
+
+Both username and password must be set for authentication to run. If either is omitted, Stasis connects without sign-in (suitable for local/unauthenticated setups).
+
+Legacy struct-literal form remains available when you need full control:
+
+```rust
 let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
     endpoint: "ws://127.0.0.1:8000/rpc".to_string(),
     namespace: "stasis".to_string(),
     database: "runtime".to_string(),
-});
-
-// Embedded SurrealKV backend
-let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
-    path: "./data/stasis-runtime".to_string(),
-    namespace: "stasis".to_string(),
-    database: "runtime".to_string(),
+    auth: Some(SurrealAuth::new("runtime_user", "runtime_pass")),
 });
 ```
 

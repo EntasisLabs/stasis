@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use surrealdb::engine::any::Any;
+use surrealdb::opt::auth::Database;
 use surrealdb::Surreal;
 
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
@@ -37,17 +38,71 @@ use crate::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 #[derive(Clone, Debug)]
 pub enum RuntimeBackend {
     InMemory,
-    SurrealMem { namespace: String, database: String },
+    SurrealMem {
+        namespace: String,
+        database: String,
+        auth: Option<SurrealAuth>,
+    },
     SurrealWs {
         endpoint: String,
         namespace: String,
         database: String,
+        auth: Option<SurrealAuth>,
     },
     SurrealKv {
         path: String,
         namespace: String,
         database: String,
+        auth: Option<SurrealAuth>,
     },
+}
+
+pub use crate::application::composition::surreal_backend_config::SurrealAuth;
+
+impl RuntimeBackend {
+    pub fn surreal_mem(namespace: impl Into<String>, database: impl Into<String>) -> Self {
+        Self::SurrealMem {
+            namespace: namespace.into(),
+            database: database.into(),
+            auth: None,
+        }
+    }
+
+    pub fn surreal_ws(
+        endpoint: impl Into<String>,
+        namespace: impl Into<String>,
+        database: impl Into<String>,
+    ) -> Self {
+        Self::SurrealWs {
+            endpoint: endpoint.into(),
+            namespace: namespace.into(),
+            database: database.into(),
+            auth: None,
+        }
+    }
+
+    pub fn surreal_kv(
+        path: impl Into<String>,
+        namespace: impl Into<String>,
+        database: impl Into<String>,
+    ) -> Self {
+        Self::SurrealKv {
+            path: path.into(),
+            namespace: namespace.into(),
+            database: database.into(),
+            auth: None,
+        }
+    }
+
+    pub fn with_surreal_auth(mut self, auth: SurrealAuth) -> Self {
+        match &mut self {
+            Self::SurrealMem { auth: slot, .. }
+            | Self::SurrealWs { auth: slot, .. }
+            | Self::SurrealKv { auth: slot, .. } => *slot = Some(auth),
+            Self::InMemory => {}
+        }
+        self
+    }
 }
 
 #[derive(Clone)]
@@ -63,11 +118,23 @@ impl RuntimeFactory {
         endpoint: &str,
         namespace: String,
         database: String,
+        auth: Option<SurrealAuth>,
     ) -> Result<RuntimeComposition> {
         let db = Surreal::<Any>::init();
         db.connect(endpoint)
             .await
             .map_err(|e| StasisError::PortFailure(format!("connect surreal db ({endpoint}): {e}")))?;
+
+        if let Some(auth) = auth {
+            db.signin(Database {
+                namespace: namespace.clone(),
+                database: database.clone(),
+                username: auth.username,
+                password: auth.password,
+            })
+            .await
+            .map_err(|e| StasisError::PortFailure(format!("signin surreal db: {e}")))?;
+        }
 
         db.use_ns(namespace).use_db(database).await.map_err(|e| {
             StasisError::PortFailure(format!("select surreal namespace/database: {e}"))
@@ -84,23 +151,26 @@ impl RuntimeFactory {
             RuntimeBackend::SurrealMem {
                 namespace,
                 database,
-            } => Self::connect_surreal_any("mem://", namespace, database).await,
+                auth,
+            } => Self::connect_surreal_any("mem://", namespace, database, auth).await,
             RuntimeBackend::SurrealWs {
                 endpoint,
                 namespace,
                 database,
-            } => Self::connect_surreal_any(&endpoint, namespace, database).await,
+                auth,
+            } => Self::connect_surreal_any(&endpoint, namespace, database, auth).await,
             RuntimeBackend::SurrealKv {
                 path,
                 namespace,
                 database,
+                auth,
             } => {
                 let endpoint = if path.starts_with("surrealkv://") {
                     path
                 } else {
                     format!("surrealkv://{path}")
                 };
-                Self::connect_surreal_any(&endpoint, namespace, database).await
+                Self::connect_surreal_any(&endpoint, namespace, database, auth).await
             }
         }
     }

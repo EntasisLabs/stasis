@@ -25,7 +25,7 @@ pub mod runtime_prelude {
         InMemoryRuntime, JobExecutionOutcome, JobHandler,
     };
     pub use crate::application::runtime::runtime_factory::{
-        RuntimeBackend, RuntimeComposition, RuntimeFactory,
+        RuntimeBackend, RuntimeComposition, RuntimeFactory, SurrealAuth,
     };
     pub use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
     pub use crate::domain::errors::{Result, StasisError};
@@ -96,7 +96,7 @@ pub mod sdk_prelude {
     pub use crate::application::dto::{InvokeAgentRequest, RegisterAgentRequest};
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, NewJob};
-    pub use crate::application::runtime::runtime_factory::{RuntimeBackend, RuntimeFactory};
+    pub use crate::application::runtime::runtime_factory::{RuntimeBackend, RuntimeFactory, SurrealAuth};
     pub use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
     pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
     pub use crate::sdk::runtime_sdk::{RuntimeSdk, StasisRuntime};

@@ -1647,10 +1647,10 @@ query Echo {
         let in_memory = RuntimeDashboardQueryService::from_runtime_composition(
             RuntimeComposition::InMemory(InMemoryRuntime::new()),
         );
-        let surreal_runtime = RuntimeFactory::build(RuntimeBackend::SurrealMem {
-            namespace: "stasis".to_string(),
-            database: "dashboard_phase3_reflection_parity".to_string(),
-        })
+        let surreal_runtime = RuntimeFactory::build(RuntimeBackend::surreal_mem(
+            "stasis",
+            "dashboard_phase3_reflection_parity",
+        ))
         .await
         .expect("surreal mem runtime should build");
         let surreal = RuntimeDashboardQueryService::from_runtime_composition(surreal_runtime);
