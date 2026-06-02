@@ -63,7 +63,7 @@ impl RuntimeSdk {
         Self::surreal_ws_with_auth(endpoint, namespace, database, None).await
     }
 
-    /// Builds a remote websocket surreal runtime facade with optional database credentials.
+    /// Builds a remote websocket surreal runtime facade with optional root credentials.
     pub async fn surreal_ws_with_auth(
         endpoint: impl Into<String>,
         namespace: impl Into<String>,
@@ -86,7 +86,7 @@ impl RuntimeSdk {
         Self::surreal_kv_with_auth(path, namespace, database, None).await
     }
 
-    /// Builds an embedded surreal-kv runtime facade with optional database credentials.
+    /// Builds an embedded surreal-kv runtime facade with optional root credentials.
     pub async fn surreal_kv_with_auth(
         path: impl Into<String>,
         namespace: impl Into<String>,
@@ -100,7 +100,7 @@ impl RuntimeSdk {
         Self::from_builder(StasisRuntimeBuilder::new(backend)).await
     }
 
-    /// Builds a surreal-mem runtime facade with optional database credentials.
+    /// Builds a surreal-mem runtime facade with optional root credentials.
     pub async fn surreal_mem_with_auth(
         namespace: impl Into<String>,
         database: impl Into<String>,

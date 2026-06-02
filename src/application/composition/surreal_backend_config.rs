@@ -1,3 +1,4 @@
+/// Root-level SurrealDB credentials used during runtime connection bootstrap.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SurrealAuth {
     pub username: String,

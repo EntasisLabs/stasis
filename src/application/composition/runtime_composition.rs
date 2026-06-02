@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use surrealdb::engine::any::Any;
-use surrealdb::opt::auth::Database;
+use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
@@ -126,9 +126,7 @@ impl RuntimeFactory {
             .map_err(|e| StasisError::PortFailure(format!("connect surreal db ({endpoint}): {e}")))?;
 
         if let Some(auth) = auth {
-            db.signin(Database {
-                namespace: namespace.clone(),
-                database: database.clone(),
+            db.signin(Root {
                 username: auth.username,
                 password: auth.password,
             })
