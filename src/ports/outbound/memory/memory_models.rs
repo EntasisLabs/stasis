@@ -62,6 +62,70 @@ impl Default for MemoryRecallRequest {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct MemoryMetricRange {
+    pub min: Option<f32>,
+    pub max: Option<f32>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MemoryFilter {
+    pub has_embedding: Option<bool>,
+    pub embedding_model: Option<String>,
+    pub psi: Option<MemoryMetricRange>,
+    pub rho: Option<MemoryMetricRange>,
+    pub kappa: Option<MemoryMetricRange>,
+    pub text_contains: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MemorySortField {
+    #[default]
+    Timestamp,
+    UpdatedAt,
+    Psi,
+    Rho,
+    Kappa,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MemorySortDirection {
+    Asc,
+    #[default]
+    Desc,
+}
+
+#[derive(Clone, Debug)]
+pub struct MemoryFindRequest {
+    pub scope: MemoryScope,
+    pub filter: MemoryFilter,
+    pub limit: usize,
+    pub cursor: Option<String>,
+    pub sort_field: MemorySortField,
+    pub sort_direction: MemorySortDirection,
+}
+
+impl Default for MemoryFindRequest {
+    fn default() -> Self {
+        Self {
+            scope: MemoryScope::default(),
+            filter: MemoryFilter::default(),
+            limit: 50,
+            cursor: None,
+            sort_field: MemorySortField::Timestamp,
+            sort_direction: MemorySortDirection::Desc,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MemoryFindResponse {
+    pub retrieved: usize,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+    pub node_sync_keys: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct MemoryRecallResponse {
     pub retrieved: usize,
     pub next_cursor: Option<String>,

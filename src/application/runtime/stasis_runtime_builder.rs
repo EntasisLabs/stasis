@@ -19,6 +19,7 @@ use crate::application::runtime::grapheme_textops_job_handler::GraphemeTextOpsJo
 use crate::application::runtime::handoff_pattern_job_handler::HandoffPatternJobHandler;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::memory_aggregate_job_handler::MemoryAggregateJobHandler;
+use crate::application::runtime::memory_find_job_handler::MemoryFindJobHandler;
 use crate::application::runtime::memory_recall_job_handler::MemoryRecallJobHandler;
 use crate::application::runtime::memory_rollup_job_handler::MemoryRollupJobHandler;
 use crate::application::runtime::memory_schema_job_handler::MemorySchemaJobHandler;
@@ -369,7 +370,8 @@ impl StasisRuntimeBuilder {
 
                 if self.include_memory_operation_handlers {
                     if let Some(reader) = memory_context_reader.clone() {
-                        rt.register_handler(MemoryRecallJobHandler::new(reader))?;
+                        rt.register_handler(MemoryRecallJobHandler::new(reader.clone()))?;
+                        rt.register_handler(MemoryFindJobHandler::new(reader))?;
                     }
                     if let Some(operations) = memory_operations.clone() {
                         rt.register_handler(MemoryAggregateJobHandler::new(operations.clone()))?;
@@ -484,7 +486,8 @@ impl StasisRuntimeBuilder {
 
                 if self.include_memory_operation_handlers {
                     if let Some(reader) = memory_context_reader.clone() {
-                        rt.register_handler(MemoryRecallJobHandler::new(reader))?;
+                        rt.register_handler(MemoryRecallJobHandler::new(reader.clone()))?;
+                        rt.register_handler(MemoryFindJobHandler::new(reader))?;
                     }
                     if let Some(operations) = memory_operations.clone() {
                         rt.register_handler(MemoryAggregateJobHandler::new(operations.clone()))?;

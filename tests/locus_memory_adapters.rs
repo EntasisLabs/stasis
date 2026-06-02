@@ -5,8 +5,8 @@ use stasis::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFact
 use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use stasis::ports::outbound::memory::memory_models::{
-    MemoryAggregateRequest, MemoryRecallRequest, MemoryRollupRequest, MemoryScope,
-    MemoryStoreRequest, MemoryTransformRequest,
+    MemoryAggregateRequest, MemoryFindRequest, MemoryRecallRequest, MemoryRollupRequest,
+    MemoryScope, MemoryStoreRequest, MemoryTransformRequest,
 };
 use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
 
@@ -30,6 +30,28 @@ async fn locus_node_store_factory_in_memory_initializes_store() {
         .expect("recall should succeed with empty store");
 
     assert_eq!(response.retrieved, 0);
+}
+
+#[tokio::test]
+async fn locus_context_reader_find_returns_empty_store_inventory() {
+    let store = LocusNodeStoreFactory::in_memory()
+        .await
+        .expect("in-memory node store should initialize");
+
+    let reader = LocusContextReader::new(store);
+    let response = reader
+        .find(&MemoryFindRequest {
+            scope: MemoryScope {
+                session_ids: Some(vec!["session-find-empty".to_string()]),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await
+        .expect("find should succeed with empty store");
+
+    assert_eq!(response.retrieved, 0);
+    assert!(!response.has_more);
 }
 
 #[tokio::test]

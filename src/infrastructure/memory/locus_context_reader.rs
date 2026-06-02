@@ -5,17 +5,23 @@ use locus_core_rs::NodeStore;
 use locus_core_rs::domain::models::AvecState;
 use locus_sdk::prelude::{
     FallbackPolicy, MemoryExplainRequest, MemoryExplainService,
-    MemoryRecallRequest as LocusRecallRequest, MemoryRecallService, MemoryScoring, StrictnessMode,
+    MemoryFindRequest as LocusFindRequest, MemoryFindService, MemoryFilter as LocusFilter,
+    MemoryRecallRequest as LocusRecallRequest, MemoryRecallService, MemoryScoring, MemorySort,
+    MemorySortField as LocusSortField, StrictnessMode, SortDirection as LocusSortDirection,
 };
+use locus_sdk::domain::memory::MetricRange as LocusMetricRange;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_models::{
-    MemoryFallbackPolicy, MemoryRecallRequest, MemoryRecallResponse, MemoryStrictnessMode,
+    MemoryFallbackPolicy, MemoryFilter, MemoryFindRequest, MemoryFindResponse,
+    MemoryMetricRange, MemoryRecallRequest, MemoryRecallResponse, MemorySortDirection,
+    MemorySortField, MemoryStrictnessMode,
 };
 
 pub struct LocusContextReader {
     recall: MemoryRecallService,
+    find: MemoryFindService,
     explain: MemoryExplainService,
 }
 
@@ -23,6 +29,7 @@ impl LocusContextReader {
     pub fn new(store: Arc<dyn NodeStore>) -> Self {
         Self {
             recall: MemoryRecallService::new(store.clone()),
+            find: MemoryFindService::new(store.clone()),
             explain: MemoryExplainService::new(store),
         }
     }
@@ -94,6 +101,44 @@ impl MemoryContextReader for LocusContextReader {
 
         Ok(response)
     }
+
+    async fn find(&self, request: &MemoryFindRequest) -> Result<MemoryFindResponse> {
+        let locus_request = LocusFindRequest {
+            scope: locus_sdk::prelude::MemoryScope {
+                session_ids: request.scope.session_ids.clone(),
+                tiers: request.scope.tiers.clone(),
+                from_utc: request.scope.from_utc,
+                to_utc: request.scope.to_utc,
+                ..Default::default()
+            },
+            filter: map_filter(&request.filter),
+            page: locus_sdk::prelude::MemoryPage {
+                limit: request.limit,
+                cursor: request.cursor.clone(),
+            },
+            sort: MemorySort {
+                field: map_sort_field(request.sort_field),
+                direction: map_sort_direction(request.sort_direction),
+            },
+        };
+
+        let find_result = self
+            .find
+            .execute(&locus_request)
+            .await
+            .map_err(|e| StasisError::PortFailure(format!("locus find failed: {e}")))?;
+
+        Ok(MemoryFindResponse {
+            retrieved: find_result.retrieved,
+            has_more: find_result.has_more,
+            next_cursor: find_result.next_cursor,
+            node_sync_keys: find_result
+                .nodes
+                .iter()
+                .map(|node| node.sync_key.clone())
+                .collect(),
+        })
+    }
 }
 
 fn map_fallback(value: MemoryFallbackPolicy) -> FallbackPolicy {
@@ -109,5 +154,40 @@ fn map_strictness(value: MemoryStrictnessMode) -> StrictnessMode {
         MemoryStrictnessMode::Precision => StrictnessMode::Precision,
         MemoryStrictnessMode::Balanced => StrictnessMode::Balanced,
         MemoryStrictnessMode::Recall => StrictnessMode::Recall,
+    }
+}
+
+fn map_metric_range(value: &MemoryMetricRange) -> LocusMetricRange {
+    LocusMetricRange {
+        min: value.min,
+        max: value.max,
+    }
+}
+
+fn map_filter(value: &MemoryFilter) -> LocusFilter {
+    LocusFilter {
+        has_embedding: value.has_embedding,
+        embedding_model: value.embedding_model.clone(),
+        psi: value.psi.as_ref().map(map_metric_range),
+        rho: value.rho.as_ref().map(map_metric_range),
+        kappa: value.kappa.as_ref().map(map_metric_range),
+        text_contains: value.text_contains.clone(),
+    }
+}
+
+fn map_sort_field(value: MemorySortField) -> LocusSortField {
+    match value {
+        MemorySortField::Timestamp => LocusSortField::Timestamp,
+        MemorySortField::UpdatedAt => LocusSortField::UpdatedAt,
+        MemorySortField::Psi => LocusSortField::Psi,
+        MemorySortField::Rho => LocusSortField::Rho,
+        MemorySortField::Kappa => LocusSortField::Kappa,
+    }
+}
+
+fn map_sort_direction(value: MemorySortDirection) -> LocusSortDirection {
+    match value {
+        MemorySortDirection::Asc => LocusSortDirection::Asc,
+        MemorySortDirection::Desc => LocusSortDirection::Desc,
     }
 }

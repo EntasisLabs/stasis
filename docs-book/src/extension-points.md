@@ -310,7 +310,7 @@ Memory ports are documented in full in [Memory Operations Reference](./memory-op
 
 | Port | Method | Purpose |
 |---|---|---|
-| `MemoryContextReader` | `recall(request)` | Retrieve prior context before job execution |
+| `MemoryContextReader` | `recall(request)`, `find(request)` | Resonance/semantic recall and predicate-based inventory |
 | `MemoryContextWriter` | `store_context(request)` | Persist execution output after job completion |
 | `MemoryOperations` | `aggregate`, `transform`, `rollup`, `schema` | Bulk memory maintenance operations |
 
@@ -318,9 +318,11 @@ Memory ports are documented in full in [Memory Operations Reference](./memory-op
 
 | Type | Ports implemented | Description |
 |---|---|---|
-| `LocusContextReader` | `MemoryContextReader` | Locus-backed recall |
+| `LocusContextReader` | `MemoryContextReader` | Locus-backed recall and find |
 | `LocusContextWriter` | `MemoryContextWriter` | Locus-backed store |
 | `LocusMemoryOperations` | `MemoryOperations` | Locus-backed aggregate/transform/rollup/schema |
+
+Custom implementations can replace any built-in adapter. Explicit builder ports take precedence over `.with_locus_memory()` auto-bootstrap.
 
 ---
 

@@ -266,6 +266,28 @@ impl MemoryRecallJobPayload {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MemoryFindJobPayload {
+    pub session_ids: Option<Vec<String>>,
+    pub tiers: Option<Vec<String>>,
+    pub from_utc: Option<DateTime<Utc>>,
+    pub to_utc: Option<DateTime<Utc>>,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+    pub text_contains: Option<String>,
+    pub sort_field: Option<String>,
+    pub sort_direction: Option<String>,
+}
+
+impl MemoryFindJobPayload {
+    pub fn to_payload_ref(&self) -> Result<String> {
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode memory-find payload: {err}"))
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MemoryAggregateJobPayload {
     pub session_ids: Option<Vec<String>>,
     pub tiers: Option<Vec<String>>,

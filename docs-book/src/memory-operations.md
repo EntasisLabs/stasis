@@ -5,13 +5,14 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect, SRE
 - Stability: Evolving
-- Last Verified: 2026-05-15
+- Last Verified: 2026-06-02
 - Verified Against:
   - src/ports/outbound/memory/memory_operations.rs
   - src/ports/outbound/memory/memory_context_reader.rs
   - src/ports/outbound/memory/memory_context_writer.rs
   - src/ports/outbound/memory/memory_models.rs
   - src/application/runtime/memory_recall_job_handler.rs
+  - src/application/runtime/memory_find_job_handler.rs
   - src/application/runtime/memory_aggregate_job_handler.rs
   - src/application/runtime/memory_transform_job_handler.rs
   - src/application/runtime/memory_rollup_job_handler.rs
@@ -20,11 +21,11 @@
 
 ## Purpose
 
-Document the five Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (`MemoryContextReader`, `MemoryContextWriter`, `MemoryOperations`).
+Document the six Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (`MemoryContextReader`, `MemoryContextWriter`, `MemoryOperations`).
 
 ## Invariants
 
-1. All five memory handlers are durable jobs — they inherit retry, dead-letter, and lineage semantics from the runtime.
+1. All six memory workflow handlers are durable jobs — they inherit retry, dead-letter, and lineage semantics from the runtime.
 2. Memory handlers are only registered when a `MemoryContextReader` or `MemoryOperations` port is provided to the builder. Missing ports cause the handler to be silently skipped at build time.
 3. Invalid payloads produce a `FatalFailure` with `guardrail_code: POLICY_VIOLATION` — they are not retried.
 4. `MemoryTransformRequest` defaults to `dry_run: true`. Callers must explicitly set `dry_run: false` to apply changes.
@@ -42,8 +43,12 @@ Used by handlers that need to retrieve prior context before execution (prompt, t
 #[async_trait]
 pub trait MemoryContextReader: Send + Sync {
     async fn recall(&self, request: &MemoryRecallRequest) -> Result<MemoryRecallResponse>;
+
+    async fn find(&self, request: &MemoryFindRequest) -> Result<MemoryFindResponse>;
 }
 ```
+
+Custom implementations must provide both methods. The default Locus adapter delegates `recall` to resonance/semantic retrieval and `find` to deterministic predicate-based inventory (no AVEC scoring).
 
 ### MemoryContextWriter
 
@@ -58,7 +63,7 @@ pub trait MemoryContextWriter: Send + Sync {
 
 ### MemoryOperations
 
-Used by the five memory workflow handlers for aggregate, transform, rollup, and schema operations.
+Used by the memory maintenance workflow handlers for aggregate, transform, rollup, and schema operations.
 
 ```rust
 #[async_trait]
@@ -76,7 +81,7 @@ pub trait MemoryOperations: Send + Sync {
 
 ### MemoryScope
 
-Filters applied to recall, aggregate, transform, and rollup operations.
+Filters applied to recall, find, aggregate, transform, and rollup operations.
 
 | Field | Type | Description |
 |---|---|---|
@@ -95,6 +100,35 @@ AVEC scores used for resonance-based recall ranking.
 | `friction` | `f32` | Friction dimension (0.0–1.0) |
 | `logic` | `f32` | Logic dimension (0.0–1.0) |
 | `autonomy` | `f32` | Autonomy dimension (0.0–1.0) |
+
+### MemoryFilter
+
+Predicate filters for find operations (and available on the Locus SDK recall path via adapter defaults).
+
+| Field | Type | Description |
+|---|---|---|
+| `has_embedding` | `Option<bool>` | Restrict to nodes with or without embeddings |
+| `embedding_model` | `Option<String>` | Restrict to a specific embedding model |
+| `psi` | `Option<MemoryMetricRange>` | Filter by psi range |
+| `rho` | `Option<MemoryMetricRange>` | Filter by rho range |
+| `kappa` | `Option<MemoryMetricRange>` | Filter by kappa range |
+| `text_contains` | `Option<String>` | Substring match on node text |
+
+### MemoryMetricRange
+
+| Field | Type | Description |
+|---|---|---|
+| `min` | `Option<f32>` | Inclusive lower bound |
+| `max` | `Option<f32>` | Inclusive upper bound |
+
+### MemorySortField / MemorySortDirection
+
+Used by find operations for stable result ordering.
+
+| Sort field | Values |
+|---|---|
+| `MemorySortField` | `Timestamp` (default), `UpdatedAt`, `Psi`, `Rho`, `Kappa` |
+| `MemorySortDirection` | `Asc`, `Desc` (default) |
 
 ---
 
@@ -149,7 +183,62 @@ Retrieves memory nodes matching the provided scope and query parameters. Used in
 
 ---
 
-## Operation 2: Store Context
+## Operation 2: Find
+
+**Job type:** `workflow.stasis.memory.find`  
+**Port:** `MemoryContextReader`
+
+Deterministic memory inventory: filters, sorts, and paginates nodes without AVEC resonance scoring. Use when you need stable predicate-based listing rather than semantic/recall ranking.
+
+### Request: `MemoryFindRequest`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `scope` | `MemoryScope` | empty | Scope filter |
+| `filter` | `MemoryFilter` | empty | Predicate filters |
+| `limit` | `usize` | `50` | Maximum nodes to retrieve |
+| `cursor` | `Option<String>` | `None` | Pagination cursor from a prior response |
+| `sort_field` | `MemorySortField` | `Timestamp` | Sort key |
+| `sort_direction` | `MemorySortDirection` | `Desc` | Sort order |
+
+### Job payload: `MemoryFindJobPayload`
+
+JSON fields accepted by the find workflow handler (camelCase):
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `sessionIds` | `Option<Vec<String>>` | `None` | Session scope |
+| `tiers` | `Option<Vec<String>>` | `None` | Tier scope |
+| `fromUtc` / `toUtc` | `Option<DateTime<Utc>>` | `None` | Time bounds |
+| `limit` | `Option<usize>` | `50` | Page size |
+| `cursor` | `Option<String>` | `None` | Pagination cursor |
+| `textContains` | `Option<String>` | `None` | Text substring filter |
+| `sortField` | `Option<String>` | `timestamp` | `timestamp`, `updated_at`, `psi`, `rho`, or `kappa` |
+| `sortDirection` | `Option<String>` | `desc` | `asc` or `desc` |
+
+### Response: `MemoryFindResponse`
+
+| Field | Type | Description |
+|---|---|---|
+| `retrieved` | `usize` | Number of nodes returned |
+| `has_more` | `bool` | Whether more results are available |
+| `next_cursor` | `Option<String>` | Cursor for the next page |
+| `node_sync_keys` | `Vec<String>` | Sync keys of returned nodes |
+
+### Diagnostics keys
+
+| Key | Value |
+|---|---|
+| `provider` | `stasis-memory-find` |
+| `status` | `success` or `failure` |
+| `retrieved` | Result count |
+| `has_more` | Pagination flag |
+| `next_cursor` | Next page cursor when present |
+| `node_sync_keys` | Returned node sync keys |
+
+---
+
+## Operation 3: Store Context
 
 **Job type:** Inline only (no standalone job handler)  
 **Port:** `MemoryContextWriter`
@@ -174,7 +263,7 @@ Persists a raw STTP node string to memory for future recall. Called automaticall
 
 ---
 
-## Operation 3: Aggregate
+## Operation 4: Aggregate
 
 **Job type:** `workflow.stasis.memory.aggregate`  
 **Port:** `MemoryOperations`
@@ -207,7 +296,7 @@ Groups memory nodes within the scope and produces aggregate statistics. Used for
 
 ---
 
-## Operation 4: Transform
+## Operation 5: Transform
 
 **Job type:** `workflow.stasis.memory.transform`  
 **Port:** `MemoryOperations`
@@ -258,7 +347,7 @@ Applies a batch transformation operation to memory nodes (embedding backfill or 
 
 ---
 
-## Operation 5: Rollup
+## Operation 6: Rollup
 
 **Job type:** `workflow.stasis.memory.rollup`  
 **Port:** `MemoryOperations`
@@ -282,7 +371,7 @@ Creates monthly checkpoint rollups from stored nodes to reduce retrieval noise o
 
 ---
 
-## Operation 6: Schema
+## Operation 7: Schema
 
 **Job type:** `workflow.stasis.memory.schema`  
 **Port:** `MemoryOperations`
@@ -316,3 +405,13 @@ Returns the current memory schema version and capability descriptor. No payload 
 
 - Memory operations do not perform agent execution. They are maintenance and retrieval workflows, not orchestration patterns.
 - `MemoryContextReader` and `MemoryContextWriter` are separate interfaces from `MemoryOperations` by design — readers/writers can be wired without enabling bulk operation handlers.
+- Embedding migration and sync coordination remain Locus-core capabilities; Stasis does not expose dedicated workflow handlers for them yet. Use custom `MemoryOperations` implementations or call Locus services directly in application code if needed.
+
+## Locus dependency versions
+
+Stasis pins Locus crates to prevent resolution drift:
+
+- `locus-core-rs = 0.3.0`
+- `locus-sdk = 0.1.2`
+
+The default `.with_locus_memory()` bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via `.with_memory_context_reader(...)`, `.with_memory_context_writer(...)`, or `.with_memory_operations(...)`.

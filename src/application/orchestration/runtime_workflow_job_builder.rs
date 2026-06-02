@@ -2,8 +2,8 @@ use chrono::{DateTime, Utc};
 
 use crate::application::orchestration::runtime_job_payloads::{
     AgentSessionJobPayload, AgentTurnJobPayload, ConcurrentPatternJobPayload,
-    HandoffPatternJobPayload, MemoryAggregateJobPayload, MemoryRecallJobPayload,
-    MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
+    HandoffPatternJobPayload, MemoryAggregateJobPayload, MemoryFindJobPayload,
+    MemoryRecallJobPayload, MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
     OrchestratorPatternJobPayload, PromptJobPayload, SequentialPatternJobPayload,
     ToolLoopJobPayload,
 };
@@ -15,6 +15,7 @@ const JOB_TYPE_AGENT_TURN: &str = "workflow.stasis.agent_turn";
 const JOB_TYPE_TOOL_LOOP: &str = "workflow.stasis.tool_loop";
 const JOB_TYPE_PROMPT: &str = "workflow.stasis.prompt";
 const JOB_TYPE_MEMORY_RECALL: &str = "workflow.stasis.memory.recall";
+const JOB_TYPE_MEMORY_FIND: &str = "workflow.stasis.memory.find";
 const JOB_TYPE_MEMORY_AGGREGATE: &str = "workflow.stasis.memory.aggregate";
 const JOB_TYPE_MEMORY_TRANSFORM: &str = "workflow.stasis.memory.transform";
 const JOB_TYPE_MEMORY_ROLLUP: &str = "workflow.stasis.memory.rollup";
@@ -55,6 +56,7 @@ impl RuntimeWorkflowJobBuilder {
     define_payload_builder!(for_tool_loop, ToolLoopJobPayload, JOB_TYPE_TOOL_LOOP);
     define_payload_builder!(for_prompt, PromptJobPayload, JOB_TYPE_PROMPT);
     define_payload_builder!(for_memory_recall, MemoryRecallJobPayload, JOB_TYPE_MEMORY_RECALL);
+    define_payload_builder!(for_memory_find, MemoryFindJobPayload, JOB_TYPE_MEMORY_FIND);
     define_payload_builder!(
         for_memory_aggregate,
         MemoryAggregateJobPayload,

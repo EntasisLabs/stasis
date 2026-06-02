@@ -85,7 +85,8 @@ use stasis::ports::outbound::memory::identity_memory_models::{
 };
 use stasis::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use stasis::ports::outbound::memory::memory_models::{
-    MemoryAggregateRequest, MemoryAggregateResponse, MemoryRecallRequest, MemoryRecallResponse,
+    MemoryAggregateRequest, MemoryAggregateResponse, MemoryFindRequest, MemoryFindResponse,
+    MemoryRecallRequest, MemoryRecallResponse,
     MemoryRollupRequest, MemoryRollupResponse, MemorySchemaResponse, MemoryStoreRequest,
     MemoryStoreResponse, MemoryTransformRequest, MemoryTransformResponse,
 };
@@ -449,6 +450,10 @@ struct MockMemoryContextReader {
 impl MemoryContextReader for MockMemoryContextReader {
     async fn recall(&self, _request: &MemoryRecallRequest) -> Result<MemoryRecallResponse> {
         Ok(self.response.clone())
+    }
+
+    async fn find(&self, _request: &MemoryFindRequest) -> Result<MemoryFindResponse> {
+        Ok(MemoryFindResponse::default())
     }
 }
 
