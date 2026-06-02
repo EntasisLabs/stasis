@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-cf74aef5.js";
+            window.path_to_searchindex_js = "searchindex-aacee42b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-1439a5de.js"></script>
@@ -504,7 +504,7 @@ pub trait WorkflowEngine: Send + Sync {
 <tr><th>Port</th><th>Method</th><th>Purpose</th></tr>
 </thead>
 <tbody>
-<tr><td><code>MemoryContextReader</code></td><td><code>recall(request)</code></td><td>Retrieve prior context before job execution</td></tr>
+<tr><td><code>MemoryContextReader</code></td><td><code>recall(request)</code>, <code>find(request)</code></td><td>Resonance/semantic recall and predicate-based inventory</td></tr>
 <tr><td><code>MemoryContextWriter</code></td><td><code>store_context(request)</code></td><td>Persist execution output after job completion</td></tr>
 <tr><td><code>MemoryOperations</code></td><td><code>aggregate</code>, <code>transform</code>, <code>rollup</code>, <code>schema</code></td><td>Bulk memory maintenance operations</td></tr>
 </tbody>
@@ -517,12 +517,13 @@ pub trait WorkflowEngine: Send + Sync {
 <tr><th>Type</th><th>Ports implemented</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>LocusContextReader</code></td><td><code>MemoryContextReader</code></td><td>Locus-backed recall</td></tr>
+<tr><td><code>LocusContextReader</code></td><td><code>MemoryContextReader</code></td><td>Locus-backed recall and find</td></tr>
 <tr><td><code>LocusContextWriter</code></td><td><code>MemoryContextWriter</code></td><td>Locus-backed store</td></tr>
 <tr><td><code>LocusMemoryOperations</code></td><td><code>MemoryOperations</code></td><td>Locus-backed aggregate/transform/rollup/schema</td></tr>
 </tbody>
 </table>
 </div>
+<p>Custom implementations can replace any built-in adapter. Explicit builder ports take precedence over <code>.with_locus_memory()</code> auto-bootstrap.</p>
 <hr>
 <h2 id="tool-registry"><a class="header" href="#tool-registry">Tool Registry</a></h2>
 <h3 id="stasistool"><a class="header" href="#stasistool">StasisTool</a></h3>
