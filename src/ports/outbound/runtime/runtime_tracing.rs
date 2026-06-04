@@ -71,6 +71,13 @@ impl Drop for SpanGuard {
 pub trait RuntimeTracing: Send + Sync {
     fn start_span(&self, name: &'static str, attributes: &[OtelAttribute]) -> SpanGuard;
 
+    fn start_span_with_trace_context(
+        &self,
+        name: &'static str,
+        attributes: &[OtelAttribute],
+        parent: Option<&TraceContext>,
+    ) -> SpanGuard;
+
     fn active_trace_context(&self) -> Option<TraceContext>;
 }
 

@@ -6,6 +6,7 @@ pub mod htmx;
 pub mod integration;
 pub mod mappers;
 pub mod service;
+pub mod trace_context;
 
 pub use handlers::{DashboardState, router};
 #[cfg(feature = "dashboard-embedded")]

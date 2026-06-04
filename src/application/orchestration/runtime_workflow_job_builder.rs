@@ -7,8 +7,10 @@ use crate::application::orchestration::runtime_job_payloads::{
     OrchestratorPatternJobPayload, PromptJobPayload, SequentialPatternJobPayload,
     ToolLoopJobPayload,
 };
+use crate::application::telemetry::propagation::{generate_w3c_trace_id, parse_traceparent};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::{BackoffPolicy, NewJob};
+use crate::ports::outbound::runtime::runtime_tracing::TraceContext;
 
 const JOB_TYPE_AGENT_SESSION: &str = "workflow.stasis.agent_session";
 const JOB_TYPE_AGENT_TURN: &str = "workflow.stasis.agent_turn";
@@ -143,6 +145,16 @@ impl RuntimeWorkflowJobBuilder {
         self
     }
 
+    pub fn with_trace_context(mut self, trace_context: TraceContext) -> Self {
+        self.trace_id = Some(trace_context.trace_id);
+        self
+    }
+
+    pub fn with_traceparent(mut self, header: &str) -> Result<Self> {
+        let trace_context = parse_traceparent(header)?;
+        Ok(self.with_trace_context(trace_context))
+    }
+
     pub fn with_sttp_input_node_id(mut self, sttp_input_node_id: impl Into<String>) -> Self {
         self.sttp_input_node_id = sttp_input_node_id.into();
         self
@@ -163,7 +175,9 @@ impl RuntimeWorkflowJobBuilder {
             .idempotency_key
             .unwrap_or_else(|| format!("idem-{}", self.id));
         let correlation_id = self.correlation_id.unwrap_or_else(|| self.id.clone());
-        let trace_id = self.trace_id.unwrap_or_else(|| self.id.clone());
+        let trace_id = self
+            .trace_id
+            .unwrap_or_else(generate_w3c_trace_id);
 
         NewJob {
             id: self.id,

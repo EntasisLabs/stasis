@@ -8,6 +8,7 @@ use serde_json::json;
 use serde_json::Value;
 
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::telemetry::operation::OperationTelemetry;
 use crate::domain::errors::Result;
 use crate::domain::errors::StasisError;
 use crate::domain::runtime::job::Job;
@@ -26,11 +27,20 @@ struct GraphemeExecutionPayload {
 
 pub struct GraphemeJobHandler {
     engine: Arc<dyn WorkflowEngine>,
+    telemetry: Option<OperationTelemetry>,
 }
 
 impl GraphemeJobHandler {
     pub fn new(engine: Arc<dyn WorkflowEngine>) -> Self {
-        Self { engine }
+        Self {
+            engine,
+            telemetry: None,
+        }
+    }
+
+    pub fn with_operation_telemetry(mut self, telemetry: Option<OperationTelemetry>) -> Self {
+        self.telemetry = telemetry;
+        self
     }
 
     fn resolve_payload(payload_ref: &str) -> Result<(String, Option<Value>)> {
@@ -141,6 +151,11 @@ impl JobHandler for GraphemeJobHandler {
 
     async fn execute(&self, job: &Job) -> Result<JobExecutionOutcome> {
         let started = Instant::now();
+        let _grapheme_span = self
+            .telemetry
+            .as_ref()
+            .map(|telemetry| telemetry.grapheme_span(&job.id));
+
         let (source, state_current) = match Self::resolve_payload(&job.payload_ref) {
             Ok(payload) => payload,
             Err(err) => {

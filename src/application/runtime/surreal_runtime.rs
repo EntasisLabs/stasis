@@ -22,6 +22,13 @@ use crate::domain::runtime::outbox::{
 };
 use crate::domain::runtime::recurring::RecurringDefinition;
 use crate::application::telemetry::keys as metric_keys;
+use crate::application::telemetry::operation::{runtime_event_type_name, OperationTelemetry};
+use crate::application::telemetry::propagation::{
+    job_execute_span_attributes, parent_trace_context,
+};
+use crate::application::telemetry::request_context::{
+    inbound_trace_context_for_propagation, trace_id_for_enqueue,
+};
 use crate::application::telemetry::spans as span_names;
 use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
 use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
@@ -307,7 +314,7 @@ impl SurrealRuntime {
                 idempotency_key: format!("recurring:{}:{}", definition.id, now.timestamp()),
                 correlation_id: definition.id.clone(),
                 causation_id: definition.id.clone(),
-                trace_id: definition.id.clone(),
+                trace_id: trace_id_for_enqueue(|| definition.id.clone()),
                 sttp_input_node_id: definition.payload_template_ref.clone(),
                 scheduled_at,
                 backoff_policy: Default::default(),
@@ -333,12 +340,14 @@ impl SurrealRuntime {
         now: DateTime<Utc>,
     ) -> Result<Option<String>> {
         let worker_started = Instant::now();
-        let _worker_span = self.tracing.start_span(
+        let worker_parent = inbound_trace_context_for_propagation();
+        let _worker_span = self.tracing.start_span_with_trace_context(
             span_names::WORKER_PROCESS_ONCE,
             &[
                 OtelAttribute::string("stasis.queue", queue.to_string()),
                 OtelAttribute::string("stasis.worker_id", worker_id.to_string()),
             ],
+            worker_parent.as_ref(),
         );
         self.metrics
             .incr_counter(metric_keys::WORKER_PROCESS_ONCE_TOTAL, 1);
@@ -366,15 +375,12 @@ impl SurrealRuntime {
             handlers.get(&job.job_type).cloned()
         };
 
-        let _job_span = self.tracing.start_span(
+        let job_parent = parent_trace_context(&job.trace_id)
+            .or_else(inbound_trace_context_for_propagation);
+        let _job_span = self.tracing.start_span_with_trace_context(
             span_names::JOB_EXECUTE,
-            &[
-                OtelAttribute::string("stasis.job.id", job.id.clone()),
-                OtelAttribute::string("stasis.job.type", job.job_type.clone()),
-                OtelAttribute::string("stasis.trace_id", job.trace_id.clone()),
-                OtelAttribute::string("stasis.queue", queue.to_string()),
-                OtelAttribute::string("stasis.correlation_id", job.correlation_id.clone()),
-            ],
+            &job_execute_span_attributes(&job),
+            job_parent.as_ref(),
         );
 
         let outcome = if let Some(handler) = handler {
@@ -632,6 +638,7 @@ impl SurrealRuntime {
 
         let pending = self.outbox_store.list_pending(limit).await?;
         let mut published = 0usize;
+        let operation_telemetry = OperationTelemetry::new(self.metrics.clone(), self.tracing.clone());
 
         for mut event in pending {
             if event
@@ -641,6 +648,9 @@ impl SurrealRuntime {
             {
                 continue;
             }
+
+            let event_type = runtime_event_type_name(&event.event.event_type);
+            let _publish_span = operation_telemetry.outbox_publish_span(&event_type, &event.event.job_id);
 
             match publisher.publish(&event).await {
                 Ok(()) => {

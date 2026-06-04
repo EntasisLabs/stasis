@@ -135,6 +135,15 @@ pub mod config_prelude {
 /// OpenTelemetry contract keys, span names, and runtime telemetry ports.
 pub mod telemetry_prelude {
     pub use crate::application::telemetry::keys;
+    pub use crate::application::telemetry::operation::OperationTelemetry;
+    pub use crate::application::telemetry::propagation::{
+        generate_w3c_trace_id, is_w3c_trace_id, job_execute_span_attributes, parse_traceparent,
+        parent_trace_context, trace_propagation_mode, TracePropagationMode,
+    };
+    pub use crate::application::telemetry::request_context::{
+        inbound_trace_context, inbound_trace_context_for_propagation, scope_inbound_trace,
+        trace_id_for_enqueue,
+    };
     pub use crate::application::telemetry::spans;
     pub use crate::infrastructure::telemetry::{NoopRuntimeTelemetry, NoopRuntimeTracing};
     pub use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;

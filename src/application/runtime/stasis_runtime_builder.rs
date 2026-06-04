@@ -32,6 +32,7 @@ use crate::application::runtime::runtime_factory::{
 };
 use crate::application::runtime::sequential_pattern_job_handler::SequentialPatternJobHandler;
 use crate::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
+use crate::application::telemetry::operation::OperationTelemetry;
 use crate::domain::errors::Result;
 use crate::ports::outbound::ai_chat_client::AiChatClient;
 use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
@@ -338,6 +339,14 @@ impl StasisRuntimeBuilder {
         let configured_endpoint_routing_policy = self.endpoint_routing_policy.clone();
 
         let tool_registry = Arc::new(self.tool_registry);
+        let operation_telemetry = self
+            .runtime_telemetry_metrics
+            .as_ref()
+            .and_then(|metrics| {
+                self.runtime_telemetry_tracing.as_ref().map(|tracing| {
+                    OperationTelemetry::new(metrics.clone(), tracing.clone())
+                })
+            });
 
         match &runtime {
             RuntimeComposition::InMemory(rt) => {
@@ -369,7 +378,10 @@ impl StasisRuntimeBuilder {
                 }
 
                 if self.include_grapheme_handlers {
-                    rt.register_handler(GraphemeJobHandler::new(workflow_engine.clone()))?;
+                    rt.register_handler(
+                        GraphemeJobHandler::new(workflow_engine.clone())
+                            .with_operation_telemetry(operation_telemetry.clone()),
+                    )?;
                     rt.register_handler(GraphemeHealthcheckJobHandler::new(
                         workflow_engine.clone(),
                     ))?;
@@ -415,7 +427,10 @@ impl StasisRuntimeBuilder {
 
                 if self.include_memory_operation_handlers {
                     if let Some(reader) = memory_context_reader.clone() {
-                        rt.register_handler(MemoryRecallJobHandler::new(reader.clone()))?;
+                        rt.register_handler(
+                            MemoryRecallJobHandler::new(reader.clone())
+                                .with_operation_telemetry(operation_telemetry.clone()),
+                        )?;
                         rt.register_handler(MemoryFindJobHandler::new(reader))?;
                     }
                     if let Some(operations) = memory_operations.clone() {
@@ -485,7 +500,10 @@ impl StasisRuntimeBuilder {
                 }
 
                 if self.include_grapheme_handlers {
-                    rt.register_handler(GraphemeJobHandler::new(workflow_engine.clone()))?;
+                    rt.register_handler(
+                        GraphemeJobHandler::new(workflow_engine.clone())
+                            .with_operation_telemetry(operation_telemetry.clone()),
+                    )?;
                     rt.register_handler(GraphemeHealthcheckJobHandler::new(
                         workflow_engine.clone(),
                     ))?;
@@ -531,7 +549,10 @@ impl StasisRuntimeBuilder {
 
                 if self.include_memory_operation_handlers {
                     if let Some(reader) = memory_context_reader.clone() {
-                        rt.register_handler(MemoryRecallJobHandler::new(reader.clone()))?;
+                        rt.register_handler(
+                            MemoryRecallJobHandler::new(reader.clone())
+                                .with_operation_telemetry(operation_telemetry.clone()),
+                        )?;
                         rt.register_handler(MemoryFindJobHandler::new(reader))?;
                     }
                     if let Some(operations) = memory_operations.clone() {

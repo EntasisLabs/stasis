@@ -15,6 +15,7 @@ use serde_json::Value;
 
 use crate::domain::errors::StasisError;
 use crate::dashboard::assets;
+use crate::dashboard::trace_context::propagate_inbound_trace_context;
 use crate::dashboard::dto::{
     ClusterNodeCardDto, DashboardDto, EndpointInspectorDto, EventInspectorDto, InspectorView,
     JobInspectorDto, JobRowDto, NodeInspectorDto, OutboxEventRowDto, RecurringDefinitionRowDto,
@@ -87,6 +88,7 @@ pub fn router(state: DashboardState) -> Router {
         .route("/inspect/event/{id}", get(inspect_event))
         .nest("/action", action_routes)
         .route("/assets/{name}", get(asset))
+        .layer(middleware::from_fn(propagate_inbound_trace_context))
         .with_state(state)
 }
 

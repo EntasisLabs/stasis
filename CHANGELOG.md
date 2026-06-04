@@ -7,9 +7,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Planned — 0.3.0 OpenTelemetry
+## [0.3.0]
 
-Contract frozen in [docs/design/opentelemetry-integration-rfc-plan.md](docs/design/opentelemetry-integration-rfc-plan.md) (ADR-0006). Single release: OTLP metrics + distributed traces + W3C propagation behind `feature = "otel"`.
+### Added
+
+- **OpenTelemetry first-class observability** behind optional Cargo feature `otel` (ADR-0006, [RFC plan](docs/design/opentelemetry-integration-rfc-plan.md)).
+- **`RuntimeTracing` / `RuntimeTelemetry` ports** with `NoopRuntimeTracing`, `NoopRuntimeTelemetry`, and `OpenTelemetryTelemetry::from_env()`.
+- **`StasisRuntimeBuilder::with_runtime_telemetry()`** and **`with_otel_from_env()`** — wires metrics + tracing into the job loop and chat middleware.
+- **`stasis::telemetry_prelude`** — frozen metric keys, span names, propagation helpers, and telemetry types.
+- **Span instrumentation** for worker loop, job execution, chat completion, memory recall, outbox publish, and grapheme execution.
+- **W3C trace propagation** via `RuntimeWorkflowJobBuilder::with_traceparent()` / `with_trace_context()` and job-loop parent rehydration (`STASIS_OTEL_TRACE_PROPAGATION`).
+- **Dashboard HTTP trace propagation** — incoming `traceparent` headers propagate to scheduler materialization and runtime spans during dashboard actions.
+- **`tests/otel_runtime_parity.rs`** — in-memory metrics/tracing parity coverage without requiring a live OTLP collector.
+
+### Changed
+
+- `RuntimeWorkflowJobBuilder` now generates a W3C-style trace id by default when none is supplied (replacing the previous job-id fallback).
 
 ## [0.2.4]
 

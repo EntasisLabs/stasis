@@ -78,12 +78,31 @@ impl RuntimeMetrics for OpenTelemetryTelemetry {
 
 impl RuntimeTracing for OpenTelemetryTelemetry {
     fn start_span(&self, name: &'static str, attributes: &[OtelAttribute]) -> SpanGuard {
+        self.start_span_with_trace_context(name, attributes, None)
+    }
+
+    fn start_span_with_trace_context(
+        &self,
+        name: &'static str,
+        attributes: &[OtelAttribute],
+        parent: Option<&TraceContext>,
+    ) -> SpanGuard {
         let otel_attributes: Vec<KeyValue> = attributes.iter().map(Self::key_value).collect();
-        let span = self
+        let mut builder = self
             .tracer
             .span_builder(name)
-            .with_attributes(otel_attributes)
-            .start(&self.tracer);
+            .with_attributes(otel_attributes);
+
+        if let Some(parent) = parent {
+            if let Ok(trace_id) = opentelemetry::trace::TraceId::from_hex(&parent.trace_id) {
+                builder = builder.with_trace_id(trace_id);
+                if let Ok(span_id) = opentelemetry::trace::SpanId::from_hex(&parent.span_id) {
+                    builder = builder.with_span_id(span_id);
+                }
+            }
+        }
+
+        let span = builder.start(&self.tracer);
         SpanGuard::new(Box::new(span))
     }
 

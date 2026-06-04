@@ -12,6 +12,15 @@ impl RuntimeTracing for NoopRuntimeTracing {
         SpanGuard::noop()
     }
 
+    fn start_span_with_trace_context(
+        &self,
+        name: &'static str,
+        attributes: &[OtelAttribute],
+        _parent: Option<&TraceContext>,
+    ) -> SpanGuard {
+        self.start_span(name, attributes)
+    }
+
     fn active_trace_context(&self) -> Option<TraceContext> {
         None
     }
@@ -33,6 +42,15 @@ impl RuntimeMetrics for NoopRuntimeTelemetry {
 impl RuntimeTracing for NoopRuntimeTelemetry {
     fn start_span(&self, name: &'static str, attributes: &[OtelAttribute]) -> SpanGuard {
         NoopRuntimeTracing.start_span(name, attributes)
+    }
+
+    fn start_span_with_trace_context(
+        &self,
+        name: &'static str,
+        attributes: &[OtelAttribute],
+        parent: Option<&TraceContext>,
+    ) -> SpanGuard {
+        NoopRuntimeTracing.start_span_with_trace_context(name, attributes, parent)
     }
 
     fn active_trace_context(&self) -> Option<TraceContext> {
