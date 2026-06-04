@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aacee42b.js";
+            window.path_to_searchindex_js = "searchindex-6d96df05.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1439a5de.js"></script>
+        <script src="toc-9d13a89d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -180,7 +180,7 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
 <li>Stability: Evolving</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-06-02</li>
 <li>Verified Against:
 <ul>
 <li>src/application/runtime/stasis_runtime_builder.rs
@@ -216,12 +216,14 @@
 </thead>
 <tbody>
 <tr><td><code>RuntimeBackend::InMemory</code></td><td>In-process store. No persistence across restarts. Use for testing and development.</td></tr>
-<tr><td><code>RuntimeBackend::SurrealMem { namespace, database }</code></td><td>Surreal in-memory engine with explicit namespace/database. Useful for integration tests and durable-runtime behavior validation.</td></tr>
-<tr><td><code>RuntimeBackend::SurrealWs { endpoint, namespace, database }</code></td><td>Remote SurrealDB over websocket. Use for shared/dev/staging environments where runtime state is centralized.</td></tr>
-<tr><td><code>RuntimeBackend::SurrealKv { path, namespace, database }</code></td><td>Embedded SurrealKV on local disk. Use for durable single-node deployments without a remote Surreal service.</td></tr>
+<tr><td><code>RuntimeBackend::SurrealMem { namespace, database, auth }</code></td><td>Surreal in-memory engine with explicit namespace/database and optional root credentials.</td></tr>
+<tr><td><code>RuntimeBackend::SurrealWs { endpoint, namespace, database, auth }</code></td><td>Remote SurrealDB over websocket. Use for shared/dev/staging environments where runtime state is centralized.</td></tr>
+<tr><td><code>RuntimeBackend::SurrealKv { path, namespace, database, auth }</code></td><td>Embedded SurrealKV on local disk. Use for durable single-node deployments without a remote Surreal service.</td></tr>
 </tbody>
 </table>
 </div>
+<p>Helper constructors (<code>RuntimeBackend::surreal_mem</code>, <code>surreal_ws</code>, <code>surreal_kv</code>) default <code>auth</code> to <code>None</code>. Use <code>.with_surreal_auth(SurrealAuth::new(user, pass))</code> for authenticated remote databases.</p>
+<p>When <code>auth</code> is set, Stasis signs in as a <strong>root user</strong> (<code>username</code>, <code>password</code>), then selects the configured namespace and database.</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>use stasis::prelude::*;
@@ -230,23 +232,49 @@
 let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory);
 
 // Surreal-backed behavior tests
-let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-    namespace: "stasis".to_string(),
-    database: "runtime".to_string(),
-});
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem("stasis", "runtime"));
 
-// Remote websocket backend
-let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
+// Remote websocket backend with root credentials
+let backend = RuntimeBackend::surreal_ws(
+    "ws://127.0.0.1:8000/rpc",
+    "stasis",
+    "runtime",
+)
+.with_surreal_auth(SurrealAuth::new("root", "root"));
+let builder = StasisRuntimeBuilder::new(backend);
+
+// Embedded SurrealKV backend
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::surreal_kv(
+    "./data/stasis-runtime",
+    "stasis",
+    "runtime",
+));
+<span class="boring">}</span></code></pre>
+<p>Environment variables (dashboard and examples):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_NAMESPACE</code> / <code>STASIS_EXAMPLE_SURREAL_NAMESPACE</code></td><td>Namespace (default: <code>stasis</code>)</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_DATABASE</code> / <code>STASIS_EXAMPLE_SURREAL_DATABASE</code></td><td>Database (default: <code>runtime</code>)</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_USERNAME</code> / <code>STASIS_EXAMPLE_SURREAL_USERNAME</code></td><td>Root user for sign-in</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_PASSWORD</code> / <code>STASIS_EXAMPLE_SURREAL_PASSWORD</code></td><td>Root password for sign-in</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_ENDPOINT</code></td><td>Websocket endpoint (required for <code>surreal-ws</code>)</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_KV_PATH</code></td><td>Local KV path (required for <code>surreal-kv</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Both username and password must be set for authentication to run. If either is omitted, Stasis connects without sign-in (suitable for local/unauthenticated setups).</p>
+<p>Legacy struct-literal form remains available when you need full control:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
     endpoint: "ws://127.0.0.1:8000/rpc".to_string(),
     namespace: "stasis".to_string(),
     database: "runtime".to_string(),
-});
-
-// Embedded SurrealKV backend
-let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
-    path: "./data/stasis-runtime".to_string(),
-    namespace: "stasis".to_string(),
-    database: "runtime".to_string(),
+    auth: Some(SurrealAuth::new("root", "root")),
 });
 <span class="boring">}</span></code></pre>
 <hr>
@@ -261,6 +289,7 @@ let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
 <p>All handler groups are active. No middleware is applied beyond the chat client itself.</p>
 <hr>
 <h2 id="production-environment-variables"><a class="header" href="#production-environment-variables">Production Environment Variables</a></h2>
+<p>Call <code>stasis::config_prelude::bootstrap()</code> once at process entry to load <code>.env</code> (when present) and file secrets from <code>STASIS_SECRETS_DIR</code>. See <a href="./environment-configuration.html">Environment Configuration</a>.</p>
 <p>When using the default chat client (<code>GenaiChatClient::from_env()</code>), configure provider and model routing via environment variables:</p>
 <pre><code class="language-bash">export STASIS_LLM_PROVIDER=openai
 export STASIS_LLM_MODEL=gpt-4o-mini

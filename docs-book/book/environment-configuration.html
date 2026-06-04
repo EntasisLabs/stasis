@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Chat Middleware Pipeline - Stasis Architecture Book</title>
+        <title>Environment Configuration - Stasis Architecture Book</title>
 
 
         <!-- Custom HTML head -->
@@ -174,170 +174,114 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="chat-middleware-pipeline"><a class="header" href="#chat-middleware-pipeline">Chat Middleware Pipeline</a></h1>
+                        <h1 id="environment-configuration"><a class="header" href="#environment-configuration">Environment Configuration</a></h1>
 <h2 id="document-metadata"><a class="header" href="#document-metadata">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
-<li>Audience: Engineer, SRE, Architect</li>
+<li>Audience: Engineer, Operator</li>
 <li>Stability: Evolving</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-06-04</li>
 <li>Verified Against:
 <ul>
-<li>src/application/runtime/chat_client_middleware.rs</li>
-<li>src/application/runtime/default_chat_middlewares.rs</li>
-<li>tests/chat_middleware_pipeline.rs</li>
+<li>src/application/config/env.rs</li>
+<li>src/application/config/secrets.rs</li>
+<li>src/application/composition/surreal_backend_config.rs</li>
 </ul>
 </li>
 </ul>
 <h2 id="purpose"><a class="header" href="#purpose">Purpose</a></h2>
-<p>Document the chat middleware pipeline — the composable decorator chain that wraps every <code>AiChatClient</code> invocation inside the Stasis runtime. Covers the four built-in middleware, composition semantics, telemetry key contracts, and the <code>ChatClientMiddleware</code> extension interface.</p>
-<h2 id="invariants"><a class="header" href="#invariants">Invariants</a></h2>
+<p>Provide a safe, consistent way to load Stasis configuration from process environment, local <code>.env</code> files, and file-based secret mounts (including Vault Agent sidecars).</p>
+<h2 id="quick-start"><a class="header" href="#quick-start">Quick start</a></h2>
 <ol>
-<li>Middleware is applied in registration order. The first registered middleware is the outermost wrapper — it receives the request first and the response last.</li>
-<li>All middleware operates at the <code>AiChatClient</code> boundary. Every <code>complete(request, options)</code> call passes through the full chain.</li>
-<li>Middleware is wired once at builder time (<code>StasisRuntimeBuilder</code>) and shared across all handlers that use the chat client.</li>
-<li>The <code>deterministic_cache_key</code> function produces a SHA-256 hex digest over the serialized <code>ChatRequest</code> and <code>ChatOptions</code>. Cache keys are stable across restarts for identical inputs.</li>
-<li><code>TelemetryChatMiddleware</code> and <code>CacheChatMiddleware</code> do not emit metrics unless a <code>RuntimeMetrics</code> port is provided.</li>
+<li>Copy <a href="https://github.com/EntasisLabs/stasis/blob/main/.env.example"><code>.env.example</code></a> to <code>.env</code>.</li>
+<li>Call <code>bootstrap()</code> once near process entry (before reading config):</li>
 </ol>
-<hr>
-<h2 id="middleware-execution-order"><a class="header" href="#middleware-execution-order">Middleware Execution Order</a></h2>
-<p>Middleware registered with <code>StasisRuntimeBuilder</code> wraps in LIFO order relative to the inner client:</p>
-<pre><code>Request → [Middleware A] → [Middleware B] → [Middleware C] → AiChatClient
-Response ← [Middleware A] ← [Middleware B] ← [Middleware C] ← AiChatClient
-</code></pre>
-<p>Recommended registration order:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>builder
-    .with_logging_chat_middleware()           // outermost — sees all requests and errors
-    .with_telemetry_chat_middleware(metrics)  // records duration and counters
-    .with_cache_chat_middleware(cache)        // short-circuits on hit before reaching model
-    .with_tool_call_interception_chat_middleware(interceptor) // innermost — intercepts model tool calls
-<span class="boring">}</span></code></pre>
-<hr>
-<h2 id="built-in-middleware"><a class="header" href="#built-in-middleware">Built-in Middleware</a></h2>
-<h3 id="loggingchatmiddleware"><a class="header" href="#loggingchatmiddleware">LoggingChatMiddleware</a></h3>
-<p>Logs request and response metadata to stderr using the <code>stasis.chat</code> prefix.</p>
-<p><strong>On request:</strong></p>
-<pre><code>stasis.chat request messages=N options_present=true|false
-</code></pre>
-<p><strong>On success:</strong></p>
-<pre><code>stasis.chat response ok elapsed_ms=N
-</code></pre>
-<p><strong>On error:</strong></p>
-<pre><code>stasis.chat response error elapsed_ms=N error=&lt;message&gt;
-</code></pre>
-<p>No configuration required:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>builder.with_logging_chat_middleware()
-<span class="boring">}</span></code></pre>
-<hr>
-<h3 id="telemetrychatmiddleware"><a class="header" href="#telemetrychatmiddleware">TelemetryChatMiddleware</a></h3>
-<p>Emits counters and duration observations through the <code>RuntimeMetrics</code> port.</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>builder.with_telemetry_chat_middleware(metrics)
-<span class="boring">}</span></code></pre>
-<h4 id="telemetry-keys"><a class="header" href="#telemetry-keys">Telemetry keys</a></h4>
-<p>All keys are <code>&amp;'static str</code> constants exported from <code>stasis::prelude</code>:</p>
+<pre class="playground"><code class="language-rust">use stasis::config_prelude::{bootstrap, non_empty, required, with_default};
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    bootstrap()?;
+    let model = with_default("STASIS_LLM_MODEL", "gpt-4o-mini");
+    let api_key = required("STASIS_LLM_API_KEY")?;
+    Ok(())
+}</code></pre>
+<p>The dashboard binary calls <code>bootstrap()</code> automatically on startup.</p>
+<h2 id="resolution-order"><a class="header" href="#resolution-order">Resolution order</a></h2>
+<p>When the global resolver is installed via <code>bootstrap()</code>:</p>
+<ol>
+<li><strong>Process environment</strong> — explicit exports, container/Kubernetes env, Vault Agent env injection</li>
+<li><strong>File secrets</strong> — one file per key under <code>STASIS_SECRETS_DIR</code></li>
+</ol>
+<p>During bootstrap, Stasis also loads a dotenv file <strong>without overriding existing process env</strong>:</p>
+<ul>
+<li><code>STASIS_ENV_FILE</code> when set, otherwise <code>.env</code> in the working directory</li>
+</ul>
+<h2 id="api-surface-stasisconfig_prelude"><a class="header" href="#api-surface-stasisconfig_prelude">API surface (<code>stasis::config_prelude</code>)</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Constant</th><th>Key</th><th>Type</th><th>Emitted on</th></tr>
+<tr><th>Function</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>CHAT_REQUESTS_TOTAL</code></td><td><code>runtime.chat.requests.total</code></td><td>counter</td><td>Every <code>complete()</code> call</td></tr>
-<tr><td><code>CHAT_ERRORS_TOTAL</code></td><td><code>runtime.chat.errors.total</code></td><td>counter</td><td>Every failed <code>complete()</code> call</td></tr>
-<tr><td><code>CHAT_DURATION_MS</code></td><td><code>runtime.chat.duration_ms</code></td><td>duration</td><td>Every <code>complete()</code> call (success or error)</td></tr>
-<tr><td><code>CHAT_CACHE_HIT_TOTAL</code></td><td><code>runtime.chat.cache.hit.total</code></td><td>counter</td><td>Cache hit in <code>CacheChatMiddleware</code></td></tr>
-<tr><td><code>CHAT_CACHE_MISS_TOTAL</code></td><td><code>runtime.chat.cache.miss.total</code></td><td>counter</td><td>Cache miss in <code>CacheChatMiddleware</code></td></tr>
-<tr><td><code>CHAT_TOOL_CALLS_TOTAL</code></td><td><code>runtime.chat.tool_calls.total</code></td><td>counter</td><td>Tool call intercepted in <code>ToolCallInterceptionChatMiddleware</code></td></tr>
+<tr><td><code>bootstrap()</code></td><td>Load dotenv + secrets dir, install resolver</td></tr>
+<tr><td><code>bootstrap_with(EnvBootstrapOptions)</code></td><td>Same with explicit paths / skip flags</td></tr>
+<tr><td><code>non_empty(key)</code></td><td>Trimmed non-empty value or <code>None</code></td></tr>
+<tr><td><code>with_default(key, default)</code></td><td>Value or default string</td></tr>
+<tr><td><code>first_non_empty(&amp;[keys])</code></td><td>First matching non-empty value</td></tr>
+<tr><td><code>required(key)</code></td><td>Value or <code>EnvError</code> naming the missing key only</td></tr>
+<tr><td><code>truthy(key)</code></td><td>Parses <code>1</code>, <code>true</code>, <code>yes</code>, <code>on</code> (case-insensitive)</td></tr>
+<tr><td><code>load_dotenv_from(path)</code></td><td>Load dotenv without installing resolver</td></tr>
 </tbody>
 </table>
 </div>
-<p>Note: <code>CHAT_CACHE_HIT_TOTAL</code>, <code>CHAT_CACHE_MISS_TOTAL</code>, and <code>CHAT_TOOL_CALLS_TOTAL</code> are emitted by their respective middleware, not by <code>TelemetryChatMiddleware</code>. All require a <code>RuntimeMetrics</code> port to be provided to that middleware.</p>
-<hr>
-<h3 id="cachechatmiddleware"><a class="header" href="#cachechatmiddleware">CacheChatMiddleware</a></h3>
-<p>Caches <code>ChatResponse</code> values keyed by a deterministic SHA-256 hash of the request. Returns the cached response immediately on hit without calling the model.</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>builder.with_cache_chat_middleware(Arc::new(InMemoryAiChatResponseCache::default()))
-<span class="boring">}</span></code></pre>
-<h4 id="with-metrics"><a class="header" href="#with-metrics">With metrics</a></h4>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>let cache_middleware = CacheChatMiddleware::new(cache)
-    .with_metrics(metrics.clone());
-
-builder.with_chat_middleware(cache_middleware)
-<span class="boring">}</span></code></pre>
-<h4 id="cache-key"><a class="header" href="#cache-key">Cache key</a></h4>
-<p>The cache key is computed by <code>deterministic_cache_key(request, options)</code>:</p>
-<pre><code>SHA-256(format!("request={:?}|options={:?}", request, options))
-→ "chat:&lt;hex&gt;"
+<p>Secret-safe errors never include secret values — only variable names.</p>
+<h2 id="vault-and-production-secret-mounts"><a class="header" href="#vault-and-production-secret-mounts">Vault and production secret mounts</a></h2>
+<p>Stasis does not embed a Vault HTTP client. Production setups typically inject secrets in one of two ways:</p>
+<h3 id="1-environment-injection-recommended-for-12-factor-apps"><a class="header" href="#1-environment-injection-recommended-for-12-factor-apps">1. Environment injection (recommended for 12-factor apps)</a></h3>
+<p>Configure Vault Agent, External Secrets Operator, or your platform to inject secrets as environment variables before Stasis starts. These always win over <code>.env</code> and file mounts.</p>
+<h3 id="2-file-mounts-stasis_secrets_dir"><a class="header" href="#2-file-mounts-stasis_secrets_dir">2. File mounts (<code>STASIS_SECRETS_DIR</code>)</a></h3>
+<p>Point <code>STASIS_SECRETS_DIR</code> at a directory where each secret is a file named after the variable:</p>
+<pre><code class="language-text">/vault/secrets/
+  STASIS_LLM_API_KEY
+  STASIS_DASHBOARD_SURREAL_PASSWORD
 </code></pre>
-<p>Keys are stable for structurally identical requests. Any change to message content, model hint, or options produces a different key.</p>
-<h4 id="cache-interface"><a class="header" href="#cache-interface">Cache interface</a></h4>
-<p>The <code>AiChatResponseCache</code> port must be implemented to back this middleware. <code>InMemoryAiChatResponseCache</code> is provided for development and testing. Production deployments should implement a durable or distributed cache backend.</p>
-<hr>
-<h3 id="toolcallinterceptionchatmiddleware"><a class="header" href="#toolcallinterceptionchatmiddleware">ToolCallInterceptionChatMiddleware</a></h3>
-<p>Intercepts responses that contain tool calls and routes them through an <code>AiChatToolInterceptor</code> implementation. Emits <code>CHAT_TOOL_CALLS_TOTAL</code> per intercepted tool call when metrics are configured.</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>builder.with_tool_call_interception_chat_middleware(Arc::new(my_interceptor))
-<span class="boring">}</span></code></pre>
-<h4 id="with-metrics-1"><a class="header" href="#with-metrics-1">With metrics</a></h4>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>let interception_middleware = ToolCallInterceptionChatMiddleware::new(interceptor)
-    .with_metrics(metrics.clone());
-
-builder.with_chat_middleware(interception_middleware)
-<span class="boring">}</span></code></pre>
-<p>The <code>AiChatToolInterceptor</code> port receives an <code>AiToolCallEnvelope</code> for each intercepted call. Implement this port to log, audit, filter, or transform tool calls before they are processed by the tool loop.</p>
-<hr>
-<h2 id="implementing-custom-middleware"><a class="header" href="#implementing-custom-middleware">Implementing Custom Middleware</a></h2>
-<p>Implement <code>ChatClientMiddleware</code> to inject custom behavior into the pipeline:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use std::sync::Arc;
-use stasis::prelude::{AiChatClient, ChatClientMiddleware};
-
-pub struct MyMiddleware;
-
-impl ChatClientMiddleware for MyMiddleware {
-    fn wrap(&amp;self, inner: Arc&lt;dyn AiChatClient&gt;) -&gt; Arc&lt;dyn AiChatClient&gt; {
-        Arc::new(MyWrappedClient { inner })
-    }
-}
-<span class="boring">}</span></code></pre>
-<p>Register with the builder:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>builder.with_chat_middleware(MyMiddleware)
-<span class="boring">}</span></code></pre>
-<p>or with a pre-boxed arc:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>builder.with_chat_middleware_arc(Arc::new(MyMiddleware))
-<span class="boring">}</span></code></pre>
-<hr>
-<h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
+<p>File contents are trimmed; empty files are ignored.</p>
+<h3 id="custom-vault-clients"><a class="header" href="#custom-vault-clients">Custom vault clients</a></h3>
+<p>Implement <a href="https://docs.rs/stasis-rs/latest/stasis/application/config/secrets/trait.SecretsSource.html"><code>SecretsSource</code></a> and compose it with <code>ChainedSecretsSource</code> if you need direct Vault API access in-process.</p>
+<h2 id="common-variables"><a class="header" href="#common-variables">Common variables</a></h2>
+<p>See <code>.env.example</code> for a full local template. Frequently used keys:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>STASIS_LLM_PROVIDER</code></td><td>LLM adapter id (<code>openai</code>, <code>anthropic</code>, …)</td></tr>
+<tr><td><code>STASIS_LLM_MODEL</code></td><td>Default model id</td></tr>
+<tr><td><code>STASIS_LLM_API_KEY</code></td><td>Global LLM API key fallback</td></tr>
+<tr><td><code>STASIS_DASHBOARD_RUNTIME_BACKEND</code></td><td>Dashboard persistence backend</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_*</code></td><td>Surreal connection settings</td></tr>
+<tr><td><code>STASIS_SECRETS_DIR</code></td><td>Directory of file-backed secrets</td></tr>
+</tbody>
+</table>
+</div>
+<p>Surreal helpers in <code>surreal_backend_config</code> (<code>resolve_surreal_namespace_from_env</code>, <code>resolve_surreal_auth_from_env</code>, …) use the same resolver when <code>bootstrap()</code> has run.</p>
+<h2 id="safety-notes"><a class="header" href="#safety-notes">Safety notes</a></h2>
 <ul>
-<li>Middleware does not control routing between models or providers. Model selection is governed by <code>model_hint</code> in the job payload and the <code>AiChatClient</code> implementation.</li>
-<li>Middleware does not have access to job metadata (job_id, thread_id, trace_id). Those fields are available in handler diagnostics via the outbox, not in the chat pipeline.</li>
+<li><code>.env</code> is gitignored — never commit secrets.</li>
+<li>Dotenv never overrides existing process env (safe for prod + local <code>.env</code> together).</li>
+<li>Use <code>required()</code> for mandatory secrets; avoid logging return values.</li>
+<li>Prefer platform/Vault injection in production over long-lived <code>.env</code> files.</li>
 </ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="orchestration-patterns.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="identity-memory-layer.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="grapheme-workflow-handlers.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="extension-points.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -347,11 +291,11 @@ impl ChatClientMiddleware for MyMiddleware {
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="orchestration-patterns.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="identity-memory-layer.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="grapheme-workflow-handlers.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="extension-points.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

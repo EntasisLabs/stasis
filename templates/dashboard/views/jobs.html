@@ -3,7 +3,7 @@
   <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
     <div class="card">
       <div class="card-header">
-        <p class="stat-label">Job Throughput</p>
+        <p class="stat-label">Succeeded Jobs</p>
         <h3 class="stat-value">{{ dto.kpis.succeeded_jobs }}</h3>
         <p class="text-xs mt-2" style="color: var(--muted-foreground);">{{ dto.kpis.failed_jobs }} failed</p>
       </div>
@@ -47,7 +47,7 @@
   <div class="card">
     <div class="card-header">
       <h3 class="card-title">Active Jobs</h3>
-      <p class="card-description">Real-time execution monitoring</p>
+      <p class="card-description">Runtime job inventory (refreshes every 5s on this view)</p>
     </div>
     <div class="card-content overflow-x-auto">
       <table class="table">

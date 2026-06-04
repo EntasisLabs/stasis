@@ -29,7 +29,7 @@
             </svg>
             <div>
               <p class="text-sm font-semibold leading-none" style="color: var(--foreground);">Stasis Runtime</p>
-              <p class="text-xs mt-0.5" style="color: var(--muted-foreground);">Distributed Command Center</p>
+              <p class="text-xs mt-0.5" style="color: var(--muted-foreground);">Operations Console</p>
             </div>
           </div>
 
@@ -44,7 +44,7 @@
                 <a href="#" class="nav-item active"
                   data-view="jobs"
                   data-title="Job Runtime"
-                  data-subtitle="Active execution throughput and lease behavior">
+                  data-subtitle="Job counts and lease state (refreshes every 5s)">
                   <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <polygon points="9.5,1 4,9 8,9 6.5,15 13,7 9,7" fill="currentColor"/>
                   </svg>
@@ -178,7 +178,7 @@
         <div class="px-4 py-3 flex items-center gap-3"
           style="border-top: 1px solid var(--border);">
           <span class="status-dot status-healthy pulse"></span>
-          <p class="text-xs font-medium" style="color: var(--foreground);">System Online</p>
+          <p class="text-xs font-medium" style="color: var(--foreground);">Dashboard Connected</p>
         </div>
 
       </aside>
@@ -206,10 +206,13 @@
               <h2 class="text-xl font-medium leading-tight" id="view-title"
                 style="color: var(--foreground);">Job Runtime</h2>
               <p class="text-sm mt-0.5" id="view-subtitle"
-                style="color: var(--muted-foreground);">Active execution throughput and lease behavior</p>
+                style="color: var(--muted-foreground);">Job counts and lease state (refreshes every 5s)</p>
             </div>
           </div>
           <div class="flex items-center gap-3">
+            {% if demo_seed_mode %}
+            <span class="badge badge-outline" title="Sample jobs and endpoints seeded via STASIS_DASHBOARD_DEMO_SEED">Demo data</span>
+            {% endif %}
             <button id="theme-toggle" class="btn btn-sm btn-outline" type="button"
               aria-label="Switch theme">Dark</button>
             <span class="badge badge-outline">{{ refreshed_at }}</span>

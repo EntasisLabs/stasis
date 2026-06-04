@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aacee42b.js";
+            window.path_to_searchindex_js = "searchindex-6d96df05.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1439a5de.js"></script>
+        <script src="toc-9d13a89d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -253,8 +253,21 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <li><code>process_once</code> is perfect for tests and tutorials. Production workers typically run it in a loop.</li>
 <li>If no chat client is configured, Stasis uses <code>GenaiChatClient::from_env()</code> when handlers need model calls.</li>
 </ol>
+<h2 id="environment-and-secrets"><a class="header" href="#environment-and-secrets">Environment and secrets</a></h2>
+<p>For local development, copy <code>.env.example</code> to <code>.env</code> and call <code>bootstrap()</code> once at startup:</p>
+<pre class="playground"><code class="language-rust">use stasis::config_prelude::{bootstrap, with_default};
+
+#[tokio::main]
+async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
+    bootstrap().map_err(stasis::domain::errors::StasisError::PortFailure)?;
+    let model = with_default("STASIS_LLM_MODEL", "gpt-4o-mini");
+    // ...
+    Ok(())
+}</code></pre>
+<p>See <a href="./environment-configuration.html">Environment Configuration</a> for Vault/file secret mounts and the full variable reference.</p>
 <h2 id="what-to-read-next"><a class="header" href="#what-to-read-next">What To Read Next</a></h2>
 <ol>
+<li><a href="./environment-configuration.html">Environment Configuration</a> for <code>.env</code>, secrets dir, and Vault-friendly mounts.</li>
 <li><a href="./runtime-builder.html">Runtime Builder and Wiring Guide</a> for all builder options.</li>
 <li><a href="./runtime-job-design.html">Job Runtime Design</a> for lifecycle and durability semantics.</li>
 <li><a href="./extension-points.html">Extension Points and Port Contracts</a> for custom adapters.</li>

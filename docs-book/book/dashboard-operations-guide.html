@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aacee42b.js";
+            window.path_to_searchindex_js = "searchindex-6d96df05.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1439a5de.js"></script>
+        <script src="toc-9d13a89d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -251,11 +251,11 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <tbody>
 <tr><td>/</td><td>GET</td><td>Redirects to /dashboard</td></tr>
 <tr><td>/dashboard</td><td>GET</td><td>Main shell</td></tr>
-<tr><td>/view/{name}</td><td>GET</td><td>Section content swap</td></tr>
-<tr><td>/stream/jobs</td><td>GET</td><td>Live jobs panel</td></tr>
-<tr><td>/stream/outbox</td><td>GET</td><td>Live outbox panel</td></tr>
-<tr><td>/stream/nodes</td><td>GET</td><td>Live cluster nodes panel</td></tr>
-<tr><td>/stream/workflow-reflection</td><td>GET</td><td>Reflection preview stream</td></tr>
+<tr><td>/view/{name}</td><td>GET</td><td>Primary section content (auto-refreshed every 5s for runtime views)</td></tr>
+<tr><td>/stream/jobs</td><td>GET</td><td>HTMX jobs fragment (health probe / custom integrations; not used by the default shell)</td></tr>
+<tr><td>/stream/outbox</td><td>GET</td><td>HTMX outbox fragment (health probe / custom integrations)</td></tr>
+<tr><td>/stream/nodes</td><td>GET</td><td>HTMX cluster fragment (health probe / custom integrations)</td></tr>
+<tr><td>/stream/workflow-reflection</td><td>GET</td><td>Workflow reflection preview stream (used by the builder UI)</td></tr>
 <tr><td>/inspect/job/{id}</td><td>GET</td><td>Job inspector</td></tr>
 <tr><td>/inspect/attempt/{id}</td><td>GET</td><td>Attempt inspector</td></tr>
 <tr><td>/inspect/node/{id}</td><td>GET</td><td>Node inspector</td></tr>

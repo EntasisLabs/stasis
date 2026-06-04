@@ -21,13 +21,11 @@
     </div>
     <div class="card">
       <div class="card-header">
-        <p class="stat-label">Avg CPU Usage</p>
+        <p class="stat-label">Avg Queue Pressure</p>
         <h3 class="stat-value">{{ avg_load_index }}%</h3>
       </div>
       <div class="card-content">
-        <div class="progress progress-thin progress-info">
-          <div class="progress-fill" style="width: {{ avg_load_index }}%"></div>
-        </div>
+        <p class="text-xs" style="color: var(--muted-foreground);">Derived from queue ownership and node health, not host CPU.</p>
       </div>
     </div>
   </div>
@@ -36,7 +34,7 @@
   <div class="card">
     <div class="card-header">
       <h3 class="card-title">Cluster Topology</h3>
-      <p class="card-description">Node health, ownership, and operational load</p>
+      <p class="card-description">Node health, ownership, and queue-pressure indicators</p>
     </div>
     <div class="card-content">
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -83,7 +81,7 @@
           <div class="space-y-3">
             <div>
               <div class="flex items-center justify-between text-xs mb-1">
-                <span style="color: var(--muted-foreground);">CPU</span>
+                <span style="color: var(--muted-foreground);">Queue pressure</span>
                 <span class="font-medium">{{ node.load_index }}%</span>
               </div>
               <div class="progress progress-thin {% if node.load_index > 85 %}progress-warning{% else %}progress-info{% endif %}">
@@ -92,12 +90,13 @@
             </div>
             <div>
               <div class="flex items-center justify-between text-xs mb-1">
-                <span style="color: var(--muted-foreground);">Memory</span>
+                <span style="color: var(--muted-foreground);">Capacity headroom</span>
                 <span class="font-medium">{{ node.memory_index }}%</span>
               </div>
               <div class="progress progress-thin {% if node.memory_index > 85 %}progress-warning{% else %}progress-info{% endif %}">
                 <div class="progress-fill" style="width: {{ node.memory_index }}%"></div>
               </div>
+              <p class="text-xs mt-1" style="color: var(--muted-foreground);">Proxy index, not host memory telemetry.</p>
             </div>
           </div>
 

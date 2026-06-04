@@ -143,6 +143,7 @@
             >
               <div class="wb-canvas-toolbar">
                 <h4 class="text-sm font-semibold">Canvas</h4>
+                <p class="text-xs" style="color: var(--muted-foreground);">Draft step definitions for this workflow. Queue activity: {{ selected_queue_running }} running · {{ selected_queue_succeeded }} succeeded · {{ selected_queue_failed }} failed.</p>
                 <div class="wb-canvas-actions">
                   <button class="btn btn-primary btn-sm wb-action-primary" type="button"
                     data-action-post="/action/workflows/run-draft"
@@ -194,10 +195,11 @@
                     Saved Workflows
                   </button>
                   <div class="hidden wb-saved-workflows-popover" data-workflow-saved-workflows-popover>
-                    <p class="wb-saved-workflows-popover-title">Saved Workflows</p>
+                    <p class="wb-saved-workflows-popover-title">Queue Lanes</p>
+                    <p class="text-xs mb-2" style="color: var(--muted-foreground);">Jobs grouped by runtime queue. Persisted workflow definitions are saved separately via Save / Execute.</p>
                     <div class="wb-saved-workflows-list">
                       {% if lanes.is_empty() %}
-                      <p class="text-xs" style="color: var(--muted-foreground);">No saved workflows yet.</p>
+                      <p class="text-xs" style="color: var(--muted-foreground);">No queue activity yet.</p>
                       {% endif %}
                       {% for lane in lanes %}
                       <a href="#"

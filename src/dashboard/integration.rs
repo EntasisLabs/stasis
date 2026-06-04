@@ -162,6 +162,10 @@ mod tests {
             Self::unsupported()
         }
 
+        async fn endpoint_failure_rate_trends(&self) -> Vec<crate::application::dto::EndpointFailureRateTrendRow> {
+            vec![]
+        }
+
         async fn workflow_reflect_source(&self, _source: &str) -> Result<WorkflowSourceReflection> {
             Self::unsupported()
         }
@@ -190,16 +194,10 @@ mod tests {
             _source: &str,
         ) -> Result<WorkflowDiagnosticsResult> {
             Ok(WorkflowDiagnosticsResult {
-                enabled: false,
-                provider: "disabled".to_string(),
-                summary: "LSP diagnostics are disabled. Enable the dashboard-lsp feature to activate diagnostics preview.".to_string(),
-                diagnostics: vec![WorkflowDiagnostic {
-                    severity: WorkflowDiagnosticSeverity::Info,
-                    message: "dashboard-lsp feature is not enabled".to_string(),
-                    code: Some("LSP_DISABLED".to_string()),
-                    line: None,
-                    column: None,
-                }],
+                enabled: true,
+                provider: "grapheme-compiler+reflection".to_string(),
+                summary: "No issues from grapheme-compiler+reflection for the current source snapshot.".to_string(),
+                diagnostics: vec![],
             })
         }
 

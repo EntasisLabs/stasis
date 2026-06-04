@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aacee42b.js";
+            window.path_to_searchindex_js = "searchindex-6d96df05.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1439a5de.js"></script>
+        <script src="toc-9d13a89d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -275,8 +275,21 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <li><code>process_once</code> is perfect for tests and tutorials. Production workers typically run it in a loop.</li>
 <li>If no chat client is configured, Stasis uses <code>GenaiChatClient::from_env()</code> when handlers need model calls.</li>
 </ol>
+<h2 id="environment-and-secrets"><a class="header" href="#environment-and-secrets">Environment and secrets</a></h2>
+<p>For local development, copy <code>.env.example</code> to <code>.env</code> and call <code>bootstrap()</code> once at startup:</p>
+<pre class="playground"><code class="language-rust">use stasis::config_prelude::{bootstrap, with_default};
+
+#[tokio::main]
+async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
+    bootstrap().map_err(stasis::domain::errors::StasisError::PortFailure)?;
+    let model = with_default("STASIS_LLM_MODEL", "gpt-4o-mini");
+    // ...
+    Ok(())
+}</code></pre>
+<p>See <a href="#environment-configuration">Environment Configuration</a> for Vault/file secret mounts and the full variable reference.</p>
 <h2 id="what-to-read-next"><a class="header" href="#what-to-read-next">What To Read Next</a></h2>
 <ol>
+<li><a href="#environment-configuration">Environment Configuration</a> for <code>.env</code>, secrets dir, and Vault-friendly mounts.</li>
 <li><a href="#runtime-builder-and-wiring-guide">Runtime Builder and Wiring Guide</a> for all builder options.</li>
 <li><a href="#stasis-job-runtime-design">Job Runtime Design</a> for lifecycle and durability semantics.</li>
 <li><a href="#extension-points-and-port-contracts">Extension Points and Port Contracts</a> for custom adapters.</li>
@@ -934,7 +947,7 @@ Dedicated memory operation handlers support aggregate, transform, rollup, and sc
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
 <li>Stability: Evolving</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-06-02</li>
 <li>Verified Against:
 <ul>
 <li>src/application/runtime/stasis_runtime_builder.rs
@@ -970,12 +983,14 @@ Dedicated memory operation handlers support aggregate, transform, rollup, and sc
 </thead>
 <tbody>
 <tr><td><code>RuntimeBackend::InMemory</code></td><td>In-process store. No persistence across restarts. Use for testing and development.</td></tr>
-<tr><td><code>RuntimeBackend::SurrealMem { namespace, database }</code></td><td>Surreal in-memory engine with explicit namespace/database. Useful for integration tests and durable-runtime behavior validation.</td></tr>
-<tr><td><code>RuntimeBackend::SurrealWs { endpoint, namespace, database }</code></td><td>Remote SurrealDB over websocket. Use for shared/dev/staging environments where runtime state is centralized.</td></tr>
-<tr><td><code>RuntimeBackend::SurrealKv { path, namespace, database }</code></td><td>Embedded SurrealKV on local disk. Use for durable single-node deployments without a remote Surreal service.</td></tr>
+<tr><td><code>RuntimeBackend::SurrealMem { namespace, database, auth }</code></td><td>Surreal in-memory engine with explicit namespace/database and optional root credentials.</td></tr>
+<tr><td><code>RuntimeBackend::SurrealWs { endpoint, namespace, database, auth }</code></td><td>Remote SurrealDB over websocket. Use for shared/dev/staging environments where runtime state is centralized.</td></tr>
+<tr><td><code>RuntimeBackend::SurrealKv { path, namespace, database, auth }</code></td><td>Embedded SurrealKV on local disk. Use for durable single-node deployments without a remote Surreal service.</td></tr>
 </tbody>
 </table>
 </div>
+<p>Helper constructors (<code>RuntimeBackend::surreal_mem</code>, <code>surreal_ws</code>, <code>surreal_kv</code>) default <code>auth</code> to <code>None</code>. Use <code>.with_surreal_auth(SurrealAuth::new(user, pass))</code> for authenticated remote databases.</p>
+<p>When <code>auth</code> is set, Stasis signs in as a <strong>root user</strong> (<code>username</code>, <code>password</code>), then selects the configured namespace and database.</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>use stasis::prelude::*;
@@ -984,23 +999,49 @@ Dedicated memory operation handlers support aggregate, transform, rollup, and sc
 let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory);
 
 // Surreal-backed behavior tests
-let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealMem {
-    namespace: "stasis".to_string(),
-    database: "runtime".to_string(),
-});
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem("stasis", "runtime"));
 
-// Remote websocket backend
-let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
+// Remote websocket backend with root credentials
+let backend = RuntimeBackend::surreal_ws(
+    "ws://127.0.0.1:8000/rpc",
+    "stasis",
+    "runtime",
+)
+.with_surreal_auth(SurrealAuth::new("root", "root"));
+let builder = StasisRuntimeBuilder::new(backend);
+
+// Embedded SurrealKV backend
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::surreal_kv(
+    "./data/stasis-runtime",
+    "stasis",
+    "runtime",
+));
+<span class="boring">}</span></code></pre>
+<p>Environment variables (dashboard and examples):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_NAMESPACE</code> / <code>STASIS_EXAMPLE_SURREAL_NAMESPACE</code></td><td>Namespace (default: <code>stasis</code>)</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_DATABASE</code> / <code>STASIS_EXAMPLE_SURREAL_DATABASE</code></td><td>Database (default: <code>runtime</code>)</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_USERNAME</code> / <code>STASIS_EXAMPLE_SURREAL_USERNAME</code></td><td>Root user for sign-in</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_PASSWORD</code> / <code>STASIS_EXAMPLE_SURREAL_PASSWORD</code></td><td>Root password for sign-in</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_ENDPOINT</code></td><td>Websocket endpoint (required for <code>surreal-ws</code>)</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_KV_PATH</code></td><td>Local KV path (required for <code>surreal-kv</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Both username and password must be set for authentication to run. If either is omitted, Stasis connects without sign-in (suitable for local/unauthenticated setups).</p>
+<p>Legacy struct-literal form remains available when you need full control:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealWs {
     endpoint: "ws://127.0.0.1:8000/rpc".to_string(),
     namespace: "stasis".to_string(),
     database: "runtime".to_string(),
-});
-
-// Embedded SurrealKV backend
-let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
-    path: "./data/stasis-runtime".to_string(),
-    namespace: "stasis".to_string(),
-    database: "runtime".to_string(),
+    auth: Some(SurrealAuth::new("root", "root")),
 });
 <span class="boring">}</span></code></pre>
 <hr>
@@ -1015,6 +1056,7 @@ let builder = StasisRuntimeBuilder::new(RuntimeBackend::SurrealKv {
 <p>All handler groups are active. No middleware is applied beyond the chat client itself.</p>
 <hr>
 <h2 id="production-environment-variables"><a class="header" href="#production-environment-variables">Production Environment Variables</a></h2>
+<p>Call <code>stasis::config_prelude::bootstrap()</code> once at process entry to load <code>.env</code> (when present) and file secrets from <code>STASIS_SECRETS_DIR</code>. See <a href="#environment-configuration">Environment Configuration</a>.</p>
 <p>When using the default chat client (<code>GenaiChatClient::from_env()</code>), configure provider and model routing via environment variables:</p>
 <pre><code class="language-bash">export STASIS_LLM_PROVIDER=openai
 export STASIS_LLM_MODEL=gpt-4o-mini
@@ -1739,11 +1781,129 @@ runtime.list_lineage_events_by_thread_id("thread-id").await?
 <ul>
 <li><code>InvestigateRuntimeLineage</code> does not provide real-time streaming. It queries stored state.</li>
 <li>Metric emission requires a <code>RuntimeMetrics</code> implementation to be wired. The default <code>NoopRuntimeMetrics</code> silently discards all observations.</li>
+<li>For OpenTelemetry (metrics + traces + OTLP export), see <a href="#opentelemetry">OpenTelemetry</a> — planned for 0.3.0 with frozen contract.</li>
 <li>Outbox event delivery to external subscribers requires an <code>EventPublisher</code> implementation registered via <code>register_event_publisher</code>.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="orchestration-patterns"><a class="header" href="#orchestration-patterns">Orchestration Patterns</a></h1>
+<h1 id="opentelemetry"><a class="header" href="#opentelemetry">OpenTelemetry</a></h1>
 <h2 id="document-metadata-7"><a class="header" href="#document-metadata-7">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, SRE, Operator</li>
+<li>Stability: <strong>Frozen</strong> (contract for 0.3.0)</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against:
+<ul>
+<li>docs/design/opentelemetry-integration-rfc-plan.md</li>
+<li>docs/adr/ADR-0006-opentelemetry-first-class-observability.md</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h2>
+<p>Document the <strong>frozen OpenTelemetry contract</strong> for Stasis runtime: metrics, traces, propagation, configuration, and the single-release implementation plan.</p>
+<p>Full specification: <a href="../../docs/design/opentelemetry-integration-rfc-plan.html">OpenTelemetry Integration RFC</a><br>ADR: <a href="../../docs/adr/ADR-0006-opentelemetry-first-class-observability.html">ADR-0006 OpenTelemetry First-Class Observability</a></p>
+<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<p><strong>Planned for 0.3.0</strong> — contract frozen; implementation not yet shipped.</p>
+<p>OTEL ships in <strong>one release</strong> (metrics + traces + propagation). No partial metrics-only release.</p>
+<h2 id="enablement"><a class="header" href="#enablement">Enablement</a></h2>
+<p>Build with the optional feature:</p>
+<pre><code class="language-bash">cargo build --features otel
+</code></pre>
+<p>Runtime configuration (after <code>config_prelude::bootstrap()</code>):</p>
+<pre><code class="language-bash">export STASIS_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
+export OTEL_SERVICE_NAME=stasis-runtime
+</code></pre>
+<p>Builder entry point:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::config_prelude::bootstrap;
+use stasis::prelude::*;
+
+bootstrap()?;
+let composition = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+    .with_otel_from_env()?
+    .build()
+    .await?;
+<span class="boring">}</span></code></pre>
+<h2 id="contract-summary"><a class="header" href="#contract-summary">Contract Summary</a></h2>
+<h3 id="ports-1"><a class="header" href="#ports-1">Ports</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Role</th></tr>
+</thead>
+<tbody>
+<tr><td><code>RuntimeMetrics</code></td><td>Existing counter/duration keys (unchanged)</td></tr>
+<tr><td><code>RuntimeTracing</code></td><td><strong>New</strong> — span lifecycle</td></tr>
+<tr><td><code>RuntimeTelemetry</code></td><td>Combined handle wired through builder</td></tr>
+</tbody>
+</table>
+</div>
+<p>First-party adapter: <code>OpenTelemetryTelemetry</code> (feature <code>otel</code>).</p>
+<h3 id="span-names-frozen"><a class="header" href="#span-names-frozen">Span names (frozen)</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Span</th><th>Scope</th></tr>
+</thead>
+<tbody>
+<tr><td><code>stasis.worker.process_once</code></td><td>Worker tick</td></tr>
+<tr><td><code>stasis.job.execute</code></td><td>Handler execution</td></tr>
+<tr><td><code>stasis.chat.complete</code></td><td>LLM call</td></tr>
+<tr><td><code>stasis.memory.recall</code></td><td>Memory recall</td></tr>
+<tr><td><code>stasis.memory.store</code></td><td>Memory store</td></tr>
+<tr><td><code>stasis.outbox.publish</code></td><td>Outbox delivery</td></tr>
+<tr><td><code>stasis.grapheme.execute</code></td><td>Grapheme workflow</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="required-job-attributes"><a class="header" href="#required-job-attributes">Required job attributes</a></h3>
+<p><code>stasis.job.id</code>, <code>stasis.job.type</code>, <code>stasis.job.queue</code>, <code>stasis.job.attempt</code>, <code>stasis.correlation_id</code>, <code>stasis.causation_id</code>, <code>stasis.trace_id</code>, <code>stasis.worker.id</code>, <code>stasis.job.outcome</code></p>
+<p>Secrets and raw prompts/STTP bodies are <strong>never</strong> attached to spans.</p>
+<h3 id="trace-propagation"><a class="header" href="#trace-propagation">Trace propagation</a></h3>
+<p>W3C <code>traceparent</code> is canonical. <code>Job.trace_id</code> stores the trace id (32 hex chars when propagated). Legacy opaque trace ids remain supported via span attributes.</p>
+<p>Job builder helpers:</p>
+<ul>
+<li><code>RuntimeWorkflowJobBuilder::with_traceparent(header)</code></li>
+<li><code>RuntimeWorkflowJobBuilder::with_trace_context(ctx)</code></li>
+</ul>
+<h3 id="metrics"><a class="header" href="#metrics">Metrics</a></h3>
+<p>Existing keys (e.g. <code>runtime.job.succeeded.total</code>, <code>runtime.chat.duration_ms</code>) are unchanged.</p>
+<p>New keys in 0.3.0 include <code>runtime.memory.recall.duration_ms</code>, <code>runtime.memory.store.duration_ms</code>, <code>runtime.worker.process_once.duration_ms</code> — see RFC §5.3.</p>
+<h2 id="relationship-to-lineage"><a class="header" href="#relationship-to-lineage">Relationship to lineage</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Lineage</th><th>OTEL</th></tr>
+</thead>
+<tbody>
+<tr><td><code>InvestigateRuntimeLineage</code> queries</td><td>Live traces in your collector</td></tr>
+<tr><td>Stored <code>Job</code> / outbox fields</td><td>Span attributes + W3C context</td></tr>
+<tr><td>Job attempt diagnostics JSON</td><td>Complements spans (not replaced)</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="implementation-plan"><a class="header" href="#implementation-plan">Implementation plan</a></h2>
+<p>Single release <strong>0.3.0</strong> workstreams (see RFC §7):</p>
+<ol>
+<li><strong>A</strong> — Ports + OTEL adapter + <code>otel</code> feature</li>
+<li><strong>B</strong> — Builder wiring (<code>with_runtime_telemetry</code>, <code>with_otel_from_env</code>)</li>
+<li><strong>C</strong> — Span instrumentation (job, chat, memory, outbox, grapheme)</li>
+<li><strong>D</strong> — W3C propagation on enqueue + <code>process_once</code></li>
+<li><strong>E</strong> — Memory metrics</li>
+<li><strong>F</strong> — Docs, <code>.env.example</code>, parity tests</li>
+</ol>
+<p>Release gate: RFC §8 acceptance criteria (OTLP smoke test, span tree, no secrets in attributes, default build unchanged).</p>
+<h2 id="out-of-scope-030"><a class="header" href="#out-of-scope-030">Out of scope (0.3.0)</a></h2>
+<ul>
+<li>Python SDK telemetry</li>
+<li>Third-party driver auto-instrumentation (Surreal, Kafka, RabbitMQ)</li>
+<li>Replacing diagnostics JSON or lineage queries</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="orchestration-patterns"><a class="header" href="#orchestration-patterns">Orchestration Patterns</a></h1>
+<h2 id="document-metadata-8"><a class="header" href="#document-metadata-8">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
@@ -1763,7 +1923,7 @@ runtime.list_lineage_events_by_thread_id("thread-id").await?
 </ul>
 </li>
 </ul>
-<h2 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h2>
+<h2 id="purpose-6"><a class="header" href="#purpose-6">Purpose</a></h2>
 <p>Define the four durable orchestration patterns available in Stasis, their execution semantics, payload contracts, and failure behavior. Each pattern maps to a registered job handler and a corresponding pipeline that runs inside the handler’s execution boundary.</p>
 <h2 id="scope-2"><a class="header" href="#scope-2">Scope</a></h2>
 <p>This document covers the four workflow-level patterns: Sequential, Concurrent, Handoff, and Orchestrator-Routed. Agent-level coordination (<code>workflow.stasis.agent_session</code>) is covered separately in the Agent Coordination reference.</p>
@@ -2012,7 +2172,7 @@ runtime.enqueue(job).await?;
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="chat-middleware-pipeline"><a class="header" href="#chat-middleware-pipeline">Chat Middleware Pipeline</a></h1>
-<h2 id="document-metadata-8"><a class="header" href="#document-metadata-8">Document Metadata</a></h2>
+<h2 id="document-metadata-9"><a class="header" href="#document-metadata-9">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
@@ -2026,7 +2186,7 @@ runtime.enqueue(job).await?;
 </ul>
 </li>
 </ul>
-<h2 id="purpose-6"><a class="header" href="#purpose-6">Purpose</a></h2>
+<h2 id="purpose-7"><a class="header" href="#purpose-7">Purpose</a></h2>
 <p>Document the chat middleware pipeline — the composable decorator chain that wraps every <code>AiChatClient</code> invocation inside the Stasis runtime. Covers the four built-in middleware, composition semantics, telemetry key contracts, and the <code>ChatClientMiddleware</code> extension interface.</p>
 <h2 id="invariants-5"><a class="header" href="#invariants-5">Invariants</a></h2>
 <ol>
@@ -2167,7 +2327,7 @@ impl ChatClientMiddleware for MyMiddleware {
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="grapheme-workflow-handlers"><a class="header" href="#grapheme-workflow-handlers">Grapheme Workflow Handlers</a></h1>
-<h2 id="document-metadata-9"><a class="header" href="#document-metadata-9">Document Metadata</a></h2>
+<h2 id="document-metadata-10"><a class="header" href="#document-metadata-10">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
@@ -2185,7 +2345,7 @@ impl ChatClientMiddleware for MyMiddleware {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-7"><a class="header" href="#purpose-7">Purpose</a></h2>
+<h2 id="purpose-8"><a class="header" href="#purpose-8">Purpose</a></h2>
 <p>Document the Grapheme Workflow plane in Stasis — a policy-governed scripted workflow execution layer backed by <code>grapheme-sdk</code>. Covers the four registered job handlers, source resolution semantics, guardrail policy, diagnostics contracts, and tracing behavior.</p>
 <h2 id="scope-3"><a class="header" href="#scope-3">Scope</a></h2>
 <p>Grapheme jobs are one of the three capability planes in Stasis (alongside the orchestration core and Locus memory). They execute compiled Grapheme-language scripts inside a sandboxed engine with enforced policy limits. This document does not cover AI prompt handlers or Locus memory handlers.</p>
@@ -2531,7 +2691,7 @@ let handler = GraphemeEchoJobHandler::new(engine);
 <p>This is the pattern used in tests that call <code>.without_grapheme_handlers()</code> and register a custom handler instead of the default <code>GraphemeSdkWorkflowEngine</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-coordination"><a class="header" href="#agent-coordination">Agent Coordination</a></h1>
-<h2 id="document-metadata-10"><a class="header" href="#document-metadata-10">Document Metadata</a></h2>
+<h2 id="document-metadata-11"><a class="header" href="#document-metadata-11">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
@@ -2548,7 +2708,7 @@ let handler = GraphemeEchoJobHandler::new(engine);
 </ul>
 </li>
 </ul>
-<h2 id="purpose-8"><a class="header" href="#purpose-8">Purpose</a></h2>
+<h2 id="purpose-9"><a class="header" href="#purpose-9">Purpose</a></h2>
 <p>Document the agent coordination layer: <code>AgentSessionPipeline</code>, <code>AgentSessionCoordinator</code>, selection and termination strategy contracts, the <code>ToolLoopPipeline</code> underpinning, and the two job handler entry points (<code>workflow.stasis.agent_turn</code> and <code>workflow.stasis.agent_session</code>).</p>
 <h2 id="invariants-7"><a class="header" href="#invariants-7">Invariants</a></h2>
 <ol>
@@ -2806,7 +2966,7 @@ let response = coordinator.run_session(AgentSessionRunRequest {
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="memory-operations-reference"><a class="header" href="#memory-operations-reference">Memory Operations Reference</a></h1>
-<h2 id="document-metadata-11"><a class="header" href="#document-metadata-11">Document Metadata</a></h2>
+<h2 id="document-metadata-12"><a class="header" href="#document-metadata-12">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
@@ -2828,7 +2988,7 @@ let response = coordinator.run_session(AgentSessionRunRequest {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-9"><a class="header" href="#purpose-9">Purpose</a></h2>
+<h2 id="purpose-10"><a class="header" href="#purpose-10">Purpose</a></h2>
 <p>Document the six Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (<code>MemoryContextReader</code>, <code>MemoryContextWriter</code>, <code>MemoryOperations</code>).</p>
 <h2 id="invariants-8"><a class="header" href="#invariants-8">Invariants</a></h2>
 <ol>
@@ -2996,6 +3156,32 @@ pub trait MemoryOperations: Send + Sync {
 </tbody>
 </table>
 </div>
+<h3 id="response-memorynode"><a class="header" href="#response-memorynode">Response: <code>MemoryNode</code></a></h3>
+<p>Each recalled or found node carries the full STTP payload and metadata (aligned with Locus <code>MemoryNodeDto</code>):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>raw</code></td><td><code>String</code></td><td>Full STTP node text — the actual context payload</td></tr>
+<tr><td><code>session_id</code></td><td><code>String</code></td><td>Session the node belongs to</td></tr>
+<tr><td><code>tier</code></td><td><code>String</code></td><td>Memory tier (e.g. <code>raw</code>, <code>L1</code>)</td></tr>
+<tr><td><code>timestamp</code></td><td><code>DateTime&lt;Utc&gt;</code></td><td>Node creation time</td></tr>
+<tr><td><code>compression_depth</code></td><td><code>i32</code></td><td>Compression depth</td></tr>
+<tr><td><code>parent_node_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Parent node reference</td></tr>
+<tr><td><code>sync_key</code></td><td><code>String</code></td><td>Canonical sync fingerprint</td></tr>
+<tr><td><code>context_summary</code></td><td><code>Option&lt;String&gt;</code></td><td>Short summary when present</td></tr>
+<tr><td><code>embedding_model</code></td><td><code>Option&lt;String&gt;</code></td><td>Embedding model id</td></tr>
+<tr><td><code>embedding_dimensions</code></td><td><code>Option&lt;usize&gt;</code></td><td>Embedding vector size</td></tr>
+<tr><td><code>embedded_at</code></td><td><code>Option&lt;DateTime&lt;Utc&gt;&gt;</code></td><td>When embedding was computed</td></tr>
+<tr><td><code>rho</code> / <code>kappa</code> / <code>psi</code></td><td><code>f32</code></td><td>Resonance metrics</td></tr>
+<tr><td><code>user_avec</code> / <code>model_avec</code></td><td><code>MemoryAvecState</code></td><td>AVEC state snapshots</td></tr>
+<tr><td><code>compression_avec</code></td><td><code>Option&lt;MemoryAvecState&gt;</code></td><td>Compression AVEC when present</td></tr>
+<tr><td><code>updated_at</code></td><td><code>DateTime&lt;Utc&gt;</code></td><td>Last update time</td></tr>
+</tbody>
+</table>
+</div>
 <h3 id="response-memoryrecallresponse"><a class="header" href="#response-memoryrecallresponse">Response: <code>MemoryRecallResponse</code></a></h3>
 <div class="table-wrapper">
 <table>
@@ -3009,10 +3195,12 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>retrieval_path</code></td><td><code>Option&lt;String&gt;</code></td><td>Explanation of how results were retrieved</td></tr>
 <tr><td><code>fallback_triggered</code></td><td><code>bool</code></td><td>Whether fallback broadening was activated</td></tr>
 <tr><td><code>fallback_reason</code></td><td><code>Option&lt;String&gt;</code></td><td>Reason fallback was triggered</td></tr>
-<tr><td><code>node_sync_keys</code></td><td><code>Vec&lt;String&gt;</code></td><td>Sync keys of returned nodes</td></tr>
+<tr><td><code>nodes</code></td><td><code>Vec&lt;MemoryNode&gt;</code></td><td>Full recalled nodes including <code>raw</code> STTP context</td></tr>
+<tr><td><code>node_sync_keys</code></td><td><code>Vec&lt;String&gt;</code></td><td>Sync keys of returned nodes (derived from <code>nodes</code>)</td></tr>
 </tbody>
 </table>
 </div>
+<p>Memory-enabled runtime handlers prepend recalled node <code>raw</code> content into the user prompt before LLM execution (after identity snapshot, when nodes are non-empty).</p>
 <hr>
 <h2 id="operation-2-find"><a class="header" href="#operation-2-find">Operation 2: Find</a></h2>
 <p><strong>Job type:</strong> <code>workflow.stasis.memory.find</code><br><strong>Port:</strong> <code>MemoryContextReader</code></p>
@@ -3062,7 +3250,8 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>retrieved</code></td><td><code>usize</code></td><td>Number of nodes returned</td></tr>
 <tr><td><code>has_more</code></td><td><code>bool</code></td><td>Whether more results are available</td></tr>
 <tr><td><code>next_cursor</code></td><td><code>Option&lt;String&gt;</code></td><td>Cursor for the next page</td></tr>
-<tr><td><code>node_sync_keys</code></td><td><code>Vec&lt;String&gt;</code></td><td>Sync keys of returned nodes</td></tr>
+<tr><td><code>nodes</code></td><td><code>Vec&lt;MemoryNode&gt;</code></td><td>Full matched nodes including <code>raw</code> STTP context</td></tr>
+<tr><td><code>node_sync_keys</code></td><td><code>Vec&lt;String&gt;</code></td><td>Sync keys of returned nodes (derived from <code>nodes</code>)</td></tr>
 </tbody>
 </table>
 </div>
@@ -3079,6 +3268,7 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>has_more</code></td><td>Pagination flag</td></tr>
 <tr><td><code>next_cursor</code></td><td>Next page cursor when present</td></tr>
 <tr><td><code>node_sync_keys</code></td><td>Returned node sync keys</td></tr>
+<tr><td><code>nodes</code></td><td>Serialized node payloads (including <code>raw</code>)</td></tr>
 </tbody>
 </table>
 </div>
@@ -3301,7 +3491,7 @@ pub trait MemoryOperations: Send + Sync {
 <p>The default <code>.with_locus_memory()</code> bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via <code>.with_memory_context_reader(...)</code>, <code>.with_memory_context_writer(...)</code>, or <code>.with_memory_operations(...)</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="identity-memory-layer"><a class="header" href="#identity-memory-layer">Identity Memory Layer</a></h1>
-<h2 id="document-metadata-12"><a class="header" href="#document-metadata-12">Document Metadata</a></h2>
+<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture and Operations Guide</li>
 <li>Audience: Engineer, Runtime Owner, Platform Team</li>
@@ -3320,7 +3510,7 @@ pub trait MemoryOperations: Send + Sync {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-10"><a class="header" href="#purpose-10">Purpose</a></h2>
+<h2 id="purpose-11"><a class="header" href="#purpose-11">Purpose</a></h2>
 <p>The identity memory layer gives Stasis durable, policy-aware identity context for runtime decisions. It complements the Locus memory plane:</p>
 <ol>
 <li>Locus memory handles conversational and resonance retrieval.</li>
@@ -3483,8 +3673,107 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </table>
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="environment-configuration"><a class="header" href="#environment-configuration">Environment Configuration</a></h1>
+<h2 id="document-metadata-14"><a class="header" href="#document-metadata-14">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, Operator</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against:
+<ul>
+<li>src/application/config/env.rs</li>
+<li>src/application/config/secrets.rs</li>
+<li>src/application/composition/surreal_backend_config.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-12"><a class="header" href="#purpose-12">Purpose</a></h2>
+<p>Provide a safe, consistent way to load Stasis configuration from process environment, local <code>.env</code> files, and file-based secret mounts (including Vault Agent sidecars).</p>
+<h2 id="quick-start"><a class="header" href="#quick-start">Quick start</a></h2>
+<ol>
+<li>Copy <a href="https://github.com/EntasisLabs/stasis/blob/main/.env.example"><code>.env.example</code></a> to <code>.env</code>.</li>
+<li>Call <code>bootstrap()</code> once near process entry (before reading config):</li>
+</ol>
+<pre class="playground"><code class="language-rust">use stasis::config_prelude::{bootstrap, non_empty, required, with_default};
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    bootstrap()?;
+    let model = with_default("STASIS_LLM_MODEL", "gpt-4o-mini");
+    let api_key = required("STASIS_LLM_API_KEY")?;
+    Ok(())
+}</code></pre>
+<p>The dashboard binary calls <code>bootstrap()</code> automatically on startup.</p>
+<h2 id="resolution-order"><a class="header" href="#resolution-order">Resolution order</a></h2>
+<p>When the global resolver is installed via <code>bootstrap()</code>:</p>
+<ol>
+<li><strong>Process environment</strong> — explicit exports, container/Kubernetes env, Vault Agent env injection</li>
+<li><strong>File secrets</strong> — one file per key under <code>STASIS_SECRETS_DIR</code></li>
+</ol>
+<p>During bootstrap, Stasis also loads a dotenv file <strong>without overriding existing process env</strong>:</p>
+<ul>
+<li><code>STASIS_ENV_FILE</code> when set, otherwise <code>.env</code> in the working directory</li>
+</ul>
+<h2 id="api-surface-stasisconfig_prelude"><a class="header" href="#api-surface-stasisconfig_prelude">API surface (<code>stasis::config_prelude</code>)</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Function</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>bootstrap()</code></td><td>Load dotenv + secrets dir, install resolver</td></tr>
+<tr><td><code>bootstrap_with(EnvBootstrapOptions)</code></td><td>Same with explicit paths / skip flags</td></tr>
+<tr><td><code>non_empty(key)</code></td><td>Trimmed non-empty value or <code>None</code></td></tr>
+<tr><td><code>with_default(key, default)</code></td><td>Value or default string</td></tr>
+<tr><td><code>first_non_empty(&amp;[keys])</code></td><td>First matching non-empty value</td></tr>
+<tr><td><code>required(key)</code></td><td>Value or <code>EnvError</code> naming the missing key only</td></tr>
+<tr><td><code>truthy(key)</code></td><td>Parses <code>1</code>, <code>true</code>, <code>yes</code>, <code>on</code> (case-insensitive)</td></tr>
+<tr><td><code>load_dotenv_from(path)</code></td><td>Load dotenv without installing resolver</td></tr>
+</tbody>
+</table>
+</div>
+<p>Secret-safe errors never include secret values — only variable names.</p>
+<h2 id="vault-and-production-secret-mounts"><a class="header" href="#vault-and-production-secret-mounts">Vault and production secret mounts</a></h2>
+<p>Stasis does not embed a Vault HTTP client. Production setups typically inject secrets in one of two ways:</p>
+<h3 id="1-environment-injection-recommended-for-12-factor-apps"><a class="header" href="#1-environment-injection-recommended-for-12-factor-apps">1. Environment injection (recommended for 12-factor apps)</a></h3>
+<p>Configure Vault Agent, External Secrets Operator, or your platform to inject secrets as environment variables before Stasis starts. These always win over <code>.env</code> and file mounts.</p>
+<h3 id="2-file-mounts-stasis_secrets_dir"><a class="header" href="#2-file-mounts-stasis_secrets_dir">2. File mounts (<code>STASIS_SECRETS_DIR</code>)</a></h3>
+<p>Point <code>STASIS_SECRETS_DIR</code> at a directory where each secret is a file named after the variable:</p>
+<pre><code class="language-text">/vault/secrets/
+  STASIS_LLM_API_KEY
+  STASIS_DASHBOARD_SURREAL_PASSWORD
+</code></pre>
+<p>File contents are trimmed; empty files are ignored.</p>
+<h3 id="custom-vault-clients"><a class="header" href="#custom-vault-clients">Custom vault clients</a></h3>
+<p>Implement <a href="https://docs.rs/stasis-rs/latest/stasis/application/config/secrets/trait.SecretsSource.html"><code>SecretsSource</code></a> and compose it with <code>ChainedSecretsSource</code> if you need direct Vault API access in-process.</p>
+<h2 id="common-variables"><a class="header" href="#common-variables">Common variables</a></h2>
+<p>See <code>.env.example</code> for a full local template. Frequently used keys:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>STASIS_LLM_PROVIDER</code></td><td>LLM adapter id (<code>openai</code>, <code>anthropic</code>, …)</td></tr>
+<tr><td><code>STASIS_LLM_MODEL</code></td><td>Default model id</td></tr>
+<tr><td><code>STASIS_LLM_API_KEY</code></td><td>Global LLM API key fallback</td></tr>
+<tr><td><code>STASIS_DASHBOARD_RUNTIME_BACKEND</code></td><td>Dashboard persistence backend</td></tr>
+<tr><td><code>STASIS_DASHBOARD_SURREAL_*</code></td><td>Surreal connection settings</td></tr>
+<tr><td><code>STASIS_SECRETS_DIR</code></td><td>Directory of file-backed secrets</td></tr>
+</tbody>
+</table>
+</div>
+<p>Surreal helpers in <code>surreal_backend_config</code> (<code>resolve_surreal_namespace_from_env</code>, <code>resolve_surreal_auth_from_env</code>, …) use the same resolver when <code>bootstrap()</code> has run.</p>
+<h2 id="safety-notes"><a class="header" href="#safety-notes">Safety notes</a></h2>
+<ul>
+<li><code>.env</code> is gitignored — never commit secrets.</li>
+<li>Dotenv never overrides existing process env (safe for prod + local <code>.env</code> together).</li>
+<li>Use <code>required()</code> for mandatory secrets; avoid logging return values.</li>
+<li>Prefer platform/Vault injection in production over long-lived <code>.env</code> files.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="extension-points-and-port-contracts"><a class="header" href="#extension-points-and-port-contracts">Extension Points and Port Contracts</a></h1>
-<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
+<h2 id="document-metadata-15"><a class="header" href="#document-metadata-15">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
@@ -3511,7 +3800,7 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-11"><a class="header" href="#purpose-11">Purpose</a></h2>
+<h2 id="purpose-13"><a class="header" href="#purpose-13">Purpose</a></h2>
 <p>Document all port contracts that SDK consumers can implement to extend or replace Stasis infrastructure. Each entry covers the trait signature, what Stasis guarantees about call semantics, and the built-in implementation(s) provided.</p>
 <p>This reference includes both outbound ports and selected inbound control-plane contracts used to drive runtime operations.</p>
 <h2 id="architecture-principle"><a class="header" href="#architecture-principle">Architecture Principle</a></h2>
@@ -3966,7 +4255,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 <p>Compile-fail and compile-pass cases are covered by trybuild tests under <code>stasis-macros/tests/ui</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="control-plane-and-endpoint-routing"><a class="header" href="#control-plane-and-endpoint-routing">Control Plane and Endpoint Routing</a></h1>
-<h2 id="document-metadata-14"><a class="header" href="#document-metadata-14">Document Metadata</a></h2>
+<h2 id="document-metadata-16"><a class="header" href="#document-metadata-16">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture and Delivery Reference</li>
 <li>Audience: Engineer, Platform, SRE, Architect</li>
@@ -3986,7 +4275,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-12"><a class="header" href="#purpose-12">Purpose</a></h2>
+<h2 id="purpose-14"><a class="header" href="#purpose-14">Purpose</a></h2>
 <p>Document the command-center foundation for Stasis runtime operations and outbound delivery routing.</p>
 <p>This reference covers:</p>
 <ol>
@@ -4103,7 +4392,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="command-center-dashboard-concept"><a class="header" href="#command-center-dashboard-concept">Command Center Dashboard Concept</a></h1>
-<h2 id="purpose-13"><a class="header" href="#purpose-13">Purpose</a></h2>
+<h2 id="purpose-15"><a class="header" href="#purpose-15">Purpose</a></h2>
 <p>This page documents an operator-facing command center surface for runtime control and observability.</p>
 <p>For implemented route contracts, auth controls, and workflow builder behavior, use the <a href="#dashboard-operations-guide">Dashboard Operations Guide</a>.</p>
 <p>It is intentionally a concept slice focused on:</p>
@@ -4451,7 +4740,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </style>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="dashboard-operations-guide"><a class="header" href="#dashboard-operations-guide">Dashboard Operations Guide</a></h1>
-<h2 id="document-metadata-15"><a class="header" href="#document-metadata-15">Document Metadata</a></h2>
+<h2 id="document-metadata-17"><a class="header" href="#document-metadata-17">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Operations Guide</li>
 <li>Audience: Operator, SRE, Runtime Engineer</li>
@@ -4468,7 +4757,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-14"><a class="header" href="#purpose-14">Purpose</a></h2>
+<h2 id="purpose-16"><a class="header" href="#purpose-16">Purpose</a></h2>
 <p>This page documents the implemented dashboard behavior for production operators.</p>
 <p>Use this guide for:</p>
 <ol>
@@ -4527,11 +4816,11 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <tbody>
 <tr><td>/</td><td>GET</td><td>Redirects to /dashboard</td></tr>
 <tr><td>/dashboard</td><td>GET</td><td>Main shell</td></tr>
-<tr><td>/view/{name}</td><td>GET</td><td>Section content swap</td></tr>
-<tr><td>/stream/jobs</td><td>GET</td><td>Live jobs panel</td></tr>
-<tr><td>/stream/outbox</td><td>GET</td><td>Live outbox panel</td></tr>
-<tr><td>/stream/nodes</td><td>GET</td><td>Live cluster nodes panel</td></tr>
-<tr><td>/stream/workflow-reflection</td><td>GET</td><td>Reflection preview stream</td></tr>
+<tr><td>/view/{name}</td><td>GET</td><td>Primary section content (auto-refreshed every 5s for runtime views)</td></tr>
+<tr><td>/stream/jobs</td><td>GET</td><td>HTMX jobs fragment (health probe / custom integrations; not used by the default shell)</td></tr>
+<tr><td>/stream/outbox</td><td>GET</td><td>HTMX outbox fragment (health probe / custom integrations)</td></tr>
+<tr><td>/stream/nodes</td><td>GET</td><td>HTMX cluster fragment (health probe / custom integrations)</td></tr>
+<tr><td>/stream/workflow-reflection</td><td>GET</td><td>Workflow reflection preview stream (used by the builder UI)</td></tr>
 <tr><td>/inspect/job/{id}</td><td>GET</td><td>Job inspector</td></tr>
 <tr><td>/inspect/attempt/{id}</td><td>GET</td><td>Attempt inspector</td></tr>
 <tr><td>/inspect/node/{id}</td><td>GET</td><td>Node inspector</td></tr>
@@ -4680,7 +4969,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="cookbook-overview"><a class="header" href="#cookbook-overview">Cookbook Overview</a></h1>
-<h2 id="purpose-15"><a class="header" href="#purpose-15">Purpose</a></h2>
+<h2 id="purpose-17"><a class="header" href="#purpose-17">Purpose</a></h2>
 <p>This cookbook provides implementation-first recipes for teams taking Stasis from local experiments to production deployment.</p>
 <p>Each recipe is:</p>
 <ol>
@@ -5160,8 +5449,23 @@ export STASIS_DASHBOARD_ACTION_REQUIRED_ROLE=scheduler.admin
 export STASIS_DASHBOARD_ACTION_ROLE_CLAIM_HEADER=x-stasis-role
 </code></pre>
 <h3 id="3-launch-dashboard-server"><a class="header" href="#3-launch-dashboard-server">3. Launch dashboard server</a></h3>
+<p>The dashboard binary wires a production-like runtime through <code>StasisRuntimeBuilder</code> (grapheme, prompt, agent, memory, orchestration, and cluster handlers). Optional toggles:</p>
+<pre><code class="language-bash"># Enable Locus memory adapters (requires Locus configuration)
+export STASIS_DASHBOARD_LOCUS_MEMORY=true
+
+# Enable OpenTelemetry when building with --features otel
+export STASIS_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
+</code></pre>
 <pre><code class="language-bash">cargo run --bin stasis_dashboard
 </code></pre>
+<p>Embedded apps can reuse the same wiring:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::dashboard::{build_dashboard_query_service, DashboardBootstrapOptions};
+
+let service = build_dashboard_query_service(DashboardBootstrapOptions::default()).await?;
+<span class="boring">}</span></code></pre>
 <p>Open:</p>
 <ol>
 <li>http://127.0.0.1:3007/dashboard</li>
@@ -5198,7 +5502,8 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <ol>
 <li>Prefer surreal-ws or surreal-kv for durable job and workflow history.</li>
 <li>Keep STASIS_DASHBOARD_ACTION_AUTH_BEARER in secret storage, not source control.</li>
-<li>Add health checks for /dashboard and one stream endpoint such as /stream/jobs.</li>
+<li>Add health checks for <code>/dashboard</code> and one live view such as <code>/view/jobs</code>.</li>
+<li>Optional: probe <code>/stream/jobs</code> as an HTMX fragment health check for custom integrations.</li>
 <li>Alert on repeated non-200 responses from /action routes.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -5579,7 +5884,7 @@ println!("transform_ops={:?}", schema.transform_operations);
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
-<h2 id="document-metadata-16"><a class="header" href="#document-metadata-16">Document Metadata</a></h2>
+<h2 id="document-metadata-18"><a class="header" href="#document-metadata-18">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
@@ -5597,7 +5902,7 @@ println!("transform_ops={:?}", schema.transform_operations);
 </ul>
 </li>
 </ul>
-<h2 id="purpose-16"><a class="header" href="#purpose-16">Purpose</a></h2>
+<h2 id="purpose-18"><a class="header" href="#purpose-18">Purpose</a></h2>
 <p>Define the V1 SurrealDB schema and indexing strategy for Stasis durable job orchestration.</p>
 <h2 id="design-constraints"><a class="header" href="#design-constraints">Design Constraints</a></h2>
 <ol>
@@ -5885,7 +6190,7 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture-decision-records"><a class="header" href="#architecture-decision-records">Architecture Decision Records</a></h1>
-<h2 id="document-metadata-17"><a class="header" href="#document-metadata-17">Document Metadata</a></h2>
+<h2 id="document-metadata-19"><a class="header" href="#document-metadata-19">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>
@@ -5898,7 +6203,7 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 </ul>
 </li>
 </ul>
-<h2 id="purpose-17"><a class="header" href="#purpose-17">Purpose</a></h2>
+<h2 id="purpose-19"><a class="header" href="#purpose-19">Purpose</a></h2>
 <p>Track major architectural decisions with rationale, alternatives, and consequences.</p>
 <h2 id="adr-index"><a class="header" href="#adr-index">ADR Index</a></h2>
 <div class="table-wrapper">
@@ -5912,6 +6217,7 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 <tr><td>ADR-0003</td><td>STTP Reference-Only Job Context Contract</td><td>Accepted</td><td>2026-05-07</td></tr>
 <tr><td>ADR-0004</td><td>Recurring Jobs via Materialized Schedule Definitions</td><td>Accepted</td><td>2026-05-07</td></tr>
 <tr><td>ADR-0005</td><td>Agentic Workflow Skill Graph Contract</td><td>Accepted</td><td>2026-05-25</td></tr>
+<tr><td>ADR-0006</td><td>OpenTelemetry First-Class Observability</td><td>Accepted</td><td>2026-06-04</td></tr>
 </tbody>
 </table>
 </div>
@@ -5924,6 +6230,8 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
   A4 --&gt; A5
   A3 --&gt; A2
   A4 --&gt; A2
+  A1 --&gt; A6[ADR-0006 OpenTelemetry Observability]
+  A2 --&gt; A6
 </pre>
 
 <h2 id="adr-0001-durable-job-runtime-on-surrealdb"><a class="header" href="#adr-0001-durable-job-runtime-on-surrealdb">ADR-0001 Durable Job Runtime on SurrealDB</a></h2>
@@ -5985,6 +6293,19 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 <li>Tradeoff: requires graph schema/versioning, compiler determinism, and round-trip policy for advanced source edits.</li>
 </ul>
 </li>
+</ul>
+<h2 id="adr-0006-opentelemetry-first-class-observability"><a class="header" href="#adr-0006-opentelemetry-first-class-observability">ADR-0006 OpenTelemetry First-Class Observability</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Runtime metrics default to noop; no OTLP traces; operators need one complete observability path.</li>
+<li>Decision: Ship OpenTelemetry (metrics + traces + W3C propagation) in a single 0.3.0 release behind optional <code>otel</code> feature; freeze contract in opentelemetry-integration-rfc-plan.md.</li>
+<li>Consequences:
+<ul>
+<li>Positive: OTLP export, linked traces across jobs/LLM/memory/outbox, stable instrument names.</li>
+<li>Tradeoff: concentrated instrumentation work; contract maintenance obligation.</li>
+</ul>
+</li>
+<li>Plan: <a href="../../docs/design/opentelemetry-integration-rfc-plan.html">OpenTelemetry Integration RFC</a></li>
 </ul>
 
                     </main>

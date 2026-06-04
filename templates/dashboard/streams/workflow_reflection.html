@@ -59,9 +59,9 @@
         {% endif %}
       </div>
 
-      {% if !reflection.diagnostics.enabled %}
+      {% if reflection.diagnostics.provider.contains("pending") %}
       <p class="text-xs mt-2 rounded p-2" style="background: color-mix(in srgb, #eab308 14%, transparent); border: 1px dashed #eab308; color: var(--foreground);">
-        LSP diagnostics are currently disabled for this dashboard build.
+        Diagnostics use grapheme-compiler parse and SDK reflection today. Full grapheme-lsp integration is still pending.
       </p>
       {% endif %}
 

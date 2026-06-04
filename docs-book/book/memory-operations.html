@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aacee42b.js";
+            window.path_to_searchindex_js = "searchindex-6d96df05.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1439a5de.js"></script>
+        <script src="toc-9d13a89d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -365,6 +365,32 @@ pub trait MemoryOperations: Send + Sync {
 </tbody>
 </table>
 </div>
+<h3 id="response-memorynode"><a class="header" href="#response-memorynode">Response: <code>MemoryNode</code></a></h3>
+<p>Each recalled or found node carries the full STTP payload and metadata (aligned with Locus <code>MemoryNodeDto</code>):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>raw</code></td><td><code>String</code></td><td>Full STTP node text — the actual context payload</td></tr>
+<tr><td><code>session_id</code></td><td><code>String</code></td><td>Session the node belongs to</td></tr>
+<tr><td><code>tier</code></td><td><code>String</code></td><td>Memory tier (e.g. <code>raw</code>, <code>L1</code>)</td></tr>
+<tr><td><code>timestamp</code></td><td><code>DateTime&lt;Utc&gt;</code></td><td>Node creation time</td></tr>
+<tr><td><code>compression_depth</code></td><td><code>i32</code></td><td>Compression depth</td></tr>
+<tr><td><code>parent_node_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Parent node reference</td></tr>
+<tr><td><code>sync_key</code></td><td><code>String</code></td><td>Canonical sync fingerprint</td></tr>
+<tr><td><code>context_summary</code></td><td><code>Option&lt;String&gt;</code></td><td>Short summary when present</td></tr>
+<tr><td><code>embedding_model</code></td><td><code>Option&lt;String&gt;</code></td><td>Embedding model id</td></tr>
+<tr><td><code>embedding_dimensions</code></td><td><code>Option&lt;usize&gt;</code></td><td>Embedding vector size</td></tr>
+<tr><td><code>embedded_at</code></td><td><code>Option&lt;DateTime&lt;Utc&gt;&gt;</code></td><td>When embedding was computed</td></tr>
+<tr><td><code>rho</code> / <code>kappa</code> / <code>psi</code></td><td><code>f32</code></td><td>Resonance metrics</td></tr>
+<tr><td><code>user_avec</code> / <code>model_avec</code></td><td><code>MemoryAvecState</code></td><td>AVEC state snapshots</td></tr>
+<tr><td><code>compression_avec</code></td><td><code>Option&lt;MemoryAvecState&gt;</code></td><td>Compression AVEC when present</td></tr>
+<tr><td><code>updated_at</code></td><td><code>DateTime&lt;Utc&gt;</code></td><td>Last update time</td></tr>
+</tbody>
+</table>
+</div>
 <h3 id="response-memoryrecallresponse"><a class="header" href="#response-memoryrecallresponse">Response: <code>MemoryRecallResponse</code></a></h3>
 <div class="table-wrapper">
 <table>
@@ -378,10 +404,12 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>retrieval_path</code></td><td><code>Option&lt;String&gt;</code></td><td>Explanation of how results were retrieved</td></tr>
 <tr><td><code>fallback_triggered</code></td><td><code>bool</code></td><td>Whether fallback broadening was activated</td></tr>
 <tr><td><code>fallback_reason</code></td><td><code>Option&lt;String&gt;</code></td><td>Reason fallback was triggered</td></tr>
-<tr><td><code>node_sync_keys</code></td><td><code>Vec&lt;String&gt;</code></td><td>Sync keys of returned nodes</td></tr>
+<tr><td><code>nodes</code></td><td><code>Vec&lt;MemoryNode&gt;</code></td><td>Full recalled nodes including <code>raw</code> STTP context</td></tr>
+<tr><td><code>node_sync_keys</code></td><td><code>Vec&lt;String&gt;</code></td><td>Sync keys of returned nodes (derived from <code>nodes</code>)</td></tr>
 </tbody>
 </table>
 </div>
+<p>Memory-enabled runtime handlers prepend recalled node <code>raw</code> content into the user prompt before LLM execution (after identity snapshot, when nodes are non-empty).</p>
 <hr>
 <h2 id="operation-2-find"><a class="header" href="#operation-2-find">Operation 2: Find</a></h2>
 <p><strong>Job type:</strong> <code>workflow.stasis.memory.find</code><br><strong>Port:</strong> <code>MemoryContextReader</code></p>
@@ -431,7 +459,8 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>retrieved</code></td><td><code>usize</code></td><td>Number of nodes returned</td></tr>
 <tr><td><code>has_more</code></td><td><code>bool</code></td><td>Whether more results are available</td></tr>
 <tr><td><code>next_cursor</code></td><td><code>Option&lt;String&gt;</code></td><td>Cursor for the next page</td></tr>
-<tr><td><code>node_sync_keys</code></td><td><code>Vec&lt;String&gt;</code></td><td>Sync keys of returned nodes</td></tr>
+<tr><td><code>nodes</code></td><td><code>Vec&lt;MemoryNode&gt;</code></td><td>Full matched nodes including <code>raw</code> STTP context</td></tr>
+<tr><td><code>node_sync_keys</code></td><td><code>Vec&lt;String&gt;</code></td><td>Sync keys of returned nodes (derived from <code>nodes</code>)</td></tr>
 </tbody>
 </table>
 </div>
@@ -448,6 +477,7 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>has_more</code></td><td>Pagination flag</td></tr>
 <tr><td><code>next_cursor</code></td><td>Next page cursor when present</td></tr>
 <tr><td><code>node_sync_keys</code></td><td>Returned node sync keys</td></tr>
+<tr><td><code>nodes</code></td><td>Serialized node payloads (including <code>raw</code>)</td></tr>
 </tbody>
 </table>
 </div>

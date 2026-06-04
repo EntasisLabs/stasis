@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-aacee42b.js";
+            window.path_to_searchindex_js = "../searchindex-6d96df05.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-1439a5de.js"></script>
+        <script src="../toc-9d13a89d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -196,8 +196,23 @@ export STASIS_DASHBOARD_ACTION_REQUIRED_ROLE=scheduler.admin
 export STASIS_DASHBOARD_ACTION_ROLE_CLAIM_HEADER=x-stasis-role
 </code></pre>
 <h3 id="3-launch-dashboard-server"><a class="header" href="#3-launch-dashboard-server">3. Launch dashboard server</a></h3>
+<p>The dashboard binary wires a production-like runtime through <code>StasisRuntimeBuilder</code> (grapheme, prompt, agent, memory, orchestration, and cluster handlers). Optional toggles:</p>
+<pre><code class="language-bash"># Enable Locus memory adapters (requires Locus configuration)
+export STASIS_DASHBOARD_LOCUS_MEMORY=true
+
+# Enable OpenTelemetry when building with --features otel
+export STASIS_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
+</code></pre>
 <pre><code class="language-bash">cargo run --bin stasis_dashboard
 </code></pre>
+<p>Embedded apps can reuse the same wiring:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::dashboard::{build_dashboard_query_service, DashboardBootstrapOptions};
+
+let service = build_dashboard_query_service(DashboardBootstrapOptions::default()).await?;
+<span class="boring">}</span></code></pre>
 <p>Open:</p>
 <ol>
 <li>http://127.0.0.1:3007/dashboard</li>
@@ -234,7 +249,8 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <ol>
 <li>Prefer surreal-ws or surreal-kv for durable job and workflow history.</li>
 <li>Keep STASIS_DASHBOARD_ACTION_AUTH_BEARER in secret storage, not source control.</li>
-<li>Add health checks for /dashboard and one stream endpoint such as /stream/jobs.</li>
+<li>Add health checks for <code>/dashboard</code> and one live view such as <code>/view/jobs</code>.</li>
+<li>Optional: probe <code>/stream/jobs</code> as an HTMX fragment health check for custom integrations.</li>
 <li>Alert on repeated non-200 responses from /action routes.</li>
 </ol>
 

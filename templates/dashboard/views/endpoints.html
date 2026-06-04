@@ -19,9 +19,7 @@
         <h3 class="stat-value">{{ total_deliveries }}</h3>
       </div>
       <div class="card-content">
-        <div class="progress progress-thin progress-info">
-          <div class="progress-fill" style="width: 95%"></div>
-        </div>
+        <p class="text-xs" style="color: var(--muted-foreground);">{{ total_deliveries }} recorded delivery attempts</p>
       </div>
     </div>
     <div class="card">
@@ -62,7 +60,7 @@
               <th>Success</th>
               <th>Failures</th>
               <th>Failure Rate</th>
-              <th>Trend</th>
+              <th>Trend / Risk</th>
             </tr>
           </thead>
           <tbody>
@@ -100,20 +98,20 @@
                 </div>
               </td>
               <td>
-                {% if endpoint.trend == "Worsening" %}
+                {% if endpoint.trend == "Worsening" || endpoint.trend == "Elevated" %}
                 <span class="inline-flex items-center gap-1 text-sm font-medium text-red-500">
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/></svg>
-                  Worsening
+                  {{ endpoint.trend }}
                 </span>
-                {% else if endpoint.trend == "Improving" %}
+                {% else if endpoint.trend == "Improving" || endpoint.trend == "Clear" %}
                 <span class="inline-flex items-center gap-1 text-sm font-medium text-green-500">
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
-                  Improving
+                  {{ endpoint.trend }}
                 </span>
                 {% else %}
                 <span class="inline-flex items-center gap-1 text-sm" style="color: var(--muted-foreground);">
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14"/></svg>
-                  Stable
+                  {{ endpoint.trend }}
                 </span>
                 {% endif %}
               </td>

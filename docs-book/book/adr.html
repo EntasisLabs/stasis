@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aacee42b.js";
+            window.path_to_searchindex_js = "searchindex-6d96df05.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-1439a5de.js"></script>
+        <script src="toc-9d13a89d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -202,6 +202,7 @@
 <tr><td>ADR-0003</td><td>STTP Reference-Only Job Context Contract</td><td>Accepted</td><td>2026-05-07</td></tr>
 <tr><td>ADR-0004</td><td>Recurring Jobs via Materialized Schedule Definitions</td><td>Accepted</td><td>2026-05-07</td></tr>
 <tr><td>ADR-0005</td><td>Agentic Workflow Skill Graph Contract</td><td>Accepted</td><td>2026-05-25</td></tr>
+<tr><td>ADR-0006</td><td>OpenTelemetry First-Class Observability</td><td>Accepted</td><td>2026-06-04</td></tr>
 </tbody>
 </table>
 </div>
@@ -214,6 +215,8 @@
   A4 --&gt; A5
   A3 --&gt; A2
   A4 --&gt; A2
+  A1 --&gt; A6[ADR-0006 OpenTelemetry Observability]
+  A2 --&gt; A6
 </pre>
 
 <h2 id="adr-0001-durable-job-runtime-on-surrealdb"><a class="header" href="#adr-0001-durable-job-runtime-on-surrealdb">ADR-0001 Durable Job Runtime on SurrealDB</a></h2>
@@ -275,6 +278,19 @@
 <li>Tradeoff: requires graph schema/versioning, compiler determinism, and round-trip policy for advanced source edits.</li>
 </ul>
 </li>
+</ul>
+<h2 id="adr-0006-opentelemetry-first-class-observability"><a class="header" href="#adr-0006-opentelemetry-first-class-observability">ADR-0006 OpenTelemetry First-Class Observability</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Runtime metrics default to noop; no OTLP traces; operators need one complete observability path.</li>
+<li>Decision: Ship OpenTelemetry (metrics + traces + W3C propagation) in a single 0.3.0 release behind optional <code>otel</code> feature; freeze contract in opentelemetry-integration-rfc-plan.md.</li>
+<li>Consequences:
+<ul>
+<li>Positive: OTLP export, linked traces across jobs/LLM/memory/outbox, stable instrument names.</li>
+<li>Tradeoff: concentrated instrumentation work; contract maintenance obligation.</li>
+</ul>
+</li>
+<li>Plan: <a href="../../docs/design/opentelemetry-integration-rfc-plan.html">OpenTelemetry Integration RFC</a></li>
 </ul>
 
                     </main>

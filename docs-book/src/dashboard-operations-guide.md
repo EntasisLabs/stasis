@@ -81,11 +81,11 @@ Reference: src/dashboard/integration.rs
 |---|---|---|
 | / | GET | Redirects to /dashboard |
 | /dashboard | GET | Main shell |
-| /view/{name} | GET | Section content swap |
-| /stream/jobs | GET | Live jobs panel |
-| /stream/outbox | GET | Live outbox panel |
-| /stream/nodes | GET | Live cluster nodes panel |
-| /stream/workflow-reflection | GET | Reflection preview stream |
+| /view/{name} | GET | Primary section content (auto-refreshed every 5s for runtime views) |
+| /stream/jobs | GET | HTMX jobs fragment (health probe / custom integrations; not used by the default shell) |
+| /stream/outbox | GET | HTMX outbox fragment (health probe / custom integrations) |
+| /stream/nodes | GET | HTMX cluster fragment (health probe / custom integrations) |
+| /stream/workflow-reflection | GET | Workflow reflection preview stream (used by the builder UI) |
 | /inspect/job/{id} | GET | Job inspector |
 | /inspect/attempt/{id} | GET | Attempt inspector |
 | /inspect/node/{id} | GET | Node inspector |

@@ -7,7 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.3.0]
+### Changed
+
+- **Dashboard bootstrap (Phase A)** — `stasis_dashboard` now builds the runtime via `StasisRuntimeBuilder` with full default handlers, optional Locus memory (`STASIS_DASHBOARD_LOCUS_MEMORY`), and OTEL when enabled. In-memory control-plane stores are shared with the runtime via `dashboard::bootstrap`.
+- **Dashboard workflow execute (Phase B)** — saved workflow execute now enqueues a `workflow.grapheme.run` job from the latest persisted revision source and runs it via `process_once`, instead of only draining an unrelated queue job.
+- **Dashboard UI honesty pass (Phase C)** — relabeled synthetic cluster pressure metrics, wired endpoint trends to delivery history where available, clarified queue lanes vs persisted workflows, set workflow canvas nodes to draft status, disclosed lineage preview limits, corrected diagnostics provider naming, and surfaced demo-seed mode in the shell.
 
 ### Added
 

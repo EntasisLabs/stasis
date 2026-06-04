@@ -5,12 +5,13 @@ use async_trait::async_trait;
 use chrono::Utc;
 
 use crate::application::dto::{
-    ClusterNodeHealthRow, EndpointDiagnosticsReadModelRow,
+    ClusterNodeHealthRow, EndpointDiagnosticsReadModelRow, EndpointFailureRateTrendRow,
     ListClusterNodeHealthRequest, ListEndpointDiagnosticsReadModelRequest,
     ListEndpointFailureRateTrendsRequest,
 };
 use crate::application::runtime::runtime_factory::{RuntimeComposition, RuntimeFactory};
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
+use crate::application::telemetry::request_context::trace_id_for_enqueue;
 use crate::dashboard::dto::{
     AttemptInspectorDto, ClusterMapDto, DashboardDto, EndpointRowDto, EventInspectorDto,
     InspectorView, JobInspectorDto, JobRowDto, OutboxEventRowDto, RecurringDefinitionRowDto,
@@ -21,7 +22,7 @@ use crate::dashboard::mappers::{
     map_node_inspector, map_outbox_to_row, map_recurring_definition_row,
 };
 use crate::domain::errors::{Result, StasisError};
-use crate::domain::runtime::job::JobState;
+use crate::domain::runtime::job::{BackoffPolicy, JobState, NewJob};
 use crate::domain::runtime::outbox::OutboxEvent;
 use crate::domain::runtime::workflow_definition::{WorkflowDefinition, WorkflowRevision};
 use crate::infrastructure::runtime::grapheme_sdk_workflow_reflection::GraphemeSdkWorkflowReflection;
@@ -525,6 +526,38 @@ fn normalize_compile_mode_hint(raw: Option<&str>) -> Option<String> {
     }
 }
 
+const WORKFLOW_GRAPHEME_JOB_TYPE: &str = "workflow.grapheme.run";
+const GRAPHEME_INLINE_PAYLOAD_PREFIX: &str = "grapheme:inline:";
+
+fn workflow_execution_payload_ref(revision: &WorkflowRevision) -> String {
+    format!("{}{}", GRAPHEME_INLINE_PAYLOAD_PREFIX, revision.source)
+}
+
+fn build_workflow_execution_job(
+    workflow_id: &str,
+    revision: &WorkflowRevision,
+    queue: &str,
+    scheduled_at: chrono::DateTime<Utc>,
+) -> NewJob {
+    let job_id = format!("job-wf-{}-{}", workflow_id, scheduled_at.timestamp_millis());
+
+    NewJob {
+        id: job_id.clone(),
+        queue: queue.to_string(),
+        job_type: WORKFLOW_GRAPHEME_JOB_TYPE.to_string(),
+        payload_ref: workflow_execution_payload_ref(revision),
+        priority: 100,
+        max_attempts: 3,
+        idempotency_key: format!("idem-{}", job_id),
+        correlation_id: workflow_id.to_string(),
+        causation_id: revision.revision_id.clone(),
+        trace_id: trace_id_for_enqueue(|| format!("trace-wf-{}", workflow_id)),
+        sttp_input_node_id: format!("sttp:in:workflow:{workflow_id}"),
+        scheduled_at,
+        backoff_policy: BackoffPolicy::default(),
+    }
+}
+
 #[async_trait]
 pub trait DashboardQueryService: Send + Sync {
     async fn dashboard(&self, inspect: Option<InspectEntity>) -> Result<DashboardDto>;
@@ -548,6 +581,7 @@ pub trait DashboardQueryService: Send + Sync {
         queue: &str,
         worker_id: &str,
     ) -> Result<WorkflowExecuteResult>;
+    async fn endpoint_failure_rate_trends(&self) -> Vec<EndpointFailureRateTrendRow>;
     async fn workflow_run_draft(
         &self,
         request: WorkflowRunDraftRequest,
@@ -575,8 +609,15 @@ pub struct RuntimeDashboardQueryService {
 
 impl RuntimeDashboardQueryService {
     pub fn new(runtime: Arc<InMemoryRuntime>, control_plane: DashboardControlPlane) -> Self {
+        Self::from_in_memory_composition(runtime.as_ref().clone(), control_plane)
+    }
+
+    pub fn from_in_memory_composition(
+        runtime: InMemoryRuntime,
+        control_plane: DashboardControlPlane,
+    ) -> Self {
         Self {
-            runtime: RuntimeComposition::InMemory(runtime.as_ref().clone()),
+            runtime: RuntimeComposition::InMemory(runtime),
             control_plane: DashboardControlPlaneKind::InMemory(control_plane),
             workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
             workflow_store: Arc::new(InMemoryWorkflowDefinitionStore::default()),
@@ -631,6 +672,13 @@ impl RuntimeDashboardQueryService {
             .ok_or_else(|| {
                 StasisError::PortFailure(format!("workflow definition not found: {workflow_id}"))
             })
+    }
+
+    async fn enqueue_runtime_job(&self, job: NewJob) -> Result<()> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.enqueue(job).await,
+            RuntimeComposition::Surreal(rt) => rt.enqueue(job).await,
+        }
     }
 
     async fn list_cluster_node_health_rows(&self) -> Result<Vec<ClusterNodeHealthRow>> {
@@ -1078,6 +1126,12 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
             queue.trim().to_string()
         };
 
+        let now = Utc::now();
+        let execution_job =
+            build_workflow_execution_job(workflow_id.trim(), latest, resolved_queue.as_str(), now);
+        let enqueued_job_id = execution_job.id.clone();
+        self.enqueue_runtime_job(execution_job).await?;
+
         let leased_job_id = match &self.runtime {
             RuntimeComposition::InMemory(rt) => {
                 rt.process_once_now(resolved_queue.as_str(), worker_id).await?
@@ -1096,8 +1150,12 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
             graph_function_inputs_json: latest.graph_function_inputs_json.clone(),
             source_bytes: latest.source.len(),
             reflected_at_utc: latest.reflected_at_utc.to_rfc3339(),
-            leased_job_id,
+            leased_job_id: leased_job_id.or(Some(enqueued_job_id)),
         })
+    }
+
+    async fn endpoint_failure_rate_trends(&self) -> Vec<EndpointFailureRateTrendRow> {
+        self.list_endpoint_failure_rate_trends().await
     }
 
     async fn workflow_run_draft(
@@ -1250,17 +1308,19 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
             });
         }
 
-        let enabled = cfg!(feature = "dashboard-lsp");
-        let provider = if enabled {
-            "grapheme-lsp"
+        let enabled = true;
+        let provider = if cfg!(feature = "dashboard-lsp") {
+            "grapheme-compiler+reflection (grapheme-lsp wiring pending)"
         } else {
-            "fallback-parser"
+            "grapheme-compiler+reflection"
         };
         let summary = if diagnostics.is_empty() {
-            "No diagnostics from current source snapshot.".to_string()
+            format!(
+                "No issues from {provider} for the current source snapshot."
+            )
         } else {
             format!(
-                "Diagnostics reported {} issue(s) in the current source snapshot.",
+                "{provider} reported {} issue(s) in the current source snapshot.",
                 diagnostics.len()
             )
         };
@@ -1544,8 +1604,14 @@ query Echo {
 
     #[tokio::test]
     async fn workflow_execute_uses_latest_persisted_revision_metadata() {
+        let runtime = InMemoryRuntime::new();
+        runtime
+            .register_handler(crate::application::runtime::grapheme_job_handler::GraphemeJobHandler::new(
+                RuntimeFactory::default_workflow_engine(),
+            ))
+            .expect("grapheme handler should register");
         let service = RuntimeDashboardQueryService::from_runtime_composition(
-            RuntimeComposition::InMemory(InMemoryRuntime::new()),
+            RuntimeComposition::InMemory(runtime),
         );
         let source = valid_workflow_source();
 
@@ -1580,11 +1646,22 @@ query Echo {
             r#"{"node-fn-core-echo-1":"{\"message\":\"ping\"}"}"#
         );
         assert_eq!(executed.source_bytes, source.trim().len());
-        assert!(executed.leased_job_id.is_none());
+        let job_id = executed
+            .leased_job_id
+            .expect("workflow execute should enqueue and lease a grapheme job");
         assert!(
             DateTime::parse_from_rfc3339(&executed.reflected_at_utc).is_ok(),
             "reflected_at_utc should be RFC3339"
         );
+
+        let jobs = service.jobs_stream().await.expect("jobs stream should load");
+        let job = jobs
+            .items
+            .iter()
+            .find(|row| row.id == job_id)
+            .expect("executed job should appear in dashboard stream");
+        assert_eq!(job.status, "succeeded");
+        assert_eq!(job.queue, "queue.exec.meta");
     }
 
     #[tokio::test]
@@ -1759,7 +1836,7 @@ query Echo {
     }
 
     #[tokio::test]
-    async fn workflow_lsp_diagnostics_reports_disabled_without_feature() {
+    async fn workflow_lsp_diagnostics_uses_compiler_and_reflection_provider() {
         let service = RuntimeDashboardQueryService::from_runtime_composition(
             RuntimeComposition::InMemory(InMemoryRuntime::new()),
         );
@@ -1769,12 +1846,9 @@ query Echo {
             .await
             .expect("diagnostics call should succeed");
 
-        #[cfg(not(feature = "dashboard-lsp"))]
-        {
-            assert!(!diagnostics.enabled);
-            assert_eq!(diagnostics.provider, "fallback-parser");
-            assert!(diagnostics.diagnostics.is_empty());
-        }
+        assert!(diagnostics.enabled);
+        assert!(diagnostics.provider.contains("grapheme-compiler+reflection"));
+        assert!(diagnostics.diagnostics.is_empty());
     }
 
     #[tokio::test]

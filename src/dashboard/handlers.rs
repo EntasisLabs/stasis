@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use askama::Template;
@@ -13,12 +13,14 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::application::dto::EndpointFailureTrendDirection;
 use crate::domain::errors::StasisError;
 use crate::dashboard::assets;
 use crate::dashboard::trace_context::propagate_inbound_trace_context;
 use crate::dashboard::dto::{
-    ClusterNodeCardDto, DashboardDto, EndpointInspectorDto, EventInspectorDto, InspectorView,
-    JobInspectorDto, JobRowDto, NodeInspectorDto, OutboxEventRowDto, RecurringDefinitionRowDto,
+    ClusterNodeCardDto, DashboardDto, EndpointInspectorDto, EndpointRowDto, EventInspectorDto,
+    InspectorView, JobInspectorDto, JobRowDto, NodeInspectorDto, OutboxEventRowDto,
+    RecurringDefinitionRowDto,
 };
 use crate::dashboard::service::{
     DashboardQueryService, InspectEntity, WorkflowRunDraftRequest, WorkflowSaveRequest,
@@ -30,6 +32,7 @@ pub struct DashboardState {
     action_auth_bearer_token: Option<String>,
     action_required_role: Option<String>,
     action_role_claim_header: String,
+    demo_seed_mode: bool,
 }
 
 impl DashboardState {
@@ -39,7 +42,13 @@ impl DashboardState {
             action_auth_bearer_token: None,
             action_required_role: None,
             action_role_claim_header: "x-stasis-role".to_string(),
+            demo_seed_mode: false,
         }
+    }
+
+    pub fn with_demo_seed_mode(mut self, enabled: bool) -> Self {
+        self.demo_seed_mode = enabled;
+        self
     }
 
     pub fn with_action_auth_bearer_token(mut self, token: impl Into<String>) -> Self {
@@ -77,6 +86,8 @@ pub fn router(state: DashboardState) -> Router {
         .route("/", get(root))
         .route("/dashboard", get(dashboard))
         .route("/view/{name}", get(view_section))
+        // HTMX fragment endpoints: workflow-reflection is wired in the builder UI;
+        // jobs/outbox/nodes remain available for health probes and custom integrations.
         .route("/stream/jobs", get(stream_jobs))
         .route("/stream/outbox", get(stream_outbox))
         .route("/stream/nodes", get(stream_nodes))
@@ -162,9 +173,10 @@ async fn root() -> Redirect {
     Redirect::temporary("/dashboard")
 }
 
-async fn dashboard() -> Result<Html<String>, (StatusCode, String)> {
+async fn dashboard(State(state): State<DashboardState>) -> Result<Html<String>, (StatusCode, String)> {
     render_template(DashboardPageTemplate {
         refreshed_at: Utc::now().format("Updated %Y-%m-%d %H:%M UTC").to_string(),
+        demo_seed_mode: state.demo_seed_mode,
     })
 }
 
@@ -1795,6 +1807,11 @@ async fn view_section(
                 .endpoint_stream()
                 .await
                 .map_err(internal_error)?;
+            let trend_rows = state.service.endpoint_failure_rate_trends().await;
+            let trend_by_id: HashMap<String, EndpointFailureTrendDirection> = trend_rows
+                .into_iter()
+                .map(|row| (row.endpoint_id, row.trend))
+                .collect();
             let total = panel.items.len();
             let unhealthy_count = panel
                 .items
@@ -1816,13 +1833,11 @@ async fn view_section(
                 .items
                 .into_iter()
                 .map(|endpoint| {
-                    let trend = if endpoint.failure_count == 0 {
-                        "Improving"
-                    } else if endpoint.failure_rate_percent >= 10.0 || endpoint.unhealthy {
-                        "Worsening"
-                    } else {
-                        "Stable"
-                    };
+                    let trend = trend_by_id
+                        .get(endpoint.endpoint_id.as_str())
+                        .map(format_endpoint_trend_direction)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| fallback_endpoint_risk_band(&endpoint));
 
                     EndpointHealthRowDto {
                         endpoint_id: endpoint.endpoint_id,
@@ -1962,7 +1977,7 @@ async fn view_section(
                     .entry(job.queue.clone())
                     .or_insert_with(|| WorkflowLaneDto {
                         workflow_id: format!("wf-{}", job.queue.replace('.', "-")),
-                        workflow_name: format!("{} Workflow", job.queue),
+                        workflow_name: format!("Queue · {}", job.queue),
                         lane: job.queue.clone(),
                         total_jobs: 0,
                         running_jobs: 0,
@@ -1993,10 +2008,10 @@ async fn view_section(
             }
 
             let selected = lane_rows.iter().find(|lane| lane.selected).cloned();
-            let selected_name = selected
+            let selected_name = selected_queue
                 .as_ref()
-                .map(|lane| lane.workflow_name.clone())
-                .unwrap_or_else(|| "Workflow".to_string());
+                .map(|queue| format!("Workflow · {queue}"))
+                .unwrap_or_else(|| "New Workflow".to_string());
             let selected_id = selected
                 .as_ref()
                 .map(|lane| lane.workflow_id.clone())
@@ -2226,6 +2241,10 @@ async fn view_section(
                 }
             }
 
+            if custom_module_kinds.is_empty() && custom_function_steps.is_empty() {
+                custom_module_kinds.push(selected_module_catalog.clone());
+            }
+
             if custom_function_steps.is_empty() {
                 for module_id in &custom_module_kinds {
                     custom_function_steps.push((
@@ -2253,10 +2272,9 @@ async fn view_section(
             }
 
             let selected_lane = lane_rows.iter().find(|lane| lane.selected);
-            let workflow_count = selected_lane.map(|lane| lane.total_jobs).unwrap_or(0);
-            let running_count = selected_lane.map(|lane| lane.running_jobs).unwrap_or(0);
-            let succeeded_count = selected_lane.map(|lane| lane.succeeded_jobs).unwrap_or(0);
-            let failed_count = selected_lane.map(|lane| lane.failed_jobs).unwrap_or(0);
+            let selected_queue_running = selected_lane.map(|lane| lane.running_jobs).unwrap_or(0);
+            let selected_queue_succeeded = selected_lane.map(|lane| lane.succeeded_jobs).unwrap_or(0);
+            let selected_queue_failed = selected_lane.map(|lane| lane.failed_jobs).unwrap_or(0);
 
             let mut graph_nodes = Vec::new();
 
@@ -2296,26 +2314,8 @@ async fn view_section(
                     id,
                     label,
                     node_type: format!("{}.{}", module_id, function_id),
-                    status: if running_count > 0 {
-                        "running".to_string()
-                    } else if succeeded_count > 0 {
-                        "ready".to_string()
-                    } else if failed_count > 0 {
-                        "needs-attention".to_string()
-                    } else if workflow_count > 0 {
-                        "ready".to_string()
-                    } else {
-                        "draft".to_string()
-                    },
-                    status_tone: if failed_count > 0 {
-                        "warn".to_string()
-                    } else if running_count > 0 {
-                        "info".to_string()
-                    } else if succeeded_count > 0 || workflow_count > 0 {
-                        "ok".to_string()
-                    } else {
-                        "neutral".to_string()
-                    },
+                    status: "draft".to_string(),
+                    status_tone: "neutral".to_string(),
                     count: 0,
                     input_hint: input_schema_ref.clone().unwrap_or_else(|| {
                         "Piped from previous Grapheme function".to_string()
@@ -2440,6 +2440,9 @@ async fn view_section(
                 selected_queue: selected_queue
                     .clone()
                     .unwrap_or_else(|| "default".to_string()),
+                selected_queue_running,
+                selected_queue_succeeded,
+                selected_queue_failed,
                 selected_module_catalog,
                 module_catalog_options,
                 function_tiles,
@@ -2529,15 +2532,20 @@ async fn view_section(
 
             let graph_node_count = graph_nodes.len();
             let connection_count = graph_node_count.saturating_sub(1);
+            let unique_lanes = graph_nodes
+                .iter()
+                .map(|node| node.lane.as_str())
+                .collect::<BTreeSet<_>>()
+                .len();
             let depth_label = if graph_node_count == 0 {
-                "0 levels".to_string()
+                "0 lanes".to_string()
             } else {
-                "3 levels".to_string()
+                format!("{unique_lanes} preview lane(s)")
             };
 
             render_template(LineageViewTemplate {
                 event_count: events.len(),
-                active_job_count: jobs.items.len(),
+                runtime_job_count: jobs.items.len(),
                 events,
                 selected_state,
                 query_text,
@@ -3065,7 +3073,7 @@ async fn action_workflow_execute(
             job_id
         ),
         None => format!(
-            "{} (revision={}, executables={}, function_steps={}, function_inputs={}, reflected_at={}) queued execution request, but no due jobs were available in {}",
+            "{} (revision={}, executables={}, function_steps={}, function_inputs={}, reflected_at={}) enqueued grapheme job {} in {}, but the worker did not lease it immediately",
             executed.workflow_id,
             executed.revision_id,
             executed.executable_count,
@@ -3080,6 +3088,10 @@ async fn action_workflow_execute(
                 executed.graph_function_inputs_json.clone()
             },
             executed.reflected_at_utc,
+            executed
+                .leased_job_id
+                .as_deref()
+                .unwrap_or("unknown"),
             executed.queue
         ),
     };
@@ -3122,6 +3134,27 @@ fn internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
         StatusCode::INTERNAL_SERVER_ERROR,
         format!("dashboard error: {err}"),
     )
+}
+
+fn format_endpoint_trend_direction(direction: &EndpointFailureTrendDirection) -> &'static str {
+    match direction {
+        EndpointFailureTrendDirection::Improving => "Improving",
+        EndpointFailureTrendDirection::Stable => "Stable",
+        EndpointFailureTrendDirection::Worsening => "Worsening",
+    }
+}
+
+fn fallback_endpoint_risk_band(endpoint: &EndpointRowDto) -> String {
+    let total = endpoint.success_count + endpoint.failure_count;
+    if total == 0 {
+        "No delivery history".to_string()
+    } else if endpoint.failure_count == 0 {
+        "Clear".to_string()
+    } else if endpoint.unhealthy || endpoint.failure_rate_percent >= 10.0 {
+        "Elevated".to_string()
+    } else {
+        "Within tolerance".to_string()
+    }
 }
 
 fn action_bad_request_template(title: &str, detail: &str) -> (StatusCode, String) {
@@ -3275,6 +3308,10 @@ mod tests {
             Self::unsupported()
         }
 
+        async fn endpoint_failure_rate_trends(&self) -> Vec<crate::application::dto::EndpointFailureRateTrendRow> {
+            vec![]
+        }
+
         async fn workflow_run_draft(
             &self,
             _request: WorkflowRunDraftRequest,
@@ -3363,16 +3400,10 @@ mod tests {
             _source: &str,
         ) -> Result<WorkflowDiagnosticsResult> {
             Ok(WorkflowDiagnosticsResult {
-                enabled: false,
-                provider: "disabled".to_string(),
-                summary: "LSP diagnostics are disabled. Enable the dashboard-lsp feature to activate diagnostics preview.".to_string(),
-                diagnostics: vec![WorkflowDiagnostic {
-                    severity: WorkflowDiagnosticSeverity::Info,
-                    message: "dashboard-lsp feature is not enabled".to_string(),
-                    code: Some("LSP_DISABLED".to_string()),
-                    line: None,
-                    column: None,
-                }],
+                enabled: true,
+                provider: "grapheme-compiler+reflection".to_string(),
+                summary: "No issues from grapheme-compiler+reflection for the current source snapshot.".to_string(),
+                diagnostics: vec![],
             })
         }
 
@@ -4065,9 +4096,9 @@ mod tests {
             .await
             .expect("body should read");
         let html = String::from_utf8(body.to_vec()).expect("body should be utf8");
-        assert!(html.contains("Function steps in textops"));
-        assert!(html.contains("textops.echo"));
         assert!(html.contains("Echo"));
+        assert!(html.contains("data-module-kind=\"textops\""));
+        assert!(html.contains("data-function-id=\"echo\""));
     }
 
     #[tokio::test]
@@ -4868,6 +4899,7 @@ fn render_template<T: Template>(template: T) -> Result<Html<String>, (StatusCode
 #[template(path = "dashboard/index.html")]
 struct DashboardPageTemplate {
     refreshed_at: String,
+    demo_seed_mode: bool,
 }
 
 #[derive(Template)]
@@ -4945,6 +4977,9 @@ struct WorkflowsViewTemplate {
     selected_workflow_name: String,
     selected_workflow_id: String,
     selected_queue: String,
+    selected_queue_running: usize,
+    selected_queue_succeeded: usize,
+    selected_queue_failed: usize,
     selected_module_catalog: String,
     module_catalog_options: Vec<WorkflowModuleCatalogOptionDto>,
     function_tiles: Vec<WorkflowFunctionTileDto>,
@@ -4973,7 +5008,7 @@ struct WorkflowReflectionStreamTemplate {
 #[template(path = "dashboard/views/lineage.html")]
 struct LineageViewTemplate {
     event_count: usize,
-    active_job_count: usize,
+    runtime_job_count: usize,
     events: Vec<LineageEventDto>,
     selected_state: String,
     query_text: String,
