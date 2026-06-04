@@ -459,7 +459,7 @@ async fn build_workflow_reflection_preview(
     };
 
     let diagnostics_dto = WorkflowDiagnosticsPreviewDto {
-        enabled: diagnostics.enabled,
+        lsp_integration_pending: diagnostics.provider.contains("pending"),
         provider: diagnostics.provider,
         summary: diagnostics.summary,
         diagnostics: diagnostics
@@ -887,9 +887,7 @@ struct WorkflowGraphTopologyLoopSpec {
 fn parse_module_function_from_node_id(node_id: &str) -> Option<(String, String)> {
     let trimmed = node_id.trim();
     let rest = trimmed.strip_prefix("node-fn-")?;
-    let mut parts = rest.rsplitn(2, '-');
-    let _index = parts.next()?;
-    let module_and_function = parts.next()?;
+    let (module_and_function, _index) = rest.rsplit_once('-')?;
     let (module_id, function_id) = module_and_function.split_once('-')?;
 
     let module_id = module_id.trim().to_ascii_lowercase();
@@ -1244,7 +1242,7 @@ fn render_graph_literal(value: &serde_json::Value) -> String {
             }
 
             let mut entries = map.iter().collect::<Vec<_>>();
-            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            entries.sort_by_key(|(left, _)| *left);
             let rendered = entries
                 .into_iter()
                 .map(|(key, value)| {
@@ -1278,7 +1276,7 @@ fn render_graph_call_args(args: Option<&serde_json::Value>) -> String {
     };
 
     let mut entries = object.iter().collect::<Vec<_>>();
-    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    entries.sort_by_key(|(left, _)| *left);
     let rendered = entries
         .into_iter()
         .map(|(key, value)| format!("{key}: {}", render_graph_literal(value)))
@@ -1300,7 +1298,7 @@ fn render_graph_set_state(initial_state: Option<&serde_json::Value>) -> Option<S
     }
 
     let mut entries = object.iter().collect::<Vec<_>>();
-    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    entries.sort_by_key(|(left, _)| *left);
     let rendered = entries
         .into_iter()
         .map(|(key, value)| {
@@ -1708,7 +1706,7 @@ fn compile_grapheme_source_from_function_steps(
                     }
 
                     let mut entries = map.iter().collect::<Vec<_>>();
-                    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+                    entries.sort_by_key(|(left, _)| *left);
                     let rendered = entries
                         .into_iter()
                         .map(|(key, value)| {
@@ -1748,7 +1746,7 @@ fn compile_grapheme_source_from_function_steps(
                 .and_then(|value| value.as_object().cloned())
                 .map(|object| {
                     let mut entries = object.iter().collect::<Vec<_>>();
-                    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+                    entries.sort_by_key(|(left, _)| *left);
                     entries
                         .into_iter()
                         .map(|(key, value)| format!("{key}: {}", render_literal(value)))
@@ -2298,15 +2296,16 @@ async fn view_section(
                     .cloned()
                     .unwrap_or_else(|| "{}".to_string());
 
-                if requested_add_function.as_ref().is_some_and(|(add_module, add_function)| {
-                    add_module == module_id
-                        && add_function == function_id
-                        && index == custom_function_steps.len() - 1
-                }) {
-                    added_node_id = Some(id.clone());
-                } else if requested_add_module.as_ref().is_some_and(|added| {
+                let marks_added_node = requested_add_function.as_ref().is_some_and(
+                    |(add_module, add_function)| {
+                        add_module == module_id
+                            && add_function == function_id
+                            && index == custom_function_steps.len() - 1
+                    },
+                ) || requested_add_module.as_ref().is_some_and(|added| {
                     added == module_id && index == custom_function_steps.len() - 1
-                }) {
+                });
+                if marks_added_node {
                     added_node_id = Some(id.clone());
                 }
 
@@ -3190,9 +3189,8 @@ mod tests {
     use crate::dashboard::service::{
         DashboardQueryService, InspectEntity, RuntimeDashboardQueryService,
         WorkflowExecuteResult, WorkflowRunDraftRequest, WorkflowRunDraftResult,
-        WorkflowSaveRequest,
-        WorkflowDiagnostic, WorkflowDiagnosticSeverity, WorkflowDiagnosticsResult,
-        WorkflowSaveResult, WorkflowSavedRevisionSummary,
+        WorkflowSaveRequest, WorkflowDiagnosticsResult, WorkflowSaveResult,
+        WorkflowSavedRevisionSummary,
     };
     use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
     use crate::application::runtime::runtime_factory::RuntimeComposition;
@@ -5131,7 +5129,7 @@ struct WorkflowReflectionPreviewDto {
 
 #[derive(Clone, Debug)]
 struct WorkflowDiagnosticsPreviewDto {
-    enabled: bool,
+    lsp_integration_pending: bool,
     provider: String,
     summary: String,
     diagnostics: Vec<WorkflowDiagnosticRowDto>,

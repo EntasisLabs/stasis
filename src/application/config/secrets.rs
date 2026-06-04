@@ -68,7 +68,7 @@ impl ChainedSecretsSource {
 
     pub fn with_source(mut self, source: impl SecretsSource + 'static) -> Self {
         self.sources.push(Box::new(source));
-        return self;
+        self
     }
 }
 

@@ -672,7 +672,7 @@ impl InMemoryRuntime {
             }
 
             let event_type = runtime_event_type_name(&event.event.event_type);
-            let _publish_span = operation_telemetry.outbox_publish_span(&event_type, &event.event.job_id);
+            let _publish_span = operation_telemetry.outbox_publish_span(event_type, &event.event.job_id);
 
             match publisher.publish(&event).await {
                 Ok(()) => {

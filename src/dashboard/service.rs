@@ -607,6 +607,24 @@ pub struct RuntimeDashboardQueryService {
     workflow_engine: Arc<dyn WorkflowEngine>,
 }
 
+macro_rules! with_runtime {
+    ($service:expr, |$rt:ident| $body:expr) => {
+        match &$service.runtime {
+            RuntimeComposition::InMemory($rt) => $body,
+            RuntimeComposition::Surreal($rt) => $body,
+        }
+    };
+}
+
+macro_rules! with_control_plane {
+    ($service:expr, |$cp:ident| $body:expr) => {
+        match &$service.control_plane {
+            DashboardControlPlaneKind::InMemory($cp) => $body,
+            DashboardControlPlaneKind::Surreal($cp) => $body,
+        }
+    };
+}
+
 impl RuntimeDashboardQueryService {
     pub fn new(runtime: Arc<InMemoryRuntime>, control_plane: DashboardControlPlane) -> Self {
         Self::from_in_memory_composition(runtime.as_ref().clone(), control_plane)
@@ -675,10 +693,27 @@ impl RuntimeDashboardQueryService {
     }
 
     async fn enqueue_runtime_job(&self, job: NewJob) -> Result<()> {
-        match &self.runtime {
-            RuntimeComposition::InMemory(rt) => rt.enqueue(job).await,
-            RuntimeComposition::Surreal(rt) => rt.enqueue(job).await,
-        }
+        with_runtime!(self, |rt| rt.enqueue(job).await)
+    }
+
+    async fn runtime_process_once(
+        &self,
+        queue: &str,
+        worker_id: &str,
+    ) -> Result<Option<String>> {
+        with_runtime!(self, |rt| rt.process_once_now(queue, worker_id).await)
+    }
+
+    async fn runtime_materialize_recurring(&self, scheduler_id: &str) -> Result<usize> {
+        with_runtime!(self, |rt| rt.materialize_recurring_now(scheduler_id).await)
+    }
+
+    async fn runtime_publish_pending(&self, limit: usize) -> Result<usize> {
+        with_runtime!(self, |rt| rt.publish_pending_events_now(limit).await)
+    }
+
+    async fn runtime_replay_dead_letter(&self, job_id: &str) -> Result<bool> {
+        with_runtime!(self, |rt| rt.replay_dead_letter_now(job_id).await)
     }
 
     async fn list_cluster_node_health_rows(&self) -> Result<Vec<ClusterNodeHealthRow>> {
@@ -692,14 +727,7 @@ impl RuntimeDashboardQueryService {
             limit: Some(200),
         };
 
-        match &self.control_plane {
-            DashboardControlPlaneKind::InMemory(control_plane) => {
-                control_plane.list_cluster_node_health(request).await
-            }
-            DashboardControlPlaneKind::Surreal(control_plane) => {
-                control_plane.list_cluster_node_health(request).await
-            }
-        }
+        with_control_plane!(self, |control_plane| control_plane.list_cluster_node_health(request).await)
     }
 
     async fn list_endpoint_diagnostics_rows(
@@ -718,17 +746,13 @@ impl RuntimeDashboardQueryService {
             limit,
         };
 
-        match &self.control_plane {
-            DashboardControlPlaneKind::InMemory(control_plane) => {
-                control_plane.list_endpoint_diagnostics_read_model(request).await
-            }
-            DashboardControlPlaneKind::Surreal(control_plane) => {
-                control_plane.list_endpoint_diagnostics_read_model(request).await
-            }
-        }
+        with_control_plane!(
+            self,
+            |control_plane| control_plane.list_endpoint_diagnostics_read_model(request).await
+        )
     }
 
-    async fn list_endpoint_failure_rate_trends(&self) -> Vec<crate::application::dto::EndpointFailureRateTrendRow> {
+    async fn list_endpoint_failure_rate_trends(&self) -> Vec<EndpointFailureRateTrendRow> {
         let request = ListEndpointFailureRateTrendsRequest {
             protocol: None,
             include_disabled: true,
@@ -736,33 +760,21 @@ impl RuntimeDashboardQueryService {
             limit: 100,
         };
 
-        match &self.control_plane {
-            DashboardControlPlaneKind::InMemory(control_plane) => control_plane
-                .list_endpoint_failure_rate_trends(request)
-                .await
-                .unwrap_or_default(),
-            DashboardControlPlaneKind::Surreal(control_plane) => control_plane
-                .list_endpoint_failure_rate_trends(request)
-                .await
-                .unwrap_or_default(),
-        }
+        with_control_plane!(self, |control_plane| control_plane
+            .list_endpoint_failure_rate_trends(request)
+            .await
+            .unwrap_or_default())
     }
 
     async fn list_job_attempts(&self, job_id: &str) -> Result<Vec<crate::domain::runtime::job_attempt::JobAttempt>> {
-        match &self.runtime {
-            RuntimeComposition::InMemory(rt) => rt.list_job_attempts(job_id).await,
-            RuntimeComposition::Surreal(rt) => rt.list_job_attempts(job_id).await,
-        }
+        with_runtime!(self, |rt| rt.list_job_attempts(job_id).await)
     }
 
     async fn list_lineage_events_by_job(
         &self,
         job_id: &str,
     ) -> Result<Vec<OutboxEvent>> {
-        match &self.runtime {
-            RuntimeComposition::InMemory(rt) => rt.list_lineage_events(job_id).await,
-            RuntimeComposition::Surreal(rt) => rt.list_lineage_events(job_id).await,
-        }
+        with_runtime!(self, |rt| rt.list_lineage_events(job_id).await)
     }
 
     async fn list_all_jobs(&self) -> Result<Vec<crate::domain::runtime::job::Job>> {
@@ -778,10 +790,7 @@ impl RuntimeDashboardQueryService {
 
         let mut jobs = Vec::new();
         for state in states {
-            let mut by_state = match &self.runtime {
-                RuntimeComposition::InMemory(rt) => rt.job_store.list_by_state(state).await?,
-                RuntimeComposition::Surreal(rt) => rt.job_store.list_by_state(state).await?,
-            };
+            let mut by_state = with_runtime!(self, |rt| rt.job_store.list_by_state(state).await?);
             jobs.append(&mut by_state);
         }
 
@@ -948,10 +957,7 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
     }
 
     async fn recurring_stream(&self) -> Result<UiListPanel<RecurringDefinitionRowDto>> {
-        let definitions = match &self.runtime {
-            RuntimeComposition::InMemory(rt) => rt.recurring_store.list().await?,
-            RuntimeComposition::Surreal(rt) => rt.recurring_store.list().await?,
-        };
+        let definitions = with_runtime!(self, |rt| rt.recurring_store.list().await?);
         let mut rows = definitions
             .iter()
             .map(map_recurring_definition_row)
@@ -979,10 +985,7 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
     }
 
     async fn scheduler_materialize_now(&self, scheduler_id: &str) -> Result<usize> {
-        match &self.runtime {
-            RuntimeComposition::InMemory(rt) => rt.materialize_recurring_now(scheduler_id).await,
-            RuntimeComposition::Surreal(rt) => rt.materialize_recurring_now(scheduler_id).await,
-        }
+        self.runtime_materialize_recurring(scheduler_id).await
     }
 
     async fn scheduler_process_queue_once(
@@ -990,24 +993,15 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
         queue: &str,
         worker_id: &str,
     ) -> Result<Option<String>> {
-        match &self.runtime {
-            RuntimeComposition::InMemory(rt) => rt.process_once_now(queue, worker_id).await,
-            RuntimeComposition::Surreal(rt) => rt.process_once_now(queue, worker_id).await,
-        }
+        self.runtime_process_once(queue, worker_id).await
     }
 
     async fn scheduler_publish_pending_now(&self, limit: usize) -> Result<usize> {
-        match &self.runtime {
-            RuntimeComposition::InMemory(rt) => rt.publish_pending_events_now(limit).await,
-            RuntimeComposition::Surreal(rt) => rt.publish_pending_events_now(limit).await,
-        }
+        self.runtime_publish_pending(limit).await
     }
 
     async fn scheduler_replay_dead_letter_now(&self, job_id: &str) -> Result<bool> {
-        match &self.runtime {
-            RuntimeComposition::InMemory(rt) => rt.replay_dead_letter_now(job_id).await,
-            RuntimeComposition::Surreal(rt) => rt.replay_dead_letter_now(job_id).await,
-        }
+        self.runtime_replay_dead_letter(job_id).await
     }
 
     async fn workflow_save(&self, request: WorkflowSaveRequest) -> Result<WorkflowSaveResult> {
@@ -1132,14 +1126,9 @@ impl DashboardQueryService for RuntimeDashboardQueryService {
         let enqueued_job_id = execution_job.id.clone();
         self.enqueue_runtime_job(execution_job).await?;
 
-        let leased_job_id = match &self.runtime {
-            RuntimeComposition::InMemory(rt) => {
-                rt.process_once_now(resolved_queue.as_str(), worker_id).await?
-            }
-            RuntimeComposition::Surreal(rt) => {
-                rt.process_once_now(resolved_queue.as_str(), worker_id).await?
-            }
-        };
+        let leased_job_id = self
+            .runtime_process_once(resolved_queue.as_str(), worker_id)
+            .await?;
 
         Ok(WorkflowExecuteResult {
             workflow_id: workflow.workflow_id,

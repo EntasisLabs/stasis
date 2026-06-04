@@ -150,7 +150,7 @@ impl RuntimeWorkflowJobBuilder {
         self
     }
 
-    pub fn with_traceparent(mut self, header: &str) -> Result<Self> {
+    pub fn with_traceparent(self, header: &str) -> Result<Self> {
         let trace_context = parse_traceparent(header)?;
         Ok(self.with_trace_context(trace_context))
     }

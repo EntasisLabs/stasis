@@ -59,7 +59,7 @@
         {% endif %}
       </div>
 
-      {% if reflection.diagnostics.provider.contains("pending") %}
+      {% if reflection.diagnostics.lsp_integration_pending %}
       <p class="text-xs mt-2 rounded p-2" style="background: color-mix(in srgb, #eab308 14%, transparent); border: 1px dashed #eab308; color: var(--foreground);">
         Diagnostics use grapheme-compiler parse and SDK reflection today. Full grapheme-lsp integration is still pending.
       </p>
