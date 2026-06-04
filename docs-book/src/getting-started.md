@@ -82,9 +82,28 @@ async fn main() -> stasis::domain::errors::Result<()> {
 3. `process_once` is perfect for tests and tutorials. Production workers typically run it in a loop.
 4. If no chat client is configured, Stasis uses `GenaiChatClient::from_env()` when handlers need model calls.
 
+## Environment and secrets
+
+For local development, copy `.env.example` to `.env` and call `bootstrap()` once at startup:
+
+```rust
+use stasis::config_prelude::{bootstrap, with_default};
+
+#[tokio::main]
+async fn main() -> stasis::domain::errors::Result<()> {
+    bootstrap().map_err(stasis::domain::errors::StasisError::PortFailure)?;
+    let model = with_default("STASIS_LLM_MODEL", "gpt-4o-mini");
+    // ...
+    Ok(())
+}
+```
+
+See [Environment Configuration](./environment-configuration.md) for Vault/file secret mounts and the full variable reference.
+
 ## What To Read Next
 
-1. [Runtime Builder and Wiring Guide](./runtime-builder.md) for all builder options.
+1. [Environment Configuration](./environment-configuration.md) for `.env`, secrets dir, and Vault-friendly mounts.
+2. [Runtime Builder and Wiring Guide](./runtime-builder.md) for all builder options.
 2. [Job Runtime Design](./runtime-job-design.md) for lifecycle and durability semantics.
 3. [Extension Points and Port Contracts](./extension-points.md) for custom adapters.
 4. [Production Agentic Workflows](./cookbook/production-agentic-workflows.md) for real-provider loop and orchestration examples.

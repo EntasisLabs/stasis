@@ -121,8 +121,20 @@ pub mod prelude {
     pub use crate::sdk_prelude::*;
 }
 
+/// Environment and secrets configuration helpers.
+pub mod config_prelude {
+    pub use crate::application::config::env::{
+        bootstrap, bootstrap_with, first_non_empty, load_dotenv_from, non_empty, required, truthy,
+        with_default, EnvBootstrapOptions, EnvBootstrapReport, EnvError,
+    };
+    pub use crate::application::config::secrets::{
+        ChainedSecretsSource, FileSecretsSource, OsEnvSource, SecretsSource, default_secrets_dir,
+    };
+}
+
 /// Re-exported extended API surface for advanced integrations.
 pub mod prelude_ext {
+    pub use crate::config_prelude::*;
     pub use crate::memory_prelude_ext::*;
     pub use crate::runtime_prelude_ext::*;
     pub use crate::sdk_prelude_ext::*;

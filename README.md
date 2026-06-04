@@ -76,6 +76,8 @@ export STASIS_LLM_PROVIDER=openai
 export STASIS_LLM_MODEL=gpt-4o-mini
 ```
 
+Or copy `.env.example` to `.env` and call `stasis::config_prelude::bootstrap()` at process start (the dashboard does this automatically). See [docs-book/src/environment-configuration.md](docs-book/src/environment-configuration.md) for Vault/file secret mounts.
+
 You can also set a Stasis-scoped fallback key:
 
 ```bash

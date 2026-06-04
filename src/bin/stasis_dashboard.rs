@@ -8,6 +8,7 @@ use stasis::application::dto::{
 use stasis::application::composition::surreal_backend_config::{
     resolve_surreal_auth_from_env, resolve_surreal_database_from_env, resolve_surreal_namespace_from_env,
 };
+use stasis::application::config::env::{bootstrap, non_empty, required, truthy, with_default};
 use stasis::application::runtime::runtime_factory::{
     RuntimeBackend, RuntimeComposition, RuntimeFactory, SurrealAuth,
 };
@@ -234,11 +235,11 @@ async fn seed_control_plane_data(
 
 #[tokio::main]
 async fn main() {
-    let seed_demo_data = std::env::var("STASIS_DASHBOARD_DEMO_SEED")
-        .ok()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .map(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false);
+    if let Err(err) = bootstrap() {
+        eprintln!("stasis env bootstrap warning: {err}");
+    }
+
+    let seed_demo_data = truthy("STASIS_DASHBOARD_DEMO_SEED");
 
     let backend = resolve_dashboard_runtime_backend();
     let runtime = RuntimeFactory::build(backend)
@@ -279,31 +280,18 @@ async fn main() {
     };
 
     let mut state = DashboardState::new(service);
-    if let Some(token) = std::env::var("STASIS_DASHBOARD_ACTION_AUTH_BEARER")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(token) = non_empty("STASIS_DASHBOARD_ACTION_AUTH_BEARER") {
         state = state.with_action_auth_bearer_token(token);
     }
-    if let Some(required_role) = std::env::var("STASIS_DASHBOARD_ACTION_REQUIRED_ROLE")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(required_role) = non_empty("STASIS_DASHBOARD_ACTION_REQUIRED_ROLE") {
         state = state.with_action_required_role(required_role);
     }
-    if let Some(role_claim_header) = std::env::var("STASIS_DASHBOARD_ACTION_ROLE_CLAIM_HEADER")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(role_claim_header) = non_empty("STASIS_DASHBOARD_ACTION_ROLE_CLAIM_HEADER") {
         state = state.with_action_role_claim_header(role_claim_header);
     }
     let app = router(state);
 
-    let addr: SocketAddr = std::env::var("STASIS_DASHBOARD_ADDR")
-        .ok()
+    let addr: SocketAddr = non_empty("STASIS_DASHBOARD_ADDR")
         .and_then(|raw| raw.parse().ok())
         .unwrap_or_else(|| {
             "127.0.0.1:3007"
@@ -326,11 +314,9 @@ async fn main() {
 }
 
 fn resolve_dashboard_runtime_backend() -> RuntimeBackend {
-    let backend = std::env::var("STASIS_DASHBOARD_RUNTIME_BACKEND")
-        .ok()
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "in-memory".to_string());
+    let backend = with_default("STASIS_DASHBOARD_RUNTIME_BACKEND", "in-memory")
+        .trim()
+        .to_ascii_lowercase();
 
     match backend.as_str() {
         "in-memory" | "inmemory" => RuntimeBackend::InMemory,
@@ -339,24 +325,20 @@ fn resolve_dashboard_runtime_backend() -> RuntimeBackend {
             dashboard_surreal_database(),
         )),
         "surreal-ws" | "ws" => apply_surreal_auth(RuntimeBackend::surreal_ws(
-            std::env::var("STASIS_DASHBOARD_SURREAL_ENDPOINT")
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .expect(
-                    "STASIS_DASHBOARD_SURREAL_ENDPOINT is required when STASIS_DASHBOARD_RUNTIME_BACKEND=surreal-ws",
-                ),
+            required("STASIS_DASHBOARD_SURREAL_ENDPOINT").unwrap_or_else(|_| {
+                panic!(
+                    "STASIS_DASHBOARD_SURREAL_ENDPOINT is required when STASIS_DASHBOARD_RUNTIME_BACKEND=surreal-ws"
+                )
+            }),
             dashboard_surreal_namespace(),
             dashboard_surreal_database(),
         )),
         "surreal-kv" | "kv" => apply_surreal_auth(RuntimeBackend::surreal_kv(
-            std::env::var("STASIS_DASHBOARD_SURREAL_KV_PATH")
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .expect(
-                    "STASIS_DASHBOARD_SURREAL_KV_PATH is required when STASIS_DASHBOARD_RUNTIME_BACKEND=surreal-kv",
-                ),
+            required("STASIS_DASHBOARD_SURREAL_KV_PATH").unwrap_or_else(|_| {
+                panic!(
+                    "STASIS_DASHBOARD_SURREAL_KV_PATH is required when STASIS_DASHBOARD_RUNTIME_BACKEND=surreal-kv"
+                )
+            }),
             dashboard_surreal_namespace(),
             dashboard_surreal_database(),
         )),

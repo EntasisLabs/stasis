@@ -112,6 +112,8 @@ All handler groups are active. No middleware is applied beyond the chat client i
 
 ## Production Environment Variables
 
+Call `stasis::config_prelude::bootstrap()` once at process entry to load `.env` (when present) and file secrets from `STASIS_SECRETS_DIR`. See [Environment Configuration](./environment-configuration.md).
+
 When using the default chat client (`GenaiChatClient::from_env()`), configure provider and model routing via environment variables:
 
 ```bash

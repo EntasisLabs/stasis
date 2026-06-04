@@ -29,6 +29,7 @@
 
 ## Integration
 
+- [Environment Configuration](./environment-configuration.md)
 - [Extension Points and Port Contracts](./extension-points.md)
 - [Stasis Tool Macro](./stasis-tool-macro.md)
 - [Control Plane and Endpoint Routing](./control-plane-endpoint-routing.md)

@@ -3,3 +3,6 @@
 package-lock.json
 .grapheme-examples/
 /data
+.env
+.env.local
+.env.*.local

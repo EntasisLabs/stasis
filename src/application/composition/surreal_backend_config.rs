@@ -19,9 +19,11 @@ pub fn resolve_surreal_namespace_from_env(
     fallback_var: Option<&str>,
     default: &str,
 ) -> String {
-    read_non_empty_env(primary_var)
-        .or_else(|| fallback_var.and_then(read_non_empty_env))
-        .unwrap_or_else(|| default.to_string())
+    crate::application::config::env::first_non_empty(&match fallback_var {
+        Some(fallback) => vec![primary_var, fallback],
+        None => vec![primary_var],
+    })
+    .unwrap_or_else(|| default.to_string())
 }
 
 pub fn resolve_surreal_database_from_env(
@@ -29,9 +31,7 @@ pub fn resolve_surreal_database_from_env(
     fallback_var: Option<&str>,
     default: &str,
 ) -> String {
-    read_non_empty_env(primary_var)
-        .or_else(|| fallback_var.and_then(read_non_empty_env))
-        .unwrap_or_else(|| default.to_string())
+    resolve_surreal_namespace_from_env(primary_var, fallback_var, default)
 }
 
 pub fn resolve_surreal_auth_from_env(
@@ -40,16 +40,13 @@ pub fn resolve_surreal_auth_from_env(
     fallback_username_var: Option<&str>,
     fallback_password_var: Option<&str>,
 ) -> Option<SurrealAuth> {
-    let username = read_non_empty_env(username_var)
-        .or_else(|| fallback_username_var.and_then(read_non_empty_env))?;
-    let password = read_non_empty_env(password_var)
-        .or_else(|| fallback_password_var.and_then(read_non_empty_env))?;
+    let username = crate::application::config::env::first_non_empty(&match fallback_username_var {
+        Some(fallback) => vec![username_var, fallback],
+        None => vec![username_var],
+    })?;
+    let password = crate::application::config::env::first_non_empty(&match fallback_password_var {
+        Some(fallback) => vec![password_var, fallback],
+        None => vec![password_var],
+    })?;
     Some(SurrealAuth { username, password })
-}
-
-fn read_non_empty_env(key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
 }
