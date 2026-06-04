@@ -46,6 +46,8 @@ use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDel
 use crate::ports::outbound::runtime::endpoint_routing_policy::EndpointRoutingPolicy;
 use crate::ports::outbound::runtime::endpoint_transport_publisher::EndpointTransportPublisher;
 use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
+use crate::ports::outbound::runtime::runtime_telemetry::RuntimeTelemetry;
+use crate::ports::outbound::runtime::runtime_tracing::RuntimeTracing;
 use crate::ports::outbound::runtime::thread_store::ThreadStore;
 
 #[derive(Clone)]
@@ -90,6 +92,9 @@ pub struct StasisRuntimeBuilder {
     include_orchestration_pattern_handlers: bool,
     include_cluster_control_handlers: bool,
     extra_handlers: Vec<Arc<dyn JobHandler>>,
+    runtime_telemetry_metrics: Option<Arc<dyn RuntimeMetrics>>,
+    runtime_telemetry_tracing: Option<Arc<dyn RuntimeTracing>>,
+    explicit_telemetry_chat_middleware: bool,
 }
 
 macro_rules! define_arc_option_setter {
@@ -146,6 +151,9 @@ impl StasisRuntimeBuilder {
             include_orchestration_pattern_handlers: true,
             include_cluster_control_handlers: true,
             extra_handlers: Vec::new(),
+            runtime_telemetry_metrics: None,
+            runtime_telemetry_tracing: None,
+            explicit_telemetry_chat_middleware: false,
         }
     }
 
@@ -168,8 +176,31 @@ impl StasisRuntimeBuilder {
         self.with_chat_middleware(LoggingChatMiddleware)
     }
 
-    pub fn with_telemetry_chat_middleware(self, metrics: Arc<dyn RuntimeMetrics>) -> Self {
+    pub fn with_telemetry_chat_middleware(mut self, metrics: Arc<dyn RuntimeMetrics>) -> Self {
+        self.explicit_telemetry_chat_middleware = true;
         self.with_chat_middleware(TelemetryChatMiddleware::new(metrics))
+    }
+
+    pub fn with_runtime_telemetry<T: RuntimeTelemetry + 'static>(
+        mut self,
+        telemetry: Arc<T>,
+    ) -> Self {
+        self.runtime_telemetry_metrics = Some(telemetry.clone());
+        self.runtime_telemetry_tracing = Some(telemetry);
+        self
+    }
+
+    #[cfg(feature = "otel")]
+    pub fn with_otel_from_env(self) -> Result<Self> {
+        let telemetry = crate::infrastructure::telemetry::OpenTelemetryTelemetry::from_env()?;
+        Ok(self.with_runtime_telemetry(telemetry))
+    }
+
+    #[cfg(not(feature = "otel"))]
+    pub fn with_otel_from_env(self) -> Result<Self> {
+        Err(crate::domain::errors::StasisError::PortFailure(
+            "OpenTelemetry support requires the `otel` Cargo feature".to_string(),
+        ))
     }
 
     pub fn with_cache_chat_middleware(self, cache: Arc<dyn AiChatResponseCache>) -> Self {
@@ -270,12 +301,26 @@ impl StasisRuntimeBuilder {
     define_disable_flag_setter!(without_cluster_control_handlers, include_cluster_control_handlers);
 
     pub async fn build(self) -> Result<RuntimeComposition> {
-        let runtime = RuntimeFactory::build(self.backend).await?;
+        let mut runtime = RuntimeFactory::build(self.backend).await?;
+        let mut chat_middlewares = self.chat_middlewares;
+
+        if let (Some(metrics), Some(tracing)) = (
+            self.runtime_telemetry_metrics.clone(),
+            self.runtime_telemetry_tracing.clone(),
+        ) {
+            runtime.replace_telemetry(metrics.clone(), tracing.clone());
+            if !self.explicit_telemetry_chat_middleware {
+                chat_middlewares.push(Arc::new(
+                    TelemetryChatMiddleware::new(metrics.clone()).with_tracing(tracing),
+                ));
+            }
+        }
+
         let workflow_engine = RuntimeFactory::default_workflow_engine();
         let chat_client = self
             .chat_client
             .unwrap_or_else(RuntimeFactory::default_chat_client);
-        let chat_client = Self::compose_chat_client(chat_client, &self.chat_middlewares);
+        let chat_client = Self::compose_chat_client(chat_client, &chat_middlewares);
         let (memory_context_reader, memory_context_writer, memory_operations) =
             RuntimeFactory::ensure_locus_memory_adapters(
                 self.enable_locus_memory,

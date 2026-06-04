@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
+## [Unreleased]
+
+### Planned — 0.3.0 OpenTelemetry
+
+Contract frozen in [docs/design/opentelemetry-integration-rfc-plan.md](docs/design/opentelemetry-integration-rfc-plan.md) (ADR-0006). Single release: OTLP metrics + distributed traces + W3C propagation behind `feature = "otel"`.
+
 ## [0.2.4]
 
 ### Added

@@ -6,18 +6,18 @@ use genai::chat::{ChatOptions, ChatRequest, ChatResponse};
 use sha2::{Digest, Sha256};
 
 use crate::application::runtime::chat_client_middleware::ChatClientMiddleware;
+use crate::application::telemetry::spans as span_names;
 use crate::domain::errors::Result;
 use crate::ports::outbound::ai_chat_client::AiChatClient;
 use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
 use crate::ports::outbound::ai_chat_tool_interceptor::{AiChatToolInterceptor, AiToolCallEnvelope};
 use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
+use crate::ports::outbound::runtime::runtime_tracing::{OtelAttribute, RuntimeTracing};
 
-pub const CHAT_REQUESTS_TOTAL: &str = "runtime.chat.requests.total";
-pub const CHAT_ERRORS_TOTAL: &str = "runtime.chat.errors.total";
-pub const CHAT_DURATION_MS: &str = "runtime.chat.duration_ms";
-pub const CHAT_CACHE_HIT_TOTAL: &str = "runtime.chat.cache.hit.total";
-pub const CHAT_CACHE_MISS_TOTAL: &str = "runtime.chat.cache.miss.total";
-pub const CHAT_TOOL_CALLS_TOTAL: &str = "runtime.chat.tool_calls.total";
+pub use crate::application::telemetry::keys::{
+    CHAT_CACHE_HIT_TOTAL, CHAT_CACHE_MISS_TOTAL, CHAT_DURATION_MS, CHAT_ERRORS_TOTAL,
+    CHAT_REQUESTS_TOTAL, CHAT_TOOL_CALLS_TOTAL,
+};
 
 #[derive(Clone, Default)]
 pub struct LoggingChatMiddleware;
@@ -70,11 +70,20 @@ impl AiChatClient for LoggingChatClient {
 #[derive(Clone)]
 pub struct TelemetryChatMiddleware {
     metrics: Arc<dyn RuntimeMetrics>,
+    tracing: Option<Arc<dyn RuntimeTracing>>,
 }
 
 impl TelemetryChatMiddleware {
     pub fn new(metrics: Arc<dyn RuntimeMetrics>) -> Self {
-        Self { metrics }
+        Self {
+            metrics,
+            tracing: None,
+        }
+    }
+
+    pub fn with_tracing(mut self, tracing: Arc<dyn RuntimeTracing>) -> Self {
+        self.tracing = Some(tracing);
+        self
     }
 }
 
@@ -83,6 +92,7 @@ impl ChatClientMiddleware for TelemetryChatMiddleware {
         Arc::new(TelemetryChatClient {
             inner,
             metrics: self.metrics.clone(),
+            tracing: self.tracing.clone(),
         })
     }
 }
@@ -91,6 +101,7 @@ impl ChatClientMiddleware for TelemetryChatMiddleware {
 struct TelemetryChatClient {
     inner: Arc<dyn AiChatClient>,
     metrics: Arc<dyn RuntimeMetrics>,
+    tracing: Option<Arc<dyn RuntimeTracing>>,
 }
 
 #[async_trait]
@@ -100,6 +111,16 @@ impl AiChatClient for TelemetryChatClient {
         request: ChatRequest,
         options: Option<&ChatOptions>,
     ) -> Result<ChatResponse> {
+        let _span = self.tracing.as_ref().map(|tracing| {
+            tracing.start_span(
+                span_names::CHAT_COMPLETE,
+                &[OtelAttribute::int(
+                    "stasis.chat.messages",
+                    request.messages.len() as i64,
+                )],
+            )
+        });
+
         self.metrics.incr_counter(CHAT_REQUESTS_TOTAL, 1);
         let started = Instant::now();
         match self.inner.complete(request, options).await {

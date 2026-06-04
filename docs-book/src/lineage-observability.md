@@ -208,4 +208,5 @@ Chat-layer metrics are documented in [Chat Middleware Pipeline](./chat-middlewar
 
 - `InvestigateRuntimeLineage` does not provide real-time streaming. It queries stored state.
 - Metric emission requires a `RuntimeMetrics` implementation to be wired. The default `NoopRuntimeMetrics` silently discards all observations.
+- For OpenTelemetry (metrics + traces + OTLP export), see [OpenTelemetry](./opentelemetry.md) — planned for 0.3.0 with frozen contract.
 - Outbox event delivery to external subscribers requires an `EventPublisher` implementation registered via `register_event_publisher`.

@@ -23,6 +23,7 @@ Track major architectural decisions with rationale, alternatives, and consequenc
 | ADR-0003 | STTP Reference-Only Job Context Contract | Accepted | 2026-05-07 |
 | ADR-0004 | Recurring Jobs via Materialized Schedule Definitions | Accepted | 2026-05-07 |
 | ADR-0005 | Agentic Workflow Skill Graph Contract | Accepted | 2026-05-25 |
+| ADR-0006 | OpenTelemetry First-Class Observability | Accepted | 2026-06-04 |
 
 ## Decision Dependency Diagram
 
@@ -35,6 +36,8 @@ flowchart TD
   A4 --> A5
   A3 --> A2
   A4 --> A2
+  A1 --> A6[ADR-0006 OpenTelemetry Observability]
+  A2 --> A6
 ```
 
 ## ADR-0001 Durable Job Runtime on SurrealDB
@@ -81,3 +84,13 @@ flowchart TD
 - Consequences:
   - Positive: deterministic graph->source->runtime parity and clearer product semantics.
   - Tradeoff: requires graph schema/versioning, compiler determinism, and round-trip policy for advanced source edits.
+
+## ADR-0006 OpenTelemetry First-Class Observability
+
+- Status: Accepted
+- Context: Runtime metrics default to noop; no OTLP traces; operators need one complete observability path.
+- Decision: Ship OpenTelemetry (metrics + traces + W3C propagation) in a single 0.3.0 release behind optional `otel` feature; freeze contract in opentelemetry-integration-rfc-plan.md.
+- Consequences:
+  - Positive: OTLP export, linked traces across jobs/LLM/memory/outbox, stable instrument names.
+  - Tradeoff: concentrated instrumentation work; contract maintenance obligation.
+- Plan: [OpenTelemetry Integration RFC](../../docs/design/opentelemetry-integration-rfc-plan.md)

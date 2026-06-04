@@ -14,6 +14,7 @@
 - [Recurring Jobs](./recurring-jobs.md)
 - [Retention and Replay](./retention-replay.md)
 - [Lineage and Observability](./lineage-observability.md)
+- [OpenTelemetry](./opentelemetry.md)
 
 ## Orchestration
 

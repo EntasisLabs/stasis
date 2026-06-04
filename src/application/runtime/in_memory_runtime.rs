@@ -19,8 +19,11 @@ use crate::domain::runtime::outbox::{
     OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
 };
 use crate::domain::runtime::recurring::RecurringDefinition;
+use crate::application::telemetry::keys as metric_keys;
+use crate::application::telemetry::spans as span_names;
 use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
 use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
+use crate::infrastructure::telemetry::NoopRuntimeTracing;
 use crate::infrastructure::runtime::system_clock::SystemClock;
 use crate::ports::outbound::runtime::clock::Clock;
 use crate::ports::outbound::runtime::event_publisher::EventPublisher;
@@ -30,16 +33,7 @@ use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
 use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
-
-const METRIC_JOB_SUCCEEDED_TOTAL: &str = "runtime.job.succeeded.total";
-const METRIC_JOB_RETRYABLE_FAILURE_TOTAL: &str = "runtime.job.retryable_failure.total";
-const METRIC_JOB_FATAL_FAILURE_TOTAL: &str = "runtime.job.fatal_failure.total";
-const METRIC_JOB_DEAD_LETTER_TOTAL: &str = "runtime.job.dead_letter.total";
-const METRIC_JOB_RETRY_SCHEDULED_TOTAL: &str = "runtime.job.retry_scheduled.total";
-const METRIC_JOB_PROCESS_DURATION_MS: &str = "runtime.job.process.duration_ms";
-const METRIC_OUTBOX_PUBLISH_SUCCESS_TOTAL: &str = "runtime.outbox.publish.success.total";
-const METRIC_OUTBOX_PUBLISH_FAILURE_TOTAL: &str = "runtime.outbox.publish.failure.total";
-const METRIC_GRAPHEME_GUARDRAIL_FAILURE_TOTAL: &str = "runtime.grapheme.guardrail_failure.total";
+use crate::ports::outbound::runtime::runtime_tracing::{OtelAttribute, RuntimeTracing};
 
 #[derive(Clone, Debug)]
 pub enum JobExecutionOutcome {
@@ -78,6 +72,7 @@ pub struct InMemoryRuntime {
     clock: Arc<dyn Clock>,
     id_generator: Arc<dyn IdGenerator>,
     metrics: Arc<dyn RuntimeMetrics>,
+    tracing: Arc<dyn RuntimeTracing>,
     retention_policy: Arc<RwLock<RetentionPolicy>>,
 }
 
@@ -89,21 +84,41 @@ impl Default for InMemoryRuntime {
 
 impl InMemoryRuntime {
     pub fn new() -> Self {
-        Self::with_dependencies_and_metrics(
+        Self::with_dependencies_and_telemetry(
             Arc::new(SystemClock),
             Arc::new(AtomicIdGenerator::new(1)),
             Arc::new(NoopRuntimeMetrics),
+            Arc::new(NoopRuntimeTracing),
         )
     }
 
     pub fn with_dependencies(clock: Arc<dyn Clock>, id_generator: Arc<dyn IdGenerator>) -> Self {
-        Self::with_dependencies_and_metrics(clock, id_generator, Arc::new(NoopRuntimeMetrics))
+        Self::with_dependencies_and_telemetry(
+            clock,
+            id_generator,
+            Arc::new(NoopRuntimeMetrics),
+            Arc::new(NoopRuntimeTracing),
+        )
     }
 
     pub fn with_dependencies_and_metrics(
         clock: Arc<dyn Clock>,
         id_generator: Arc<dyn IdGenerator>,
         metrics: Arc<dyn RuntimeMetrics>,
+    ) -> Self {
+        Self::with_dependencies_and_telemetry(
+            clock,
+            id_generator,
+            metrics,
+            Arc::new(NoopRuntimeTracing),
+        )
+    }
+
+    pub fn with_dependencies_and_telemetry(
+        clock: Arc<dyn Clock>,
+        id_generator: Arc<dyn IdGenerator>,
+        metrics: Arc<dyn RuntimeMetrics>,
+        tracing: Arc<dyn RuntimeTracing>,
     ) -> Self {
         Self {
             job_store: InMemoryJobStore::default(),
@@ -116,8 +131,22 @@ impl InMemoryRuntime {
             clock,
             id_generator,
             metrics,
+            tracing,
             retention_policy: Arc::new(RwLock::new(RetentionPolicy::default())),
         }
+    }
+
+    pub fn replace_telemetry(
+        &mut self,
+        metrics: Arc<dyn RuntimeMetrics>,
+        tracing: Arc<dyn RuntimeTracing>,
+    ) {
+        self.metrics = metrics;
+        self.tracing = tracing;
+    }
+
+    pub fn tracing(&self) -> Arc<dyn RuntimeTracing> {
+        self.tracing.clone()
     }
 
     pub fn configure_retention_policy(&self, policy: RetentionPolicy) -> Result<()> {
@@ -325,7 +354,22 @@ impl InMemoryRuntime {
         worker_id: &str,
         now: DateTime<Utc>,
     ) -> Result<Option<String>> {
+        let worker_started = Instant::now();
+        let _worker_span = self.tracing.start_span(
+            span_names::WORKER_PROCESS_ONCE,
+            &[
+                OtelAttribute::string("stasis.queue", queue.to_string()),
+                OtelAttribute::string("stasis.worker_id", worker_id.to_string()),
+            ],
+        );
+        self.metrics
+            .incr_counter(metric_keys::WORKER_PROCESS_ONCE_TOTAL, 1);
+
         let Some(mut job) = self.job_store.lease_due(queue, worker_id, now, 30).await? else {
+            self.metrics.observe_duration_ms(
+                metric_keys::WORKER_PROCESS_ONCE_DURATION_MS,
+                worker_started.elapsed().as_millis() as u64,
+            );
             return Ok(None);
         };
 
@@ -343,6 +387,17 @@ impl InMemoryRuntime {
                 .map_err(|_| StasisError::PortFailure("handlers lock poisoned".to_string()))?;
             handlers.get(&job.job_type).cloned()
         };
+
+        let _job_span = self.tracing.start_span(
+            span_names::JOB_EXECUTE,
+            &[
+                OtelAttribute::string("stasis.job.id", job.id.clone()),
+                OtelAttribute::string("stasis.job.type", job.job_type.clone()),
+                OtelAttribute::string("stasis.trace_id", job.trace_id.clone()),
+                OtelAttribute::string("stasis.queue", queue.to_string()),
+                OtelAttribute::string("stasis.correlation_id", job.correlation_id.clone()),
+            ],
+        );
 
         let outcome = if let Some(handler) = handler {
             handler.execute(&job).await?
@@ -399,9 +454,9 @@ impl InMemoryRuntime {
                 )
                 .await?;
 
-                self.metrics.incr_counter(METRIC_JOB_SUCCEEDED_TOTAL, 1);
+                self.metrics.incr_counter(metric_keys::JOB_SUCCEEDED_TOTAL, 1);
                 self.metrics.observe_duration_ms(
-                    METRIC_JOB_PROCESS_DURATION_MS,
+                    metric_keys::JOB_PROCESS_DURATION_MS,
                     processing_started.elapsed().as_millis() as u64,
                 );
             }
@@ -436,7 +491,7 @@ impl InMemoryRuntime {
                     )
                     .await?;
 
-                    self.metrics.incr_counter(METRIC_JOB_DEAD_LETTER_TOTAL, 1);
+                    self.metrics.incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
                 } else {
                     job.state = JobState::Enqueued;
                     let exponent = job.attempts - 1;
@@ -459,7 +514,7 @@ impl InMemoryRuntime {
                     .await?;
 
                     self.metrics
-                        .incr_counter(METRIC_JOB_RETRY_SCHEDULED_TOTAL, 1);
+                        .incr_counter(metric_keys::JOB_RETRY_SCHEDULED_TOTAL, 1);
                 }
 
                 self.job_store.save(job).await?;
@@ -480,14 +535,14 @@ impl InMemoryRuntime {
                 .await?;
 
                 self.metrics
-                    .incr_counter(METRIC_JOB_RETRYABLE_FAILURE_TOTAL, 1);
+                    .incr_counter(metric_keys::JOB_RETRYABLE_FAILURE_TOTAL, 1);
                 self.metrics.observe_duration_ms(
-                    METRIC_JOB_PROCESS_DURATION_MS,
+                    metric_keys::JOB_PROCESS_DURATION_MS,
                     processing_started.elapsed().as_millis() as u64,
                 );
                 if guardrail_failure {
                     self.metrics
-                        .incr_counter(METRIC_GRAPHEME_GUARDRAIL_FAILURE_TOTAL, 1);
+                        .incr_counter(metric_keys::GRAPHEME_GUARDRAIL_FAILURE_TOTAL, 1);
                 }
             }
             JobExecutionOutcome::FatalFailure {
@@ -536,19 +591,23 @@ impl InMemoryRuntime {
                 )
                 .await?;
 
-                self.metrics.incr_counter(METRIC_JOB_FATAL_FAILURE_TOTAL, 1);
-                self.metrics.incr_counter(METRIC_JOB_DEAD_LETTER_TOTAL, 1);
+                self.metrics.incr_counter(metric_keys::JOB_FATAL_FAILURE_TOTAL, 1);
+                self.metrics.incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
                 self.metrics.observe_duration_ms(
-                    METRIC_JOB_PROCESS_DURATION_MS,
+                    metric_keys::JOB_PROCESS_DURATION_MS,
                     processing_started.elapsed().as_millis() as u64,
                 );
                 if guardrail_failure {
                     self.metrics
-                        .incr_counter(METRIC_GRAPHEME_GUARDRAIL_FAILURE_TOTAL, 1);
+                        .incr_counter(metric_keys::GRAPHEME_GUARDRAIL_FAILURE_TOTAL, 1);
                 }
             }
         }
 
+        self.metrics.observe_duration_ms(
+            metric_keys::WORKER_PROCESS_ONCE_DURATION_MS,
+            worker_started.elapsed().as_millis() as u64,
+        );
         Ok(Some(job_identity.job_id))
     }
 
@@ -615,7 +674,7 @@ impl InMemoryRuntime {
                     self.outbox_store.save(event).await?;
                     published += 1;
                     self.metrics
-                        .incr_counter(METRIC_OUTBOX_PUBLISH_SUCCESS_TOTAL, 1);
+                        .incr_counter(metric_keys::OUTBOX_PUBLISH_SUCCESS_TOTAL, 1);
                 }
                 Err(err) => {
                     event.publish_attempts = event.publish_attempts.saturating_add(1);
@@ -637,7 +696,7 @@ impl InMemoryRuntime {
 
                     self.outbox_store.save(event).await?;
                     self.metrics
-                        .incr_counter(METRIC_OUTBOX_PUBLISH_FAILURE_TOTAL, 1);
+                        .incr_counter(metric_keys::OUTBOX_PUBLISH_FAILURE_TOTAL, 1);
                 }
             }
         }

@@ -32,6 +32,8 @@ use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointSt
 use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
 use crate::ports::outbound::runtime::endpoint_routing_policy::EndpointRoutingPolicy;
 use crate::ports::outbound::runtime::endpoint_transport_publisher::EndpointTransportPublisher;
+use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
+use crate::ports::outbound::runtime::runtime_tracing::RuntimeTracing;
 use crate::ports::outbound::runtime::thread_store::ThreadStore;
 use crate::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 
@@ -109,6 +111,19 @@ impl RuntimeBackend {
 pub enum RuntimeComposition {
     InMemory(InMemoryRuntime),
     Surreal(SurrealRuntime),
+}
+
+impl RuntimeComposition {
+    pub fn replace_telemetry(
+        &mut self,
+        metrics: Arc<dyn RuntimeMetrics>,
+        tracing: Arc<dyn RuntimeTracing>,
+    ) {
+        match self {
+            Self::InMemory(runtime) => runtime.replace_telemetry(metrics, tracing),
+            Self::Surreal(runtime) => runtime.replace_telemetry(metrics, tracing),
+        }
+    }
 }
 
 pub struct RuntimeFactory;

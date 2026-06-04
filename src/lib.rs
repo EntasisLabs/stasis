@@ -132,6 +132,21 @@ pub mod config_prelude {
     };
 }
 
+/// OpenTelemetry contract keys, span names, and runtime telemetry ports.
+pub mod telemetry_prelude {
+    pub use crate::application::telemetry::keys;
+    pub use crate::application::telemetry::spans;
+    pub use crate::infrastructure::telemetry::{NoopRuntimeTelemetry, NoopRuntimeTracing};
+    pub use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
+    pub use crate::ports::outbound::runtime::runtime_telemetry::RuntimeTelemetry;
+    pub use crate::ports::outbound::runtime::runtime_tracing::{
+        in_span, OtelAttribute, OtelAttributeValue, RuntimeTracing, SpanGuard, TraceContext,
+    };
+
+    #[cfg(feature = "otel")]
+    pub use crate::infrastructure::telemetry::OpenTelemetryTelemetry;
+}
+
 /// Re-exported extended API surface for advanced integrations.
 pub mod prelude_ext {
     pub use crate::config_prelude::*;
