@@ -169,6 +169,28 @@ Retrieves memory nodes matching the provided scope and query parameters. Used in
 | `Balanced` (default) | Balanced precision/recall |
 | `Recall` | High recall, lower precision — broader matches |
 
+### Response: `MemoryNode`
+
+Each recalled or found node carries the full STTP payload and metadata (aligned with Locus `MemoryNodeDto`):
+
+| Field | Type | Description |
+|---|---|---|
+| `raw` | `String` | Full STTP node text — the actual context payload |
+| `session_id` | `String` | Session the node belongs to |
+| `tier` | `String` | Memory tier (e.g. `raw`, `L1`) |
+| `timestamp` | `DateTime<Utc>` | Node creation time |
+| `compression_depth` | `i32` | Compression depth |
+| `parent_node_id` | `Option<String>` | Parent node reference |
+| `sync_key` | `String` | Canonical sync fingerprint |
+| `context_summary` | `Option<String>` | Short summary when present |
+| `embedding_model` | `Option<String>` | Embedding model id |
+| `embedding_dimensions` | `Option<usize>` | Embedding vector size |
+| `embedded_at` | `Option<DateTime<Utc>>` | When embedding was computed |
+| `rho` / `kappa` / `psi` | `f32` | Resonance metrics |
+| `user_avec` / `model_avec` | `MemoryAvecState` | AVEC state snapshots |
+| `compression_avec` | `Option<MemoryAvecState>` | Compression AVEC when present |
+| `updated_at` | `DateTime<Utc>` | Last update time |
+
 ### Response: `MemoryRecallResponse`
 
 | Field | Type | Description |
@@ -179,7 +201,10 @@ Retrieves memory nodes matching the provided scope and query parameters. Used in
 | `retrieval_path` | `Option<String>` | Explanation of how results were retrieved |
 | `fallback_triggered` | `bool` | Whether fallback broadening was activated |
 | `fallback_reason` | `Option<String>` | Reason fallback was triggered |
-| `node_sync_keys` | `Vec<String>` | Sync keys of returned nodes |
+| `nodes` | `Vec<MemoryNode>` | Full recalled nodes including `raw` STTP context |
+| `node_sync_keys` | `Vec<String>` | Sync keys of returned nodes (derived from `nodes`) |
+
+Memory-enabled runtime handlers prepend recalled node `raw` content into the user prompt before LLM execution (after identity snapshot, when nodes are non-empty).
 
 ---
 
@@ -223,7 +248,8 @@ JSON fields accepted by the find workflow handler (camelCase):
 | `retrieved` | `usize` | Number of nodes returned |
 | `has_more` | `bool` | Whether more results are available |
 | `next_cursor` | `Option<String>` | Cursor for the next page |
-| `node_sync_keys` | `Vec<String>` | Sync keys of returned nodes |
+| `nodes` | `Vec<MemoryNode>` | Full matched nodes including `raw` STTP context |
+| `node_sync_keys` | `Vec<String>` | Sync keys of returned nodes (derived from `nodes`) |
 
 ### Diagnostics keys
 
@@ -235,6 +261,7 @@ JSON fields accepted by the find workflow handler (camelCase):
 | `has_more` | Pagination flag |
 | `next_cursor` | Next page cursor when present |
 | `node_sync_keys` | Returned node sync keys |
+| `nodes` | Serialized node payloads (including `raw`) |
 
 ---
 

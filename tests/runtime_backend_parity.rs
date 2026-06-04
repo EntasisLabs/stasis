@@ -86,7 +86,7 @@ use stasis::ports::outbound::memory::identity_memory_models::{
 use stasis::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use stasis::ports::outbound::memory::memory_models::{
     MemoryAggregateRequest, MemoryAggregateResponse, MemoryFindRequest, MemoryFindResponse,
-    MemoryRecallRequest, MemoryRecallResponse,
+    MemoryNode, MemoryRecallRequest, MemoryRecallResponse,
     MemoryRollupRequest, MemoryRollupResponse, MemorySchemaResponse, MemoryStoreRequest,
     MemoryStoreResponse, MemoryTransformRequest, MemoryTransformResponse,
 };
@@ -329,6 +329,85 @@ impl AiChatClient for PlainScriptedChatClient {
             usage: Usage::default(),
             captured_raw_body: None,
         })
+    }
+}
+
+#[derive(Clone)]
+struct CapturingChatClient {
+    responses: Arc<Vec<String>>,
+    captured_prompts: Arc<StdMutex<Vec<String>>>,
+}
+
+impl CapturingChatClient {
+    fn new(responses: Vec<String>) -> Self {
+        Self {
+            responses: Arc::new(responses),
+            captured_prompts: Arc::new(StdMutex::new(Vec::new())),
+        }
+    }
+
+    fn captured_prompts(&self) -> Vec<String> {
+        self.captured_prompts
+            .lock()
+            .map(|state| state.clone())
+            .unwrap_or_default()
+    }
+}
+
+#[async_trait]
+impl AiChatClient for CapturingChatClient {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        _options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
+        let prompt = request
+            .messages
+            .iter()
+            .filter_map(|message| message.content.first_text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if let Ok(mut state) = self.captured_prompts.lock() {
+            state.push(prompt);
+        }
+
+        let index = self.captured_prompts.lock().map(|state| state.len() - 1).unwrap_or(0);
+        let text = self
+            .responses
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| "fallback response".to_string());
+
+        Ok(ChatResponse {
+            content: MessageContent::from_text(text),
+            reasoning_content: None,
+            model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            usage: Usage::default(),
+            captured_raw_body: None,
+        })
+    }
+}
+
+fn mock_recall_response(sync_keys: &[&str], raw_nodes: &[&str]) -> MemoryRecallResponse {
+    let nodes: Vec<MemoryNode> = sync_keys
+        .iter()
+        .zip(raw_nodes.iter())
+        .map(|(sync_key, raw)| MemoryNode {
+            sync_key: (*sync_key).to_string(),
+            raw: (*raw).to_string(),
+            session_id: "session-mock".to_string(),
+            tier: "raw".to_string(),
+            ..Default::default()
+        })
+        .collect();
+
+    MemoryRecallResponse {
+        retrieved: nodes.len(),
+        retrieval_path: Some("Hybrid".to_string()),
+        nodes: nodes.clone(),
+        node_sync_keys: nodes.iter().map(|node| node.sync_key.clone()).collect(),
+        ..Default::default()
     }
 }
 
@@ -1093,18 +1172,17 @@ async fn in_memory_runtime_emits_and_publishes_outbox_events() {
 #[tokio::test]
 async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
     let runtime = InMemoryRuntime::new();
-    let chat_client = Arc::new(ScriptedChatClient::new(vec![
+    let chat_client = Arc::new(CapturingChatClient::new(vec![
         "prompt completion text".to_string(),
     ]));
     let memory_reader = Arc::new(MockMemoryContextReader {
-        response: MemoryRecallResponse {
-            retrieved: 2,
-            retrieval_path: Some("Hybrid".to_string()),
-            fallback_triggered: false,
-            fallback_reason: None,
-            node_sync_keys: vec!["sync-a".to_string(), "sync-b".to_string()],
-            ..Default::default()
-        },
+        response: mock_recall_response(
+            &["sync-a", "sync-b"],
+            &[
+                "◈⟨ prior rust context A ⟩",
+                "◈⟨ prior rust context B ⟩",
+            ],
+        ),
     });
     let memory_writer = Arc::new(MockMemoryContextWriter {
         response: MemoryStoreResponse {
@@ -1117,7 +1195,7 @@ async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_di
 
     runtime
         .register_handler(PromptChatJobHandler::new_with_memory(
-            chat_client,
+            chat_client.clone(),
             Some(memory_reader),
             Some(memory_writer),
         ))
@@ -1185,6 +1263,11 @@ async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_di
         diagnostics.pointer("/memory_recall/retrieved"),
         Some(&json!(2))
     );
+    let captured_prompts = chat_client.captured_prompts();
+    assert_eq!(captured_prompts.len(), 1);
+    assert!(captured_prompts[0].contains("Recalled memory context:"));
+    assert!(captured_prompts[0].contains("prior rust context A"));
+    assert!(captured_prompts[0].contains("summarize rust trends"));
     assert_eq!(
         diagnostics.pointer("/memory_store/node_id"),
         Some(&json!("sttp:memory:prompt:1"))

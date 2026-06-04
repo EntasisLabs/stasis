@@ -8,6 +8,7 @@ use crate::application::orchestration::runtime_job_payloads::{
 };
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::memory_recall_request_builder::build_memory_recall_request;
+use crate::application::runtime::runtime_diagnostics_helpers::memory_nodes_json;
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
@@ -75,6 +76,8 @@ impl JobHandler for MemoryRecallJobHandler {
                         "fallback_triggered": response.fallback_triggered,
                         "fallback_reason": response.fallback_reason,
                         "has_more": response.has_more,
+                        "node_sync_keys": response.node_sync_keys,
+                        "nodes": memory_nodes_json(&response.nodes),
                     })
                     .to_string(),
                 ),

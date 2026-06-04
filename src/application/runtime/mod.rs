@@ -16,6 +16,7 @@ pub mod memory_operation_job_outcome_helpers;
 pub mod memory_persistence_helpers;
 pub mod memory_find_job_handler;
 pub mod memory_recall_request_builder;
+pub mod memory_recall_context_compiler;
 pub mod memory_recall_job_handler;
 pub mod memory_rollup_job_handler;
 pub mod memory_schema_job_handler;

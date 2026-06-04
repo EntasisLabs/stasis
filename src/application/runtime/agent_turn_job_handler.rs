@@ -7,6 +7,7 @@ use crate::application::orchestration::runtime_job_payloads::{AgentToolCallMode,
 use crate::application::runtime::identity_context_compiler::{
     load_identity_context_summary, prepend_identity_snapshot,
 };
+use crate::application::runtime::memory_recall_context_compiler::prepend_memory_recall_context;
 use crate::application::runtime::memory_persistence_helpers::{
     SttpPromptNodeFormat, memory_query_fingerprint, memory_query_id, memory_scope_hash,
     render_prompt_response_sttp_node, resolve_sttp_output_node_id, should_store,
@@ -148,7 +149,7 @@ impl JobHandler for AgentTurnJobHandler {
             execution_context.policy_profile(),
         )
         .await;
-        let effective_user_prompt =
+        let mut effective_user_prompt =
             prepend_identity_snapshot(&payload.user_prompt, identity_summary.as_deref());
 
         let mut memory_recall = None;
@@ -168,7 +169,10 @@ impl JobHandler for AgentTurnJobHandler {
             input_memory_query_fingerprint = Some(memory_query_fingerprint(&recall_request));
 
             match reader.recall(&recall_request).await {
-                Ok(response) => memory_recall = Some(response),
+                Ok(response) => {
+                    effective_user_prompt = prepend_memory_recall_context(&effective_user_prompt, &response);
+                    memory_recall = Some(response);
+                }
                 Err(err) => memory_recall_error = Some(err.to_string()),
             }
         }

@@ -1,6 +1,28 @@
 use serde_json::{Value as JsonValue, json};
 
-use crate::ports::outbound::memory::memory_models::{MemoryRecallResponse, MemoryStoreResponse};
+use crate::ports::outbound::memory::memory_models::{
+    MemoryNode, MemoryRecallResponse, MemoryStoreResponse,
+};
+
+pub fn memory_nodes_json(nodes: &[MemoryNode]) -> JsonValue {
+    JsonValue::Array(
+        nodes
+            .iter()
+            .map(|node| {
+                json!({
+                    "sync_key": node.sync_key,
+                    "session_id": node.session_id,
+                    "tier": node.tier,
+                    "raw": node.raw,
+                    "context_summary": node.context_summary,
+                    "psi": node.psi,
+                    "rho": node.rho,
+                    "kappa": node.kappa,
+                })
+            })
+            .collect(),
+    )
+}
 
 pub struct RuntimeMemoryDiagnosticsBundle {
     pub retrieved_count: usize,

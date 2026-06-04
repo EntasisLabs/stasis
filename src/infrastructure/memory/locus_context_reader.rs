@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use locus_core_rs::NodeStore;
-use locus_core_rs::domain::models::AvecState;
+use locus_core_rs::domain::models::{AvecState, SttpNode};
 use locus_sdk::prelude::{
     FallbackPolicy, MemoryExplainRequest, MemoryExplainService,
     MemoryFindRequest as LocusFindRequest, MemoryFindService, MemoryFilter as LocusFilter,
@@ -14,8 +14,8 @@ use locus_sdk::domain::memory::MetricRange as LocusMetricRange;
 use crate::domain::errors::{Result, StasisError};
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_models::{
-    MemoryFallbackPolicy, MemoryFilter, MemoryFindRequest, MemoryFindResponse,
-    MemoryMetricRange, MemoryRecallRequest, MemoryRecallResponse, MemorySortDirection,
+    MemoryAvecState, MemoryFallbackPolicy, MemoryFilter, MemoryFindRequest, MemoryFindResponse,
+    MemoryMetricRange, MemoryNode, MemoryRecallRequest, MemoryRecallResponse, MemorySortDirection,
     MemorySortField, MemoryStrictnessMode,
 };
 
@@ -73,16 +73,20 @@ impl MemoryContextReader for LocusContextReader {
             .await
             .map_err(|e| StasisError::PortFailure(format!("locus recall failed: {e}")))?;
 
+        let nodes: Vec<MemoryNode> = recall_result
+            .nodes
+            .iter()
+            .map(map_node)
+            .collect();
+        let node_sync_keys: Vec<String> = nodes.iter().map(|node| node.sync_key.clone()).collect();
+
         let mut response = MemoryRecallResponse {
             retrieved: recall_result.retrieved,
             next_cursor: recall_result.next_cursor,
             has_more: recall_result.has_more,
             retrieval_path: Some(format!("{:?}", recall_result.retrieval_path)),
-            node_sync_keys: recall_result
-                .nodes
-                .iter()
-                .map(|node| node.sync_key.clone())
-                .collect(),
+            nodes,
+            node_sync_keys,
             ..Default::default()
         };
 
@@ -128,16 +132,48 @@ impl MemoryContextReader for LocusContextReader {
             .await
             .map_err(|e| StasisError::PortFailure(format!("locus find failed: {e}")))?;
 
+        let nodes: Vec<MemoryNode> = find_result.nodes.iter().map(map_node).collect();
+        let node_sync_keys: Vec<String> = nodes.iter().map(|node| node.sync_key.clone()).collect();
+
         Ok(MemoryFindResponse {
             retrieved: find_result.retrieved,
             has_more: find_result.has_more,
             next_cursor: find_result.next_cursor,
-            node_sync_keys: find_result
-                .nodes
-                .iter()
-                .map(|node| node.sync_key.clone())
-                .collect(),
+            nodes,
+            node_sync_keys,
         })
+    }
+}
+
+fn map_avec(avec: &AvecState) -> MemoryAvecState {
+    MemoryAvecState {
+        stability: avec.stability,
+        friction: avec.friction,
+        logic: avec.logic,
+        autonomy: avec.autonomy,
+    }
+}
+
+fn map_node(node: &SttpNode) -> MemoryNode {
+    MemoryNode {
+        raw: node.raw.clone(),
+        session_id: node.session_id.clone(),
+        tier: node.tier.clone(),
+        timestamp: node.timestamp,
+        compression_depth: node.compression_depth,
+        parent_node_id: node.parent_node_id.clone(),
+        sync_key: node.sync_key.clone(),
+        context_summary: node.context_summary.clone(),
+        embedding_model: node.embedding_model.clone(),
+        embedding_dimensions: node.embedding_dimensions,
+        embedded_at: node.embedded_at,
+        rho: node.rho,
+        kappa: node.kappa,
+        psi: node.psi,
+        user_avec: map_avec(&node.user_avec),
+        model_avec: map_avec(&node.model_avec),
+        compression_avec: node.compression_avec.as_ref().map(map_avec),
+        updated_at: node.updated_at,
     }
 }
 

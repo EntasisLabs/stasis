@@ -1,3 +1,6 @@
+use stasis::application::runtime::memory_persistence_helpers::{
+    SttpPromptNodeFormat, render_prompt_response_sttp_node,
+};
 use stasis::infrastructure::memory::locus_context_reader::LocusContextReader;
 use stasis::infrastructure::memory::locus_context_writer::LocusContextWriter;
 use stasis::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
@@ -52,6 +55,92 @@ async fn locus_context_reader_find_returns_empty_store_inventory() {
 
     assert_eq!(response.retrieved, 0);
     assert!(!response.has_more);
+}
+
+#[tokio::test]
+async fn locus_context_reader_recall_returns_raw_nodes_after_store() {
+    let session_id = "session-recall-raw";
+    let store = LocusNodeStoreFactory::in_memory()
+        .await
+        .expect("in-memory node store should initialize");
+    let writer = LocusContextWriter::new(store.clone());
+    let reader = LocusContextReader::new(store);
+
+    let raw_node = render_prompt_response_sttp_node(
+        session_id,
+        "prior question",
+        "prior answer about rust",
+        SttpPromptNodeFormat::TaggedSchema,
+    );
+    writer
+        .store_context(&MemoryStoreRequest {
+            session_id: session_id.to_string(),
+            raw_node,
+        })
+        .await
+        .expect("valid STTP node should store");
+
+    let response = reader
+        .recall(&MemoryRecallRequest {
+            scope: MemoryScope {
+                session_ids: Some(vec![session_id.to_string()]),
+                ..Default::default()
+            },
+            query_text: Some("rust".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("recall should succeed");
+
+    assert_eq!(response.retrieved, 1);
+    assert_eq!(response.nodes.len(), 1);
+    assert_eq!(response.node_sync_keys.len(), 1);
+    assert!(
+        response.nodes[0].raw.contains("prior answer about rust"),
+        "recalled node should include raw STTP context"
+    );
+}
+
+#[tokio::test]
+async fn locus_context_reader_find_returns_raw_nodes_after_store() {
+    let session_id = "session-find-raw";
+    let store = LocusNodeStoreFactory::in_memory()
+        .await
+        .expect("in-memory node store should initialize");
+    let writer = LocusContextWriter::new(store.clone());
+    let reader = LocusContextReader::new(store);
+
+    let raw_node = render_prompt_response_sttp_node(
+        session_id,
+        "inventory question",
+        "inventory answer",
+        SttpPromptNodeFormat::TaggedSchema,
+    );
+    writer
+        .store_context(&MemoryStoreRequest {
+            session_id: session_id.to_string(),
+            raw_node,
+        })
+        .await
+        .expect("valid STTP node should store");
+
+    let response = reader
+        .find(&MemoryFindRequest {
+            scope: MemoryScope {
+                session_ids: Some(vec![session_id.to_string()]),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await
+        .expect("find should succeed");
+
+    assert_eq!(response.retrieved, 1);
+    assert_eq!(response.nodes.len(), 1);
+    assert!(
+        response.nodes[0].raw.contains("inventory answer"),
+        "found node should include raw STTP context"
+    );
 }
 
 #[tokio::test]

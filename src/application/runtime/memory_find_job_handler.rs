@@ -8,6 +8,7 @@ use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHan
 use crate::application::runtime::memory_operation_job_outcome_helpers::{
     operation_failure, operation_success, policy_violation_failure,
 };
+use crate::application::runtime::runtime_diagnostics_helpers::memory_nodes_json;
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
@@ -86,6 +87,7 @@ impl JobHandler for MemoryFindJobHandler {
                     "has_more": result.has_more,
                     "next_cursor": result.next_cursor,
                     "node_sync_keys": result.node_sync_keys,
+                    "nodes": memory_nodes_json(&result.nodes),
                 }),
             )),
             Err(err) => Ok(operation_failure("stasis-memory-find", err.to_string())),

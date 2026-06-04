@@ -9,6 +9,7 @@ use crate::application::orchestration::runtime_job_payloads::{
 use crate::application::runtime::identity_context_compiler::{
     load_identity_context_summary, prepend_identity_snapshot,
 };
+use crate::application::runtime::memory_recall_context_compiler::prepend_memory_recall_context;
 use crate::application::runtime::memory_persistence_helpers::{
     memory_query_fingerprint, memory_query_id, memory_scope_hash, render_session_summary_sttp_node,
     resolve_sttp_output_node_id, should_store,
@@ -166,7 +167,7 @@ impl JobHandler for AgentSessionJobHandler {
             execution_context.policy_profile(),
         )
         .await;
-        let effective_initial_user_prompt =
+        let mut effective_initial_user_prompt =
             prepend_identity_snapshot(&payload.initial_user_prompt, identity_summary.as_deref());
 
         let mut memory_recall = None;
@@ -186,7 +187,11 @@ impl JobHandler for AgentSessionJobHandler {
             input_memory_query_fingerprint = Some(memory_query_fingerprint(&recall_request));
 
             match reader.recall(&recall_request).await {
-                Ok(response) => memory_recall = Some(response),
+                Ok(response) => {
+                    effective_initial_user_prompt =
+                        prepend_memory_recall_context(&effective_initial_user_prompt, &response);
+                    memory_recall = Some(response);
+                }
                 Err(err) => memory_recall_error = Some(err.to_string()),
             }
         }

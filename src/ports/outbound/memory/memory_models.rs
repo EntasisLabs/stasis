@@ -118,10 +118,33 @@ impl Default for MemoryFindRequest {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct MemoryNode {
+    pub raw: String,
+    pub session_id: String,
+    pub tier: String,
+    pub timestamp: DateTime<Utc>,
+    pub compression_depth: i32,
+    pub parent_node_id: Option<String>,
+    pub sync_key: String,
+    pub context_summary: Option<String>,
+    pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<usize>,
+    pub embedded_at: Option<DateTime<Utc>>,
+    pub rho: f32,
+    pub kappa: f32,
+    pub psi: f32,
+    pub user_avec: MemoryAvecState,
+    pub model_avec: MemoryAvecState,
+    pub compression_avec: Option<MemoryAvecState>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct MemoryFindResponse {
     pub retrieved: usize,
     pub has_more: bool,
     pub next_cursor: Option<String>,
+    pub nodes: Vec<MemoryNode>,
     pub node_sync_keys: Vec<String>,
 }
 
@@ -133,6 +156,7 @@ pub struct MemoryRecallResponse {
     pub retrieval_path: Option<String>,
     pub fallback_triggered: bool,
     pub fallback_reason: Option<String>,
+    pub nodes: Vec<MemoryNode>,
     pub node_sync_keys: Vec<String>,
 }
 
