@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-6d96df05.js";
+            window.path_to_searchindex_js = "searchindex-1d30842c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9d13a89d.js"></script>
@@ -180,13 +180,15 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
 <li>Stability: Evolving</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-06-04</li>
 <li>Verified Against:
 <ul>
 <li>src/application/use_cases/investigate_runtime_lineage.rs</li>
 <li>src/application/runtime/in_memory_runtime.rs</li>
 <li>src/domain/runtime/outbox.rs</li>
 <li>src/domain/runtime/job_attempt.rs</li>
+<li>src/application/telemetry/keys.rs</li>
+<li>docs/design/opentelemetry-integration-rfc-plan.md</li>
 <li>tests/runtime_backend_parity.rs</li>
 </ul>
 </li>
@@ -411,7 +413,7 @@ runtime.list_lineage_events_by_thread_id("thread-id").await?
 <ul>
 <li><code>InvestigateRuntimeLineage</code> does not provide real-time streaming. It queries stored state.</li>
 <li>Metric emission requires a <code>RuntimeMetrics</code> implementation to be wired. The default <code>NoopRuntimeMetrics</code> silently discards all observations.</li>
-<li>For OpenTelemetry (metrics + traces + OTLP export), see <a href="./opentelemetry.html">OpenTelemetry</a> — planned for 0.3.0 with frozen contract.</li>
+<li>For OpenTelemetry (metrics + traces + OTLP export), see <a href="./opentelemetry.html">OpenTelemetry</a> — shipped in 0.3.0 behind the optional <code>otel</code> feature.</li>
 <li>Outbox event delivery to external subscribers requires an <code>EventPublisher</code> implementation registered via <code>register_event_publisher</code>.</li>
 </ul>
 

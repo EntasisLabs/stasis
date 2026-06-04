@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-6d96df05.js";
+            window.path_to_searchindex_js = "searchindex-1d30842c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9d13a89d.js"></script>
@@ -192,8 +192,7 @@
 <p>Document the <strong>frozen OpenTelemetry contract</strong> for Stasis runtime: metrics, traces, propagation, configuration, and the single-release implementation plan.</p>
 <p>Full specification: <a href="../../docs/design/opentelemetry-integration-rfc-plan.html">OpenTelemetry Integration RFC</a><br>ADR: <a href="../../docs/adr/ADR-0006-opentelemetry-first-class-observability.html">ADR-0006 OpenTelemetry First-Class Observability</a></p>
 <h2 id="status"><a class="header" href="#status">Status</a></h2>
-<p><strong>Planned for 0.3.0</strong> — contract frozen; implementation not yet shipped.</p>
-<p>OTEL ships in <strong>one release</strong> (metrics + traces + propagation). No partial metrics-only release.</p>
+<p><strong>Shipped in 0.3.0</strong> behind optional Cargo feature <code>otel</code>. Metrics, traces, and W3C propagation ship together in one release.</p>
 <h2 id="enablement"><a class="header" href="#enablement">Enablement</a></h2>
 <p>Build with the optional feature:</p>
 <pre><code class="language-bash">cargo build --features otel
@@ -284,6 +283,38 @@ let composition = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
 <li><strong>F</strong> — Docs, <code>.env.example</code>, parity tests</li>
 </ol>
 <p>Release gate: RFC §8 acceptance criteria (OTLP smoke test, span tree, no secrets in attributes, default build unchanged).</p>
+<h2 id="local-collector-smoke-test"><a class="header" href="#local-collector-smoke-test">Local collector smoke test</a></h2>
+<p>Verify OTLP export end-to-end before tagging a release:</p>
+<ol>
+<li>Start an OTLP gRPC collector (Jaeger all-in-one is enough for local dev):</li>
+</ol>
+<pre><code class="language-bash">docker run --rm -p 4317:4317 -p 16686:16686 jaegertracing/all-in-one:1.62.0
+</code></pre>
+<ol start="2">
+<li>Build and run a runtime or the dashboard with OTEL enabled:</li>
+</ol>
+<pre><code class="language-bash">export STASIS_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
+export OTEL_SERVICE_NAME=stasis-runtime
+
+cargo run --features otel --bin stasis_dashboard
+</code></pre>
+<ol start="3">
+<li>Trigger work that emits spans (enqueue/process a job, or call a dashboard action with a W3C header):</li>
+</ol>
+<pre><code class="language-bash">curl -i -X POST http://127.0.0.1:3007/action/scheduler/materialize \
+  -H 'traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'
+</code></pre>
+<ol start="4">
+<li>
+<p>Open Jaeger UI at http://127.0.0.1:16686 and confirm spans such as <code>stasis.worker.process_once</code> and <code>stasis.job.execute</code> for service <code>stasis-runtime</code>.</p>
+</li>
+<li>
+<p>Run parity tests without a live collector:</p>
+</li>
+</ol>
+<pre><code class="language-bash">cargo test --features otel --test otel_runtime_parity
+</code></pre>
 <h2 id="out-of-scope-030"><a class="header" href="#out-of-scope-030">Out of scope (0.3.0)</a></h2>
 <ul>
 <li>Python SDK telemetry</li>

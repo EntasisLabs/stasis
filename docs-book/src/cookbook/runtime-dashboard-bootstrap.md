@@ -41,21 +41,19 @@ The dashboard binary wires a production-like runtime through `StasisRuntimeBuild
 # Enable Locus memory adapters (requires Locus configuration)
 export STASIS_DASHBOARD_LOCUS_MEMORY=true
 
-# Enable OpenTelemetry when building with --features otel
+# Demo fixtures (sample jobs + endpoints; in-memory backend only)
+export STASIS_DASHBOARD_DEMO_SEED=true
+
+# OpenTelemetry (requires building with --features otel)
 export STASIS_OTEL_ENABLED=true
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
 ```
 
 ```bash
 cargo run --bin stasis_dashboard
-```
 
-Embedded apps can reuse the same wiring:
-
-```rust
-use stasis::dashboard::{build_dashboard_query_service, DashboardBootstrapOptions};
-
-let service = build_dashboard_query_service(DashboardBootstrapOptions::default()).await?;
+# With OpenTelemetry export enabled at compile time:
+cargo run --features otel --bin stasis_dashboard
 ```
 
 Open:
@@ -82,21 +80,31 @@ Expected result: 200 and HTML action status fragment.
 
 ## Embedded Variant
 
-Mount dashboard routes into your existing Axum application.
+Mount dashboard routes into your existing Axum application using the same bootstrap as the standalone binary:
 
 ```rust
 use std::sync::Arc;
 
 use axum::Router;
-use stasis::dashboard::{DashboardRouterExt, RuntimeDashboardQueryService};
+use stasis::dashboard::{
+    build_dashboard_query_service, DashboardBootstrapOptions, DashboardRouterExt, DashboardState,
+};
 
-fn app(service: Arc<RuntimeDashboardQueryService>) -> Router {
-    Router::new().add_dashboard_with(service, |state| {
+#[tokio::main]
+async fn main() -> stasis::domain::errors::Result<()> {
+    stasis::config_prelude::bootstrap()?;
+
+    let service = build_dashboard_query_service(DashboardBootstrapOptions::default()).await?;
+
+    let app = Router::new().add_dashboard_with(service, |state| {
         state
             .with_action_auth_bearer_token("replace-me")
             .with_action_required_role("scheduler.admin")
             .with_action_role_claim_header("x-stasis-role")
-    })
+    });
+
+    // bind and serve...
+    Ok(())
 }
 ```
 
@@ -106,4 +114,5 @@ fn app(service: Arc<RuntimeDashboardQueryService>) -> Router {
 2. Keep STASIS_DASHBOARD_ACTION_AUTH_BEARER in secret storage, not source control.
 3. Add health checks for `/dashboard` and one live view such as `/view/jobs`.
 4. Optional: probe `/stream/jobs` as an HTMX fragment health check for custom integrations.
-4. Alert on repeated non-200 responses from /action routes.
+5. Alert on repeated non-200 responses from /action routes.
+6. For OTLP verification, see [OpenTelemetry — Local collector smoke test](../opentelemetry.md#local-collector-smoke-test).

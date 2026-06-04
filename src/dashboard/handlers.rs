@@ -3037,14 +3037,6 @@ async fn action_workflow_execute(
     State(state): State<DashboardState>,
     Json(payload): Json<WorkflowActionRequest>,
 ) -> Result<Html<String>, (StatusCode, String)> {
-    if payload.queue.trim().is_empty() {
-        return render_template(ActionStatusTemplate {
-            title: "Workflow Execute Rejected".to_string(),
-            detail: "queue is required".to_string(),
-            kind: "bad".to_string(),
-        });
-    }
-
     let executed = state
         .service
         .workflow_execute(payload.workflow_id.trim(), payload.queue.trim(), "workflow-ui")

@@ -19,9 +19,7 @@ ADR: [ADR-0006 OpenTelemetry First-Class Observability](../../docs/adr/ADR-0006-
 
 ## Status
 
-**Planned for 0.3.0** — contract frozen; implementation not yet shipped.
-
-OTEL ships in **one release** (metrics + traces + propagation). No partial metrics-only release.
+**Shipped in 0.3.0** behind optional Cargo feature `otel`. Metrics, traces, and W3C propagation ship together in one release.
 
 ## Enablement
 
@@ -117,6 +115,41 @@ Single release **0.3.0** workstreams (see RFC §7):
 6. **F** — Docs, `.env.example`, parity tests
 
 Release gate: RFC §8 acceptance criteria (OTLP smoke test, span tree, no secrets in attributes, default build unchanged).
+
+## Local collector smoke test
+
+Verify OTLP export end-to-end before tagging a release:
+
+1. Start an OTLP gRPC collector (Jaeger all-in-one is enough for local dev):
+
+```bash
+docker run --rm -p 4317:4317 -p 16686:16686 jaegertracing/all-in-one:1.62.0
+```
+
+2. Build and run a runtime or the dashboard with OTEL enabled:
+
+```bash
+export STASIS_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
+export OTEL_SERVICE_NAME=stasis-runtime
+
+cargo run --features otel --bin stasis_dashboard
+```
+
+3. Trigger work that emits spans (enqueue/process a job, or call a dashboard action with a W3C header):
+
+```bash
+curl -i -X POST http://127.0.0.1:3007/action/scheduler/materialize \
+  -H 'traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'
+```
+
+4. Open Jaeger UI at http://127.0.0.1:16686 and confirm spans such as `stasis.worker.process_once` and `stasis.job.execute` for service `stasis-runtime`.
+
+5. Run parity tests without a live collector:
+
+```bash
+cargo test --features otel --test otel_runtime_parity
+```
 
 ## Out of scope (0.3.0)
 

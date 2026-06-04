@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6d96df05.js";
+            window.path_to_searchindex_js = "../searchindex-1d30842c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9d13a89d.js"></script>
@@ -200,19 +200,18 @@ export STASIS_DASHBOARD_ACTION_ROLE_CLAIM_HEADER=x-stasis-role
 <pre><code class="language-bash"># Enable Locus memory adapters (requires Locus configuration)
 export STASIS_DASHBOARD_LOCUS_MEMORY=true
 
-# Enable OpenTelemetry when building with --features otel
+# Demo fixtures (sample jobs + endpoints; in-memory backend only)
+export STASIS_DASHBOARD_DEMO_SEED=true
+
+# OpenTelemetry (requires building with --features otel)
 export STASIS_OTEL_ENABLED=true
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
 </code></pre>
 <pre><code class="language-bash">cargo run --bin stasis_dashboard
-</code></pre>
-<p>Embedded apps can reuse the same wiring:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use stasis::dashboard::{build_dashboard_query_service, DashboardBootstrapOptions};
 
-let service = build_dashboard_query_service(DashboardBootstrapOptions::default()).await?;
-<span class="boring">}</span></code></pre>
+# With OpenTelemetry export enabled at compile time:
+cargo run --features otel --bin stasis_dashboard
+</code></pre>
 <p>Open:</p>
 <ol>
 <li>http://127.0.0.1:3007/dashboard</li>
@@ -228,23 +227,30 @@ let service = build_dashboard_query_service(DashboardBootstrapOptions::default()
 </code></pre>
 <p>Expected result: 200 and HTML action status fragment.</p>
 <h2 id="embedded-variant"><a class="header" href="#embedded-variant">Embedded Variant</a></h2>
-<p>Mount dashboard routes into your existing Axum application.</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use std::sync::Arc;
+<p>Mount dashboard routes into your existing Axum application using the same bootstrap as the standalone binary:</p>
+<pre class="playground"><code class="language-rust">use std::sync::Arc;
 
 use axum::Router;
-use stasis::dashboard::{DashboardRouterExt, RuntimeDashboardQueryService};
+use stasis::dashboard::{
+    build_dashboard_query_service, DashboardBootstrapOptions, DashboardRouterExt, DashboardState,
+};
 
-fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
-    Router::new().add_dashboard_with(service, |state| {
+#[tokio::main]
+async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
+    stasis::config_prelude::bootstrap()?;
+
+    let service = build_dashboard_query_service(DashboardBootstrapOptions::default()).await?;
+
+    let app = Router::new().add_dashboard_with(service, |state| {
         state
             .with_action_auth_bearer_token("replace-me")
             .with_action_required_role("scheduler.admin")
             .with_action_role_claim_header("x-stasis-role")
-    })
-}
-<span class="boring">}</span></code></pre>
+    });
+
+    // bind and serve...
+    Ok(())
+}</code></pre>
 <h2 id="production-notes"><a class="header" href="#production-notes">Production Notes</a></h2>
 <ol>
 <li>Prefer surreal-ws or surreal-kv for durable job and workflow history.</li>
@@ -252,6 +258,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <li>Add health checks for <code>/dashboard</code> and one live view such as <code>/view/jobs</code>.</li>
 <li>Optional: probe <code>/stream/jobs</code> as an HTMX fragment health check for custom integrations.</li>
 <li>Alert on repeated non-200 responses from /action routes.</li>
+<li>For OTLP verification, see <a href="../opentelemetry.html#local-collector-smoke-test">OpenTelemetry — Local collector smoke test</a>.</li>
 </ol>
 
                     </main>

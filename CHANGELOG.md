@@ -5,13 +5,9 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
-## [0.3.0]
+## [Unreleased]
 
-### Changed
-
-- **Dashboard bootstrap (Phase A)** — `stasis_dashboard` now builds the runtime via `StasisRuntimeBuilder` with full default handlers, optional Locus memory (`STASIS_DASHBOARD_LOCUS_MEMORY`), and OTEL when enabled. In-memory control-plane stores are shared with the runtime via `dashboard::bootstrap`.
-- **Dashboard workflow execute (Phase B)** — saved workflow execute now enqueues a `workflow.grapheme.run` job from the latest persisted revision source and runs it via `process_once`, instead of only draining an unrelated queue job.
-- **Dashboard UI honesty pass (Phase C)** — relabeled synthetic cluster pressure metrics, wired endpoint trends to delivery history where available, clarified queue lanes vs persisted workflows, set workflow canvas nodes to draft status, disclosed lineage preview limits, corrected diagnostics provider naming, and surfaced demo-seed mode in the shell.
+## [0.3.0] - 2026-06-04
 
 ### Added
 
@@ -22,11 +18,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Span instrumentation** for worker loop, job execution, chat completion, memory recall, outbox publish, and grapheme execution.
 - **W3C trace propagation** via `RuntimeWorkflowJobBuilder::with_traceparent()` / `with_trace_context()` and job-loop parent rehydration (`STASIS_OTEL_TRACE_PROPAGATION`).
 - **Dashboard HTTP trace propagation** — incoming `traceparent` headers propagate to scheduler materialization and runtime spans during dashboard actions.
-- **`tests/otel_runtime_parity.rs`** — in-memory metrics/tracing parity coverage without requiring a live OTLP collector.
+- **`dashboard::bootstrap`** — shared `build_dashboard_query_service()` for the standalone binary and embedded apps (`StasisRuntimeBuilder`, optional Locus memory, OTEL, demo seed).
+- **`tests/otel_runtime_parity.rs`** and **`tests/dashboard_bootstrap.rs`** — OTEL parity and production-like dashboard bootstrap coverage.
 
 ### Changed
 
-- `RuntimeWorkflowJobBuilder` now generates a W3C-style trace id by default when none is supplied (replacing the previous job-id fallback).
+- **Dashboard bootstrap** — `stasis_dashboard` builds the runtime via `StasisRuntimeBuilder` with full default handlers; in-memory control-plane stores are shared with the runtime.
+- **Dashboard workflow execute** — saved workflow execute enqueues a `workflow.grapheme.run` job from the latest persisted revision and runs it via `process_once` (empty queue falls back to the saved workflow queue).
+- **Dashboard UI honesty pass** — relabeled synthetic cluster metrics, wired endpoint trends to delivery history where available, clarified queue lanes vs persisted workflows, draft canvas node status, lineage preview disclosures, honest diagnostics provider naming, and demo-seed badge in the shell.
+- **`RuntimeWorkflowJobBuilder`** now generates a W3C-style trace id by default when none is supplied (replacing the previous job-id fallback).
+- **Dashboard service** — consolidated runtime and control-plane dispatch helpers to remove duplicated in-memory/Surreal match arms.
 
 ## [0.2.4]
 

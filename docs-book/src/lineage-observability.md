@@ -5,12 +5,14 @@
 - Document Type: Reference Standard
 - Audience: Engineer, SRE, Architect
 - Stability: Evolving
-- Last Verified: 2026-05-15
+- Last Verified: 2026-06-04
 - Verified Against:
   - src/application/use_cases/investigate_runtime_lineage.rs
   - src/application/runtime/in_memory_runtime.rs
   - src/domain/runtime/outbox.rs
   - src/domain/runtime/job_attempt.rs
+  - src/application/telemetry/keys.rs
+  - docs/design/opentelemetry-integration-rfc-plan.md
   - tests/runtime_backend_parity.rs
 
 ## Purpose
@@ -208,5 +210,5 @@ Chat-layer metrics are documented in [Chat Middleware Pipeline](./chat-middlewar
 
 - `InvestigateRuntimeLineage` does not provide real-time streaming. It queries stored state.
 - Metric emission requires a `RuntimeMetrics` implementation to be wired. The default `NoopRuntimeMetrics` silently discards all observations.
-- For OpenTelemetry (metrics + traces + OTLP export), see [OpenTelemetry](./opentelemetry.md) — planned for 0.3.0 with frozen contract.
+- For OpenTelemetry (metrics + traces + OTLP export), see [OpenTelemetry](./opentelemetry.md) — shipped in 0.3.0 behind the optional `otel` feature.
 - Outbox event delivery to external subscribers requires an `EventPublisher` implementation registered via `register_event_publisher`.
