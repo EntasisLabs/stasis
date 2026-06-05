@@ -4,7 +4,7 @@
 
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
-- Stability: Evolving
+- Stability: Stable
 - Last Verified: 2026-06-02
 - Verified Against:
   - src/application/runtime/stasis_runtime_builder.rs

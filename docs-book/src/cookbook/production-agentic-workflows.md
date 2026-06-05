@@ -1,5 +1,15 @@
 # Production Agentic Workflows
 
+## Document Metadata
+
+- Document Type: Cookbook Recipe
+- Audience: Engineer, Operator
+- Stability: Stable
+- Last Verified: 2026-06-04
+- Verified Against:
+  - examples/
+  - scripts/smoke-agentic-workflows.sh
+
 ## Outcome
 
 Run production-style agentic jobs with real LLM providers, durable runtime wiring, memory controls, and orchestration patterns teams can copy directly.

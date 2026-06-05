@@ -1,5 +1,14 @@
 # Stasis Tool Macro
 
+## Document Metadata
+
+- Document Type: Reference Guide
+- Audience: Engineer
+- Stability: Stable
+- Last Verified: 2026-06-04
+- Verified Against:
+  - stasis-macros/src/lib.rs
+
 ## Outcome
 
 Use `#[stasis_tool(...)]` to generate `StasisTool` implementations from typed async functions with compile-time contract checks.

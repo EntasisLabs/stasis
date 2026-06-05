@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-1d30842c.js";
+            window.path_to_searchindex_js = "searchindex-01f42003.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9d13a89d.js"></script>
@@ -176,6 +176,14 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
+<h2 id="document-metadata"><a class="header" href="#document-metadata">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Book Overview</li>
+<li>Audience: Engineer, Architect, Operator</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against: Stasis 0.3.0 release</li>
+</ul>
 <p>Stasis is an agentic framework SDK with a durable job orchestration runtime.</p>
 <p>If you are new to Stasis, start with <a href="#getting-started">Getting Started</a> before diving into architecture details.</p>
 <p>This book is the architecture reference for the runtime and covers:</p>
@@ -194,14 +202,14 @@
 <li>Review Extension Points for integration contracts and ADRs for rationale.</li>
 </ol>
 <h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
-<p>This book documents V1 runtime architecture and operational semantics. It does not define production deployment topology or UI dashboard design.</p>
+<p>This book documents the Stasis 0.3.0 runtime architecture and operational semantics. Reference pages in this book are marked <strong>Stable</strong> at the 0.3.0 release. It does not define production deployment topology beyond the cookbook recipes.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
-<h2 id="document-metadata"><a class="header" href="#document-metadata">Document Metadata</a></h2>
+<h2 id="document-metadata-1"><a class="header" href="#document-metadata-1">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Quickstart Guide</li>
 <li>Audience: Beginner, Engineer</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-24</li>
 <li>Verified Against:
 <ul>
@@ -299,11 +307,11 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="stasis-architecture-overview"><a class="header" href="#stasis-architecture-overview">Stasis Architecture Overview</a></h1>
-<h2 id="document-metadata-1"><a class="header" href="#document-metadata-1">Document Metadata</a></h2>
+<h2 id="document-metadata-2"><a class="header" href="#document-metadata-2">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, SRE, Security, Architect</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-17</li>
 <li>Verified Against:
 <ul>
@@ -617,11 +625,11 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="stasis-job-runtime-design"><a class="header" href="#stasis-job-runtime-design">Stasis Job Runtime Design</a></h1>
-<h2 id="document-metadata-2"><a class="header" href="#document-metadata-2">Document Metadata</a></h2>
+<h2 id="document-metadata-3"><a class="header" href="#document-metadata-3">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-15</li>
 <li>Verified Against:
 <ul>
@@ -942,11 +950,11 @@ Dedicated memory operation handlers support aggregate, transform, rollup, and sc
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="runtime-builder-and-wiring-guide"><a class="header" href="#runtime-builder-and-wiring-guide">Runtime Builder and Wiring Guide</a></h1>
-<h2 id="document-metadata-3"><a class="header" href="#document-metadata-3">Document Metadata</a></h2>
+<h2 id="document-metadata-4"><a class="header" href="#document-metadata-4">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-06-02</li>
 <li>Verified Against:
 <ul>
@@ -1220,11 +1228,11 @@ println!("processed={:?}", processed);
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="recurring-jobs"><a class="header" href="#recurring-jobs">Recurring Jobs</a></h1>
-<h2 id="document-metadata-4"><a class="header" href="#document-metadata-4">Document Metadata</a></h2>
+<h2 id="document-metadata-5"><a class="header" href="#document-metadata-5">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-15</li>
 <li>Verified Against:
 <ul>
@@ -1384,11 +1392,11 @@ runtime.recurring_store.save(definition).await?;
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="retention-and-replay"><a class="header" href="#retention-and-replay">Retention and Replay</a></h1>
-<h2 id="document-metadata-5"><a class="header" href="#document-metadata-5">Document Metadata</a></h2>
+<h2 id="document-metadata-6"><a class="header" href="#document-metadata-6">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-15</li>
 <li>Verified Against:
 <ul>
@@ -1545,11 +1553,11 @@ println!("events: {}", report.lineage_events.len());
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="lineage-and-observability"><a class="header" href="#lineage-and-observability">Lineage and Observability</a></h1>
-<h2 id="document-metadata-6"><a class="header" href="#document-metadata-6">Document Metadata</a></h2>
+<h2 id="document-metadata-7"><a class="header" href="#document-metadata-7">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-06-04</li>
 <li>Verified Against:
 <ul>
@@ -1788,11 +1796,11 @@ runtime.list_lineage_events_by_thread_id("thread-id").await?
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="opentelemetry"><a class="header" href="#opentelemetry">OpenTelemetry</a></h1>
-<h2 id="document-metadata-7"><a class="header" href="#document-metadata-7">Document Metadata</a></h2>
+<h2 id="document-metadata-8"><a class="header" href="#document-metadata-8">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Operator</li>
-<li>Stability: <strong>Frozen</strong> (contract for 0.3.0)</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-06-04</li>
 <li>Verified Against:
 <ul>
@@ -1802,7 +1810,7 @@ runtime.list_lineage_events_by_thread_id("thread-id").await?
 </li>
 </ul>
 <h2 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h2>
-<p>Document the <strong>frozen OpenTelemetry contract</strong> for Stasis runtime: metrics, traces, propagation, configuration, and the single-release implementation plan.</p>
+<p>Document the stable OpenTelemetry contract for Stasis runtime: metrics, traces, propagation, and configuration.</p>
 <p>Full specification: <a href="../../docs/design/opentelemetry-integration-rfc-plan.html">OpenTelemetry Integration RFC</a><br>ADR: <a href="../../docs/adr/ADR-0006-opentelemetry-first-class-observability.html">ADR-0006 OpenTelemetry First-Class Observability</a></p>
 <h2 id="status"><a class="header" href="#status">Status</a></h2>
 <p><strong>Shipped in 0.3.0</strong> behind optional Cargo feature <code>otel</code>. Metrics, traces, and W3C propagation ship together in one release.</p>
@@ -1936,11 +1944,11 @@ cargo run --features otel --bin stasis_dashboard
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="orchestration-patterns"><a class="header" href="#orchestration-patterns">Orchestration Patterns</a></h1>
-<h2 id="document-metadata-8"><a class="header" href="#document-metadata-8">Document Metadata</a></h2>
+<h2 id="document-metadata-9"><a class="header" href="#document-metadata-9">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-15</li>
 <li>Verified Against:
 <ul>
@@ -2205,11 +2213,11 @@ runtime.enqueue(job).await?;
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="chat-middleware-pipeline"><a class="header" href="#chat-middleware-pipeline">Chat Middleware Pipeline</a></h1>
-<h2 id="document-metadata-9"><a class="header" href="#document-metadata-9">Document Metadata</a></h2>
+<h2 id="document-metadata-10"><a class="header" href="#document-metadata-10">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-15</li>
 <li>Verified Against:
 <ul>
@@ -2360,11 +2368,11 @@ impl ChatClientMiddleware for MyMiddleware {
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="grapheme-workflow-handlers"><a class="header" href="#grapheme-workflow-handlers">Grapheme Workflow Handlers</a></h1>
-<h2 id="document-metadata-10"><a class="header" href="#document-metadata-10">Document Metadata</a></h2>
+<h2 id="document-metadata-11"><a class="header" href="#document-metadata-11">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-15</li>
 <li>Verified Against:
 <ul>
@@ -2724,11 +2732,11 @@ let handler = GraphemeEchoJobHandler::new(engine);
 <p>This is the pattern used in tests that call <code>.without_grapheme_handlers()</code> and register a custom handler instead of the default <code>GraphemeSdkWorkflowEngine</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-coordination"><a class="header" href="#agent-coordination">Agent Coordination</a></h1>
-<h2 id="document-metadata-11"><a class="header" href="#document-metadata-11">Document Metadata</a></h2>
+<h2 id="document-metadata-12"><a class="header" href="#document-metadata-12">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-15</li>
 <li>Verified Against:
 <ul>
@@ -2999,11 +3007,11 @@ let response = coordinator.run_session(AgentSessionRunRequest {
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="memory-operations-reference"><a class="header" href="#memory-operations-reference">Memory Operations Reference</a></h1>
-<h2 id="document-metadata-12"><a class="header" href="#document-metadata-12">Document Metadata</a></h2>
+<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-06-02</li>
 <li>Verified Against:
 <ul>
@@ -3524,11 +3532,11 @@ pub trait MemoryOperations: Send + Sync {
 <p>The default <code>.with_locus_memory()</code> bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via <code>.with_memory_context_reader(...)</code>, <code>.with_memory_context_writer(...)</code>, or <code>.with_memory_operations(...)</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="identity-memory-layer"><a class="header" href="#identity-memory-layer">Identity Memory Layer</a></h1>
-<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
+<h2 id="document-metadata-14"><a class="header" href="#document-metadata-14">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture and Operations Guide</li>
 <li>Audience: Engineer, Runtime Owner, Platform Team</li>
-<li>Stability: Active</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-27</li>
 <li>Verified Against:
 <ul>
@@ -3707,11 +3715,11 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="environment-configuration"><a class="header" href="#environment-configuration">Environment Configuration</a></h1>
-<h2 id="document-metadata-14"><a class="header" href="#document-metadata-14">Document Metadata</a></h2>
+<h2 id="document-metadata-15"><a class="header" href="#document-metadata-15">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Operator</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-06-04</li>
 <li>Verified Against:
 <ul>
@@ -3806,11 +3814,11 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="extension-points-and-port-contracts"><a class="header" href="#extension-points-and-port-contracts">Extension Points and Port Contracts</a></h1>
-<h2 id="document-metadata-15"><a class="header" href="#document-metadata-15">Document Metadata</a></h2>
+<h2 id="document-metadata-16"><a class="header" href="#document-metadata-16">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-17</li>
 <li>Verified Against:
 <ul>
@@ -4212,6 +4220,18 @@ pub trait StasisTool: Send + Sync {
 <p>No port is strictly required. The runtime boots with all defaults when <code>StasisRuntimeBuilder::new(backend).build().await?</code> is called with no additional configuration.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="stasis-tool-macro"><a class="header" href="#stasis-tool-macro">Stasis Tool Macro</a></h1>
+<h2 id="document-metadata-17"><a class="header" href="#document-metadata-17">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Guide</li>
+<li>Audience: Engineer</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against:
+<ul>
+<li>stasis-macros/src/lib.rs</li>
+</ul>
+</li>
+</ul>
 <h2 id="outcome"><a class="header" href="#outcome">Outcome</a></h2>
 <p>Use <code>#[stasis_tool(...)]</code> to generate <code>StasisTool</code> implementations from typed async functions with compile-time contract checks.</p>
 <h2 id="why-this-exists"><a class="header" href="#why-this-exists">Why This Exists</a></h2>
@@ -4288,11 +4308,11 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 <p>Compile-fail and compile-pass cases are covered by trybuild tests under <code>stasis-macros/tests/ui</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="control-plane-and-endpoint-routing"><a class="header" href="#control-plane-and-endpoint-routing">Control Plane and Endpoint Routing</a></h1>
-<h2 id="document-metadata-16"><a class="header" href="#document-metadata-16">Document Metadata</a></h2>
+<h2 id="document-metadata-18"><a class="header" href="#document-metadata-18">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture and Delivery Reference</li>
 <li>Audience: Engineer, Platform, SRE, Architect</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-17</li>
 <li>Verified Against:
 <ul>
@@ -4425,6 +4445,19 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="command-center-dashboard-concept"><a class="header" href="#command-center-dashboard-concept">Command Center Dashboard Concept</a></h1>
+<h2 id="document-metadata-19"><a class="header" href="#document-metadata-19">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Concept Guide</li>
+<li>Audience: Operator, Architect</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against:
+<ul>
+<li>src/dashboard/handlers.rs</li>
+<li>docs-book/src/dashboard-operations-guide.md</li>
+</ul>
+</li>
+</ul>
 <h2 id="purpose-15"><a class="header" href="#purpose-15">Purpose</a></h2>
 <p>This page documents an operator-facing command center surface for runtime control and observability.</p>
 <p>For implemented route contracts, auth controls, and workflow builder behavior, use the <a href="#dashboard-operations-guide">Dashboard Operations Guide</a>.</p>
@@ -4773,11 +4806,11 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </style>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="dashboard-operations-guide"><a class="header" href="#dashboard-operations-guide">Dashboard Operations Guide</a></h1>
-<h2 id="document-metadata-17"><a class="header" href="#document-metadata-17">Document Metadata</a></h2>
+<h2 id="document-metadata-20"><a class="header" href="#document-metadata-20">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Operations Guide</li>
 <li>Audience: Operator, SRE, Runtime Engineer</li>
-<li>Stability: Active</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-27</li>
 <li>Verified Against:
 <ul>
@@ -5002,6 +5035,14 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="cookbook-overview"><a class="header" href="#cookbook-overview">Cookbook Overview</a></h1>
+<h2 id="document-metadata-21"><a class="header" href="#document-metadata-21">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Cookbook Index</li>
+<li>Audience: Engineer, Operator</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against: docs-book/src/cookbook/</li>
+</ul>
 <h2 id="purpose-17"><a class="header" href="#purpose-17">Purpose</a></h2>
 <p>This cookbook provides implementation-first recipes for teams taking Stasis from local experiments to production deployment.</p>
 <p>Each recipe is:</p>
@@ -5028,6 +5069,19 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="production-agentic-workflows"><a class="header" href="#production-agentic-workflows">Production Agentic Workflows</a></h1>
+<h2 id="document-metadata-22"><a class="header" href="#document-metadata-22">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Cookbook Recipe</li>
+<li>Audience: Engineer, Operator</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against:
+<ul>
+<li>examples/</li>
+<li>scripts/smoke-agentic-workflows.sh</li>
+</ul>
+</li>
+</ul>
 <h2 id="outcome-1"><a class="header" href="#outcome-1">Outcome</a></h2>
 <p>Run production-style agentic jobs with real LLM providers, durable runtime wiring, memory controls, and orchestration patterns teams can copy directly.</p>
 <h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
@@ -5461,6 +5515,19 @@ STASIS_EXAMPLE_DRY_RUN=1 STASIS_EXAMPLE_TEAM_PROFILE=support cargo run --example
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="runtime-and-dashboard-bootstrap"><a class="header" href="#runtime-and-dashboard-bootstrap">Runtime and Dashboard Bootstrap</a></h1>
+<h2 id="document-metadata-23"><a class="header" href="#document-metadata-23">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Cookbook Recipe</li>
+<li>Audience: Engineer, Operator</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against:
+<ul>
+<li>src/dashboard/bootstrap.rs</li>
+<li>src/bin/stasis_dashboard.rs</li>
+</ul>
+</li>
+</ul>
 <h2 id="outcome-2"><a class="header" href="#outcome-2">Outcome</a></h2>
 <p>Bring up a production-like Stasis runtime with dashboard observability and secured action routes.</p>
 <h2 id="recipe"><a class="header" href="#recipe">Recipe</a></h2>
@@ -5548,6 +5615,19 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="workflow-builder-starting-object"><a class="header" href="#workflow-builder-starting-object">Workflow Builder Starting Object</a></h1>
+<h2 id="document-metadata-24"><a class="header" href="#document-metadata-24">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Cookbook Recipe</li>
+<li>Audience: Engineer, Operator</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against:
+<ul>
+<li>src/dashboard/handlers.rs</li>
+<li>src/dashboard/service.rs</li>
+</ul>
+</li>
+</ul>
 <h2 id="outcome-3"><a class="header" href="#outcome-3">Outcome</a></h2>
 <p>Create a deterministic workflow draft or saved revision that seeds initial $current state through the Starting Object control.</p>
 <h2 id="why-this-matters"><a class="header" href="#why-this-matters">Why this matters</a></h2>
@@ -5632,6 +5712,18 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="identity-memory-change-control"><a class="header" href="#identity-memory-change-control">Identity Memory Change Control</a></h1>
+<h2 id="document-metadata-25"><a class="header" href="#document-metadata-25">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Cookbook Recipe</li>
+<li>Audience: Engineer</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against:
+<ul>
+<li>src/application/use_cases/</li>
+</ul>
+</li>
+</ul>
 <h2 id="outcome-4"><a class="header" href="#outcome-4">Outcome</a></h2>
 <p>Apply governed identity relationship updates with tier-aware proposal splitting, explicit approvals, and version-safe commits.</p>
 <h2 id="recipe-2"><a class="header" href="#recipe-2">Recipe</a></h2>
@@ -5810,6 +5902,18 @@ println!("rolled_back={}", rollback.rolled_back);
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="memory-maintenance-and-rollups"><a class="header" href="#memory-maintenance-and-rollups">Memory Maintenance and Rollups</a></h1>
+<h2 id="document-metadata-26"><a class="header" href="#document-metadata-26">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Cookbook Recipe</li>
+<li>Audience: Engineer, Operator</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-06-04</li>
+<li>Verified Against:
+<ul>
+<li>src/application/use_cases/</li>
+</ul>
+</li>
+</ul>
 <h2 id="outcome-5"><a class="header" href="#outcome-5">Outcome</a></h2>
 <p>Run routine memory health operations for aggregate visibility, embedding maintenance, and monthly rollup compaction.</p>
 <h2 id="recipe-3"><a class="header" href="#recipe-3">Recipe</a></h2>
@@ -5924,11 +6028,11 @@ println!("transform_ops={:?}", schema.transform_operations);
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
-<h2 id="document-metadata-18"><a class="header" href="#document-metadata-18">Document Metadata</a></h2>
+<h2 id="document-metadata-27"><a class="header" href="#document-metadata-27">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
-<li>Stability: Evolving</li>
+<li>Stability: Stable</li>
 <li>Last Verified: 2026-05-15</li>
 <li>Verified Against:
 <ul>
@@ -6230,7 +6334,7 @@ DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_i
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture-decision-records"><a class="header" href="#architecture-decision-records">Architecture Decision Records</a></h1>
-<h2 id="document-metadata-19"><a class="header" href="#document-metadata-19">Document Metadata</a></h2>
+<h2 id="document-metadata-28"><a class="header" href="#document-metadata-28">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>

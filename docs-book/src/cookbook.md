@@ -1,5 +1,13 @@
 # Cookbook Overview
 
+## Document Metadata
+
+- Document Type: Cookbook Index
+- Audience: Engineer, Operator
+- Stability: Stable
+- Last Verified: 2026-06-04
+- Verified Against: docs-book/src/cookbook/
+
 ## Purpose
 
 This cookbook provides implementation-first recipes for teams taking Stasis from local experiments to production deployment.

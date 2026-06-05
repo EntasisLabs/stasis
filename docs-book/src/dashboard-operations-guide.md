@@ -4,7 +4,7 @@
 
 - Document Type: Operations Guide
 - Audience: Operator, SRE, Runtime Engineer
-- Stability: Active
+- Stability: Stable
 - Last Verified: 2026-05-27
 - Verified Against:
   - src/bin/stasis_dashboard.rs

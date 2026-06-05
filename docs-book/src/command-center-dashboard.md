@@ -1,5 +1,15 @@
 # Command Center Dashboard Concept
 
+## Document Metadata
+
+- Document Type: Concept Guide
+- Audience: Operator, Architect
+- Stability: Stable
+- Last Verified: 2026-06-04
+- Verified Against:
+  - src/dashboard/handlers.rs
+  - docs-book/src/dashboard-operations-guide.md
+
 ## Purpose
 
 This page documents an operator-facing command center surface for runtime control and observability.

@@ -1,5 +1,14 @@
 # Memory Maintenance and Rollups
 
+## Document Metadata
+
+- Document Type: Cookbook Recipe
+- Audience: Engineer, Operator
+- Stability: Stable
+- Last Verified: 2026-06-04
+- Verified Against:
+  - src/application/use_cases/
+
 ## Outcome
 
 Run routine memory health operations for aggregate visibility, embedding maintenance, and monthly rollup compaction.

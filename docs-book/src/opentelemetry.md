@@ -4,7 +4,7 @@
 
 - Document Type: Reference Standard
 - Audience: Engineer, SRE, Operator
-- Stability: **Frozen** (contract for 0.3.0)
+- Stability: Stable
 - Last Verified: 2026-06-04
 - Verified Against:
   - docs/design/opentelemetry-integration-rfc-plan.md
@@ -12,7 +12,7 @@
 
 ## Purpose
 
-Document the **frozen OpenTelemetry contract** for Stasis runtime: metrics, traces, propagation, configuration, and the single-release implementation plan.
+Document the stable OpenTelemetry contract for Stasis runtime: metrics, traces, propagation, and configuration.
 
 Full specification: [OpenTelemetry Integration RFC](../../docs/design/opentelemetry-integration-rfc-plan.md)  
 ADR: [ADR-0006 OpenTelemetry First-Class Observability](../../docs/adr/ADR-0006-opentelemetry-first-class-observability.md)

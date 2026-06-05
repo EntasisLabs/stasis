@@ -1,5 +1,15 @@
 # Runtime and Dashboard Bootstrap
 
+## Document Metadata
+
+- Document Type: Cookbook Recipe
+- Audience: Engineer, Operator
+- Stability: Stable
+- Last Verified: 2026-06-04
+- Verified Against:
+  - src/dashboard/bootstrap.rs
+  - src/bin/stasis_dashboard.rs
+
 ## Outcome
 
 Bring up a production-like Stasis runtime with dashboard observability and secured action routes.
