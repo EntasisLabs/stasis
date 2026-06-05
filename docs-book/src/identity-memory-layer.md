@@ -4,7 +4,7 @@
 
 - Document Type: Architecture and Operations Guide
 - Audience: Engineer, Runtime Owner, Platform Team
-- Stability: Active
+- Stability: Stable
 - Last Verified: 2026-05-27
 - Verified Against:
   - src/ports/outbound/memory/identity_memory_store.rs

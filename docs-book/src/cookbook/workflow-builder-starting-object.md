@@ -1,5 +1,15 @@
 # Workflow Builder Starting Object
 
+## Document Metadata
+
+- Document Type: Cookbook Recipe
+- Audience: Engineer, Operator
+- Stability: Stable
+- Last Verified: 2026-06-04
+- Verified Against:
+  - src/dashboard/handlers.rs
+  - src/dashboard/service.rs
+
 ## Outcome
 
 Create a deterministic workflow draft or saved revision that seeds initial $current state through the Starting Object control.

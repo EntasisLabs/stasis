@@ -4,7 +4,7 @@
 
 - Document Type: Architecture Standard
 - Audience: Engineer, SRE, Security, Architect
-- Stability: Evolving
+- Stability: Stable
 - Last Verified: 2026-05-17
 - Verified Against:
   - src/application/runtime/stasis_runtime_builder.rs

@@ -4,7 +4,7 @@
 
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
-- Stability: Evolving
+- Stability: Stable
 - Last Verified: 2026-05-17
 - Verified Against:
     - src/ports/inbound/control_plane_commands.rs

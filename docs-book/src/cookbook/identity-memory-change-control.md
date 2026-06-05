@@ -1,5 +1,14 @@
 # Identity Memory Change Control
 
+## Document Metadata
+
+- Document Type: Cookbook Recipe
+- Audience: Engineer
+- Stability: Stable
+- Last Verified: 2026-06-04
+- Verified Against:
+  - src/application/use_cases/
+
 ## Outcome
 
 Apply governed identity relationship updates with tier-aware proposal splitting, explicit approvals, and version-safe commits.

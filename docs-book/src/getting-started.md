@@ -4,7 +4,7 @@
 
 - Document Type: Quickstart Guide
 - Audience: Beginner, Engineer
-- Stability: Evolving
+- Stability: Stable
 - Last Verified: 2026-05-24
 - Verified Against:
   - src/application/runtime/stasis_runtime_builder.rs

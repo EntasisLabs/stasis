@@ -4,7 +4,7 @@
 
 - Document Type: Reference Standard
 - Audience: Engineer, SRE
-- Stability: Evolving
+- Stability: Stable
 - Last Verified: 2026-05-15
 - Verified Against:
   - src/domain/runtime/recurring.rs

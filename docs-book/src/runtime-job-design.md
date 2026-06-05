@@ -4,7 +4,7 @@
 
 - Document Type: Reference Standard
 - Audience: Engineer, SRE, Architect
-- Stability: Evolving
+- Stability: Stable
 - Last Verified: 2026-05-15
 - Verified Against:
 	- src/application/runtime/in_memory_runtime.rs

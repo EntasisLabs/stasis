@@ -4,7 +4,7 @@
 
 - Document Type: Reference Standard
 - Audience: Engineer, SRE, Architect
-- Stability: Evolving
+- Stability: Stable
 - Last Verified: 2026-06-04
 - Verified Against:
   - src/application/use_cases/investigate_runtime_lineage.rs

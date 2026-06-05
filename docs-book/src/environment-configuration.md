@@ -4,7 +4,7 @@
 
 - Document Type: Reference Standard
 - Audience: Engineer, Operator
-- Stability: Evolving
+- Stability: Stable
 - Last Verified: 2026-06-04
 - Verified Against:
   - src/application/config/env.rs

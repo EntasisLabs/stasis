@@ -4,7 +4,7 @@
 
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
-- Stability: Evolving
+- Stability: Stable
 - Last Verified: 2026-05-15
 - Verified Against:
   - src/application/orchestration/sequential_pattern_pipeline.rs

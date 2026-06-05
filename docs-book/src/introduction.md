@@ -1,5 +1,13 @@
 # Introduction
 
+## Document Metadata
+
+- Document Type: Book Overview
+- Audience: Engineer, Architect, Operator
+- Stability: Stable
+- Last Verified: 2026-06-04
+- Verified Against: Stasis 0.3.0 release
+
 Stasis is an agentic framework SDK with a durable job orchestration runtime.
 
 If you are new to Stasis, start with [Getting Started](./getting-started.md) before diving into architecture details.
@@ -21,4 +29,4 @@ This book is the architecture reference for the runtime and covers:
 
 ## Scope
 
-This book documents V1 runtime architecture and operational semantics. It does not define production deployment topology or UI dashboard design.
+This book documents the Stasis 0.3.0 runtime architecture and operational semantics. Reference pages in this book are marked **Stable** at the 0.3.0 release. It does not define production deployment topology beyond the cookbook recipes.
