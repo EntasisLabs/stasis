@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::ports::outbound::memory::identity_memory_models::GetIdentityContextRequest;
+use crate::ports::outbound::memory::identity_memory_models::{
+    GetIdentityContextRequest, IdentityContextMode,
+};
 use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 
 const DEFAULT_PERSONA_ID: &str = "persona:default";
@@ -32,6 +34,7 @@ pub async fn load_identity_context_summary(
         persona_id: resolved_persona_id(),
         channel_id: resolved_channel_id(policy_profile),
         relationship_limit: 8,
+        mode: IdentityContextMode::Cognitive,
     };
 
     match store.get_identity_context(&request).await {
@@ -48,10 +51,16 @@ pub async fn load_identity_context_summary(
                 .count();
 
             let summary = format!(
-                "persona_present={} user_present={} channel_present={} relationships={} policies={} depth={} continuity_links={} continuity_receipts={}",
+                "persona_present={} user_present={} channel_present={} contacts={} preferences={} relationships={} policies={} depth={} continuity_links={} continuity_receipts={}",
                 context.persona.is_some(),
                 context.user.is_some(),
                 context.channel.is_some(),
+                context.contacts.len(),
+                context
+                    .user
+                    .as_ref()
+                    .map(|user| user.preferences.len())
+                    .unwrap_or(0),
                 context.relationships.len(),
                 context.policy_profiles.len(),
                 context.graph_depth_used,

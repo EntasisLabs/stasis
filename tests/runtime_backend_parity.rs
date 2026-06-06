@@ -80,7 +80,7 @@ use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use stasis::ports::outbound::memory::identity_memory_models::{
     AutonomyScope, EntityRef, GetIdentityContextRequest, GetIdentityContextResponse,
-    ListEntityHistoryRequest, ListEntityHistoryResponse, RelationshipEntity,
+    ListEntityHistoryRequest, ListEntityHistoryResponse, RelationshipEntity, RelationshipKind,
     RelationshipStatus,
 };
 use stasis::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
@@ -652,6 +652,7 @@ fn replacement_trace_identity_context() -> GetIdentityContextResponse {
         persona: None,
         user: None,
         channel: None,
+        contacts: vec![],
         relationships: vec![RelationshipEntity {
             relationship_id: "rel-new".to_string(),
             source_entity_ref: EntityRef {
@@ -662,7 +663,7 @@ fn replacement_trace_identity_context() -> GetIdentityContextResponse {
                 entity_type: "UserEntity".to_string(),
                 entity_id: "u1".to_string(),
             },
-            relationship_kind: "assistant_user".to_string(),
+            relationship_kind: RelationshipKind::AssistantUser,
             status: RelationshipStatus::Active,
             trust_level: 0.4,
             confidence: 0.9,

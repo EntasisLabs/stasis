@@ -8,15 +8,18 @@ use chrono::Utc;
 use serde_json::{Map, Value};
 
 use crate::domain::errors::{Result, StasisError};
+use crate::infrastructure::memory::identity_context_filter::{
+    apply_identity_context_mode, collect_contact_ids, resolve_contacts,
+};
 use crate::infrastructure::memory::identity_memory_store_shared::{
     compute_graph_depth_with_cap, render_sttp_bridge_node,
 };
 use crate::ports::outbound::memory::identity_memory_models::{
     ChannelProfileEntity, CommitEntityUpdateRequest, CommitEntityUpdateResponse, CommitOutcomeCode,
-    EntityUpdateProposalRecord, GetIdentityContextRequest, GetIdentityContextResponse,
+    ContactEntity, EntityUpdateProposalRecord, GetIdentityContextRequest, GetIdentityContextResponse,
     IdentityEntityType, ListEntityHistoryRequest, ListEntityHistoryResponse, PersonaEntity,
     PolicyProfileEntity, ProposalState, ProposeEntityUpdateRequest, ProposeEntityUpdateResponse,
-    RelationshipEntity, RelationshipStatus, RelationshipTransitionEvent,
+    RelationshipEntity, RelationshipKind, RelationshipStatus, RelationshipTransitionEvent,
     RollbackEntityVersionRequest, RollbackEntityVersionResponse, UpdateTier,
 };
 use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
@@ -34,6 +37,7 @@ fn next_id(prefix: &str) -> String {
 pub struct InMemoryIdentityMemoryStore {
     personas: Arc<RwLock<HashMap<String, PersonaEntity>>>,
     users: Arc<RwLock<HashMap<String, crate::ports::outbound::memory::identity_memory_models::UserEntity>>>,
+    contacts: Arc<RwLock<HashMap<String, ContactEntity>>>,
     channels: Arc<RwLock<HashMap<String, ChannelProfileEntity>>>,
     policies: Arc<RwLock<HashMap<String, PolicyProfileEntity>>>,
     relationships: Arc<RwLock<HashMap<String, RelationshipEntity>>>,
@@ -61,6 +65,15 @@ impl InMemoryIdentityMemoryStore {
             .write()
             .map_err(|_| StasisError::PortFailure("user store lock poisoned".to_string()))?;
         state.insert(user.user_id.clone(), user);
+        Ok(())
+    }
+
+    pub fn upsert_contact(&self, contact: ContactEntity) -> Result<()> {
+        let mut state = self
+            .contacts
+            .write()
+            .map_err(|_| StasisError::PortFailure("contact store lock poisoned".to_string()))?;
+        state.insert(contact.contact_id.clone(), contact);
         Ok(())
     }
 
@@ -368,9 +381,13 @@ impl InMemoryIdentityMemoryStore {
                         value.as_str().map(|v| v.to_string());
                 }
                 "relationship_kind" => {
-                    relationship.relationship_kind = value.as_str().ok_or_else(|| {
-                        StasisError::PortFailure("relationship_kind must be a string".to_string())
-                    })?.to_string();
+                    relationship.relationship_kind = RelationshipKind::parse(
+                        value.as_str().ok_or_else(|| {
+                            StasisError::PortFailure(
+                                "relationship_kind must be a string".to_string(),
+                            )
+                        })?,
+                    );
                 }
                 "policy_tags" => {
                     relationship.policy_tags = parse_string_array(value, "policy_tags")?;
@@ -467,6 +484,10 @@ impl IdentityMemoryStore for InMemoryIdentityMemoryStore {
             .policies
             .read()
             .map_err(|_| StasisError::PortFailure("policy store lock poisoned".to_string()))?;
+        let contacts = self
+            .contacts
+            .read()
+            .map_err(|_| StasisError::PortFailure("contact store lock poisoned".to_string()))?;
 
         let mut relationships = rels
             .values()
@@ -480,6 +501,12 @@ impl IdentityMemoryStore for InMemoryIdentityMemoryStore {
                         && rel.source_entity_ref.entity_id == request.user_id
                         && rel.target_entity_ref.entity_type == "ChannelProfileEntity"
                         && rel.target_entity_ref.entity_id == request.channel_id)
+                    || (rel.source_entity_ref.entity_type == "UserEntity"
+                        && rel.source_entity_ref.entity_id == request.user_id
+                        && rel.target_entity_ref.entity_type == "ContactEntity")
+                    || (rel.target_entity_ref.entity_type == "UserEntity"
+                        && rel.target_entity_ref.entity_id == request.user_id
+                        && rel.source_entity_ref.entity_type == "ContactEntity")
                     || rel.source_entity_ref.entity_id == request.persona_id
             })
             .cloned()
@@ -516,15 +543,21 @@ impl IdentityMemoryStore for InMemoryIdentityMemoryStore {
             || next_id("claim"),
         );
 
-        Ok(GetIdentityContextResponse {
+        let contact_ids = collect_contact_ids(&relationships);
+        let resolved_contacts = resolve_contacts(&contact_ids, |id| contacts.get(id).cloned());
+
+        let response = GetIdentityContextResponse {
             persona: personas.get(&request.persona_id).cloned(),
             user: users.get(&request.user_id).cloned(),
             channel: channels.get(&request.channel_id).cloned(),
+            contacts: resolved_contacts,
             relationships,
             policy_profiles,
             graph_depth_used,
             flattened_claims,
-        })
+        };
+
+        Ok(apply_identity_context_mode(request.mode, response))
     }
 
     async fn propose_entity_update(
@@ -858,9 +891,9 @@ mod tests {
 
     use super::InMemoryIdentityMemoryStore;
     use crate::ports::outbound::memory::identity_memory_models::{
-        CommitEntityUpdateRequest, EntityRef, GetIdentityContextRequest, IdentityEntityType,
-        PersonaEntity, ProposeEntityUpdateRequest, RelationshipEntity, RelationshipStatus,
-        UpdateSource, UserEntity,
+        CommitEntityUpdateRequest, ContactEntity, EntityRef, GetIdentityContextRequest,
+        IdentityContextMode, IdentityEntityType, PersonaEntity, ProposeEntityUpdateRequest,
+        RelationshipEntity, RelationshipKind, RelationshipStatus, UpdateSource, UserEntity,
     };
     use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 
@@ -912,6 +945,7 @@ mod tests {
                 status: "active".to_string(),
                 version: 1,
                 updated_at: Utc::now(),
+                ..Default::default()
             })
             .expect("user upsert should work");
 
@@ -926,7 +960,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Active,
                 trust_level: 0.50,
                 confidence: 0.80,
@@ -983,6 +1017,7 @@ mod tests {
                 persona_id: "p1".to_string(),
                 channel_id: "none".to_string(),
                 relationship_limit: 10,
+                ..Default::default()
             })
             .await
             .expect("context read should succeed");
@@ -1011,7 +1046,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Active,
                 trust_level: 0.5,
                 confidence: 0.8,
@@ -1102,7 +1137,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Revoked,
                 trust_level: 0.1,
                 confidence: 0.8,
@@ -1177,7 +1212,7 @@ mod tests {
                         entity_type: "UserEntity".to_string(),
                         entity_id: "u1".to_string(),
                     },
-                    relationship_kind: "assistant_user".to_string(),
+                    relationship_kind: RelationshipKind::AssistantUser,
                     status: RelationshipStatus::Active,
                     trust_level: 0.5,
                     confidence: 0.8,
@@ -1207,6 +1242,7 @@ mod tests {
                 persona_id: "p1".to_string(),
                 channel_id: "none".to_string(),
                 relationship_limit: 10,
+                ..Default::default()
             })
             .await
             .expect("context should load");
@@ -1230,7 +1266,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Active,
                 trust_level: 0.5,
                 confidence: 0.8,
@@ -1300,7 +1336,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Revoked,
                 trust_level: 0.1,
                 confidence: 0.8,
@@ -1333,7 +1369,7 @@ mod tests {
                 entity_type: "UserEntity".to_string(),
                 entity_id: "u1".to_string(),
             },
-            relationship_kind: "assistant_user".to_string(),
+            relationship_kind: RelationshipKind::AssistantUser,
             status: RelationshipStatus::Active,
             trust_level: 0.4,
             confidence: 0.8,
@@ -1373,7 +1409,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Revoked,
                 trust_level: 0.1,
                 confidence: 0.8,
@@ -1406,7 +1442,7 @@ mod tests {
                 entity_type: "UserEntity".to_string(),
                 entity_id: "u1".to_string(),
             },
-            relationship_kind: "assistant_user".to_string(),
+            relationship_kind: RelationshipKind::AssistantUser,
             status: RelationshipStatus::Active,
             trust_level: 0.4,
             confidence: 0.8,
@@ -1429,5 +1465,87 @@ mod tests {
         });
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn cognitive_mode_loads_contacts_and_preferences_without_policy_profiles() {
+        let store = InMemoryIdentityMemoryStore::default();
+        store
+            .upsert_user(UserEntity {
+                user_id: "u1".to_string(),
+                timezone: "UTC".to_string(),
+                language_variant: None,
+                preferences: [("theme".to_string(), json!("dark"))]
+                    .into_iter()
+                    .collect(),
+                status: "active".to_string(),
+                version: 1,
+                updated_at: Utc::now(),
+            })
+            .expect("user upsert");
+        store
+            .upsert_contact(ContactEntity {
+                contact_id: "contact-alex".to_string(),
+                display_name: "Alex".to_string(),
+                aliases: vec!["alex@example.com".to_string()],
+                status: "active".to_string(),
+                version: 1,
+                updated_at: Utc::now(),
+            })
+            .expect("contact upsert");
+        store
+            .upsert_relationship(RelationshipEntity {
+                relationship_id: "rel-knows".to_string(),
+                source_entity_ref: EntityRef {
+                    entity_type: "UserEntity".to_string(),
+                    entity_id: "u1".to_string(),
+                },
+                target_entity_ref: EntityRef {
+                    entity_type: "ContactEntity".to_string(),
+                    entity_id: "contact-alex".to_string(),
+                },
+                relationship_kind: RelationshipKind::Knows,
+                status: RelationshipStatus::Active,
+                trust_level: 0.5,
+                confidence: 0.8,
+                strength_score: 0.8,
+                recency_score: 0.8,
+                autonomy_scope: Default::default(),
+                approval_profile_id: None,
+                interruption_policy: Default::default(),
+                escalation_policy: Default::default(),
+                policy_tags: vec![],
+                provenance: UpdateSource::UserDirect,
+                parent_relationship_id: None,
+                governing_relationship_ids: vec![],
+                derived_from_relationship_id: None,
+                last_transition_reason: None,
+                transition_receipt_id: None,
+                version: 1,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+            .expect("relationship upsert");
+
+        let context = store
+            .get_identity_context(&GetIdentityContextRequest {
+                user_id: "u1".to_string(),
+                persona_id: "p1".to_string(),
+                channel_id: "c1".to_string(),
+                relationship_limit: 8,
+                mode: IdentityContextMode::Cognitive,
+            })
+            .await
+            .expect("identity context");
+
+        assert_eq!(context.contacts.len(), 1);
+        assert_eq!(context.contacts[0].display_name, "Alex");
+        assert_eq!(
+            context.user.expect("user").preferences.get("theme"),
+            Some(&json!("dark"))
+        );
+        assert!(context.policy_profiles.is_empty());
+        assert_eq!(context.relationships.len(), 1);
+        assert!(context.relationships[0].relationship_kind.is_social());
     }
 }

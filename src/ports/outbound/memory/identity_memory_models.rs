@@ -1,11 +1,16 @@
+use std::collections::BTreeMap;
+use std::fmt;
+
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
 pub enum IdentityEntityType {
     PersonaEntity,
     UserEntity,
+    ContactEntity,
     ChannelProfileEntity,
     PolicyProfileEntity,
     #[default]
@@ -44,6 +49,111 @@ pub enum RelationshipStatus {
     Suspended,
     Deprecated,
     Revoked,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityContextMode {
+    #[default]
+    Full,
+    Policy,
+    Cognitive,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum RelationshipKind {
+    AssistantUser,
+    UserChannel,
+    Knows,
+    Prefers,
+    Delegation,
+    Colleague,
+    Legacy(String),
+}
+
+impl RelationshipKind {
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "assistant_user" => Self::AssistantUser,
+            "user_channel" => Self::UserChannel,
+            "knows" => Self::Knows,
+            "prefers" => Self::Prefers,
+            "delegation" => Self::Delegation,
+            "colleague" => Self::Colleague,
+            other => Self::Legacy(other.to_string()),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::AssistantUser => "assistant_user",
+            Self::UserChannel => "user_channel",
+            Self::Knows => "knows",
+            Self::Prefers => "prefers",
+            Self::Delegation => "delegation",
+            Self::Colleague => "colleague",
+            Self::Legacy(value) => value.as_str(),
+        }
+    }
+
+    pub fn is_structural(&self) -> bool {
+        matches!(self, Self::AssistantUser | Self::UserChannel)
+    }
+
+    pub fn is_social(&self) -> bool {
+        matches!(
+            self,
+            Self::Knows | Self::Prefers | Self::Delegation | Self::Colleague
+        )
+    }
+}
+
+impl Default for RelationshipKind {
+    fn default() -> Self {
+        Self::AssistantUser
+    }
+}
+
+impl Serialize for RelationshipKind {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RelationshipKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RelationshipKindVisitor;
+
+        impl Visitor<'_> for RelationshipKindVisitor {
+            type Value = RelationshipKind;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a relationship kind string")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(RelationshipKind::parse(value))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(RelationshipKind::parse(&value))
+            }
+        }
+
+        deserializer.deserialize_str(RelationshipKindVisitor)
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
@@ -86,6 +196,19 @@ pub struct UserEntity {
     pub user_id: String,
     pub timezone: String,
     pub language_variant: Option<String>,
+    #[serde(default)]
+    pub preferences: BTreeMap<String, Value>,
+    pub status: String,
+    pub version: i32,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ContactEntity {
+    pub contact_id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
     pub status: String,
     pub version: i32,
     pub updated_at: DateTime<Utc>,
@@ -116,7 +239,7 @@ pub struct RelationshipEntity {
     pub relationship_id: String,
     pub source_entity_ref: EntityRef,
     pub target_entity_ref: EntityRef,
-    pub relationship_kind: String,
+    pub relationship_kind: RelationshipKind,
     pub status: RelationshipStatus,
     pub trust_level: f32,
     pub confidence: f32,
@@ -153,6 +276,8 @@ pub struct GetIdentityContextRequest {
     pub persona_id: String,
     pub channel_id: String,
     pub relationship_limit: usize,
+    #[serde(default)]
+    pub mode: IdentityContextMode,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -160,6 +285,8 @@ pub struct GetIdentityContextResponse {
     pub persona: Option<PersonaEntity>,
     pub user: Option<UserEntity>,
     pub channel: Option<ChannelProfileEntity>,
+    #[serde(default)]
+    pub contacts: Vec<ContactEntity>,
     pub relationships: Vec<RelationshipEntity>,
     pub policy_profiles: Vec<PolicyProfileEntity>,
     pub graph_depth_used: usize,
@@ -280,4 +407,38 @@ pub struct RollbackEntityVersionResponse {
     pub new_version: Option<i32>,
     pub rollback_receipt_id: Option<String>,
     pub rationale: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IdentityContextMode, RelationshipKind};
+
+    #[test]
+    fn relationship_kind_deserializes_legacy_strings() {
+        let kind: RelationshipKind =
+            serde_json::from_value(serde_json::json!("assistant_user")).expect("deserialize");
+        assert_eq!(kind, RelationshipKind::AssistantUser);
+
+        let social: RelationshipKind =
+            serde_json::from_value(serde_json::json!("knows")).expect("deserialize");
+        assert!(social.is_social());
+    }
+
+    #[test]
+    fn relationship_kind_serializes_snake_case() {
+        let encoded = serde_json::to_string(&RelationshipKind::Delegation).expect("serialize");
+        assert_eq!(encoded, "\"delegation\"");
+    }
+
+    #[test]
+    fn identity_context_mode_defaults_to_full() {
+        let request: super::GetIdentityContextRequest = serde_json::from_value(serde_json::json!({
+            "user_id": "u1",
+            "persona_id": "p1",
+            "channel_id": "c1",
+            "relationship_limit": 4
+        }))
+        .expect("request should default mode to full");
+        assert_eq!(request.mode, IdentityContextMode::Full);
+    }
 }

@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -9,16 +9,19 @@ use surrealdb::{engine::any::Any, Surreal};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
+use crate::infrastructure::memory::identity_context_filter::{
+    apply_identity_context_mode, collect_contact_ids,
+};
 use crate::infrastructure::memory::identity_memory_store_shared::{
     compute_graph_depth_with_cap, render_sttp_bridge_node,
 };
 use crate::ports::outbound::memory::identity_memory_models::{
     AutonomyScope, ChannelProfileEntity, CommitEntityUpdateRequest, CommitEntityUpdateResponse,
-    CommitOutcomeCode, EntityRef, EntityUpdateProposalRecord, EscalationPolicy,
+    CommitOutcomeCode, ContactEntity, EntityRef, EntityUpdateProposalRecord, EscalationPolicy,
     GetIdentityContextRequest, GetIdentityContextResponse, IdentityEntityType,
     InterruptionPolicy, ListEntityHistoryRequest, ListEntityHistoryResponse, PersonaEntity,
     PolicyProfileEntity, ProposalState, ProposeEntityUpdateRequest, ProposeEntityUpdateResponse,
-    RelationshipEntity, RelationshipStatus, RelationshipTransitionEvent,
+    RelationshipEntity, RelationshipKind, RelationshipStatus, RelationshipTransitionEvent,
     RollbackEntityVersionRequest, RollbackEntityVersionResponse, UpdateSource, UpdateTier,
     UserEntity,
 };
@@ -37,9 +40,17 @@ const IDENTITY_SCHEMA_STATEMENTS: &[&str] = &[
     "DEFINE FIELD user_id ON TABLE identity_user TYPE string",
     "DEFINE FIELD timezone ON TABLE identity_user TYPE string",
     "DEFINE FIELD language_variant ON TABLE identity_user TYPE option<string>",
+    "DEFINE FIELD preferences ON TABLE identity_user TYPE object",
     "DEFINE FIELD status ON TABLE identity_user TYPE string",
     "DEFINE FIELD version ON TABLE identity_user TYPE int",
     "DEFINE FIELD updated_at ON TABLE identity_user TYPE datetime",
+    "DEFINE TABLE identity_contact SCHEMAFULL",
+    "DEFINE FIELD contact_id ON TABLE identity_contact TYPE string",
+    "DEFINE FIELD display_name ON TABLE identity_contact TYPE string",
+    "DEFINE FIELD aliases ON TABLE identity_contact TYPE array<string>",
+    "DEFINE FIELD status ON TABLE identity_contact TYPE string",
+    "DEFINE FIELD version ON TABLE identity_contact TYPE int",
+    "DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime",
     "DEFINE TABLE identity_channel_profile SCHEMAFULL",
     "DEFINE FIELD channel_id ON TABLE identity_channel_profile TYPE string",
     "DEFINE FIELD channel_type ON TABLE identity_channel_profile TYPE string",
@@ -129,6 +140,7 @@ pub struct SurrealIdentityMemoryStore {
     db: Surreal<Any>,
     persona_table: String,
     user_table: String,
+    contact_table: String,
     channel_table: String,
     policy_table: String,
     relationship_table: String,
@@ -143,6 +155,7 @@ impl SurrealIdentityMemoryStore {
             db,
             persona_table: "identity_persona".to_string(),
             user_table: "identity_user".to_string(),
+            contact_table: "identity_contact".to_string(),
             channel_table: "identity_channel_profile".to_string(),
             policy_table: "identity_policy_profile".to_string(),
             relationship_table: "identity_relationship".to_string(),
@@ -318,6 +331,38 @@ impl SurrealIdentityMemoryStore {
         Ok(row.map(PolicyProfileEntity::from))
     }
 
+    async fn load_contact(&self, contact_id: &str) -> Result<Option<ContactEntity>> {
+        let mut response = match self
+            .db
+            .query("SELECT * FROM type::record($table, $id)")
+            .bind(("table", self.contact_table.clone()))
+            .bind(("id", contact_id.to_string()))
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                let message = err.to_string();
+                if Self::is_missing_table(&message, &self.contact_table) {
+                    return Ok(None);
+                }
+                return Err(Self::port_err("load contact", err));
+            }
+        };
+
+        let row: Option<ContactRow> = match response.take(0) {
+            Ok(row) => row,
+            Err(err) => {
+                let message = err.to_string();
+                if Self::is_missing_table(&message, &self.contact_table) {
+                    return Ok(None);
+                }
+                return Err(Self::port_err("decode contact", err));
+            }
+        };
+
+        Ok(row.map(ContactEntity::from))
+    }
+
     async fn trust_delta_max_for_relationship(&self, relationship: &RelationshipEntity) -> f32 {
         if let Some(profile_id) = relationship.approval_profile_id.as_ref()
             && let Ok(Some(profile)) = self.load_policy_profile(profile_id).await
@@ -432,14 +477,13 @@ impl SurrealIdentityMemoryStore {
                         value.as_str().map(|v| v.to_string());
                 }
                 "relationship_kind" => {
-                    relationship.relationship_kind = value
-                        .as_str()
-                        .ok_or_else(|| {
+                    relationship.relationship_kind = RelationshipKind::parse(
+                        value.as_str().ok_or_else(|| {
                             StasisError::PortFailure(
                                 "relationship_kind must be a string".to_string(),
                             )
-                        })?
-                        .to_string();
+                        })?,
+                    );
                 }
                 "policy_tags" => {
                     relationship.policy_tags = parse_string_array(value, "policy_tags")?;
@@ -578,7 +622,7 @@ impl SurrealIdentityMemoryStore {
                 "target_entity_id",
                 relationship.target_entity_ref.entity_id.clone(),
             ))
-            .bind(("relationship_kind", relationship.relationship_kind.clone()))
+            .bind(("relationship_kind", relationship.relationship_kind.as_str().to_string()))
             .await
         {
             Ok(response) => response,
@@ -646,6 +690,18 @@ impl SurrealIdentityMemoryStore {
         Ok(())
     }
 
+    pub async fn upsert_contact(&self, contact: ContactEntity) -> Result<()> {
+        let row = ContactRow::from(contact);
+        self.db
+            .query("UPSERT type::record($table, $id) CONTENT $data")
+            .bind(("table", self.contact_table.clone()))
+            .bind(("id", row.contact_id.clone()))
+            .bind(("data", row))
+            .await
+            .map_err(|e| Self::port_err("upsert contact", e))?;
+        Ok(())
+    }
+
     pub async fn upsert_channel(&self, channel: ChannelProfileEntity) -> Result<()> {
         let row = ChannelProfileRow::from(channel);
         self.db
@@ -708,6 +764,7 @@ fn parse_identity_entity_type(value: &str) -> Result<IdentityEntityType> {
     match value {
         "persona_entity" => Ok(IdentityEntityType::PersonaEntity),
         "user_entity" => Ok(IdentityEntityType::UserEntity),
+        "contact_entity" => Ok(IdentityEntityType::ContactEntity),
         "channel_profile_entity" => Ok(IdentityEntityType::ChannelProfileEntity),
         "policy_profile_entity" => Ok(IdentityEntityType::PolicyProfileEntity),
         "relationship_entity" => Ok(IdentityEntityType::RelationshipEntity),
@@ -721,6 +778,7 @@ fn identity_entity_type_str(value: IdentityEntityType) -> &'static str {
     match value {
         IdentityEntityType::PersonaEntity => "persona_entity",
         IdentityEntityType::UserEntity => "user_entity",
+        IdentityEntityType::ContactEntity => "contact_entity",
         IdentityEntityType::ChannelProfileEntity => "channel_profile_entity",
         IdentityEntityType::PolicyProfileEntity => "policy_profile_entity",
         IdentityEntityType::RelationshipEntity => "relationship_entity",
@@ -847,6 +905,8 @@ struct UserRow {
     user_id: String,
     timezone: String,
     language_variant: Option<String>,
+    #[serde(default)]
+    preferences: BTreeMap<String, Value>,
     status: String,
     version: i32,
     updated_at: DateTime<Utc>,
@@ -858,6 +918,7 @@ impl From<UserEntity> for UserRow {
             user_id: value.user_id,
             timezone: value.timezone,
             language_variant: value.language_variant,
+            preferences: value.preferences,
             status: value.status,
             version: value.version,
             updated_at: value.updated_at,
@@ -871,6 +932,44 @@ impl From<UserRow> for UserEntity {
             user_id: value.user_id,
             timezone: value.timezone,
             language_variant: value.language_variant,
+            preferences: value.preferences,
+            status: value.status,
+            version: value.version,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
+struct ContactRow {
+    contact_id: String,
+    display_name: String,
+    #[serde(default)]
+    aliases: Vec<String>,
+    status: String,
+    version: i32,
+    updated_at: DateTime<Utc>,
+}
+
+impl From<ContactEntity> for ContactRow {
+    fn from(value: ContactEntity) -> Self {
+        Self {
+            contact_id: value.contact_id,
+            display_name: value.display_name,
+            aliases: value.aliases,
+            status: value.status,
+            version: value.version,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+impl From<ContactRow> for ContactEntity {
+    fn from(value: ContactRow) -> Self {
+        Self {
+            contact_id: value.contact_id,
+            display_name: value.display_name,
+            aliases: value.aliases,
             status: value.status,
             version: value.version,
             updated_at: value.updated_at,
@@ -998,7 +1097,7 @@ impl TryFrom<RelationshipRow> for RelationshipEntity {
                 entity_type: value.target_entity_type,
                 entity_id: value.target_entity_id,
             },
-            relationship_kind: value.relationship_kind,
+            relationship_kind: RelationshipKind::parse(&value.relationship_kind),
             status: parse_relationship_status(&value.status)?,
             trust_level: value.trust_level,
             confidence: value.confidence,
@@ -1041,7 +1140,7 @@ impl From<RelationshipEntity> for RelationshipRow {
             source_entity_id: value.source_entity_ref.entity_id,
             target_entity_type: value.target_entity_ref.entity_type,
             target_entity_id: value.target_entity_ref.entity_id,
-            relationship_kind: value.relationship_kind,
+            relationship_kind: value.relationship_kind.as_str().to_string(),
             status: relationship_status_str(value.status).to_string(),
             trust_level: value.trust_level,
             confidence: value.confidence,
@@ -1308,6 +1407,8 @@ impl IdentityMemoryStore for SurrealIdentityMemoryStore {
                  WHERE status = 'active' \
                    AND ((source_entity_type = 'PersonaEntity' AND source_entity_id = $persona_id AND target_entity_type = 'UserEntity' AND target_entity_id = $user_id) \
                      OR (source_entity_type = 'UserEntity' AND source_entity_id = $user_id AND target_entity_type = 'ChannelProfileEntity' AND target_entity_id = $channel_id) \
+                     OR (source_entity_type = 'UserEntity' AND source_entity_id = $user_id AND target_entity_type = 'ContactEntity') \
+                     OR (target_entity_type = 'UserEntity' AND target_entity_id = $user_id AND source_entity_type = 'ContactEntity') \
                      OR source_entity_id = $persona_id) \
                  LIMIT $limit",
             )
@@ -1373,15 +1474,28 @@ impl IdentityMemoryStore for SurrealIdentityMemoryStore {
             || Self::now_id("claim"),
         );
 
-        Ok(GetIdentityContextResponse {
+        let contact_ids = collect_contact_ids(&relationships);
+        let mut resolved_contacts = Vec::with_capacity(contact_ids.len());
+        for contact_id in contact_ids {
+            if let Some(contact) = self.load_contact(&contact_id).await?
+                && contact.status == "active"
+            {
+                resolved_contacts.push(contact);
+            }
+        }
+
+        let response = GetIdentityContextResponse {
             persona: persona.map(PersonaEntity::from),
             user: user.map(UserEntity::from),
             channel: channel.map(ChannelProfileEntity::from),
+            contacts: resolved_contacts,
             relationships,
             policy_profiles,
             graph_depth_used,
             flattened_claims,
-        })
+        };
+
+        Ok(apply_identity_context_mode(request.mode, response))
     }
 
     async fn propose_entity_update(
@@ -1795,7 +1909,8 @@ mod tests {
     use crate::ports::outbound::memory::identity_memory_models::{
         CommitEntityUpdateRequest, CommitOutcomeCode, EntityRef, GetIdentityContextRequest,
         IdentityEntityType, ListEntityHistoryRequest, PersonaEntity, ProposeEntityUpdateRequest,
-        ProposalState, RelationshipEntity, RelationshipStatus, UpdateSource, UserEntity,
+        ProposalState, RelationshipEntity, RelationshipKind, RelationshipStatus, UpdateSource,
+        UserEntity,
     };
     use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 
@@ -1905,6 +2020,7 @@ mod tests {
                 status: "active".to_string(),
                 version: 1,
                 updated_at: Utc::now(),
+                ..Default::default()
             })
             .await
             .expect("user upsert should work");
@@ -1920,7 +2036,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Active,
                 trust_level: 0.50,
                 confidence: 0.80,
@@ -1993,6 +2109,7 @@ mod tests {
                 persona_id: "p1".to_string(),
                 channel_id: "none".to_string(),
                 relationship_limit: 10,
+                ..Default::default()
             })
             .await
             .expect("identity context should load");
@@ -2016,7 +2133,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Active,
                 trust_level: 0.5,
                 confidence: 0.8,
@@ -2094,7 +2211,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Active,
                 trust_level: 0.5,
                 confidence: 0.8,
@@ -2151,6 +2268,7 @@ mod tests {
                 persona_id: "p1".to_string(),
                 channel_id: "none".to_string(),
                 relationship_limit: 10,
+                ..Default::default()
             })
             .await
             .expect("identity context should load");
@@ -2195,7 +2313,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Active,
                 trust_level: 0.5,
                 confidence: 0.8,
@@ -2254,6 +2372,7 @@ mod tests {
                 persona_id: "p1".to_string(),
                 channel_id: "none".to_string(),
                 relationship_limit: 10,
+                ..Default::default()
             })
             .await
             .expect("identity context should load");
@@ -2296,7 +2415,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Revoked,
                 trust_level: 0.1,
                 confidence: 0.8,
@@ -2380,7 +2499,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Revoked,
                 trust_level: 0.1,
                 confidence: 0.8,
@@ -2415,7 +2534,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Active,
                 trust_level: 0.4,
                 confidence: 0.8,
@@ -2456,7 +2575,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Revoked,
                 trust_level: 0.1,
                 confidence: 0.8,
@@ -2491,7 +2610,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Active,
                 trust_level: 0.4,
                 confidence: 0.8,

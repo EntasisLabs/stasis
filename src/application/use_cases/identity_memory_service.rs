@@ -120,7 +120,7 @@ mod tests {
     use crate::infrastructure::memory::in_memory_identity_memory_store::InMemoryIdentityMemoryStore;
     use crate::ports::outbound::memory::identity_memory_models::{
         EntityRef, IdentityEntityType, ProposeEntityUpdateRequest, RelationshipEntity,
-        RelationshipStatus, UpdateSource,
+        RelationshipKind, RelationshipStatus, UpdateSource,
     };
 
     #[tokio::test]
@@ -137,7 +137,7 @@ mod tests {
                     entity_type: "UserEntity".to_string(),
                     entity_id: "u1".to_string(),
                 },
-                relationship_kind: "assistant_user".to_string(),
+                relationship_kind: RelationshipKind::AssistantUser,
                 status: RelationshipStatus::Active,
                 trust_level: 0.50,
                 confidence: 0.80,

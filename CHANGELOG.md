@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Identity model 0.4.0 foundation** — `UserEntity.preferences`, `ContactEntity`, typed `RelationshipKind` enum (`knows`, `prefers`, `delegation`, `colleague` + structural kinds), and `GetIdentityContextRequest.mode` (`Full` / `Policy` / `Cognitive`) with shared mode filtering in both identity store adapters.
+- **Roadmap:** [identity-model-0.4.0-roadmap.md](docs/design/identity-model-0.4.0-roadmap.md)
+
+### Changed
+
+- **Runtime identity compiler** — prompt path now requests `IdentityContextMode::Cognitive` and reports contact/preference counts in diagnostics snapshots.
+
 ## [0.3.0] - 2026-06-04
 
 ### Added

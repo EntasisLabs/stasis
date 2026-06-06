@@ -1,3 +1,4 @@
+pub mod identity_context_filter;
 pub mod in_memory_identity_memory_store;
 pub mod identity_memory_store_shared;
 pub mod locus_context_reader;
