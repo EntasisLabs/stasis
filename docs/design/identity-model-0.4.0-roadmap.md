@@ -169,10 +169,11 @@ Implementation: shared `apply_identity_context_mode()` in `identity_context_filt
 
 ### Phase E — Docs and release
 
-- [ ] Update `docs-book/src/identity-memory-layer.md`
-- [ ] Update `docs/architecture/surrealdb-schema.md`
-- [ ] Update cookbook examples
-- [ ] CHANGELOG `[Unreleased]` → `[0.4.0]`
+- [x] Update `docs-book/src/identity-memory-layer.md`
+- [x] Update `docs/architecture/surrealdb-schema.md`
+- [x] Update `docs-book/src/surrealdb-schema.md`
+- [x] Update cookbook examples
+- [ ] CHANGELOG `[Unreleased]` → `[0.4.0]` (at release tag)
 
 ## 5. Test Plan
 
@@ -197,11 +198,11 @@ Implementation: shared `apply_identity_context_mode()` in `identity_context_filt
 1. All identity store unit tests pass (in-memory + surreal module tests).
 2. `runtime_backend_parity` identity continuity tests pass.
 3. Default `mode: Full` preserves 0.3.0 response shape (plus empty `contacts`).
-4. Docs book identity-memory-layer updated and `mdbook build` succeeds.
+4. [x] Docs book identity-memory-layer updated and `mdbook build` succeeds.
 
 ## 8. Acceptance Criteria
 
-- [ ] Operator can store `user.preferences.theme` without creating a relationship
-- [ ] Operator can create `ContactEntity` and link via `RelationshipKind::Knows`
-- [ ] Prompt path uses Cognitive mode and does not leak policy profiles into snapshot summary counts incorrectly
-- [ ] Policy consumer can call `mode: Policy` and receive structural + governance slice only
+- [x] Operator can store `user.preferences.theme` without creating a relationship
+- [x] Operator can create `ContactEntity` and link via `RelationshipKind::Knows`
+- [x] Prompt path uses Cognitive mode and does not leak policy profiles into snapshot summary counts incorrectly
+- [x] Policy consumer can call `mode: Policy` and receive structural + governance slice only

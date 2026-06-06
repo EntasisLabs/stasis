@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-01f42003.js";
+            window.path_to_searchindex_js = "searchindex-0adc64f9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9d13a89d.js"></script>
@@ -180,7 +180,7 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-06-05</li>
 <li>Verified Against:
 <ul>
 <li>src/infrastructure/runtime/surreal_job_store.rs</li>
@@ -189,6 +189,7 @@
 <li>src/infrastructure/runtime/surreal_recurring_store.rs</li>
 <li>src/infrastructure/runtime/surreal_thread_store.rs</li>
 <li>src/infrastructure/runtime/surreal_cluster_forward_outcome_store.rs</li>
+<li>src/infrastructure/memory/surreal_identity_memory_store.rs</li>
 <li>tests/runtime_backend_parity.rs</li>
 </ul>
 </li>
@@ -460,6 +461,21 @@ DEFINE FIELD occurred_at ON TABLE thread_event TYPE datetime;
 DEFINE INDEX uq_thread_event_id ON TABLE thread_event COLUMNS event_id UNIQUE;
 DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_id, occurred_at;
 </code></pre>
+<h2 id="identity-memory-tables"><a class="header" href="#identity-memory-tables">Identity Memory Tables</a></h2>
+<p>Identity persistence uses schemafull Surreal tables for persona, user, <strong>contact</strong>, channel, policy profiles, relationship graph state, proposal workflow, and transition/version history.</p>
+<p><code>relationship_kind</code> is stored as a string matching the <code>RelationshipKind</code> enum (<code>assistant_user</code>, <code>knows</code>, <code>prefers</code>, <code>delegation</code>, <code>colleague</code>, <code>user_channel</code>, or legacy values).</p>
+<p>See <code>docs/architecture/surrealdb-schema.md</code> for the full DDL. Key 0.4.0 additions:</p>
+<pre><code class="language-sql">DEFINE FIELD preferences ON TABLE identity_user TYPE object;
+
+DEFINE TABLE identity_contact SCHEMAFULL;
+DEFINE FIELD contact_id ON TABLE identity_contact TYPE string;
+DEFINE FIELD display_name ON TABLE identity_contact TYPE string;
+DEFINE FIELD aliases ON TABLE identity_contact TYPE array&lt;string&gt;;
+DEFINE FIELD status ON TABLE identity_contact TYPE string;
+DEFINE FIELD version ON TABLE identity_contact TYPE int;
+DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
+</code></pre>
+<p>Bootstrap via <code>SurrealIdentityMemoryStore::ensure_schema()</code>.</p>
 <h2 id="leasing-and-concurrency-notes"><a class="header" href="#leasing-and-concurrency-notes">Leasing and Concurrency Notes</a></h2>
 <ol>
 <li>Lease updates should include compare-and-set predicates on state and current lease values.</li>

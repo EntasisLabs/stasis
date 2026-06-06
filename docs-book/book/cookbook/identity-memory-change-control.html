@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-01f42003.js";
+            window.path_to_searchindex_js = "../searchindex-0adc64f9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9d13a89d.js"></script>
@@ -180,15 +180,18 @@
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-06-04</li>
+<li>Last Verified: 2026-06-05</li>
 <li>Verified Against:
 <ul>
-<li>src/application/use_cases/</li>
+<li>src/application/use_cases/identity_memory_service.rs</li>
+<li>src/infrastructure/memory/in_memory_identity_memory_store.rs</li>
+<li>src/infrastructure/memory/identity_context_filter.rs</li>
+<li>src/ports/outbound/memory/identity_memory_models.rs</li>
 </ul>
 </li>
 </ul>
 <h2 id="outcome"><a class="header" href="#outcome">Outcome</a></h2>
-<p>Apply governed identity relationship updates with tier-aware proposal splitting, explicit approvals, and version-safe commits.</p>
+<p>Apply governed identity relationship updates with tier-aware proposal splitting, explicit approvals, and version-safe commits. Seed <strong>contacts</strong>, <strong>user preferences</strong>, and query <strong>cognitive vs policy</strong> context slices (0.4.0).</p>
 <h2 id="recipe"><a class="header" href="#recipe">Recipe</a></h2>
 <h3 id="1-seed-baseline-relationship-state"><a class="header" href="#1-seed-baseline-relationship-state">1. Seed baseline relationship state</a></h3>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -198,7 +201,7 @@ use std::sync::Arc;
 
 use stasis::infrastructure::memory::in_memory_identity_memory_store::InMemoryIdentityMemoryStore;
 use stasis::ports::outbound::memory::identity_memory_models::{
-    EntityRef, RelationshipEntity, RelationshipStatus, UpdateSource,
+    EntityRef, RelationshipEntity, RelationshipKind, RelationshipStatus, UpdateSource,
 };
 
 fn seed_relationship(store: &amp;InMemoryIdentityMemoryStore) -&gt; stasis::domain::errors::Result&lt;()&gt; {
@@ -212,7 +215,7 @@ fn seed_relationship(store: &amp;InMemoryIdentityMemoryStore) -&gt; stasis::doma
             entity_type: "UserEntity".to_string(),
             entity_id: "user-123".to_string(),
         },
-        relationship_kind: "assistant_user".to_string(),
+        relationship_kind: RelationshipKind::AssistantUser,
         status: RelationshipStatus::Active,
         trust_level: 0.50,
         confidence: 0.80,
@@ -243,7 +246,7 @@ fn seed_relationship(store: &amp;InMemoryIdentityMemoryStore) -&gt; stasis::doma
 let store = Arc::new(InMemoryIdentityMemoryStore::default());
 seed_relationship(store.as_ref())?;
 
-let service = IdentityMemoryService::new(store);
+let service = IdentityMemoryService::new(store.clone());
 <span class="boring">}</span></code></pre>
 <h3 id="3-propose-mixed-tier-patch"><a class="header" href="#3-propose-mixed-tier-patch">3. Propose mixed-tier patch</a></h3>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -277,8 +280,8 @@ println!("tiers={:?}", proposed.tiers);
 <p>Expected behavior:</p>
 <ol>
 <li>Patch is split into multiple proposals because tiers differ.</li>
-<li>recency_score proposal is AutoCommit tier.</li>
-<li>autonomy_scope.allow proposal is ApprovalRequired tier.</li>
+<li><code>recency_score</code> proposal is AutoCommit tier.</li>
+<li><code>autonomy_scope.allow</code> proposal is ApprovalRequired tier.</li>
 </ol>
 <h3 id="4-auto-commit-safe-tiers"><a class="header" href="#4-auto-commit-safe-tiers">4. Auto-commit safe tiers</a></h3>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -356,13 +359,109 @@ let rollback = service
 
 println!("rolled_back={}", rollback.rolled_back);
 <span class="boring">}</span></code></pre>
+<h3 id="7-seed-contacts-preferences-and-query-by-mode-040"><a class="header" href="#7-seed-contacts-preferences-and-query-by-mode-040">7. Seed contacts, preferences, and query by mode (0.4.0)</a></h3>
+<p>Store scalar user prefs and first-class contacts without relationship-edge overhead for every setting:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use std::collections::BTreeMap;
+
+use stasis::ports::outbound::memory::identity_memory_models::{
+    ContactEntity, GetIdentityContextRequest, IdentityContextMode, UserEntity,
+};
+use stasis::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
+
+store.upsert_user(UserEntity {
+    user_id: "user-123".to_string(),
+    timezone: "America/New_York".to_string(),
+    language_variant: None,
+    preferences: BTreeMap::from([("theme".to_string(), json!("dark"))]),
+    status: "active".to_string(),
+    version: 1,
+    updated_at: Utc::now(),
+    ..Default::default()
+})?;
+
+store.upsert_contact(ContactEntity {
+    contact_id: "contact-alex".to_string(),
+    display_name: "Alex Rivera".to_string(),
+    aliases: vec!["alex@example.com".to_string(), "Alex R.".to_string()],
+    status: "active".to_string(),
+    version: 1,
+    updated_at: Utc::now(),
+})?;
+
+store.upsert_relationship(RelationshipEntity {
+    relationship_id: "rel-knows-alex".to_string(),
+    source_entity_ref: EntityRef {
+        entity_type: "UserEntity".to_string(),
+        entity_id: "user-123".to_string(),
+    },
+    target_entity_ref: EntityRef {
+        entity_type: "ContactEntity".to_string(),
+        entity_id: "contact-alex".to_string(),
+    },
+    relationship_kind: RelationshipKind::Knows,
+    status: RelationshipStatus::Active,
+    trust_level: 0.5,
+    confidence: 0.85,
+    strength_score: 0.8,
+    recency_score: 0.7,
+    autonomy_scope: Default::default(),
+    approval_profile_id: None,
+    interruption_policy: Default::default(),
+    escalation_policy: Default::default(),
+    policy_tags: vec![],
+    provenance: UpdateSource::UserDirect,
+    parent_relationship_id: None,
+    governing_relationship_ids: vec![],
+    derived_from_relationship_id: None,
+    last_transition_reason: None,
+    transition_receipt_id: None,
+    version: 1,
+    created_at: Utc::now(),
+    updated_at: Utc::now(),
+})?;
+
+let cognitive = store
+    .get_identity_context(&amp;GetIdentityContextRequest {
+        user_id: "user-123".to_string(),
+        persona_id: "persona:default".to_string(),
+        channel_id: "channel:default".to_string(),
+        relationship_limit: 8,
+        mode: IdentityContextMode::Cognitive,
+    })
+    .await?;
+
+assert_eq!(cognitive.contacts.len(), 1);
+assert!(cognitive.policy_profiles.is_empty());
+
+let policy = store
+    .get_identity_context(&amp;GetIdentityContextRequest {
+        user_id: "user-123".to_string(),
+        persona_id: "persona:default".to_string(),
+        channel_id: "channel:default".to_string(),
+        relationship_limit: 8,
+        mode: IdentityContextMode::Policy,
+    })
+    .await?;
+
+assert!(policy.contacts.is_empty());
+assert!(policy.user.expect("user").preferences.is_empty());
+<span class="boring">}</span></code></pre>
 <h2 id="operational-notes"><a class="header" href="#operational-notes">Operational Notes</a></h2>
 <ol>
-<li>Always pass expected_version from latest read to avoid stale writes.</li>
+<li>Always pass <code>expected_version</code> from latest read to avoid stale writes.</li>
 <li>Treat ApprovalRequired proposals as explicit human checkpoints.</li>
 <li>Persist proposal and transition history to support audits.</li>
-<li>Watch for PolicyDenied outcomes and adjust patch strategy accordingly.</li>
+<li>Watch for <code>PolicyDenied</code> outcomes and adjust patch strategy accordingly.</li>
+<li>Use <strong><code>IdentityContextMode::Cognitive</code></strong> for prompt personalization; use <strong><code>Policy</code></strong> for guardrail consumers.</li>
+<li>Prefer <code>UserEntity.preferences</code> for scalar settings; use <code>RelationshipKind::Knows</code> (or <code>prefers</code>, <code>delegation</code>, <code>colleague</code>) for people graph edges.</li>
 </ol>
+<h2 id="related-documents"><a class="header" href="#related-documents">Related Documents</a></h2>
+<ul>
+<li><a href="../identity-memory-layer.html">Identity Memory Layer</a></li>
+<li><a href="../surrealdb-schema.html#identity-memory-tables">SurrealDB Schema — Identity Memory Tables</a></li>
+</ul>
 
                     </main>
 

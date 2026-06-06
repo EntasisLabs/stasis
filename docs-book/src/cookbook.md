@@ -31,5 +31,5 @@ Each recipe is:
 1. [Production Agentic Workflows](./cookbook/production-agentic-workflows.md)
 2. [Runtime and Dashboard Bootstrap](./cookbook/runtime-dashboard-bootstrap.md)
 3. [Workflow Builder Starting Object](./cookbook/workflow-builder-starting-object.md)
-4. [Identity Memory Change Control](./cookbook/identity-memory-change-control.md)
+4. [Identity Memory Change Control](./cookbook/identity-memory-change-control.md) — governed relationship updates, contacts, preferences, and context modes
 5. [Memory Maintenance and Rollups](./cookbook/memory-maintenance-rollups.md)

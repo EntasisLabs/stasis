@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, SRE, Architect
 - Stability: Evolving
-- Last Verified: 2026-05-24
+- Last Verified: 2026-06-05
 - Verified Against:
   - src/infrastructure/runtime/surreal_job_store.rs
   - src/infrastructure/runtime/surreal_job_attempt_store.rs
@@ -50,7 +50,7 @@ DEFINE INDEX idx_cluster_forward_outcome_corr
 
 ## Identity Memory Tables
 
-Identity persistence uses schemafull Surreal tables for persona, user, channel, policy profiles, relationship graph state, proposal workflow, and transition/version history.
+Identity persistence uses schemafull Surreal tables for persona, user, contact, channel, policy profiles, relationship graph state, proposal workflow, and transition/version history.
 
 ```sql
 DEFINE TABLE identity_persona SCHEMAFULL;
@@ -64,9 +64,18 @@ DEFINE TABLE identity_user SCHEMAFULL;
 DEFINE FIELD user_id ON TABLE identity_user TYPE string;
 DEFINE FIELD timezone ON TABLE identity_user TYPE string;
 DEFINE FIELD language_variant ON TABLE identity_user TYPE option<string>;
+DEFINE FIELD preferences ON TABLE identity_user TYPE object;
 DEFINE FIELD status ON TABLE identity_user TYPE string;
 DEFINE FIELD version ON TABLE identity_user TYPE int;
 DEFINE FIELD updated_at ON TABLE identity_user TYPE datetime;
+
+DEFINE TABLE identity_contact SCHEMAFULL;
+DEFINE FIELD contact_id ON TABLE identity_contact TYPE string;
+DEFINE FIELD display_name ON TABLE identity_contact TYPE string;
+DEFINE FIELD aliases ON TABLE identity_contact TYPE array<string>;
+DEFINE FIELD status ON TABLE identity_contact TYPE string;
+DEFINE FIELD version ON TABLE identity_contact TYPE int;
+DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
 
 DEFINE TABLE identity_channel_profile SCHEMAFULL;
 DEFINE FIELD channel_id ON TABLE identity_channel_profile TYPE string;

@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
-## [Unreleased]
+## [0.4.0]
 
 ### Added
 
@@ -15,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Runtime identity compiler** — prompt path now requests `IdentityContextMode::Cognitive` and reports contact/preference counts in diagnostics snapshots.
+
+### Documentation
+
+- **Identity memory layer** — documents 0.4.0 model (`ContactEntity`, `UserEntity.preferences`, `RelationshipKind`, `IdentityContextMode`), Surreal schema additions, and updated cookbook recipes.
 
 ## [0.3.0] - 2026-06-04
 

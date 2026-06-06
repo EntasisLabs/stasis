@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, SRE, Architect
 - Stability: Stable
-- Last Verified: 2026-05-15
+- Last Verified: 2026-06-05
 - Verified Against:
   - src/infrastructure/runtime/surreal_job_store.rs
   - src/infrastructure/runtime/surreal_job_attempt_store.rs
@@ -13,6 +13,7 @@
   - src/infrastructure/runtime/surreal_recurring_store.rs
   - src/infrastructure/runtime/surreal_thread_store.rs
   - src/infrastructure/runtime/surreal_cluster_forward_outcome_store.rs
+  - src/infrastructure/memory/surreal_identity_memory_store.rs
   - tests/runtime_backend_parity.rs
 
 ## Purpose
@@ -298,6 +299,28 @@ DEFINE FIELD occurred_at ON TABLE thread_event TYPE datetime;
 DEFINE INDEX uq_thread_event_id ON TABLE thread_event COLUMNS event_id UNIQUE;
 DEFINE INDEX idx_thread_event_thread_time ON TABLE thread_event COLUMNS thread_id, occurred_at;
 ```
+
+## Identity Memory Tables
+
+Identity persistence uses schemafull Surreal tables for persona, user, **contact**, channel, policy profiles, relationship graph state, proposal workflow, and transition/version history.
+
+`relationship_kind` is stored as a string matching the `RelationshipKind` enum (`assistant_user`, `knows`, `prefers`, `delegation`, `colleague`, `user_channel`, or legacy values).
+
+See `docs/architecture/surrealdb-schema.md` for the full DDL. Key 0.4.0 additions:
+
+```sql
+DEFINE FIELD preferences ON TABLE identity_user TYPE object;
+
+DEFINE TABLE identity_contact SCHEMAFULL;
+DEFINE FIELD contact_id ON TABLE identity_contact TYPE string;
+DEFINE FIELD display_name ON TABLE identity_contact TYPE string;
+DEFINE FIELD aliases ON TABLE identity_contact TYPE array<string>;
+DEFINE FIELD status ON TABLE identity_contact TYPE string;
+DEFINE FIELD version ON TABLE identity_contact TYPE int;
+DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
+```
+
+Bootstrap via `SurrealIdentityMemoryStore::ensure_schema()`.
 
 ## Leasing and Concurrency Notes
 

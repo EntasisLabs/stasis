@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-01f42003.js";
+            window.path_to_searchindex_js = "searchindex-0adc64f9.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9d13a89d.js"></script>
@@ -180,7 +180,7 @@
 <li>Document Type: Architecture and Operations Guide</li>
 <li>Audience: Engineer, Runtime Owner, Platform Team</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-05-27</li>
+<li>Last Verified: 2026-06-05</li>
 <li>Verified Against:
 <ul>
 <li>src/ports/outbound/memory/identity_memory_store.rs</li>
@@ -191,6 +191,8 @@
 <li>src/application/runtime/stasis_runtime_builder.rs</li>
 <li>src/infrastructure/memory/in_memory_identity_memory_store.rs</li>
 <li>src/infrastructure/memory/surreal_identity_memory_store.rs</li>
+<li>src/infrastructure/memory/identity_context_filter.rs</li>
+<li>docs/design/identity-model-0.4.0-roadmap.md</li>
 </ul>
 </li>
 </ul>
@@ -204,37 +206,96 @@
 <h2 id="scope-and-responsibilities"><a class="header" href="#scope-and-responsibilities">Scope and Responsibilities</a></h2>
 <p>Identity memory in Stasis currently provides:</p>
 <ol>
-<li>Identity context retrieval via get_identity_context.</li>
-<li>Governed mutation workflow via propose_entity_update and commit_entity_update.</li>
+<li>Identity context retrieval via <code>get_identity_context</code> with optional <strong>mode filtering</strong> (0.4.0).</li>
+<li>Governed mutation workflow via <code>propose_entity_update</code> and <code>commit_entity_update</code>.</li>
 <li>Version and transition history for audit and rollback.</li>
 <li>Relationship continuity constraints (for revoked and replacement links).</li>
 <li>Bridge node generation for material relationship transitions.</li>
+<li><strong>User preferences</strong> and <strong>contact graph</strong> entities without overloading relationship edges (0.4.0).</li>
 </ol>
 <h2 id="core-port-contract"><a class="header" href="#core-port-contract">Core Port Contract</a></h2>
 <p><code>IdentityMemoryStore</code> defines five operations:</p>
 <ol>
-<li>get_identity_context</li>
-<li>propose_entity_update</li>
-<li>commit_entity_update</li>
-<li>list_entity_history</li>
-<li>rollback_entity_version</li>
+<li><code>get_identity_context</code></li>
+<li><code>propose_entity_update</code></li>
+<li><code>commit_entity_update</code></li>
+<li><code>list_entity_history</code></li>
+<li><code>rollback_entity_version</code></li>
 </ol>
-<p>Reference: src/ports/outbound/memory/identity_memory_store.rs</p>
+<p>Reference: <code>src/ports/outbound/memory/identity_memory_store.rs</code></p>
 <h2 id="data-model-overview"><a class="header" href="#data-model-overview">Data Model Overview</a></h2>
-<p>Primary model families are defined in src/ports/outbound/memory/identity_memory_models.rs.</p>
+<p>Primary model families are defined in <code>src/ports/outbound/memory/identity_memory_models.rs</code>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Family</th><th>Examples</th><th>Notes</th></tr>
 </thead>
 <tbody>
-<tr><td>Identity entities</td><td>PersonaEntity, UserEntity, ChannelProfileEntity, PolicyProfileEntity, RelationshipEntity</td><td>Core state read by get_identity_context</td></tr>
+<tr><td>Identity entities</td><td>PersonaEntity, UserEntity, <strong>ContactEntity</strong>, ChannelProfileEntity, PolicyProfileEntity, RelationshipEntity</td><td>Core state read by <code>get_identity_context</code></td></tr>
+<tr><td>Typed relationships</td><td><strong><code>RelationshipKind</code></strong> enum</td><td>Structural (<code>assistant_user</code>, <code>user_channel</code>) and social (<code>knows</code>, <code>prefers</code>, <code>delegation</code>, <code>colleague</code>)</td></tr>
+<tr><td>Context modes</td><td><strong><code>IdentityContextMode</code></strong></td><td><code>full</code>, <code>policy</code>, <code>cognitive</code> — see below</td></tr>
 <tr><td>Governance enums</td><td>UpdateTier, ProposalState, CommitOutcomeCode, RelationshipStatus, UpdateSource</td><td>Used for policy and approval semantics</td></tr>
 <tr><td>Workflow records</td><td>EntityUpdateProposalRecord, RelationshipTransitionEvent</td><td>Persistent audit trail for proposal and state change lifecycle</td></tr>
 <tr><td>IO contracts</td><td>GetIdentityContextRequest/Response, ProposeEntityUpdateRequest/Response, CommitEntityUpdateRequest/Response</td><td>Boundary contracts used by services and adapters</td></tr>
 </tbody>
 </table>
 </div>
+<h3 id="user-preferences-040"><a class="header" href="#user-preferences-040">User preferences (0.4.0)</a></h3>
+<p><code>UserEntity.preferences</code> is a <code>BTreeMap&lt;String, Value&gt;</code> for lightweight scalar settings (theme, default model, digest hour) that do not require graph edges.</p>
+<p>Store via <code>upsert_user</code> on the identity adapter. Patch tier: <code>preferences.*</code> → <strong>AutoCommit</strong> (reserved: <code>preferences.policy.*</code> → ConfirmRequired).</p>
+<h3 id="contactentity-040"><a class="header" href="#contactentity-040">ContactEntity (0.4.0)</a></h3>
+<p>First-class people with <code>contact_id</code>, <code>display_name</code>, and <code>aliases</code>. Link to users or personas via social <code>RelationshipKind</code> edges (<code>knows</code>, <code>prefers</code>, <code>delegation</code>, <code>colleague</code>).</p>
+<p>Contacts appear in <code>GetIdentityContextResponse.contacts</code> when reachable through active relationships in the current context query.</p>
+<h3 id="relationshipkind-040"><a class="header" href="#relationshipkind-040">RelationshipKind (0.4.0)</a></h3>
+<p>Typed enum replacing free-form strings. Serializes as snake_case (<code>assistant_user</code>, <code>knows</code>, …). Unknown persisted values deserialize to <code>Legacy(String)</code> for backward compatibility.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Kind</th><th>Role</th></tr>
+</thead>
+<tbody>
+<tr><td><code>assistant_user</code>, <code>user_channel</code></td><td>Runtime structural wiring (0.3.0 compat)</td></tr>
+<tr><td><code>knows</code>, <code>prefers</code>, <code>delegation</code>, <code>colleague</code></td><td>Social contact graph</td></tr>
+</tbody>
+</table>
+</div>
+<p>Helpers: <code>is_structural()</code>, <code>is_social()</code>.</p>
+<h2 id="identity-context-modes-040"><a class="header" href="#identity-context-modes-040">Identity Context Modes (0.4.0)</a></h2>
+<p><code>GetIdentityContextRequest.mode</code> selects which slice of identity state callers receive. Default: <strong><code>Full</code></strong> (backward compatible).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th><code>Full</code></th><th><code>Policy</code></th><th><code>Cognitive</code></th></tr>
+</thead>
+<tbody>
+<tr><td>persona, user, channel</td><td>✓</td><td>anchor only</td><td>✓</td></tr>
+<tr><td><code>user.preferences</code></td><td>✓</td><td>stripped</td><td>✓</td></tr>
+<tr><td><code>contacts</code></td><td>✓</td><td>empty</td><td>✓</td></tr>
+<tr><td>structural relationships</td><td>✓</td><td>✓</td><td>excluded</td></tr>
+<tr><td>social relationships</td><td>✓</td><td>excluded</td><td>✓</td></tr>
+<tr><td><code>policy_profiles</code></td><td>✓</td><td>✓</td><td>empty</td></tr>
+<tr><td><code>flattened_claims</code></td><td>✓</td><td>✓</td><td>empty</td></tr>
+</tbody>
+</table>
+</div>
+<p>Filtering is implemented in <code>src/infrastructure/memory/identity_context_filter.rs</code> and applied by both store adapters after assembling the full graph.</p>
+<p><strong>Runtime default:</strong> prompt handlers request <strong><code>Cognitive</code></strong> mode via <code>identity_context_compiler</code> so policy enforcement data is not mixed into personalization snapshots.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::ports::outbound::memory::identity_memory_models::{
+    GetIdentityContextRequest, IdentityContextMode,
+};
+
+let policy_context = store
+    .get_identity_context(&amp;GetIdentityContextRequest {
+        user_id: "user-123".to_string(),
+        persona_id: "persona:default".to_string(),
+        channel_id: "channel:default".to_string(),
+        relationship_limit: 8,
+        mode: IdentityContextMode::Policy,
+    })
+    .await?;
+<span class="boring">}</span></code></pre>
 <h2 id="governance-model"><a class="header" href="#governance-model">Governance Model</a></h2>
 <p>Patch fields are classified into policy tiers before proposal records are created.</p>
 <div class="table-wrapper">
@@ -243,8 +304,8 @@
 <tr><th>Tier</th><th>Behavior</th><th>Representative fields</th></tr>
 </thead>
 <tbody>
-<tr><td>AutoCommit</td><td>Can be committed automatically</td><td>recency_score, confidence, strength_score</td></tr>
-<tr><td>ConfirmRequired</td><td>Requires explicit confirm flow</td><td>interruption_policy.quiet_hours, escalation_policy.fallback, policy_tags</td></tr>
+<tr><td>AutoCommit</td><td>Can be committed automatically</td><td>recency_score, confidence, strength_score, <strong>preferences.</strong>*</td></tr>
+<tr><td>ConfirmRequired</td><td>Requires explicit confirm flow</td><td>interruption_policy.quiet_hours, escalation_policy.fallback, policy_tags, relationship_kind</td></tr>
 <tr><td>ApprovalRequired</td><td>Requires explicit approver</td><td>status, trust_level, autonomy_scope.allow, autonomy_scope.deny, approval_profile_id</td></tr>
 </tbody>
 </table>
@@ -252,15 +313,15 @@
 <p>Important behavior:</p>
 <ol>
 <li>Mixed-tier patches are split into multiple proposals.</li>
-<li>Propose response reports split_patch and per-proposal tiers.</li>
+<li>Propose response reports <code>split_patch</code> and per-proposal tiers.</li>
 <li>ApprovalRequired commits are rejected without approver.</li>
 </ol>
-<p>Reference: src/infrastructure/memory/in_memory_identity_memory_store.rs</p>
+<p>Reference: <code>src/infrastructure/memory/in_memory_identity_memory_store.rs</code></p>
 <h2 id="commit-and-rollback-semantics"><a class="header" href="#commit-and-rollback-semantics">Commit and Rollback Semantics</a></h2>
 <p>Current implementation status:</p>
 <ol>
-<li>RelationshipEntity has a full commit path.</li>
-<li>Non-relationship entity commit currently returns InvalidPatch rationale.</li>
+<li><code>RelationshipEntity</code> has a full commit path.</li>
+<li>Non-relationship entity commit currently returns <code>InvalidPatch</code> rationale (includes <code>ContactEntity</code> and <code>UserEntity</code> in 0.4.0 — use adapter <code>upsert_*</code> helpers for direct writes).</li>
 <li>Relationship rollback is supported by version snapshot restore.</li>
 <li>Non-relationship rollback currently returns not implemented rationale.</li>
 </ol>
@@ -277,21 +338,22 @@
 <h2 id="runtime-integration-path"><a class="header" href="#runtime-integration-path">Runtime Integration Path</a></h2>
 <p>When an identity store is wired into runtime handlers:</p>
 <ol>
-<li>Runtime loads identity summary before prompt execution.</li>
+<li>Runtime loads identity summary before prompt execution using <strong><code>IdentityContextMode::Cognitive</code></strong>.</li>
 <li>Summary is prepended to user prompt as an identity snapshot header.</li>
 <li>Diagnostics include identity_context attempted, summary, and error information.</li>
+<li>Snapshot counts include <strong><code>contacts=</code></strong> and <strong><code>preferences=</code></strong> (0.4.0).</li>
 </ol>
 <p>Defaults and resolution rules:</p>
 <ol>
-<li>user_id is sourced from correlation_id.</li>
-<li>persona_id defaults to STASIS_DEFAULT_PERSONA_ID or persona:default.</li>
-<li>channel_id defaults to STASIS_DEFAULT_CHANNEL_ID or channel:default.</li>
-<li>If policy_profile exists, channel_id is derived as channel:{policy_profile}.</li>
+<li><code>user_id</code> is sourced from <code>correlation_id</code>.</li>
+<li><code>persona_id</code> defaults to <code>STASIS_DEFAULT_PERSONA_ID</code> or <code>persona:default</code>.</li>
+<li><code>channel_id</code> defaults to <code>STASIS_DEFAULT_CHANNEL_ID</code> or <code>channel:default</code>.</li>
+<li>If <code>policy_profile</code> exists, <code>channel_id</code> is derived as <code>channel:{policy_profile}</code>.</li>
 </ol>
 <p>Reference:</p>
 <ul>
-<li>src/application/runtime/identity_context_compiler.rs</li>
-<li>src/application/runtime/prompt_chat_job_handler.rs</li>
+<li><code>src/application/runtime/identity_context_compiler.rs</code></li>
+<li><code>src/application/runtime/prompt_chat_job_handler.rs</code></li>
 </ul>
 <h2 id="wiring-patterns"><a class="header" href="#wiring-patterns">Wiring Patterns</a></h2>
 <h3 id="in-memory-runtime-with-identity-store"><a class="header" href="#in-memory-runtime-with-identity-store">In-memory runtime with identity store</a></h3>
@@ -332,14 +394,16 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
     let _identity_store_arc = Arc::new(identity_store);
     Ok(())
 }</code></pre>
+<p>Surreal schema for identity tables (including <code>identity_contact</code> and <code>identity_user.preferences</code>) is documented in <a href="./surrealdb-schema.html#identity-memory-tables">SurrealDB Schema</a> and <code>docs/architecture/surrealdb-schema.md</code>.</p>
 <h2 id="production-checklist"><a class="header" href="#production-checklist">Production Checklist</a></h2>
 <ol>
 <li>Decide ownership model for approver identities and receipt IDs.</li>
-<li>Enforce expected_version checks in all write paths.</li>
-<li>Keep relationship_limit bounded for predictable latency.</li>
-<li>Track CommitOutcomeCode rates and stale-state frequency.</li>
+<li>Enforce <code>expected_version</code> checks in all write paths.</li>
+<li>Keep <code>relationship_limit</code> bounded for predictable latency.</li>
+<li>Choose <code>IdentityContextMode</code> explicitly for each consumer (<code>Cognitive</code> for prompts, <code>Policy</code> for guardrails).</li>
+<li>Track <code>CommitOutcomeCode</code> rates and stale-state frequency.</li>
 <li>Validate transition and proposal history retention policies.</li>
-<li>Alert on repeated PolicyDenied or ApprovalRequired failures.</li>
+<li>Alert on repeated <code>PolicyDenied</code> or <code>ApprovalRequired</code> failures.</li>
 </ol>
 <h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
 <div class="table-wrapper">
@@ -351,11 +415,18 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <tr><td>commit returns StaleState</td><td>expected_version mismatch</td><td>Reload current entity version and retry with updated expected_version</td></tr>
 <tr><td>commit returns ApprovalRequired</td><td>proposal tier needs approver</td><td>Re-submit commit with approver set</td></tr>
 <tr><td>commit returns PolicyDenied</td><td>guardrail violation</td><td>Inspect rationale, patch fields, and relationship continuity constraints</td></tr>
-<tr><td>identity context missing in diagnostics</td><td>store not wired</td><td>Ensure with_identity_memory_store is used in StasisRuntimeBuilder</td></tr>
+<tr><td>identity context missing in diagnostics</td><td>store not wired</td><td>Ensure <code>with_identity_memory_store</code> is used in StasisRuntimeBuilder</td></tr>
 <tr><td>summary not prepended to prompt</td><td>identity read failure</td><td>Check identity store health and identity_context diagnostics section</td></tr>
+<tr><td>contacts empty in Cognitive mode</td><td>no active social edge to ContactEntity</td><td>Seed contact + <code>RelationshipKind::Knows</code> edge from user/persona</td></tr>
+<tr><td>policy profiles in prompt snapshot</td><td>wrong mode</td><td>Use <code>IdentityContextMode::Cognitive</code>; compiler sets this by default</td></tr>
 </tbody>
 </table>
 </div>
+<h2 id="related-documents"><a class="header" href="#related-documents">Related Documents</a></h2>
+<ul>
+<li><a href="./cookbook/identity-memory-change-control.html">Identity Memory Change Control</a> — governed relationship updates and contact graph seeding</li>
+<li><a href="../../docs/design/identity-model-0.4.0-roadmap.html">Identity Model 0.4.0 Roadmap</a> — internal delivery plan</li>
+</ul>
 
                     </main>
 
