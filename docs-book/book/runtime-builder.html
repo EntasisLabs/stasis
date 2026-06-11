@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0adc64f9.js";
+            window.path_to_searchindex_js = "searchindex-bbd140bb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9d13a89d.js"></script>
@@ -348,7 +348,7 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
 </div>
 <hr>
 <h2 id="tool-registration"><a class="header" href="#tool-registration">Tool Registration</a></h2>
-<p>Tools are registered on the builder and made available to <code>workflow.stasis.tool_loop</code> and <code>workflow.stasis.agent_*</code> handlers.</p>
+<p>Tools are registered on the builder and made available to <code>workflow.stasis.tool_loop</code>, <code>workflow.stasis.agent_*</code>, and <strong>concurrent orchestration branches</strong> with <code>execution_mode: tool_loop</code>.</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)

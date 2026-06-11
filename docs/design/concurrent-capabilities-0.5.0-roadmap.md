@@ -1,9 +1,9 @@
 # Concurrent Capabilities 0.5.0 Roadmap and Internal Plan
 
-Status: **Approved — In Implementation**
+Status: **Shipped — 0.5.0**
 Date: 2026-06-02
 Owner: Stasis Core
-Target Release: **0.5.0**
+Target Release: **0.5.0** (tagged)
 Feedback source: Post-0.4.0 operator and integrator review
 
 Depends on:
@@ -63,7 +63,7 @@ Pattern-level defaults (optional, branch overrides):
 | Field | Scope |
 |---|---|
 | `tool_call_mode` | Default for tool_loop branches |
-| `memory_policy` | Default for tool_loop branches (Slice 5) |
+| `memory_policy` | Default for tool_loop branches — recall before execution, optional store after (branch-scoped session id) |
 
 ### 3.3 Merge semantics
 
@@ -107,18 +107,18 @@ Each slice lands independently, builds on the prior slice, and keeps tests green
 - [x] Policy violation: `tool_loop` branch missing `tool_name`
 - [x] Thread lineage unchanged for tool branches
 
-### Slice 5 — Memory on tool branches (optional per branch)
+### Slice 5 — Memory on tool branches ✅
 
-- [ ] Resolve `memory_policy` (pattern default → branch override) for tool_loop branches
-- [ ] Reuse `ToolLoopJobHandler` memory/identity prepend path in concurrent handler
-- [ ] Parity test with mock memory reader
+- [x] Resolve `memory_policy` (pattern default → branch override) for tool_loop branches
+- [x] Reuse identity + memory prepend path via `concurrent_tool_branch_memory.rs`
+- [x] Parity test with mock memory reader/writer
 
-### Slice 6 — Docs and release
+### Slice 6 — Docs and release ✅
 
 - [x] Update `docs-book/src/orchestration-patterns.md`
 - [x] Update cookbook / examples (`agentic_workflows_production.rs`, `team_role_workflows.rs`)
-- [ ] `CHANGELOG [Unreleased]` → `[0.5.0]` at tag time
-- [ ] `mdbook build`
+- [x] `CHANGELOG [Unreleased]` → `[0.5.0]` at tag time
+- [x] `mdbook build`
 
 ## 5. Test Plan
 
@@ -128,7 +128,7 @@ Each slice lands independently, builds on the prior slice, and keeps tests green
 | `concurrent_tool_loop_branch_missing_tool_name_rejects` | Policy violation |
 | `surreal_orchestration_concurrent_pattern_executes_all_branches` | Backward compat (prompt-only) |
 | `in_memory_orchestration_concurrent_pattern_persists_branch_thread_lineage` | Thread events for tool branches |
-| `concurrent_tool_loop_branch_memory_recall` (Slice 5) | Per-branch memory_policy |
+| `concurrent_tool_loop_branch_memory_recall` (Slice 5) | Per-branch memory recall + store on tool_loop branches |
 
 ## 6. Non-Goals (0.5.0)
 

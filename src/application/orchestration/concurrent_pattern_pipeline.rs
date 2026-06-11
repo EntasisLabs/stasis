@@ -5,12 +5,20 @@ use serde_json::Value;
 use crate::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline, PromptExecutionRequest,
 };
-use crate::application::orchestration::runtime_job_payloads::ConcurrentBranchExecutionMode;
+use crate::application::orchestration::runtime_job_payloads::{
+    ConcurrentBranchExecutionMode, MemoryPolicyPayload,
+};
 use crate::application::orchestration::tool_loop_pipeline::{
     ToolCallMode, ToolInvocation, ToolLoopExecutionRequest, ToolLoopPipeline,
 };
 use crate::application::orchestration::tool_registry::ToolRegistry;
+use crate::application::runtime::concurrent_tool_branch_memory::{
+    prepare_concurrent_tool_branch, store_concurrent_tool_branch_memory,
+};
 use crate::domain::errors::{Result, StasisError};
+use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
+use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
+use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use tokio::task::JoinSet;
 
 #[derive(Clone, Debug)]
@@ -24,6 +32,7 @@ pub struct ConcurrentPatternBranch {
     pub tool_name: Option<String>,
     pub tool_input: Option<Value>,
     pub tool_call_mode: ToolCallMode,
+    pub memory_policy: Option<MemoryPolicyPayload>,
 }
 
 #[derive(Clone, Debug)]
@@ -33,6 +42,7 @@ pub struct ConcurrentPatternExecutionRequest {
     pub correlation_id: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub default_memory_policy: Option<MemoryPolicyPayload>,
     pub merge_strategy: Option<String>,
     pub branches: Vec<ConcurrentPatternBranch>,
 }
@@ -48,6 +58,12 @@ pub struct ConcurrentPatternBranchResult {
     pub tool_invocations: Vec<ToolInvocation>,
     pub rounds_executed: Option<usize>,
     pub branch_termination_reason: Option<String>,
+    pub memory_retrieved_count: Option<usize>,
+    pub memory_store_node_id: Option<String>,
+    pub input_memory_query_id: Option<String>,
+    pub input_memory_query_fingerprint: Option<String>,
+    pub memory_recall_error: Option<String>,
+    pub memory_store_error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +78,9 @@ pub struct ConcurrentPatternExecutionResponse {
 pub struct ConcurrentPatternPipeline {
     prompt_pipeline: PromptExecutionPipeline,
     tool_loop_pipeline: Option<ToolLoopPipeline>,
+    memory_reader: Option<Arc<dyn MemoryContextReader>>,
+    memory_writer: Option<Arc<dyn MemoryContextWriter>>,
+    identity_memory_store: Option<Arc<dyn IdentityMemoryStore>>,
 }
 
 #[derive(Clone)]
@@ -71,6 +90,7 @@ struct ConcurrentSharedInputs {
     correlation_id: Arc<Option<String>>,
     default_policy_profile: Arc<Option<String>>,
     default_model_hint: Arc<Option<String>>,
+    default_memory_policy: Arc<Option<MemoryPolicyPayload>>,
 }
 
 impl ConcurrentSharedInputs {
@@ -99,12 +119,18 @@ impl ConcurrentPatternPipeline {
         Self {
             prompt_pipeline,
             tool_loop_pipeline: None,
+            memory_reader: None,
+            memory_writer: None,
+            identity_memory_store: None,
         }
     }
 
     pub fn new_with_tool_loop(
         prompt_pipeline: PromptExecutionPipeline,
         tool_registry: Arc<dyn ToolRegistry>,
+        memory_reader: Option<Arc<dyn MemoryContextReader>>,
+        memory_writer: Option<Arc<dyn MemoryContextWriter>>,
+        identity_memory_store: Option<Arc<dyn IdentityMemoryStore>>,
     ) -> Self {
         Self {
             tool_loop_pipeline: Some(ToolLoopPipeline::new(
@@ -112,6 +138,9 @@ impl ConcurrentPatternPipeline {
                 tool_registry,
             )),
             prompt_pipeline,
+            memory_reader,
+            memory_writer,
+            identity_memory_store,
         }
     }
 
@@ -125,6 +154,7 @@ impl ConcurrentPatternPipeline {
             correlation_id,
             policy_profile,
             model_hint,
+            default_memory_policy,
             merge_strategy,
             branches,
         } = request;
@@ -136,6 +166,7 @@ impl ConcurrentPatternPipeline {
             correlation_id: Arc::new(correlation_id),
             default_policy_profile: Arc::new(policy_profile),
             default_model_hint: Arc::new(model_hint),
+            default_memory_policy: Arc::new(default_memory_policy),
         };
 
         let mut join_set: JoinSet<Result<ConcurrentPatternBranchResult>> = JoinSet::new();
@@ -143,6 +174,9 @@ impl ConcurrentPatternPipeline {
         for branch in branches {
             let prompt_pipeline = self.prompt_pipeline.clone();
             let tool_loop_pipeline = self.tool_loop_pipeline.clone();
+            let memory_reader = self.memory_reader.clone();
+            let memory_writer = self.memory_writer.clone();
+            let identity_memory_store = self.identity_memory_store.clone();
             let shared_inputs = shared_inputs.clone();
 
             join_set.spawn(async move {
@@ -156,10 +190,19 @@ impl ConcurrentPatternPipeline {
                     tool_name,
                     tool_input,
                     tool_call_mode,
+                    memory_policy,
                 } = branch;
 
                 let rendered_prompt = shared_inputs.render_template(&user_prompt_template);
-                let context = shared_inputs.build_context(policy_profile, model_hint);
+                let context = shared_inputs.build_context(policy_profile.clone(), model_hint);
+                let correlation_id = shared_inputs
+                    .correlation_id
+                    .as_deref()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "unknown".to_string());
+                let resolved_memory_policy = memory_policy
+                    .or_else(|| (*shared_inputs.default_memory_policy).clone());
+                let memory_policy_ref = resolved_memory_policy.as_ref();
 
                 match execution_mode {
                     ConcurrentBranchExecutionMode::Prompt => {
@@ -181,6 +224,12 @@ impl ConcurrentPatternPipeline {
                             tool_invocations: Vec::new(),
                             rounds_executed: None,
                             branch_termination_reason: None,
+                            memory_retrieved_count: None,
+                            memory_store_node_id: None,
+                            input_memory_query_id: None,
+                            input_memory_query_fingerprint: None,
+                            memory_recall_error: None,
+                            memory_store_error: None,
                         })
                     }
                     ConcurrentBranchExecutionMode::ToolLoop => {
@@ -192,10 +241,21 @@ impl ConcurrentPatternPipeline {
                         };
 
                         let tool_name = tool_name.unwrap_or_default();
-                        let tool_input = tool_input.unwrap_or_else(|| Value::Object(Default::default()));
+                        let tool_input =
+                            tool_input.unwrap_or_else(|| Value::Object(Default::default()));
+
+                        let prepared = prepare_concurrent_tool_branch(
+                            memory_reader.as_ref(),
+                            identity_memory_store.as_ref(),
+                            &correlation_id,
+                            context.policy_profile.as_deref(),
+                            &rendered_prompt,
+                            memory_policy_ref,
+                        )
+                        .await;
 
                         let tool_loop_request = ToolLoopExecutionRequest {
-                            user_prompt: rendered_prompt.clone(),
+                            user_prompt: prepared.user_prompt,
                             system_prompt,
                             context,
                             tool_name: tool_name.clone(),
@@ -204,6 +264,17 @@ impl ConcurrentPatternPipeline {
                         };
 
                         let response = tool_loop_pipeline.execute(tool_loop_request).await?;
+
+                        let stored = store_concurrent_tool_branch_memory(
+                            memory_writer.as_ref(),
+                            &correlation_id,
+                            &branch_id,
+                            &response.tool_name,
+                            &response.text,
+                            memory_policy_ref,
+                        )
+                        .await;
+
                         Ok(ConcurrentPatternBranchResult {
                             branch_id,
                             execution_mode,
@@ -214,6 +285,18 @@ impl ConcurrentPatternPipeline {
                             tool_invocations: response.tool_invocations,
                             rounds_executed: Some(response.rounds_executed),
                             branch_termination_reason: Some(response.termination_reason),
+                            memory_retrieved_count: prepared
+                                .memory_recall
+                                .as_ref()
+                                .map(|recall| recall.retrieved),
+                            memory_store_node_id: stored
+                                .memory_store
+                                .as_ref()
+                                .map(|store| store.node_id.clone()),
+                            input_memory_query_id: prepared.input_memory_query_id,
+                            input_memory_query_fingerprint: prepared.input_memory_query_fingerprint,
+                            memory_recall_error: prepared.memory_recall_error,
+                            memory_store_error: stored.memory_store_error,
                         })
                     }
                 }
@@ -409,8 +492,13 @@ mod tests {
             .register_tool(MockWebSearchTool)
             .expect("tool should register");
 
-        let pipeline =
-            ConcurrentPatternPipeline::new_with_tool_loop(prompt_pipeline, tool_registry);
+        let pipeline = ConcurrentPatternPipeline::new_with_tool_loop(
+            prompt_pipeline,
+            tool_registry,
+            None,
+            None,
+            None,
+        );
 
         let response = pipeline
             .execute(ConcurrentPatternExecutionRequest {
@@ -419,6 +507,7 @@ mod tests {
                 correlation_id: None,
                 policy_profile: None,
                 model_hint: None,
+                default_memory_policy: None,
                 merge_strategy: Some("join_with_headers".to_string()),
                 branches: vec![
                     ConcurrentPatternBranch {
@@ -431,6 +520,7 @@ mod tests {
                         tool_name: None,
                         tool_input: None,
                         tool_call_mode: ToolCallMode::Auto,
+                        memory_policy: None,
                     },
                     ConcurrentPatternBranch {
                         branch_id: "tool".to_string(),
@@ -442,6 +532,7 @@ mod tests {
                         tool_name: Some("stasis.web.search.mock".to_string()),
                         tool_input: Some(json!({ "query": "shared input" })),
                         tool_call_mode: ToolCallMode::Auto,
+                        memory_policy: None,
                     },
                 ],
             })
@@ -480,6 +571,7 @@ mod tests {
                 correlation_id: None,
                 policy_profile: None,
                 model_hint: None,
+                default_memory_policy: None,
                 merge_strategy: None,
                 branches: vec![ConcurrentPatternBranch {
                     branch_id: "alpha".to_string(),
@@ -491,6 +583,7 @@ mod tests {
                     tool_name: None,
                     tool_input: None,
                     tool_call_mode: ToolCallMode::Auto,
+                    memory_policy: None,
                 }],
             })
             .await

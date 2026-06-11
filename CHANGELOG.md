@@ -7,15 +7,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-02
+
 ### Added
 
-- **Concurrent tool_loop branches (0.5.0 Track A)** — `ConcurrentBranchExecutionMode` (`prompt` / `tool_loop`) on concurrent orchestration branches; branches can run full `ToolLoopPipeline` in parallel via the existing `JoinSet`.
+- **Concurrent tool_loop branches** — `ConcurrentBranchExecutionMode` (`prompt` / `tool_loop`) on concurrent orchestration branches; branches can run full `ToolLoopPipeline` in parallel via the existing `JoinSet`.
 - **Payload helpers** — `ConcurrentBranchJobPayload::prompt(...)` and `::tool_loop(...)`; pattern-level `tool_call_mode` and `memory_policy` defaults.
+- **Concurrent tool branch memory** — identity snapshot + memory recall prepend and optional store per `tool_loop` branch (`concurrent_tool_branch_memory.rs`).
 - **Roadmap:** [concurrent-capabilities-0.5.0-roadmap.md](docs/design/concurrent-capabilities-0.5.0-roadmap.md)
 
 ### Changed
 
-- **`ConcurrentPatternJobHandler`** — wires `ToolRegistry` and reports `prompt_branch_count`, `tool_loop_branch_count`, and per-branch summaries in diagnostics.
+- **`ConcurrentPatternJobHandler`** — wires `ToolRegistry` and memory/identity deps; reports `prompt_branch_count`, `tool_loop_branch_count`, and per-branch summaries (including memory fields) in diagnostics.
+
+### Documentation
+
+- **Orchestration patterns** — concurrent branch execution modes, memory policy semantics, updated cookbook example.
 
 ## [0.4.0]
 

@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
 - Stability: Stable
-- Last Verified: 2026-05-15
+- Last Verified: 2026-06-02
 - Verified Against:
   - src/application/orchestration/sequential_pattern_pipeline.rs
   - src/application/orchestration/concurrent_pattern_pipeline.rs
@@ -14,6 +14,7 @@
   - src/application/orchestration/agent_session_payload.rs
   - src/application/runtime/sequential_pattern_job_handler.rs
   - src/application/runtime/concurrent_pattern_job_handler.rs
+  - src/application/runtime/concurrent_tool_branch_memory.rs
   - src/application/runtime/handoff_pattern_job_handler.rs
   - src/application/runtime/orchestrator_pattern_job_handler.rs
 
@@ -127,6 +128,8 @@ All branches execute simultaneously using `tokio::task::JoinSet`. Branch results
 
 Use `ConcurrentBranchJobPayload::prompt(...)` or `::tool_loop(...)` in Rust for ergonomic construction.
 
+For `tool_loop` branches, `memory_policy` resolves branch override → pattern default. Recall runs before execution; store uses session id `{correlation_id}::concurrent-branch::{branch_id}` to avoid parallel write collisions.
+
 Rust type: `ConcurrentPatternJobPayload` → `ConcurrentBranchJobPayload` → `ConcurrentBranchExecutionMode`
 
 ### Merge strategies
@@ -141,7 +144,7 @@ Rust type: `ConcurrentPatternJobPayload` → `ConcurrentBranchJobPayload` → `C
 | Field | Type | Description |
 |---|---|---|
 | `final_text` | string | Merged output across all branches |
-| `branches` | array | Per-branch results: `branch_id`, `execution_mode`, `rendered_prompt`, `output_text`, optional tool metadata (`tool_output`, `tool_invocations`, `rounds_executed`, `branch_termination_reason`) |
+| `branches` | array | Per-branch results: `branch_id`, `execution_mode`, `rendered_prompt`, `output_text`, optional tool metadata (`tool_output`, `tool_invocations`, `rounds_executed`, `branch_termination_reason`), and for `tool_loop` branches optional memory fields (`memory_retrieved_count`, `memory_store_node_id`, `input_memory_query_id`) in job diagnostics `branch_summaries` |
 | `termination_reason` | string | Always `completed_all_branches` on success |
 | `merge_strategy` | string | Strategy applied |
 
@@ -290,4 +293,4 @@ Each pattern has a matching builder method on `StasisWorkflowJobBuilder`:
 ## Non-Goals
 
 - These patterns do not manage state between separate job invocations. Cross-job continuity is handled via `thread_id` and Locus memory.
-- Pattern pipelines do not perform tool invocations. Tool-augmented workflows use `workflow.stasis.tool_loop` or `workflow.stasis.agent_session`.
+- Sequential, handoff, and orchestrator pattern stages are prompt-only. Tool-augmented parallel work uses **concurrent** branches with `execution_mode: tool_loop`, or standalone `workflow.stasis.tool_loop` / `workflow.stasis.agent_session` jobs.

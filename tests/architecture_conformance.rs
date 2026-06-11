@@ -238,8 +238,8 @@ fn runtime_builder_registers_orchestration_pattern_handlers_by_default() {
         "runtime builder must expose explicit orchestration handler disable toggle"
     );
     assert!(
-        builder_source.contains("ConcurrentPatternJobHandler::new_with_thread_store"),
-        "runtime builder must register concurrent orchestration handler"
+        builder_source.contains("ConcurrentPatternJobHandler::new_with_thread_store_and_memory"),
+        "runtime builder must register concurrent orchestration handler with memory wiring"
     );
     assert!(
         builder_source.contains("SequentialPatternJobHandler::new_with_thread_store"),

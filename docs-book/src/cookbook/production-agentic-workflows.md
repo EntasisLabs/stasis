@@ -278,6 +278,8 @@ runtime.enqueue(job).await?;
 
 ## Concurrent Pattern Workflow Job
 
+Prompt-only branches and tool-loop branches can run in parallel. Register tools on the runtime builder before enqueueing tool branches.
+
 ```rust
 use stasis::application::orchestration::runtime_job_payloads::{
     ConcurrentBranchJobPayload, ConcurrentPatternJobPayload,
@@ -289,22 +291,20 @@ let concurrent_payload = ConcurrentPatternJobPayload {
     initial_user_prompt: "Assess release quality from three angles".to_string(),
     policy_profile: Some("prod.release".to_string()),
     model_hint: Some("balanced".to_string()),
-    merge_strategy: Some("append".to_string()),
+    tool_call_mode: None,
+    memory_policy: None,
+    merge_strategy: Some("join_with_headers".to_string()),
     branches: vec![
-        ConcurrentBranchJobPayload {
-            branch_id: "security".to_string(),
-            user_prompt_template: "{{input}}\nPerform a security review.".to_string(),
-            system_prompt: None,
-            policy_profile: None,
-            model_hint: None,
-        },
-        ConcurrentBranchJobPayload {
-            branch_id: "performance".to_string(),
-            user_prompt_template: "{{input}}\nPerform a performance review.".to_string(),
-            system_prompt: None,
-            policy_profile: None,
-            model_hint: None,
-        },
+        ConcurrentBranchJobPayload::prompt(
+            "security",
+            "{{input}}\nPerform a security review.",
+        ),
+        ConcurrentBranchJobPayload::tool_loop(
+            "research",
+            "{{input}}\nResearch known issues with the search tool.",
+            "stasis.web.search",
+            Some(serde_json::json!({ "query": "{{input}}" })),
+        ),
     ],
 };
 

@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0adc64f9.js";
+            window.path_to_searchindex_js = "searchindex-bbd140bb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9d13a89d.js"></script>
@@ -180,7 +180,7 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-05-15</li>
+<li>Last Verified: 2026-06-02</li>
 <li>Verified Against:
 <ul>
 <li>src/application/orchestration/sequential_pattern_pipeline.rs</li>
@@ -190,6 +190,7 @@
 <li>src/application/orchestration/agent_session_payload.rs</li>
 <li>src/application/runtime/sequential_pattern_job_handler.rs</li>
 <li>src/application/runtime/concurrent_pattern_job_handler.rs</li>
+<li>src/application/runtime/concurrent_tool_branch_memory.rs</li>
 <li>src/application/runtime/handoff_pattern_job_handler.rs</li>
 <li>src/application/runtime/orchestrator_pattern_job_handler.rs</li>
 </ul>
@@ -202,7 +203,7 @@
 <h2 id="invariants"><a class="header" href="#invariants">Invariants</a></h2>
 <ol>
 <li>Every pattern is submitted as a durable job and inherits retry, dead-letter, and lineage semantics from the runtime.</li>
-<li>All patterns execute through <code>PromptExecutionPipeline</code> internally — the chat middleware chain applies uniformly.</li>
+<li>All <strong>prompt</strong> branches and the prompt rounds inside <strong>tool_loop</strong> branches execute through <code>PromptExecutionPipeline</code> — the chat middleware chain applies uniformly.</li>
 <li><code>{{input}}</code> and <code>{input}</code> template tokens are substituted with the output of the prior stage or the initial prompt.</li>
 <li><code>policy_profile</code> and <code>model_hint</code> set at the pattern level act as defaults and are overridden per-stage/branch/turn if provided.</li>
 <li>Thread records are created per execution for concurrent, handoff, and orchestrator patterns when a <code>ThreadStore</code> is wired.</li>
@@ -267,18 +268,28 @@
   "policy_profile": "string | null",
   "model_hint": "string | null",
   "merge_strategy": "join_with_headers | join_lines | null",
+  "tool_call_mode": "auto | strict | null",
+  "memory_policy": "MemoryPolicyPayload | null",
   "branches": [
     {
       "branch_id": "string",
+      "execution_mode": "prompt | tool_loop",
       "user_prompt_template": "string",
       "system_prompt": "string | null",
       "policy_profile": "string | null",
-      "model_hint": "string | null"
+      "model_hint": "string | null",
+      "tool_name": "string | null",
+      "tool_input": "object | null",
+      "tool_call_mode": "auto | strict | null",
+      "memory_policy": "MemoryPolicyPayload | null"
     }
   ]
 }
 </code></pre>
-<p>Rust type: <code>ConcurrentPatternJobPayload</code> → <code>ConcurrentBranchJobPayload</code></p>
+<p><code>execution_mode</code> defaults to <code>prompt</code> when omitted. When <code>execution_mode</code> is <code>tool_loop</code>, <code>tool_name</code> is required.</p>
+<p>Use <code>ConcurrentBranchJobPayload::prompt(...)</code> or <code>::tool_loop(...)</code> in Rust for ergonomic construction.</p>
+<p>For <code>tool_loop</code> branches, <code>memory_policy</code> resolves branch override → pattern default. Recall runs before execution; store uses session id <code>{correlation_id}::concurrent-branch::{branch_id}</code> to avoid parallel write collisions.</p>
+<p>Rust type: <code>ConcurrentPatternJobPayload</code> → <code>ConcurrentBranchJobPayload</code> → <code>ConcurrentBranchExecutionMode</code></p>
 <h3 id="merge-strategies"><a class="header" href="#merge-strategies">Merge strategies</a></h3>
 <div class="table-wrapper">
 <table>
@@ -299,7 +310,7 @@
 </thead>
 <tbody>
 <tr><td><code>final_text</code></td><td>string</td><td>Merged output across all branches</td></tr>
-<tr><td><code>branches</code></td><td>array</td><td>Per-branch results: <code>branch_id</code>, <code>rendered_prompt</code>, <code>output_text</code></td></tr>
+<tr><td><code>branches</code></td><td>array</td><td>Per-branch results: <code>branch_id</code>, <code>execution_mode</code>, <code>rendered_prompt</code>, <code>output_text</code>, optional tool metadata (<code>tool_output</code>, <code>tool_invocations</code>, <code>rounds_executed</code>, <code>branch_termination_reason</code>), and for <code>tool_loop</code> branches optional memory fields (<code>memory_retrieved_count</code>, <code>memory_store_node_id</code>, <code>input_memory_query_id</code>) in job diagnostics <code>branch_summaries</code></td></tr>
 <tr><td><code>termination_reason</code></td><td>string</td><td>Always <code>completed_all_branches</code> on success</td></tr>
 <tr><td><code>merge_strategy</code></td><td>string</td><td>Strategy applied</td></tr>
 </tbody>
@@ -440,7 +451,7 @@ runtime.enqueue(job).await?;
 <h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
 <ul>
 <li>These patterns do not manage state between separate job invocations. Cross-job continuity is handled via <code>thread_id</code> and Locus memory.</li>
-<li>Pattern pipelines do not perform tool invocations. Tool-augmented workflows use <code>workflow.stasis.tool_loop</code> or <code>workflow.stasis.agent_session</code>.</li>
+<li>Sequential, handoff, and orchestrator pattern stages are prompt-only. Tool-augmented parallel work uses <strong>concurrent</strong> branches with <code>execution_mode: tool_loop</code>, or standalone <code>workflow.stasis.tool_loop</code> / <code>workflow.stasis.agent_session</code> jobs.</li>
 </ul>
 
                     </main>

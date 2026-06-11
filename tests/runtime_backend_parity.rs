@@ -4701,6 +4701,115 @@ async fn in_memory_orchestration_concurrent_mixed_tool_and_prompt_branches() {
 }
 
 #[tokio::test]
+async fn in_memory_orchestration_concurrent_tool_loop_branch_recalls_and_stores_memory() {
+    let now = Utc::now();
+    let memory_reader = Arc::new(MockMemoryContextReader {
+        response: MemoryRecallResponse {
+            retrieved: 3,
+            retrieval_path: Some("Hybrid".to_string()),
+            fallback_triggered: false,
+            fallback_reason: None,
+            node_sync_keys: vec!["sync-concurrent-tool-1".to_string()],
+            ..Default::default()
+        },
+    });
+    let memory_writer = Arc::new(MockMemoryContextWriter {
+        response: MemoryStoreResponse {
+            node_id: "sttp:memory:concurrent-tool-branch:1".to_string(),
+            psi: 2.6,
+            valid: true,
+            validation_error: None,
+        },
+    });
+
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_memory_context_reader(memory_reader)
+        .with_memory_context_writer(memory_writer)
+        .with_chat_client(Arc::new(BranchAwareConcurrentTestClient))
+        .with_tool(MockWebSearchTool)
+        .expect("tool should register")
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let payload = ConcurrentPatternJobPayload {
+        thread_id: Some("thread.concurrent.memory.1".to_string()),
+        initial_user_prompt: "memory context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        tool_call_mode: None,
+        memory_policy: None,
+        merge_strategy: Some("join_with_headers".to_string()),
+        branches: vec![ConcurrentBranchJobPayload::tool_loop(
+            "research",
+            "Run tool branch for {input}",
+            "stasis.web.search.mock",
+            Some(json!({ "query": "memory context" })),
+        )],
+    };
+
+    runtime
+        .enqueue(build_orchestration_concurrent_job(
+            "job-concurrent-memory-in-memory-1",
+            &payload,
+            now,
+            "idem-concurrent-memory-in-memory-1",
+            "corr-concurrent-memory-in-memory-1",
+            "cause-concurrent-memory-in-memory-1",
+            "trace-concurrent-memory-in-memory-1",
+            "sttp:in:orchestration:concurrent:memory:in-memory:1",
+        ))
+        .await
+        .expect("concurrent job should enqueue");
+
+    runtime
+        .process_once("default", "worker-concurrent-memory", now)
+        .await
+        .expect("concurrent processing should succeed");
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-concurrent-memory-in-memory-1")
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+
+    assert_eq!(
+        diagnostics.pointer("/branch_summaries/0/memory_retrieved_count"),
+        Some(&json!(3))
+    );
+    assert_eq!(
+        diagnostics.pointer("/branch_summaries/0/memory_store_node_id"),
+        Some(&json!("sttp:memory:concurrent-tool-branch:1"))
+    );
+    let input_query_id = diagnostics
+        .pointer("/branch_summaries/0/input_memory_query_id")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_id should be present");
+    let input_query_fingerprint = diagnostics
+        .pointer("/branch_summaries/0/input_memory_query_fingerprint")
+        .and_then(|value| value.as_str())
+        .expect("input_memory_query_fingerprint should be present");
+    assert!(input_query_id.starts_with("mq:"));
+    assert!(input_query_fingerprint.contains("alpha="));
+}
+
+#[tokio::test]
 async fn in_memory_orchestration_concurrent_tool_loop_branch_missing_tool_name_rejects() {
     let now = Utc::now();
     let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)

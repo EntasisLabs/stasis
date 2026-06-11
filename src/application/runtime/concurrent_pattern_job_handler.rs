@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::application::orchestration::runtime_job_payloads::{
     AgentToolCallMode, ConcurrentBranchExecutionMode, ConcurrentBranchJobPayload,
-    ConcurrentPatternJobPayload,
+    ConcurrentPatternJobPayload, MemoryPolicyPayload,
 };
 use crate::application::orchestration::concurrent_pattern_pipeline::{
     ConcurrentPatternBranch, ConcurrentPatternExecutionRequest, ConcurrentPatternPipeline,
@@ -19,6 +19,9 @@ use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::domain::runtime::thread::{NewThread, NewThreadEvent, ThreadMergeMetadata};
 use crate::ports::outbound::ai_chat_client::AiChatClient;
+use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
+use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
+use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use crate::ports::outbound::runtime::thread_store::ThreadStore;
 
 pub struct ConcurrentPatternJobHandler {
@@ -28,7 +31,14 @@ pub struct ConcurrentPatternJobHandler {
 
 impl ConcurrentPatternJobHandler {
     pub fn new(chat_client: Arc<dyn AiChatClient>, tool_registry: Arc<dyn ToolRegistry>) -> Self {
-        Self::new_with_thread_store(chat_client, tool_registry, None)
+        Self::new_with_thread_store_and_memory(
+            chat_client,
+            tool_registry,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 
     pub fn new_with_thread_store(
@@ -36,11 +46,32 @@ impl ConcurrentPatternJobHandler {
         tool_registry: Arc<dyn ToolRegistry>,
         thread_store: Option<Arc<dyn ThreadStore>>,
     ) -> Self {
+        Self::new_with_thread_store_and_memory(
+            chat_client,
+            tool_registry,
+            thread_store,
+            None,
+            None,
+            None,
+        )
+    }
+
+    pub fn new_with_thread_store_and_memory(
+        chat_client: Arc<dyn AiChatClient>,
+        tool_registry: Arc<dyn ToolRegistry>,
+        thread_store: Option<Arc<dyn ThreadStore>>,
+        memory_reader: Option<Arc<dyn MemoryContextReader>>,
+        memory_writer: Option<Arc<dyn MemoryContextWriter>>,
+        identity_memory_store: Option<Arc<dyn IdentityMemoryStore>>,
+    ) -> Self {
         let prompt_pipeline = PromptExecutionPipeline::new(chat_client);
         Self {
             pipeline: ConcurrentPatternPipeline::new_with_tool_loop(
                 prompt_pipeline,
                 tool_registry,
+                memory_reader,
+                memory_writer,
+                identity_memory_store,
             ),
             thread_store,
         }
@@ -156,6 +187,13 @@ impl ConcurrentPatternJobHandler {
         }
     }
 
+    fn resolve_memory_policy(
+        branch_policy: Option<MemoryPolicyPayload>,
+        default_policy: Option<MemoryPolicyPayload>,
+    ) -> Option<MemoryPolicyPayload> {
+        branch_policy.or(default_policy)
+    }
+
     fn build_failure(message: String) -> JobExecutionOutcome {
         let diagnostics = json!({
             "provider": "stasis-orchestration-concurrent",
@@ -193,11 +231,12 @@ impl JobHandler for ConcurrentPatternJobHandler {
             model_hint,
             merge_strategy,
             tool_call_mode,
-            memory_policy: _memory_policy,
+            memory_policy,
             branches,
         } = payload;
 
         let pattern_tool_call_mode = tool_call_mode;
+        let pattern_memory_policy = memory_policy;
 
         let now = Utc::now();
         let thread_id = thread_id.unwrap_or_else(|| job.correlation_id.clone());
@@ -218,6 +257,7 @@ impl JobHandler for ConcurrentPatternJobHandler {
             correlation_id: Some(job.correlation_id.clone()),
             policy_profile,
             model_hint,
+            default_memory_policy: pattern_memory_policy.clone(),
             merge_strategy,
             branches: branches
                 .into_iter()
@@ -232,7 +272,7 @@ impl JobHandler for ConcurrentPatternJobHandler {
                         tool_name,
                         tool_input,
                         tool_call_mode,
-                        memory_policy: _,
+                        memory_policy,
                     } = branch;
 
                     ConcurrentPatternBranch {
@@ -247,6 +287,10 @@ impl JobHandler for ConcurrentPatternJobHandler {
                         tool_call_mode: Self::resolve_tool_call_mode(
                             tool_call_mode,
                             pattern_tool_call_mode.clone(),
+                        ),
+                        memory_policy: Self::resolve_memory_policy(
+                            memory_policy,
+                            pattern_memory_policy.clone(),
                         ),
                     }
                 })
@@ -297,6 +341,12 @@ impl JobHandler for ConcurrentPatternJobHandler {
                     "rounds_executed": branch.rounds_executed,
                     "tool_invocation_count": branch.tool_invocations.len(),
                     "branch_termination_reason": branch.branch_termination_reason,
+                    "memory_retrieved_count": branch.memory_retrieved_count,
+                    "memory_store_node_id": branch.memory_store_node_id,
+                    "input_memory_query_id": branch.input_memory_query_id,
+                    "input_memory_query_fingerprint": branch.input_memory_query_fingerprint,
+                    "memory_recall_error": branch.memory_recall_error,
+                    "memory_store_error": branch.memory_store_error,
                 })
             })
             .collect();

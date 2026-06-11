@@ -2,6 +2,7 @@ pub mod agent_session_job_handler;
 pub mod agent_turn_job_handler;
 pub mod chat_client_middleware;
 pub mod concurrent_pattern_job_handler;
+pub mod concurrent_tool_branch_memory;
 pub mod coordinator_failover_job_handler;
 pub mod default_chat_middlewares;
 pub mod grapheme_echo_job_handler;

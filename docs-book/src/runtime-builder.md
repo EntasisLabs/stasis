@@ -181,7 +181,7 @@ Convenience methods:
 
 ## Tool Registration
 
-Tools are registered on the builder and made available to `workflow.stasis.tool_loop` and `workflow.stasis.agent_*` handlers.
+Tools are registered on the builder and made available to `workflow.stasis.tool_loop`, `workflow.stasis.agent_*`, and **concurrent orchestration branches** with `execution_mode: tool_loop`.
 
 ```rust
 let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
