@@ -190,23 +190,18 @@ fn build_support_triage_jobs() -> Result<Vec<NewJob>> {
             .to_string(),
         policy_profile: Some("prod.support".to_string()),
         model_hint: Some("balanced".to_string()),
+        tool_call_mode: None,
+        memory_policy: None,
         merge_strategy: Some("append".to_string()),
         branches: vec![
-            ConcurrentBranchJobPayload {
-                branch_id: "severity".to_string(),
-                user_prompt_template: "{{input}}\nAssess severity with rationale.".to_string(),
-                system_prompt: None,
-                policy_profile: None,
-                model_hint: None,
-            },
-            ConcurrentBranchJobPayload {
-                branch_id: "owner".to_string(),
-                user_prompt_template: "{{input}}\nRecommend owning team and escalation path."
-                    .to_string(),
-                system_prompt: None,
-                policy_profile: None,
-                model_hint: None,
-            },
+            ConcurrentBranchJobPayload::prompt(
+                "severity",
+                "{{input}}\nAssess severity with rationale.",
+            ),
+            ConcurrentBranchJobPayload::prompt(
+                "owner",
+                "{{input}}\nRecommend owning team and escalation path.",
+            ),
         ],
     };
 

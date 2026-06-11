@@ -28,7 +28,7 @@ This document covers the four workflow-level patterns: Sequential, Concurrent, H
 ## Invariants
 
 1. Every pattern is submitted as a durable job and inherits retry, dead-letter, and lineage semantics from the runtime.
-2. All patterns execute through `PromptExecutionPipeline` internally — the chat middleware chain applies uniformly.
+2. All **prompt** branches and the prompt rounds inside **tool_loop** branches execute through `PromptExecutionPipeline` — the chat middleware chain applies uniformly.
 3. `{{input}}` and `{input}` template tokens are substituted with the output of the prior stage or the initial prompt.
 4. `policy_profile` and `model_hint` set at the pattern level act as defaults and are overridden per-stage/branch/turn if provided.
 5. Thread records are created per execution for concurrent, handoff, and orchestrator patterns when a `ThreadStore` is wired.
@@ -104,19 +104,30 @@ All branches execute simultaneously using `tokio::task::JoinSet`. Branch results
   "policy_profile": "string | null",
   "model_hint": "string | null",
   "merge_strategy": "join_with_headers | join_lines | null",
+  "tool_call_mode": "auto | strict | null",
+  "memory_policy": "MemoryPolicyPayload | null",
   "branches": [
     {
       "branch_id": "string",
+      "execution_mode": "prompt | tool_loop",
       "user_prompt_template": "string",
       "system_prompt": "string | null",
       "policy_profile": "string | null",
-      "model_hint": "string | null"
+      "model_hint": "string | null",
+      "tool_name": "string | null",
+      "tool_input": "object | null",
+      "tool_call_mode": "auto | strict | null",
+      "memory_policy": "MemoryPolicyPayload | null"
     }
   ]
 }
 ```
 
-Rust type: `ConcurrentPatternJobPayload` → `ConcurrentBranchJobPayload`
+`execution_mode` defaults to `prompt` when omitted. When `execution_mode` is `tool_loop`, `tool_name` is required.
+
+Use `ConcurrentBranchJobPayload::prompt(...)` or `::tool_loop(...)` in Rust for ergonomic construction.
+
+Rust type: `ConcurrentPatternJobPayload` → `ConcurrentBranchJobPayload` → `ConcurrentBranchExecutionMode`
 
 ### Merge strategies
 
@@ -130,7 +141,7 @@ Rust type: `ConcurrentPatternJobPayload` → `ConcurrentBranchJobPayload`
 | Field | Type | Description |
 |---|---|---|
 | `final_text` | string | Merged output across all branches |
-| `branches` | array | Per-branch results: `branch_id`, `rendered_prompt`, `output_text` |
+| `branches` | array | Per-branch results: `branch_id`, `execution_mode`, `rendered_prompt`, `output_text`, optional tool metadata (`tool_output`, `tool_invocations`, `rounds_executed`, `branch_termination_reason`) |
 | `termination_reason` | string | Always `completed_all_branches` on success |
 | `merge_strategy` | string | Strategy applied |
 

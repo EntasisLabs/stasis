@@ -2,15 +2,18 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::application::orchestration::runtime_job_payloads::{
-    ConcurrentBranchJobPayload, ConcurrentPatternJobPayload,
+    AgentToolCallMode, ConcurrentBranchExecutionMode, ConcurrentBranchJobPayload,
+    ConcurrentPatternJobPayload,
 };
 use crate::application::orchestration::concurrent_pattern_pipeline::{
     ConcurrentPatternBranch, ConcurrentPatternExecutionRequest, ConcurrentPatternPipeline,
 };
 use crate::application::orchestration::prompt_pipeline::PromptExecutionPipeline;
+use crate::application::orchestration::tool_loop_pipeline::ToolCallMode;
+use crate::application::orchestration::tool_registry::ToolRegistry;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
@@ -24,17 +27,21 @@ pub struct ConcurrentPatternJobHandler {
 }
 
 impl ConcurrentPatternJobHandler {
-    pub fn new(chat_client: Arc<dyn AiChatClient>) -> Self {
-        Self::new_with_thread_store(chat_client, None)
+    pub fn new(chat_client: Arc<dyn AiChatClient>, tool_registry: Arc<dyn ToolRegistry>) -> Self {
+        Self::new_with_thread_store(chat_client, tool_registry, None)
     }
 
     pub fn new_with_thread_store(
         chat_client: Arc<dyn AiChatClient>,
+        tool_registry: Arc<dyn ToolRegistry>,
         thread_store: Option<Arc<dyn ThreadStore>>,
     ) -> Self {
         let prompt_pipeline = PromptExecutionPipeline::new(chat_client);
         Self {
-            pipeline: ConcurrentPatternPipeline::new(prompt_pipeline),
+            pipeline: ConcurrentPatternPipeline::new_with_tool_loop(
+                prompt_pipeline,
+                tool_registry,
+            ),
             thread_store,
         }
     }
@@ -126,8 +133,27 @@ impl ConcurrentPatternJobHandler {
                     .to_string(),
             );
         }
+        if branch.execution_mode == ConcurrentBranchExecutionMode::ToolLoop {
+            let tool_name = branch.tool_name.as_deref().unwrap_or_default().trim();
+            if tool_name.is_empty() {
+                return Err(
+                    "policy violation: concurrent-pattern payload.branches[].tool_name must be non-empty when execution_mode is tool_loop"
+                        .to_string(),
+                );
+            }
+        }
 
         Ok(())
+    }
+
+    fn resolve_tool_call_mode(
+        branch_mode: Option<AgentToolCallMode>,
+        default_mode: Option<AgentToolCallMode>,
+    ) -> ToolCallMode {
+        match branch_mode.or(default_mode) {
+            Some(AgentToolCallMode::Strict) => ToolCallMode::Strict,
+            _ => ToolCallMode::Auto,
+        }
     }
 
     fn build_failure(message: String) -> JobExecutionOutcome {
@@ -166,8 +192,12 @@ impl JobHandler for ConcurrentPatternJobHandler {
             policy_profile,
             model_hint,
             merge_strategy,
+            tool_call_mode,
+            memory_policy: _memory_policy,
             branches,
         } = payload;
+
+        let pattern_tool_call_mode = tool_call_mode;
 
         let now = Utc::now();
         let thread_id = thread_id.unwrap_or_else(|| job.correlation_id.clone());
@@ -191,12 +221,34 @@ impl JobHandler for ConcurrentPatternJobHandler {
             merge_strategy,
             branches: branches
                 .into_iter()
-                .map(|branch| ConcurrentPatternBranch {
-                    branch_id: branch.branch_id,
-                    user_prompt_template: branch.user_prompt_template,
-                    system_prompt: branch.system_prompt,
-                    policy_profile: branch.policy_profile,
-                    model_hint: branch.model_hint,
+                .map(|branch| {
+                    let ConcurrentBranchJobPayload {
+                        branch_id,
+                        user_prompt_template,
+                        system_prompt,
+                        policy_profile,
+                        model_hint,
+                        execution_mode,
+                        tool_name,
+                        tool_input,
+                        tool_call_mode,
+                        memory_policy: _,
+                    } = branch;
+
+                    ConcurrentPatternBranch {
+                        branch_id,
+                        user_prompt_template,
+                        system_prompt,
+                        policy_profile,
+                        model_hint,
+                        execution_mode,
+                        tool_name,
+                        tool_input,
+                        tool_call_mode: Self::resolve_tool_call_mode(
+                            tool_call_mode,
+                            pattern_tool_call_mode.clone(),
+                        ),
+                    }
                 })
                 .collect(),
         };
@@ -226,6 +278,29 @@ impl JobHandler for ConcurrentPatternJobHandler {
             .iter()
             .map(|branch| branch.branch_id.clone())
             .collect();
+        let tool_loop_branch_count = response
+            .branches
+            .iter()
+            .filter(|branch| branch.execution_mode == ConcurrentBranchExecutionMode::ToolLoop)
+            .count();
+        let prompt_branch_count = response.branches.len() - tool_loop_branch_count;
+        let branch_summaries: Vec<Value> = response
+            .branches
+            .iter()
+            .map(|branch| {
+                json!({
+                    "branch_id": branch.branch_id,
+                    "execution_mode": match branch.execution_mode {
+                        ConcurrentBranchExecutionMode::Prompt => "prompt",
+                        ConcurrentBranchExecutionMode::ToolLoop => "tool_loop",
+                    },
+                    "rounds_executed": branch.rounds_executed,
+                    "tool_invocation_count": branch.tool_invocations.len(),
+                    "branch_termination_reason": branch.branch_termination_reason,
+                })
+            })
+            .collect();
+
         let mut branch_thread_ids = Vec::new();
         for branch in &response.branches {
             let branch_thread_id = format!("{}::branch::{}", thread_id, branch.branch_id);
@@ -275,6 +350,9 @@ impl JobHandler for ConcurrentPatternJobHandler {
                     "status": "success",
                     "pattern": "concurrent",
                     "branches_executed": response.branches.len(),
+                    "prompt_branch_count": prompt_branch_count,
+                    "tool_loop_branch_count": tool_loop_branch_count,
+                    "branch_summaries": branch_summaries,
                     "branch_ids": branch_ids,
                     "thread_id": thread_id,
                     "branch_thread_ids": branch_thread_ids,

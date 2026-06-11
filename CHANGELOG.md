@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
+## [Unreleased]
+
+### Added
+
+- **Concurrent tool_loop branches (0.5.0 Track A)** — `ConcurrentBranchExecutionMode` (`prompt` / `tool_loop`) on concurrent orchestration branches; branches can run full `ToolLoopPipeline` in parallel via the existing `JoinSet`.
+- **Payload helpers** — `ConcurrentBranchJobPayload::prompt(...)` and `::tool_loop(...)`; pattern-level `tool_call_mode` and `memory_policy` defaults.
+- **Roadmap:** [concurrent-capabilities-0.5.0-roadmap.md](docs/design/concurrent-capabilities-0.5.0-roadmap.md)
+
+### Changed
+
+- **`ConcurrentPatternJobHandler`** — wires `ToolRegistry` and reports `prompt_branch_count`, `tool_loop_branch_count`, and per-branch summaries in diagnostics.
+
 ## [0.4.0]
 
 ### Added

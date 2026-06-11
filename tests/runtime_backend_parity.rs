@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 
 use stasis::application::orchestration::runtime_job_payloads::{
     AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode, AgentTurnJobPayload,
-    ConcurrentBranchJobPayload, ConcurrentPatternJobPayload, HandoffPatternJobPayload,
+    ConcurrentBranchExecutionMode, ConcurrentBranchJobPayload, ConcurrentPatternJobPayload, HandoffPatternJobPayload,
     HandoffTurnJobPayload, MemoryAggregateJobPayload, MemoryRecallJobPayload,
     MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
     OrchestratorPatternJobPayload, OrchestratorRouteJobPayload, PromptJobPayload,
@@ -408,6 +408,67 @@ fn mock_recall_response(sync_keys: &[&str], raw_nodes: &[&str]) -> MemoryRecallR
         nodes: nodes.clone(),
         node_sync_keys: nodes.iter().map(|node| node.sync_key.clone()).collect(),
         ..Default::default()
+    }
+}
+
+#[derive(Clone)]
+struct BranchAwareConcurrentTestClient;
+
+#[async_trait]
+impl AiChatClient for BranchAwareConcurrentTestClient {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        _options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
+        let user_text = request
+            .messages
+            .iter()
+            .rev()
+            .filter_map(|message| message.content.first_text())
+            .next()
+            .unwrap_or_default();
+
+        if user_text.contains("tool branch") {
+            let has_tool_response = request
+                .messages
+                .iter()
+                .any(|message| !message.content.tool_responses().is_empty());
+
+            if !has_tool_response {
+                return Ok(ChatResponse {
+                    content: MessageContent::from_tool_calls(vec![ToolCall {
+                        call_id: "tool-call-concurrent-1".to_string(),
+                        fn_name: "stasis.web.search.mock".to_string(),
+                        fn_arguments: json!({ "query": "concurrent tool branch" }),
+                        thought_signatures: None,
+                    }]),
+                    reasoning_content: None,
+                    model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+                    provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+                    usage: Usage::default(),
+                    captured_raw_body: None,
+                });
+            }
+
+            return Ok(ChatResponse {
+                content: MessageContent::from_text("concurrent tool branch final answer"),
+                reasoning_content: None,
+                model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+                provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+                usage: Usage::default(),
+                captured_raw_body: None,
+            });
+        }
+
+        Ok(ChatResponse {
+            content: MessageContent::from_text(format!("echo::{user_text}")),
+            reasoning_content: None,
+            model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            usage: Usage::default(),
+            captured_raw_body: None,
+        })
     }
 }
 
@@ -4287,6 +4348,8 @@ async fn surreal_orchestration_concurrent_pattern_executes_all_branches() {
         initial_user_prompt: "base context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        tool_call_mode: None,
+        memory_policy: None,
         merge_strategy: Some("join_with_headers".to_string()),
         branches: vec![
             ConcurrentBranchJobPayload {
@@ -4295,6 +4358,11 @@ async fn surreal_orchestration_concurrent_pattern_executes_all_branches() {
                 system_prompt: Some("be direct".to_string()),
                 policy_profile: None,
                 model_hint: None,
+                execution_mode: ConcurrentBranchExecutionMode::Prompt,
+                tool_name: None,
+                tool_input: None,
+                tool_call_mode: None,
+                memory_policy: None,
             },
             ConcurrentBranchJobPayload {
                 branch_id: "branch.a".to_string(),
@@ -4302,6 +4370,11 @@ async fn surreal_orchestration_concurrent_pattern_executes_all_branches() {
                 system_prompt: Some("be concise".to_string()),
                 policy_profile: None,
                 model_hint: None,
+                execution_mode: ConcurrentBranchExecutionMode::Prompt,
+                tool_name: None,
+                tool_input: None,
+                tool_call_mode: None,
+                memory_policy: None,
             },
         ],
     };
@@ -4391,6 +4464,8 @@ async fn in_memory_orchestration_concurrent_pattern_policy_violation_dead_letter
         initial_user_prompt: "base context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        tool_call_mode: None,
+        memory_policy: None,
         merge_strategy: None,
         branches: vec![],
     };
@@ -4467,6 +4542,8 @@ async fn in_memory_orchestration_concurrent_pattern_persists_branch_thread_linea
         initial_user_prompt: "review architecture".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        tool_call_mode: None,
+        memory_policy: None,
         merge_strategy: Some("join_with_headers".to_string()),
         branches: vec![
             ConcurrentBranchJobPayload {
@@ -4475,6 +4552,11 @@ async fn in_memory_orchestration_concurrent_pattern_persists_branch_thread_linea
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                execution_mode: ConcurrentBranchExecutionMode::Prompt,
+                tool_name: None,
+                tool_input: None,
+                tool_call_mode: None,
+                memory_policy: None,
             },
             ConcurrentBranchJobPayload {
                 branch_id: "beta".to_string(),
@@ -4482,6 +4564,11 @@ async fn in_memory_orchestration_concurrent_pattern_persists_branch_thread_linea
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                execution_mode: ConcurrentBranchExecutionMode::Prompt,
+                tool_name: None,
+                tool_input: None,
+                tool_call_mode: None,
+                memory_policy: None,
             },
         ],
     };
@@ -4524,6 +4611,168 @@ async fn in_memory_orchestration_concurrent_pattern_persists_branch_thread_linea
     assert_eq!(
         events[0].event_kind,
         "orchestration.concurrent.branch.completed"
+    );
+}
+
+#[tokio::test]
+async fn in_memory_orchestration_concurrent_mixed_tool_and_prompt_branches() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(BranchAwareConcurrentTestClient))
+        .with_tool(MockWebSearchTool)
+        .expect("tool should register")
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let payload = ConcurrentPatternJobPayload {
+        thread_id: Some("thread.concurrent.mixed.1".to_string()),
+        initial_user_prompt: "review release".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        tool_call_mode: None,
+        memory_policy: None,
+        merge_strategy: Some("join_with_headers".to_string()),
+        branches: vec![
+            ConcurrentBranchJobPayload::prompt("summary", "Summarize {input}"),
+            ConcurrentBranchJobPayload::tool_loop(
+                "research",
+                "Run tool branch for {input}",
+                "stasis.web.search.mock",
+                Some(json!({ "query": "review release" })),
+            ),
+        ],
+    };
+
+    runtime
+        .enqueue(build_orchestration_concurrent_job(
+            "job-concurrent-mixed-in-memory-1",
+            &payload,
+            now,
+            "idem-concurrent-mixed-in-memory-1",
+            "corr-concurrent-mixed-in-memory-1",
+            "cause-concurrent-mixed-in-memory-1",
+            "trace-concurrent-mixed-in-memory-1",
+            "sttp:in:orchestration:concurrent:mixed:in-memory:1",
+        ))
+        .await
+        .expect("concurrent job should enqueue");
+
+    runtime
+        .process_once("default", "worker-concurrent-mixed", now)
+        .await
+        .expect("concurrent processing should succeed");
+
+    let job = runtime
+        .job_store
+        .get("job-concurrent-mixed-in-memory-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+
+    let attempts = runtime
+        .job_attempt_store
+        .list_by_job_id("job-concurrent-mixed-in-memory-1")
+        .await
+        .expect("attempt list should succeed");
+    let diagnostics: JsonValue = serde_json::from_str(
+        attempts[0]
+            .diagnostics
+            .as_deref()
+            .expect("diagnostics should be present"),
+    )
+    .expect("diagnostics should be valid json");
+    assert_eq!(diagnostics.get("tool_loop_branch_count"), Some(&json!(1)));
+    assert_eq!(diagnostics.get("prompt_branch_count"), Some(&json!(1)));
+    assert_eq!(
+        diagnostics.pointer("/branch_summaries/0/execution_mode"),
+        Some(&json!("tool_loop"))
+    );
+}
+
+#[tokio::test]
+async fn in_memory_orchestration_concurrent_tool_loop_branch_missing_tool_name_rejects() {
+    let now = Utc::now();
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(Arc::new(EchoPromptChatClient::default()))
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let mut tool_branch = ConcurrentBranchJobPayload::tool_loop(
+        "research",
+        "Research {input}",
+        "stasis.web.search.mock",
+        None,
+    );
+    tool_branch.tool_name = None;
+
+    let payload = ConcurrentPatternJobPayload {
+        thread_id: Some("thread.concurrent.tool.invalid.1".to_string()),
+        initial_user_prompt: "context".to_string(),
+        policy_profile: Some("default".to_string()),
+        model_hint: None,
+        tool_call_mode: None,
+        memory_policy: None,
+        merge_strategy: None,
+        branches: vec![tool_branch],
+    };
+
+    runtime
+        .enqueue(build_orchestration_concurrent_job(
+            "job-concurrent-tool-invalid-in-memory-1",
+            &payload,
+            now,
+            "idem-concurrent-tool-invalid-in-memory-1",
+            "corr-concurrent-tool-invalid-in-memory-1",
+            "cause-concurrent-tool-invalid-in-memory-1",
+            "trace-concurrent-tool-invalid-in-memory-1",
+            "sttp:in:orchestration:concurrent:tool:invalid:in-memory:1",
+        ))
+        .await
+        .expect("concurrent job should enqueue");
+
+    runtime
+        .process_once("default", "worker-concurrent-tool-invalid", now)
+        .await
+        .expect("concurrent processing should complete");
+
+    let job = runtime
+        .job_store
+        .get("job-concurrent-tool-invalid-in-memory-1")
+        .await
+        .expect("job get should succeed")
+        .expect("job should exist");
+    assert_eq!(job.state, JobState::DeadLetter);
+    assert!(
+        runtime
+            .job_attempt_store
+            .list_by_job_id("job-concurrent-tool-invalid-in-memory-1")
+            .await
+            .expect("attempt list should succeed")[0]
+            .policy_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("tool_name must be non-empty")
     );
 }
 
@@ -7147,6 +7396,8 @@ async fn lineage_investigator_filters_by_branch_thread_and_includes_ancestry() {
         initial_user_prompt: "lineage selector context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        tool_call_mode: None,
+        memory_policy: None,
         merge_strategy: Some("join_with_headers".to_string()),
         branches: vec![
             ConcurrentBranchJobPayload {
@@ -7155,6 +7406,11 @@ async fn lineage_investigator_filters_by_branch_thread_and_includes_ancestry() {
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                execution_mode: ConcurrentBranchExecutionMode::Prompt,
+                tool_name: None,
+                tool_input: None,
+                tool_call_mode: None,
+                memory_policy: None,
             },
             ConcurrentBranchJobPayload {
                 branch_id: "beta".to_string(),
@@ -7162,6 +7418,11 @@ async fn lineage_investigator_filters_by_branch_thread_and_includes_ancestry() {
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                execution_mode: ConcurrentBranchExecutionMode::Prompt,
+                tool_name: None,
+                tool_input: None,
+                tool_call_mode: None,
+                memory_policy: None,
             },
         ],
     };
@@ -7500,6 +7761,8 @@ async fn in_memory_orchestration_handlers_emit_standard_success_diagnostics() {
         initial_user_prompt: "context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        tool_call_mode: None,
+        memory_policy: None,
         merge_strategy: Some("join_with_headers".to_string()),
         branches: vec![ConcurrentBranchJobPayload {
             branch_id: "b1".to_string(),
@@ -7507,6 +7770,11 @@ async fn in_memory_orchestration_handlers_emit_standard_success_diagnostics() {
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            execution_mode: ConcurrentBranchExecutionMode::Prompt,
+            tool_name: None,
+            tool_input: None,
+            tool_call_mode: None,
+            memory_policy: None,
         }],
     };
     let handoff_payload = HandoffPatternJobPayload {
@@ -7659,6 +7927,8 @@ async fn in_memory_orchestration_handlers_emit_standard_policy_violation_diagnos
         initial_user_prompt: "context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        tool_call_mode: None,
+        memory_policy: None,
         merge_strategy: None,
         branches: vec![],
     };

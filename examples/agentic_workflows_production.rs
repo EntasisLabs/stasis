@@ -360,22 +360,18 @@ fn build_support_triage_jobs() -> Result<Vec<NewJob>> {
         initial_user_prompt: "Assess ticket escalation quality from three angles".to_string(),
         policy_profile: Some("prod.support".to_string()),
         model_hint: Some("balanced".to_string()),
+        tool_call_mode: None,
+        memory_policy: None,
         merge_strategy: Some("append".to_string()),
         branches: vec![
-            ConcurrentBranchJobPayload {
-                branch_id: "severity".to_string(),
-                user_prompt_template: "{{input}}\nClassify severity and urgency.".to_string(),
-                system_prompt: None,
-                policy_profile: None,
-                model_hint: None,
-            },
-            ConcurrentBranchJobPayload {
-                branch_id: "owner".to_string(),
-                user_prompt_template: "{{input}}\nSuggest owning team and escalation target.".to_string(),
-                system_prompt: None,
-                policy_profile: None,
-                model_hint: None,
-            },
+            ConcurrentBranchJobPayload::prompt(
+                "severity",
+                "{{input}}\nClassify severity and urgency.",
+            ),
+            ConcurrentBranchJobPayload::prompt(
+                "owner",
+                "{{input}}\nSuggest owning team and escalation target.",
+            ),
         ],
     };
 

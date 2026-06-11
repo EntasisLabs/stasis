@@ -167,6 +167,14 @@ impl SequentialPatternJobPayload {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConcurrentBranchExecutionMode {
+    #[default]
+    Prompt,
+    ToolLoop,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConcurrentBranchJobPayload {
     pub branch_id: String,
@@ -174,6 +182,12 @@ pub struct ConcurrentBranchJobPayload {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    #[serde(default)]
+    pub execution_mode: ConcurrentBranchExecutionMode,
+    pub tool_name: Option<String>,
+    pub tool_input: Option<Value>,
+    pub tool_call_mode: Option<AgentToolCallMode>,
+    pub memory_policy: Option<MemoryPolicyPayload>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -183,7 +197,49 @@ pub struct ConcurrentPatternJobPayload {
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
     pub merge_strategy: Option<String>,
+    pub tool_call_mode: Option<AgentToolCallMode>,
+    pub memory_policy: Option<MemoryPolicyPayload>,
     pub branches: Vec<ConcurrentBranchJobPayload>,
+}
+
+impl ConcurrentBranchJobPayload {
+    pub fn prompt(
+        branch_id: impl Into<String>,
+        user_prompt_template: impl Into<String>,
+    ) -> Self {
+        Self {
+            branch_id: branch_id.into(),
+            user_prompt_template: user_prompt_template.into(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+            execution_mode: ConcurrentBranchExecutionMode::Prompt,
+            tool_name: None,
+            tool_input: None,
+            tool_call_mode: None,
+            memory_policy: None,
+        }
+    }
+
+    pub fn tool_loop(
+        branch_id: impl Into<String>,
+        user_prompt_template: impl Into<String>,
+        tool_name: impl Into<String>,
+        tool_input: Option<Value>,
+    ) -> Self {
+        Self {
+            branch_id: branch_id.into(),
+            user_prompt_template: user_prompt_template.into(),
+            system_prompt: None,
+            policy_profile: None,
+            model_hint: None,
+            execution_mode: ConcurrentBranchExecutionMode::ToolLoop,
+            tool_name: Some(tool_name.into()),
+            tool_input,
+            tool_call_mode: None,
+            memory_policy: None,
+        }
+    }
 }
 
 impl ConcurrentPatternJobPayload {

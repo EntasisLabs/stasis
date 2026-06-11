@@ -444,6 +444,7 @@ impl StasisRuntimeBuilder {
                 if self.include_orchestration_pattern_handlers {
                     rt.register_handler(ConcurrentPatternJobHandler::new_with_thread_store(
                         chat_client.clone(),
+                        tool_registry.clone(),
                         Some(thread_store.clone()),
                     ))?;
                     rt.register_handler(HandoffPatternJobHandler::new_with_thread_store(
@@ -566,6 +567,7 @@ impl StasisRuntimeBuilder {
                 if self.include_orchestration_pattern_handlers {
                     rt.register_handler(ConcurrentPatternJobHandler::new_with_thread_store(
                         chat_client.clone(),
+                        tool_registry.clone(),
                         Some(thread_store.clone()),
                     ))?;
                     rt.register_handler(HandoffPatternJobHandler::new_with_thread_store(
