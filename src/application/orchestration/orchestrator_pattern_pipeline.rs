@@ -1,6 +1,7 @@
 use crate::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline, PromptExecutionRequest,
 };
+use crate::application::runtime::chat_options_resolver::resolve_reasoning_effort;
 use crate::domain::errors::{Result, StasisError};
 
 #[derive(Clone, Debug)]
@@ -11,6 +12,7 @@ pub struct OrchestratorPatternRoute {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -20,6 +22,7 @@ pub struct OrchestratorPatternExecutionRequest {
     pub correlation_id: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub routes: Vec<OrchestratorPatternRoute>,
 }
 
@@ -59,6 +62,10 @@ impl OrchestratorPatternPipeline {
             correlation_id: request.correlation_id,
             policy_profile: route.policy_profile.clone().or(request.policy_profile),
             model_hint: route.model_hint.clone().or(request.model_hint),
+            reasoning_effort: resolve_reasoning_effort(
+                route.reasoning_effort.clone(),
+                request.reasoning_effort.clone(),
+            ),
         };
 
         let mut prompt_request =

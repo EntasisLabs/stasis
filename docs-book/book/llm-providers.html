@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Stasis Tool Macro - Stasis Architecture Book</title>
+        <title>LLM Providers (genai 0.6.x) - Stasis Architecture Book</title>
 
 
         <!-- Custom HTML head -->
@@ -174,103 +174,104 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="stasis-tool-macro"><a class="header" href="#stasis-tool-macro">Stasis Tool Macro</a></h1>
+                        <h1 id="llm-providers-genai-06x"><a class="header" href="#llm-providers-genai-06x">LLM Providers (genai 0.6.x)</a></h1>
 <h2 id="document-metadata"><a class="header" href="#document-metadata">Document Metadata</a></h2>
 <ul>
-<li>Document Type: Reference Guide</li>
-<li>Audience: Engineer</li>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, Operator</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-06-04</li>
+<li>Last Verified: 2026-06-02</li>
 <li>Verified Against:
 <ul>
-<li>stasis-macros/src/lib.rs</li>
+<li><code>Cargo.toml</code> (<code>genai = "0.6.5"</code>)</li>
+<li><code>src/infrastructure/llm/genai_chat_client.rs</code></li>
+<li><a href="https://github.com/jeremychone/rust-genai/blob/HEAD/CHANGELOG.md">genai CHANGELOG</a></li>
 </ul>
 </li>
 </ul>
-<h2 id="outcome"><a class="header" href="#outcome">Outcome</a></h2>
-<p>Use <code>#[stasis_tool(...)]</code> to generate <code>StasisTool</code> implementations from typed async functions with compile-time contract checks.</p>
-<h2 id="why-this-exists"><a class="header" href="#why-this-exists">Why This Exists</a></h2>
-<p><code>genai</code> exposes runtime tool metadata and schema wiring (<code>Tool::new(...).with_schema(...)</code>), but does not currently provide a function-signature-driven proc macro for Stasis runtime registration.</p>
-<p>The Stasis macro adds that ergonomics layer while preserving explicit JSON contracts.</p>
-<h2 id="basic-usage"><a class="header" href="#basic-usage">Basic Usage</a></h2>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use stasis::domain::errors::Result;
-use stasis::stasis_tool;
-
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-struct SearchInput {
-    query: String,
+<h2 id="purpose"><a class="header" href="#purpose">Purpose</a></h2>
+<p>Stasis routes chat completions through <strong>genai 0.6.x</strong>. This page documents how to configure providers at deploy time and how per-job <strong><code>reasoning_effort</code></strong> overrides interact with env-based defaults.</p>
+<h2 id="default-wiring"><a class="header" href="#default-wiring">Default wiring</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>STASIS_LLM_PROVIDER</code></td><td>Adapter id passed to genai (<code>openai</code>, <code>anthropic</code>, <code>gemini</code>, …)</td></tr>
+<tr><td><code>STASIS_LLM_MODEL</code></td><td>Default model target (supports genai namespaced targets)</td></tr>
+<tr><td><code>STASIS_LLM_API_KEY</code></td><td>Global API key fallback when adapter-specific key is unset</td></tr>
+</tbody>
+</table>
+</div>
+<p>Adapter-specific keys follow the existing pattern: <code>STASIS_OPENAI_API_KEY</code>, <code>STASIS_ANTHROPIC_API_KEY</code>, <code>STASIS_GEMINI_API_KEY</code>, and so on. See <code>.env.example</code> for the full list.</p>
+<h2 id="namespaced-model-targets"><a class="header" href="#namespaced-model-targets">Namespaced model targets</a></h2>
+<p>genai 0.6.x expects <strong>namespaced</strong> model targets for most adapters:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Provider</th><th>Example model target</th><th>Auth env</th></tr>
+</thead>
+<tbody>
+<tr><td>OpenAI / OpenAI Responses</td><td><code>openai::gpt-5-mini</code></td><td><code>STASIS_OPENAI_API_KEY</code></td></tr>
+<tr><td>Anthropic</td><td><code>anthropic::claude-sonnet-4-20250514</code></td><td><code>STASIS_ANTHROPIC_API_KEY</code></td></tr>
+<tr><td>Gemini</td><td><code>gemini::gemini-2.5-flash</code></td><td><code>STASIS_GEMINI_API_KEY</code></td></tr>
+<tr><td>Groq</td><td><code>groq::llama-3.3-70b-versatile</code></td><td><code>STASIS_GROQ_API_KEY</code></td></tr>
+<tr><td>Bedrock</td><td><code>bedrock::anthropic.claude-3-5-sonnet-20241022-v2:0</code></td><td><code>STASIS_BEDROCK_API_KEY</code> (+ region)</td></tr>
+<tr><td>Vertex</td><td><code>vertex::gemini-2.5-pro</code></td><td><code>STASIS_VERTEX_API_KEY</code> / ADC</td></tr>
+<tr><td>OpenRouter</td><td><code>open_router::anthropic/claude-3.5-sonnet</code></td><td><code>STASIS_OPEN_ROUTER_API_KEY</code></td></tr>
+<tr><td>Ollama (local)</td><td><code>ollama::gemma3:4b</code></td><td>none</td></tr>
+</tbody>
+</table>
+</div>
+<p>Set <code>STASIS_LLM_MODEL</code> to the namespaced target, or pass a hint via job payload <code>model_hint</code> (metadata-only in 0.6.0 — routing still uses the configured client model).</p>
+<h2 id="reasoning-effort"><a class="header" href="#reasoning-effort">Reasoning effort</a></h2>
+<h3 id="per-job-override-recommended"><a class="header" href="#per-job-override-recommended">Per-job override (recommended)</a></h3>
+<p>All LLM job payloads accept optional <code>reasoning_effort</code> as a string keyword:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Keyword</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>none</code></td><td>Disable extra reasoning budget where supported</td></tr>
+<tr><td><code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code></td><td>Provider-supported effort levels</td></tr>
+<tr><td><code>budget:N</code></td><td>Token budget style hint (e.g. <code>budget:8192</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Orchestration patterns resolve <strong>branch / stage / turn / route override → pattern default</strong> (same semantics as <code>memory_policy</code> and <code>tool_call_mode</code> on concurrent branches).</p>
+<p>Example concurrent branch mix:</p>
+<pre><code class="language-json">{
+  "reasoning_effort": "low",
+  "branches": [
+    { "branch_id": "research", "reasoning_effort": "high", "execution_mode": "tool_loop", "tool_name": "stasis.web.search" },
+    { "branch_id": "summary", "execution_mode": "prompt" }
+  ]
 }
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-struct SearchOutput {
-    summary: String,
-}
-
-#[stasis_tool(
-    name = "search_docs",
-    description = "Search internal knowledge base",
-    output_schema = true
-)]
-async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
-    Ok(SearchOutput {
-        summary: format!("query={}", input.query),
-    })
-}
-
-// Generated symbols:
-// - struct SearchDocsTool;
-// - fn search_docs_tool() -&gt; SearchDocsTool;
-<span class="boring">}</span></code></pre>
-<p>Register generated tool with runtime builder:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>let builder = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
-    .with_locus_memory()
-    .with_tool(search_docs_tool())?;
-<span class="boring">}</span></code></pre>
-<h2 id="attribute-arguments"><a class="header" href="#attribute-arguments">Attribute Arguments</a></h2>
+</code></pre>
+<p>The <code>research</code> branch runs at <code>high</code>; <code>summary</code> inherits pattern default <code>low</code>.</p>
+<h3 id="model-suffix-fallback"><a class="header" href="#model-suffix-fallback">Model suffix fallback</a></h3>
+<p>When no payload override is set, <code>GenaiChatClient</code> parses reasoning effort from the configured model name suffix (genai convention), e.g. <code>gpt-5-mini-high</code> → <code>high</code>.</p>
+<h3 id="env-level-defaults"><a class="header" href="#env-level-defaults">Env-level defaults</a></h3>
+<p>Stasis does <strong>not</strong> add a separate <code>STASIS_LLM_REASONING_EFFORT</code> variable in 0.6.0. Use genai client env configuration or model suffix naming for global defaults; use payload fields for per-job control.</p>
+<h2 id="groq-migration-note"><a class="header" href="#groq-migration-note">Groq migration note</a></h2>
+<p>Bare Groq model names from genai 0.5.x must be prefixed: <code>groq::model-name</code>.</p>
+<h2 id="deferred-not-in-060"><a class="header" href="#deferred-not-in-060">Deferred (not in 0.6.0)</a></h2>
 <ul>
-<li><code>name = "..."</code> (required): advertised tool name.</li>
-<li><code>description = "..."</code> (optional): LLM-visible tool description.</li>
-<li><code>output_schema = true|false</code> (optional, default <code>false</code>): generate <code>output_schema()</code> from output type.</li>
-<li><code>crate_path = "..."</code> (optional): override crate path for macro expansion in advanced/internal scenarios.</li>
+<li>Built-in provider <strong>WebSearch</strong> tools — custom <code>StasisTool</code> registry remains the supported search path</li>
+<li>Dynamic <strong>model_hint → model router</strong> — planned for a follow-on release</li>
 </ul>
-<h2 id="compile-time-contract"><a class="header" href="#compile-time-contract">Compile-Time Contract</a></h2>
-<p>The macro enforces:</p>
-<ol>
-<li>Function is <code>async</code>.</li>
-<li>Function has exactly one typed input argument.</li>
-<li>Function is non-generic.</li>
-<li>Return type is <code>Result&lt;OutputType&gt;</code>.</li>
-<li>Input type implements <code>Deserialize + JsonSchema</code>.</li>
-<li>Output type implements <code>Serialize</code>.</li>
-<li>When <code>output_schema = true</code>, output type also implements <code>JsonSchema</code>.</li>
-</ol>
-<h2 id="generated-behavior"><a class="header" href="#generated-behavior">Generated Behavior</a></h2>
-<p>The generated <code>StasisTool</code> implementation:</p>
-<ul>
-<li>Exposes <code>name</code>, <code>description</code>, and input schema.</li>
-<li>Optionally exposes output schema.</li>
-<li>Deserializes runtime JSON input into your typed input struct.</li>
-<li>Calls your function and maps output back to JSON.</li>
-<li>Maps serde conversion failures to <code>StasisError::PortFailure</code> with tool-scoped messages.</li>
-</ul>
-<h2 id="ui-contract-tests"><a class="header" href="#ui-contract-tests">UI Contract Tests</a></h2>
-<p>Compile-fail and compile-pass cases are covered by trybuild tests under <code>stasis-macros/tests/ui</code>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="extension-points.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="environment-configuration.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="control-plane-endpoint-routing.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="extension-points.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -280,11 +281,11 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="extension-points.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="environment-configuration.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="control-plane-endpoint-routing.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="extension-points.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

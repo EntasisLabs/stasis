@@ -53,8 +53,10 @@ impl AiChatClient for RecordingChatClient {
             reasoning_content: None,
             model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
             provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
             usage: Usage::default(),
             captured_raw_body: None,
+            response_id: None,
         })
     }
 }
@@ -127,8 +129,10 @@ impl AiChatClient for ModelToolCallClient {
                 reasoning_content: None,
                 model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                 provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
                 usage: Usage::default(),
                 captured_raw_body: None,
+            response_id: None,
             });
         }
 
@@ -137,8 +141,10 @@ impl AiChatClient for ModelToolCallClient {
             reasoning_content: None,
             model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
             provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
             usage: Usage::default(),
             captured_raw_body: None,
+            response_id: None,
         })
     }
 }
@@ -179,6 +185,7 @@ fn prompt_payload() -> PromptJobPayload {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
     }
 }

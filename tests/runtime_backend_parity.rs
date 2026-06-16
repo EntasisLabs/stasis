@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use genai::ModelIden;
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatOptions, ChatRequest, ChatResponse, MessageContent, ToolCall, Usage};
+use genai::chat::{ChatOptions, ChatRequest, ChatResponse, MessageContent, ReasoningEffort, ToolCall, Usage};
 use serde_json::{Value as JsonValue, json};
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
@@ -286,8 +286,10 @@ impl AiChatClient for ScriptedChatClient {
             reasoning_content: None,
             model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
             provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
             usage: Usage::default(),
             captured_raw_body: None,
+            response_id: None,
         })
     }
 }
@@ -326,8 +328,10 @@ impl AiChatClient for PlainScriptedChatClient {
             reasoning_content: None,
             model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
             provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
             usage: Usage::default(),
             captured_raw_body: None,
+            response_id: None,
         })
     }
 }
@@ -383,8 +387,10 @@ impl AiChatClient for CapturingChatClient {
             reasoning_content: None,
             model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
             provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
             usage: Usage::default(),
             captured_raw_body: None,
+            response_id: None,
         })
     }
 }
@@ -446,8 +452,10 @@ impl AiChatClient for BranchAwareConcurrentTestClient {
                     reasoning_content: None,
                     model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                     provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
                     usage: Usage::default(),
                     captured_raw_body: None,
+            response_id: None,
                 });
             }
 
@@ -456,8 +464,10 @@ impl AiChatClient for BranchAwareConcurrentTestClient {
                 reasoning_content: None,
                 model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                 provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
                 usage: Usage::default(),
                 captured_raw_body: None,
+            response_id: None,
             });
         }
 
@@ -466,8 +476,48 @@ impl AiChatClient for BranchAwareConcurrentTestClient {
             reasoning_content: None,
             model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
             provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
             usage: Usage::default(),
             captured_raw_body: None,
+            response_id: None,
+        })
+    }
+}
+
+#[derive(Clone, Default)]
+struct OptionsCapturingEchoClient {
+    captured_options: Arc<StdMutex<Vec<Option<ChatOptions>>>>,
+}
+
+#[async_trait]
+impl AiChatClient for OptionsCapturingEchoClient {
+    async fn complete(
+        &self,
+        request: ChatRequest,
+        options: Option<&ChatOptions>,
+    ) -> Result<ChatResponse> {
+        self.captured_options
+            .lock()
+            .expect("options lock")
+            .push(options.cloned());
+
+        let echoed_text = request
+            .messages
+            .iter()
+            .rev()
+            .filter_map(|message| message.content.first_text())
+            .next()
+            .unwrap_or_default();
+
+        Ok(ChatResponse {
+            content: MessageContent::from_text(format!("echo::{echoed_text}")),
+            reasoning_content: None,
+            model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
+            usage: Usage::default(),
+            captured_raw_body: None,
+            response_id: None,
         })
     }
 }
@@ -495,8 +545,10 @@ impl AiChatClient for EchoPromptChatClient {
             reasoning_content: None,
             model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
             provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
             usage: Usage::default(),
             captured_raw_body: None,
+            response_id: None,
         })
     }
 }
@@ -534,8 +586,10 @@ impl AiChatClient for ModelToolCallScriptedClient {
                 reasoning_content: None,
                 model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                 provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
                 usage: Usage::default(),
                 captured_raw_body: None,
+            response_id: None,
             });
         }
 
@@ -553,8 +607,10 @@ impl AiChatClient for ModelToolCallScriptedClient {
             reasoning_content: None,
             model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
             provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+            stop_reason: None,
             usage: Usage::default(),
             captured_raw_body: None,
+            response_id: None,
         })
     }
 }
@@ -1270,6 +1326,7 @@ async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_di
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
     };
 
@@ -1415,6 +1472,7 @@ async fn in_memory_prompt_job_handler_identity_trace_includes_replacement_contin
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
     };
 
@@ -1511,6 +1569,7 @@ async fn surreal_prompt_job_handler_with_memory_persists_memory_node_id_and_diag
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
     };
 
@@ -1660,6 +1719,7 @@ async fn in_memory_tool_loop_job_handler_with_memory_persists_memory_node_id_and
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -1801,6 +1861,7 @@ async fn in_memory_tool_loop_identity_trace_includes_replacement_continuity_rece
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -1906,6 +1967,7 @@ async fn surreal_tool_loop_job_handler_with_memory_persists_memory_node_id_and_d
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -2053,6 +2115,7 @@ async fn in_memory_agent_turn_job_handler_with_memory_persists_memory_node_id_an
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -2196,6 +2259,7 @@ async fn in_memory_agent_turn_identity_trace_includes_replacement_continuity_rec
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -2304,6 +2368,7 @@ async fn surreal_agent_turn_job_handler_with_memory_persists_memory_node_id_and_
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -2428,6 +2493,7 @@ async fn in_memory_tool_loop_job_handler_executes_and_persists_diagnostics() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -2541,6 +2607,7 @@ async fn in_memory_tool_loop_model_emitted_tool_call_roundtrip() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "fallback query" })),
@@ -2636,6 +2703,7 @@ async fn in_memory_agent_turn_job_handler_executes_single_agent_turn() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -2758,6 +2826,7 @@ async fn in_memory_agent_session_job_handler_executes_session() {
         ],
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         max_turns: Some(2),
         tool_call_mode: None,
@@ -2873,6 +2942,7 @@ async fn surreal_agent_session_job_handler_executes_session() {
         ],
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         max_turns: Some(2),
         tool_call_mode: None,
@@ -2994,6 +3064,7 @@ async fn in_memory_agent_session_job_handler_with_memory_persists_memory_node_id
         ],
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         max_turns: Some(2),
         tool_call_mode: None,
@@ -3114,6 +3185,7 @@ async fn in_memory_agent_session_identity_trace_includes_replacement_continuity_
         ],
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         max_turns: Some(2),
         tool_call_mode: None,
@@ -3234,6 +3306,7 @@ async fn surreal_agent_session_job_handler_with_memory_persists_memory_node_id_a
         ],
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         max_turns: Some(2),
         tool_call_mode: None,
@@ -3978,6 +4051,7 @@ async fn in_memory_runtime_builder_middleware_chain_enables_cache_telemetry_and_
             system_prompt: Some("be concise".to_string()),
             policy_profile: Some("default".to_string()),
             model_hint: None,
+            reasoning_effort: None,
             memory_policy: None,
             tool_name: "stasis.web.search.mock".to_string(),
             tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -4080,6 +4154,7 @@ async fn surreal_runtime_builder_middleware_chain_enables_cache_telemetry_and_in
             system_prompt: Some("be concise".to_string()),
             policy_profile: Some("default".to_string()),
             model_hint: None,
+            reasoning_effort: None,
             memory_policy: None,
             tool_name: "stasis.web.search.mock".to_string(),
             tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -4166,6 +4241,7 @@ async fn in_memory_orchestration_sequential_pattern_executes_all_stages() {
         initial_user_prompt: "start context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         stages: vec![
             SequentialStageJobPayload {
                 stage_id: "analyze".to_string(),
@@ -4173,6 +4249,7 @@ async fn in_memory_orchestration_sequential_pattern_executes_all_stages() {
                 system_prompt: Some("be concise".to_string()),
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
             SequentialStageJobPayload {
                 stage_id: "synthesize".to_string(),
@@ -4180,6 +4257,7 @@ async fn in_memory_orchestration_sequential_pattern_executes_all_stages() {
                 system_prompt: Some("be structured".to_string()),
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
         ],
     };
@@ -4267,12 +4345,14 @@ async fn surreal_orchestration_sequential_pattern_policy_violation_dead_letters_
         initial_user_prompt: "   ".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         stages: vec![SequentialStageJobPayload {
             stage_id: "analyze".to_string(),
             user_prompt_template: "Analyze: {input}".to_string(),
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
 
@@ -4348,6 +4428,7 @@ async fn surreal_orchestration_concurrent_pattern_executes_all_branches() {
         initial_user_prompt: "base context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         tool_call_mode: None,
         memory_policy: None,
         merge_strategy: Some("join_with_headers".to_string()),
@@ -4358,6 +4439,7 @@ async fn surreal_orchestration_concurrent_pattern_executes_all_branches() {
                 system_prompt: Some("be direct".to_string()),
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
                 execution_mode: ConcurrentBranchExecutionMode::Prompt,
                 tool_name: None,
                 tool_input: None,
@@ -4370,6 +4452,7 @@ async fn surreal_orchestration_concurrent_pattern_executes_all_branches() {
                 system_prompt: Some("be concise".to_string()),
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
                 execution_mode: ConcurrentBranchExecutionMode::Prompt,
                 tool_name: None,
                 tool_input: None,
@@ -4464,6 +4547,7 @@ async fn in_memory_orchestration_concurrent_pattern_policy_violation_dead_letter
         initial_user_prompt: "base context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         tool_call_mode: None,
         memory_policy: None,
         merge_strategy: None,
@@ -4542,6 +4626,7 @@ async fn in_memory_orchestration_concurrent_pattern_persists_branch_thread_linea
         initial_user_prompt: "review architecture".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         tool_call_mode: None,
         memory_policy: None,
         merge_strategy: Some("join_with_headers".to_string()),
@@ -4552,6 +4637,7 @@ async fn in_memory_orchestration_concurrent_pattern_persists_branch_thread_linea
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
                 execution_mode: ConcurrentBranchExecutionMode::Prompt,
                 tool_name: None,
                 tool_input: None,
@@ -4564,6 +4650,7 @@ async fn in_memory_orchestration_concurrent_pattern_persists_branch_thread_linea
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
                 execution_mode: ConcurrentBranchExecutionMode::Prompt,
                 tool_name: None,
                 tool_input: None,
@@ -4639,6 +4726,7 @@ async fn in_memory_orchestration_concurrent_mixed_tool_and_prompt_branches() {
         initial_user_prompt: "review release".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         tool_call_mode: None,
         memory_policy: None,
         merge_strategy: Some("join_with_headers".to_string()),
@@ -4746,6 +4834,7 @@ async fn in_memory_orchestration_concurrent_tool_loop_branch_recalls_and_stores_
         initial_user_prompt: "memory context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         tool_call_mode: None,
         memory_policy: None,
         merge_strategy: Some("join_with_headers".to_string()),
@@ -4810,6 +4899,83 @@ async fn in_memory_orchestration_concurrent_tool_loop_branch_recalls_and_stores_
 }
 
 #[tokio::test]
+async fn in_memory_concurrent_branch_reasoning_effort() {
+    let now = Utc::now();
+    let chat_client = Arc::new(OptionsCapturingEchoClient::default());
+    let captured_options = chat_client.captured_options.clone();
+
+    let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+        .with_chat_client(chat_client)
+        .without_grapheme_handlers()
+        .without_prompt_handler()
+        .without_tool_loop_handler()
+        .without_agent_handlers()
+        .without_memory_operation_handlers()
+        .build()
+        .await
+        .expect("runtime should build");
+
+    let RuntimeComposition::InMemory(runtime) = runtime else {
+        panic!("expected in-memory runtime");
+    };
+
+    let mut high_branch = ConcurrentBranchJobPayload::prompt("deep", "Deep branch {input}");
+    high_branch.reasoning_effort = Some("high".to_string());
+
+    let payload = ConcurrentPatternJobPayload {
+        thread_id: Some("thread.concurrent.reasoning.1".to_string()),
+        initial_user_prompt: "analyze input".to_string(),
+        policy_profile: None,
+        model_hint: None,
+        reasoning_effort: Some("low".to_string()),
+        tool_call_mode: None,
+        memory_policy: None,
+        merge_strategy: Some("join_with_headers".to_string()),
+        branches: vec![
+            high_branch,
+            ConcurrentBranchJobPayload::prompt("quick", "Quick branch {input}"),
+        ],
+    };
+
+    runtime
+        .enqueue(build_orchestration_concurrent_job(
+            "job-concurrent-reasoning-in-memory-1",
+            &payload,
+            now,
+            "idem-concurrent-reasoning-in-memory-1",
+            "corr-concurrent-reasoning-in-memory-1",
+            "cause-concurrent-reasoning-in-memory-1",
+            "trace-concurrent-reasoning-in-memory-1",
+            "sttp:in:orchestration:concurrent:reasoning:in-memory:1",
+        ))
+        .await
+        .expect("concurrent job should enqueue");
+
+    runtime
+        .process_once("default", "worker-concurrent-reasoning", now)
+        .await
+        .expect("concurrent processing should succeed");
+
+    let captured = captured_options
+        .lock()
+        .expect("options lock")
+        .clone();
+    assert_eq!(captured.len(), 2);
+
+    let mut high = 0usize;
+    let mut low = 0usize;
+    for options in captured {
+        match options.and_then(|opts| opts.reasoning_effort) {
+            Some(ReasoningEffort::High) => high += 1,
+            Some(ReasoningEffort::Low) => low += 1,
+            other => panic!("unexpected reasoning effort {other:?}"),
+        }
+    }
+    assert_eq!(high, 1);
+    assert_eq!(low, 1);
+}
+
+#[tokio::test]
 async fn in_memory_orchestration_concurrent_tool_loop_branch_missing_tool_name_rejects() {
     let now = Utc::now();
     let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
@@ -4840,6 +5006,7 @@ async fn in_memory_orchestration_concurrent_tool_loop_branch_missing_tool_name_r
         initial_user_prompt: "context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         tool_call_mode: None,
         memory_policy: None,
         merge_strategy: None,
@@ -4911,6 +5078,7 @@ async fn in_memory_orchestration_handoff_pattern_executes_turns_and_emits_transi
         initial_user_prompt: "initial context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         turns: vec![
             HandoffTurnJobPayload {
                 actor_id: "agent.alpha".to_string(),
@@ -4918,6 +5086,7 @@ async fn in_memory_orchestration_handoff_pattern_executes_turns_and_emits_transi
                 system_prompt: Some("be analytical".to_string()),
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
             HandoffTurnJobPayload {
                 actor_id: "agent.beta".to_string(),
@@ -4925,6 +5094,7 @@ async fn in_memory_orchestration_handoff_pattern_executes_turns_and_emits_transi
                 system_prompt: Some("be concise".to_string()),
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
         ],
     };
@@ -5021,12 +5191,14 @@ async fn surreal_orchestration_handoff_pattern_policy_violation_dead_letters_job
         initial_user_prompt: "initial context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         turns: vec![HandoffTurnJobPayload {
             actor_id: " ".to_string(),
             user_prompt_template: "broken actor {input}".to_string(),
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
 
@@ -5099,6 +5271,7 @@ async fn in_memory_orchestration_orchestrator_pattern_selects_matching_route() {
         initial_user_prompt: "Need SQL query tuning help".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         routes: vec![
             OrchestratorRouteJobPayload {
                 route_id: "route.general".to_string(),
@@ -5107,6 +5280,7 @@ async fn in_memory_orchestration_orchestrator_pattern_selects_matching_route() {
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
             OrchestratorRouteJobPayload {
                 route_id: "route.sql".to_string(),
@@ -5115,6 +5289,7 @@ async fn in_memory_orchestration_orchestrator_pattern_selects_matching_route() {
                 system_prompt: Some("be technical".to_string()),
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
         ],
     };
@@ -5206,6 +5381,7 @@ async fn surreal_orchestration_orchestrator_pattern_policy_violation_dead_letter
         initial_user_prompt: "routing".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         routes: vec![OrchestratorRouteJobPayload {
             route_id: " ".to_string(),
             selector_keywords: vec!["routing".to_string()],
@@ -5213,6 +5389,7 @@ async fn surreal_orchestration_orchestrator_pattern_policy_violation_dead_letter
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
 
@@ -5306,6 +5483,7 @@ async fn agent_session_coordinator_runs_multi_turn_with_round_robin_and_max_turn
                 correlation_id: Some("corr-coord-1".to_string()),
                 policy_profile: Some("default".to_string()),
                 model_hint: None,
+                reasoning_effort: None,
             },
             max_turns_cap: 4,
             policy: AgentTurnExecutionPolicy {
@@ -5354,6 +5532,7 @@ async fn in_memory_tool_loop_strict_mode_requires_model_tool_call() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": "latest rust trends" })),
@@ -5427,6 +5606,7 @@ async fn in_memory_tool_loop_job_handler_policy_violation_dead_letters_job() {
         system_prompt: None,
         policy_profile: None,
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: None,
@@ -5539,6 +5719,7 @@ async fn in_memory_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": 123 })),
@@ -5644,6 +5825,7 @@ async fn surreal_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
         tool_name: "stasis.web.search.mock".to_string(),
         tool_input: Some(json!({ "query": 321 })),
@@ -7332,6 +7514,7 @@ async fn lineage_investigator_includes_memory_lineage_metadata() {
         system_prompt: Some("be concise".to_string()),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         memory_policy: None,
     };
 
@@ -7505,6 +7688,7 @@ async fn lineage_investigator_filters_by_branch_thread_and_includes_ancestry() {
         initial_user_prompt: "lineage selector context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         tool_call_mode: None,
         memory_policy: None,
         merge_strategy: Some("join_with_headers".to_string()),
@@ -7515,6 +7699,7 @@ async fn lineage_investigator_filters_by_branch_thread_and_includes_ancestry() {
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
                 execution_mode: ConcurrentBranchExecutionMode::Prompt,
                 tool_name: None,
                 tool_input: None,
@@ -7527,6 +7712,7 @@ async fn lineage_investigator_filters_by_branch_thread_and_includes_ancestry() {
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
                 execution_mode: ConcurrentBranchExecutionMode::Prompt,
                 tool_name: None,
                 tool_input: None,
@@ -7623,12 +7809,14 @@ async fn lineage_investigator_root_thread_selector_expands_descendants_in_memory
         initial_user_prompt: "root context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         stages: vec![SequentialStageJobPayload {
             stage_id: "root-stage".to_string(),
             user_prompt_template: "Root stage: {input}".to_string(),
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
 
@@ -7637,12 +7825,14 @@ async fn lineage_investigator_root_thread_selector_expands_descendants_in_memory
         initial_user_prompt: "branch context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         stages: vec![SequentialStageJobPayload {
             stage_id: "branch-stage".to_string(),
             user_prompt_template: "Branch stage: {input}".to_string(),
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
 
@@ -7743,12 +7933,14 @@ async fn lineage_investigator_root_thread_selector_expands_descendants_surreal()
         initial_user_prompt: "root context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         stages: vec![SequentialStageJobPayload {
             stage_id: "root-stage".to_string(),
             user_prompt_template: "Root stage: {input}".to_string(),
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
 
@@ -7757,12 +7949,14 @@ async fn lineage_investigator_root_thread_selector_expands_descendants_surreal()
         initial_user_prompt: "branch context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         stages: vec![SequentialStageJobPayload {
             stage_id: "branch-stage".to_string(),
             user_prompt_template: "Branch stage: {input}".to_string(),
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
 
@@ -7857,12 +8051,14 @@ async fn in_memory_orchestration_handlers_emit_standard_success_diagnostics() {
         initial_user_prompt: "context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         stages: vec![SequentialStageJobPayload {
             stage_id: "s1".to_string(),
             user_prompt_template: "S1 {input}".to_string(),
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
     let concurrent_payload = ConcurrentPatternJobPayload {
@@ -7870,6 +8066,7 @@ async fn in_memory_orchestration_handlers_emit_standard_success_diagnostics() {
         initial_user_prompt: "context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         tool_call_mode: None,
         memory_policy: None,
         merge_strategy: Some("join_with_headers".to_string()),
@@ -7879,6 +8076,7 @@ async fn in_memory_orchestration_handlers_emit_standard_success_diagnostics() {
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
             execution_mode: ConcurrentBranchExecutionMode::Prompt,
             tool_name: None,
             tool_input: None,
@@ -7891,12 +8089,14 @@ async fn in_memory_orchestration_handlers_emit_standard_success_diagnostics() {
         initial_user_prompt: "context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         turns: vec![HandoffTurnJobPayload {
             actor_id: "actor.a".to_string(),
             user_prompt_template: "Turn {input}".to_string(),
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
     let orchestrator_payload = OrchestratorPatternJobPayload {
@@ -7904,6 +8104,7 @@ async fn in_memory_orchestration_handlers_emit_standard_success_diagnostics() {
         initial_user_prompt: "needs sql".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         routes: vec![OrchestratorRouteJobPayload {
             route_id: "route.sql".to_string(),
             selector_keywords: vec!["sql".to_string()],
@@ -7911,6 +8112,7 @@ async fn in_memory_orchestration_handlers_emit_standard_success_diagnostics() {
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
 
@@ -8023,12 +8225,14 @@ async fn in_memory_orchestration_handlers_emit_standard_policy_violation_diagnos
         initial_user_prompt: " ".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         stages: vec![SequentialStageJobPayload {
             stage_id: "s1".to_string(),
             user_prompt_template: "S1 {input}".to_string(),
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
     let concurrent_payload = ConcurrentPatternJobPayload {
@@ -8036,6 +8240,7 @@ async fn in_memory_orchestration_handlers_emit_standard_policy_violation_diagnos
         initial_user_prompt: "context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         tool_call_mode: None,
         memory_policy: None,
         merge_strategy: None,
@@ -8046,12 +8251,14 @@ async fn in_memory_orchestration_handlers_emit_standard_policy_violation_diagnos
         initial_user_prompt: "context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         turns: vec![HandoffTurnJobPayload {
             actor_id: " ".to_string(),
             user_prompt_template: "Turn {input}".to_string(),
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
     let orchestrator_payload = OrchestratorPatternJobPayload {
@@ -8059,6 +8266,7 @@ async fn in_memory_orchestration_handlers_emit_standard_policy_violation_diagnos
         initial_user_prompt: "context".to_string(),
         policy_profile: Some("default".to_string()),
         model_hint: None,
+        reasoning_effort: None,
         routes: vec![OrchestratorRouteJobPayload {
             route_id: " ".to_string(),
             selector_keywords: vec!["sql".to_string()],
@@ -8066,6 +8274,7 @@ async fn in_memory_orchestration_handlers_emit_standard_policy_violation_diagnos
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
         }],
     };
 

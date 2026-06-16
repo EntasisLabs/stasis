@@ -15,6 +15,7 @@ use crate::application::orchestration::tool_registry::ToolRegistry;
 use crate::application::runtime::concurrent_tool_branch_memory::{
     prepare_concurrent_tool_branch, store_concurrent_tool_branch_memory,
 };
+use crate::application::runtime::chat_options_resolver::resolve_reasoning_effort;
 use crate::domain::errors::{Result, StasisError};
 use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
@@ -28,6 +29,7 @@ pub struct ConcurrentPatternBranch {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub execution_mode: ConcurrentBranchExecutionMode,
     pub tool_name: Option<String>,
     pub tool_input: Option<Value>,
@@ -42,6 +44,7 @@ pub struct ConcurrentPatternExecutionRequest {
     pub correlation_id: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub default_memory_policy: Option<MemoryPolicyPayload>,
     pub merge_strategy: Option<String>,
     pub branches: Vec<ConcurrentPatternBranch>,
@@ -90,6 +93,7 @@ struct ConcurrentSharedInputs {
     correlation_id: Arc<Option<String>>,
     default_policy_profile: Arc<Option<String>>,
     default_model_hint: Arc<Option<String>>,
+    default_reasoning_effort: Arc<Option<String>>,
     default_memory_policy: Arc<Option<MemoryPolicyPayload>>,
 }
 
@@ -98,12 +102,17 @@ impl ConcurrentSharedInputs {
         &self,
         policy_profile: Option<String>,
         model_hint: Option<String>,
+        reasoning_effort: Option<String>,
     ) -> PromptExecutionContext {
         PromptExecutionContext {
             trace_id: (*self.trace_id).clone(),
             correlation_id: (*self.correlation_id).clone(),
             policy_profile: policy_profile.or_else(|| (*self.default_policy_profile).clone()),
             model_hint: model_hint.or_else(|| (*self.default_model_hint).clone()),
+            reasoning_effort: resolve_reasoning_effort(
+                reasoning_effort,
+                (*self.default_reasoning_effort).clone(),
+            ),
         }
     }
 
@@ -154,6 +163,7 @@ impl ConcurrentPatternPipeline {
             correlation_id,
             policy_profile,
             model_hint,
+            reasoning_effort,
             default_memory_policy,
             merge_strategy,
             branches,
@@ -166,6 +176,7 @@ impl ConcurrentPatternPipeline {
             correlation_id: Arc::new(correlation_id),
             default_policy_profile: Arc::new(policy_profile),
             default_model_hint: Arc::new(model_hint),
+            default_reasoning_effort: Arc::new(reasoning_effort),
             default_memory_policy: Arc::new(default_memory_policy),
         };
 
@@ -186,6 +197,7 @@ impl ConcurrentPatternPipeline {
                     system_prompt,
                     policy_profile,
                     model_hint,
+                    reasoning_effort,
                     execution_mode,
                     tool_name,
                     tool_input,
@@ -194,7 +206,11 @@ impl ConcurrentPatternPipeline {
                 } = branch;
 
                 let rendered_prompt = shared_inputs.render_template(&user_prompt_template);
-                let context = shared_inputs.build_context(policy_profile.clone(), model_hint);
+                let context = shared_inputs.build_context(
+                    policy_profile.clone(),
+                    model_hint,
+                    reasoning_effort,
+                );
                 let correlation_id = shared_inputs
                     .correlation_id
                     .as_deref()
@@ -401,8 +417,10 @@ mod tests {
                 reasoning_content: None,
                 model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                 provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+                stop_reason: None,
                 usage: Usage::default(),
                 captured_raw_body: None,
+                response_id: None,
             })
         }
     }
@@ -441,8 +459,10 @@ mod tests {
                         reasoning_content: None,
                         model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                         provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+                        stop_reason: None,
                         usage: Usage::default(),
                         captured_raw_body: None,
+                        response_id: None,
                     });
                 }
 
@@ -451,8 +471,10 @@ mod tests {
                     reasoning_content: None,
                     model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                     provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+                    stop_reason: None,
                     usage: Usage::default(),
                     captured_raw_body: None,
+                    response_id: None,
                 });
             }
 
@@ -461,8 +483,10 @@ mod tests {
                 reasoning_content: None,
                 model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                 provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
+                stop_reason: None,
                 usage: Usage::default(),
                 captured_raw_body: None,
+                response_id: None,
             })
         }
     }
@@ -507,6 +531,7 @@ mod tests {
                 correlation_id: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
                 default_memory_policy: None,
                 merge_strategy: Some("join_with_headers".to_string()),
                 branches: vec![
@@ -516,6 +541,7 @@ mod tests {
                         system_prompt: None,
                         policy_profile: None,
                         model_hint: None,
+                        reasoning_effort: None,
                         execution_mode: ConcurrentBranchExecutionMode::Prompt,
                         tool_name: None,
                         tool_input: None,
@@ -528,6 +554,7 @@ mod tests {
                         system_prompt: None,
                         policy_profile: None,
                         model_hint: None,
+                        reasoning_effort: None,
                         execution_mode: ConcurrentBranchExecutionMode::ToolLoop,
                         tool_name: Some("stasis.web.search.mock".to_string()),
                         tool_input: Some(json!({ "query": "shared input" })),
@@ -571,6 +598,7 @@ mod tests {
                 correlation_id: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
                 default_memory_policy: None,
                 merge_strategy: None,
                 branches: vec![ConcurrentPatternBranch {
@@ -579,6 +607,7 @@ mod tests {
                     system_prompt: None,
                     policy_profile: None,
                     model_hint: None,
+                    reasoning_effort: None,
                     execution_mode: ConcurrentBranchExecutionMode::Prompt,
                     tool_name: None,
                     tool_input: None,

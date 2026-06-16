@@ -197,6 +197,7 @@ fn build_sre_incident_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Result
         system_prompt: Some("You are a reliability engineer. Be concise and actionable.".to_string()),
         policy_profile: Some("prod.sre".to_string()),
         model_hint: Some("fast-reasoning".to_string()),
+        reasoning_effort: None,
         memory_policy: memory_policy.clone(),
     };
 
@@ -213,6 +214,7 @@ fn build_sre_incident_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Result
         system_prompt: Some("Call tools when needed and cite tool output in the final answer.".to_string()),
         policy_profile: Some("prod.ops".to_string()),
         model_hint: Some("tool-use".to_string()),
+        reasoning_effort: None,
         tool_name: "fetch_knowledge_base".to_string(),
         tool_input: Some(json!({ "topic": "incident response" })),
         tool_call_mode: Some(AgentToolCallMode::Strict),
@@ -233,6 +235,7 @@ fn build_sre_incident_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Result
         system_prompt: Some("Prioritize clarity, impact, and next checkpoint.".to_string()),
         policy_profile: Some("prod.incident".to_string()),
         model_hint: Some("balanced".to_string()),
+        reasoning_effort: None,
         tool_name: "fetch_knowledge_base".to_string(),
         tool_input: Some(json!({ "topic": "incident communications" })),
         tool_call_mode: Some(AgentToolCallMode::Auto),
@@ -269,6 +272,7 @@ fn build_product_planning_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Re
         ],
         policy_profile: Some("prod.review".to_string()),
         model_hint: Some("balanced".to_string()),
+        reasoning_effort: None,
         max_turns: Some(4),
         tool_call_mode: Some(AgentToolCallMode::Auto),
         memory_policy: memory_policy.clone(),
@@ -289,6 +293,7 @@ fn build_product_planning_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Re
         initial_user_prompt: "Ship a safe canary rollout for service A".to_string(),
         policy_profile: Some("prod.release".to_string()),
         model_hint: Some("balanced".to_string()),
+        reasoning_effort: None,
         stages: vec![
             SequentialStageJobPayload {
                 stage_id: "plan".to_string(),
@@ -296,6 +301,7 @@ fn build_product_planning_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Re
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
             SequentialStageJobPayload {
                 stage_id: "risk".to_string(),
@@ -303,6 +309,7 @@ fn build_product_planning_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Re
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
         ],
     };
@@ -322,6 +329,7 @@ fn build_product_planning_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Re
         initial_user_prompt: "Create launch communication pack".to_string(),
         policy_profile: Some("prod.launch".to_string()),
         model_hint: Some("balanced".to_string()),
+        reasoning_effort: None,
         turns: vec![
             HandoffTurnJobPayload {
                 actor_id: "planner".to_string(),
@@ -329,6 +337,7 @@ fn build_product_planning_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Re
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
             HandoffTurnJobPayload {
                 actor_id: "editor".to_string(),
@@ -337,6 +346,7 @@ fn build_product_planning_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Re
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
         ],
     };
@@ -360,6 +370,7 @@ fn build_support_triage_jobs() -> Result<Vec<NewJob>> {
         initial_user_prompt: "Assess ticket escalation quality from three angles".to_string(),
         policy_profile: Some("prod.support".to_string()),
         model_hint: Some("balanced".to_string()),
+        reasoning_effort: None,
         tool_call_mode: None,
         memory_policy: None,
         merge_strategy: Some("append".to_string()),
@@ -391,6 +402,7 @@ fn build_support_triage_jobs() -> Result<Vec<NewJob>> {
             .to_string(),
         policy_profile: Some("prod.support".to_string()),
         model_hint: Some("balanced".to_string()),
+        reasoning_effort: None,
         routes: vec![
             OrchestratorRouteJobPayload {
                 route_id: "incident_path".to_string(),
@@ -399,6 +411,7 @@ fn build_support_triage_jobs() -> Result<Vec<NewJob>> {
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
             OrchestratorRouteJobPayload {
                 route_id: "standard_path".to_string(),
@@ -407,6 +420,7 @@ fn build_support_triage_jobs() -> Result<Vec<NewJob>> {
                 system_prompt: None,
                 policy_profile: None,
                 model_hint: None,
+                reasoning_effort: None,
             },
         ],
     };

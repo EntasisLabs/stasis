@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::application::orchestration::runtime_job_payloads::{AgentToolCallMode, AgentTurnJobPayload};
+use crate::application::runtime::chat_options_resolver::validate_reasoning_effort;
 use crate::application::runtime::identity_context_compiler::{
     load_identity_context_summary, prepend_identity_snapshot,
 };
@@ -100,6 +101,9 @@ impl AgentTurnJobHandler {
             );
         }
 
+        validate_reasoning_effort(payload.reasoning_effort.as_deref())
+            .map_err(|err| format!("policy violation: {err}"))?;
+
         Ok(payload)
     }
 
@@ -137,6 +141,7 @@ impl JobHandler for AgentTurnJobHandler {
             job,
             payload.policy_profile.clone(),
             payload.model_hint.clone(),
+            payload.reasoning_effort.clone(),
             self.memory_reader.is_some(),
             self.memory_writer.is_some(),
             self.identity_memory_store.is_some(),

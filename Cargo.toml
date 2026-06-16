@@ -1,6 +1,6 @@
 [package]
 name = "stasis-rs"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 description = "Durable AI orchestration framework with runtime jobs, lineage, and memory integration"
 license = "MIT OR Apache-2.0"
@@ -69,7 +69,7 @@ sha2 = "0.10"
 hex = "0.4"
 locus-core-rs = "=0.3.0"
 locus-sdk = "=0.1.2"
-genai = "0.5.3"
+genai = "0.6.5"
 async-trait = "0.1"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }

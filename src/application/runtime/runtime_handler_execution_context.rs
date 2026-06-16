@@ -19,6 +19,7 @@ impl RuntimeHandlerExecutionContext {
         job: &Job,
         policy_profile: Option<String>,
         model_hint: Option<String>,
+        reasoning_effort: Option<String>,
         memory_reader_enabled: bool,
         memory_writer_enabled: bool,
         identity_enabled: bool,
@@ -28,6 +29,7 @@ impl RuntimeHandlerExecutionContext {
             correlation_id: Some(job.correlation_id.clone()),
             policy_profile: policy_profile.clone(),
             model_hint: model_hint.clone(),
+            reasoning_effort,
         };
 
         Self {

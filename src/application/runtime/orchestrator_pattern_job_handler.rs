@@ -7,6 +7,7 @@ use serde_json::json;
 use crate::application::orchestration::runtime_job_payloads::{
     OrchestratorPatternJobPayload, OrchestratorRouteJobPayload,
 };
+use crate::application::runtime::chat_options_resolver::validate_reasoning_effort;
 use crate::application::orchestration::orchestrator_pattern_pipeline::{
     OrchestratorPatternExecutionRequest, OrchestratorPatternPipeline, OrchestratorPatternRoute,
 };
@@ -102,6 +103,9 @@ impl OrchestratorPatternJobHandler {
             Self::validate_route(route)?;
         }
 
+        validate_reasoning_effort(payload.reasoning_effort.as_deref())
+            .map_err(|err| format!("policy violation: {err}"))?;
+
         Ok(payload)
     }
 
@@ -118,6 +122,9 @@ impl OrchestratorPatternJobHandler {
                     .to_string(),
             );
         }
+
+        validate_reasoning_effort(route.reasoning_effort.as_deref())
+            .map_err(|err| format!("policy violation: {err}"))?;
 
         Ok(())
     }
@@ -157,6 +164,7 @@ impl JobHandler for OrchestratorPatternJobHandler {
             initial_user_prompt,
             policy_profile,
             model_hint,
+            reasoning_effort,
             routes,
         } = payload;
 
@@ -178,6 +186,7 @@ impl JobHandler for OrchestratorPatternJobHandler {
             correlation_id: Some(job.correlation_id.clone()),
             policy_profile,
             model_hint,
+            reasoning_effort,
             routes: routes
                 .into_iter()
                 .map(|route| OrchestratorPatternRoute {
@@ -187,6 +196,7 @@ impl JobHandler for OrchestratorPatternJobHandler {
                     system_prompt: route.system_prompt,
                     policy_profile: route.policy_profile,
                     model_hint: route.model_hint,
+                    reasoning_effort: route.reasoning_effort,
                 })
                 .collect(),
         };

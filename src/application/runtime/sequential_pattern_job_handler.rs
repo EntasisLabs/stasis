@@ -7,6 +7,7 @@ use serde_json::json;
 use crate::application::orchestration::runtime_job_payloads::{
     SequentialPatternJobPayload, SequentialStageJobPayload,
 };
+use crate::application::runtime::chat_options_resolver::validate_reasoning_effort;
 use crate::application::orchestration::prompt_pipeline::PromptExecutionPipeline;
 use crate::application::orchestration::sequential_pattern_pipeline::{
     SequentialPatternExecutionRequest, SequentialPatternPipeline, SequentialPatternStage,
@@ -104,6 +105,9 @@ impl SequentialPatternJobHandler {
             Self::validate_stage(stage)?;
         }
 
+        validate_reasoning_effort(payload.reasoning_effort.as_deref())
+            .map_err(|err| format!("policy violation: {err}"))?;
+
         Ok(payload)
     }
 
@@ -120,6 +124,9 @@ impl SequentialPatternJobHandler {
                     .to_string(),
             );
         }
+
+        validate_reasoning_effort(stage.reasoning_effort.as_deref())
+            .map_err(|err| format!("policy violation: {err}"))?;
 
         Ok(())
     }
@@ -159,6 +166,7 @@ impl JobHandler for SequentialPatternJobHandler {
             initial_user_prompt,
             policy_profile,
             model_hint,
+            reasoning_effort,
             stages,
         } = payload;
 
@@ -180,6 +188,7 @@ impl JobHandler for SequentialPatternJobHandler {
             correlation_id: Some(job.correlation_id.clone()),
             policy_profile,
             model_hint,
+            reasoning_effort,
             stages: stages
                 .into_iter()
                 .map(|stage| SequentialPatternStage {
@@ -188,6 +197,7 @@ impl JobHandler for SequentialPatternJobHandler {
                     system_prompt: stage.system_prompt,
                     policy_profile: stage.policy_profile,
                     model_hint: stage.model_hint,
+                    reasoning_effort: stage.reasoning_effort,
                 })
                 .collect(),
         };

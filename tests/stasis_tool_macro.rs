@@ -49,7 +49,7 @@ async fn stasis_tool_macro_generates_registry_compatible_tool() {
         .expect("tool listing should succeed");
 
     assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0].name, "echo_upper");
+    assert_eq!(tools[0].name.as_ref(), "echo_upper");
 
     let schema = tools[0]
         .schema

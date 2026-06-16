@@ -90,13 +90,15 @@ See `.env.example` for a full local template. Frequently used keys:
 | Variable | Purpose |
 |---|---|
 | `STASIS_LLM_PROVIDER` | LLM adapter id (`openai`, `anthropic`, …) |
-| `STASIS_LLM_MODEL` | Default model id |
+| `STASIS_LLM_MODEL` | Default model id (genai namespaced targets — see [LLM Providers](./llm-providers.md)) |
 | `STASIS_LLM_API_KEY` | Global LLM API key fallback |
 | `STASIS_DASHBOARD_RUNTIME_BACKEND` | Dashboard persistence backend |
 | `STASIS_DASHBOARD_SURREAL_*` | Surreal connection settings |
 | `STASIS_SECRETS_DIR` | Directory of file-backed secrets |
 
 Surreal helpers in `surreal_backend_config` (`resolve_surreal_namespace_from_env`, `resolve_surreal_auth_from_env`, …) use the same resolver when `bootstrap()` has run.
+
+For provider namespaces, reasoning effort keywords, and Groq migration notes, see [LLM Providers](./llm-providers.md).
 
 ## Safety notes
 

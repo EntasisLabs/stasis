@@ -3,6 +3,7 @@ use std::sync::Arc;
 use genai::chat::{ChatMessage, ChatRequest, ChatResponse};
 use tokio::sync::mpsc;
 
+use crate::application::runtime::chat_options_resolver::chat_options_for_context;
 use crate::domain::errors::{Result, StasisError};
 use crate::ports::outbound::ai_chat_client::AiChatClient;
 use crate::ports::outbound::ai_chat_client::StreamDelta;
@@ -13,6 +14,7 @@ pub struct PromptExecutionContext {
     pub correlation_id: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -69,7 +71,9 @@ impl PromptExecutionPipeline {
         request: ChatRequest,
         context: PromptExecutionContext,
     ) -> Result<PromptChatCompletion> {
-        let response = self.chat_client.complete(request, None).await?;
+        let options = chat_options_for_context(&context).map_err(StasisError::PortFailure)?;
+        let options_ref = options.as_ref();
+        let response = self.chat_client.complete(request, options_ref).await?;
         Ok(PromptChatCompletion {
             response,
             metadata: context,
@@ -82,9 +86,11 @@ impl PromptExecutionPipeline {
         context: PromptExecutionContext,
         chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<PromptChatCompletion> {
+        let options = chat_options_for_context(&context).map_err(StasisError::PortFailure)?;
+        let options_ref = options.as_ref();
         let response = self
             .chat_client
-            .complete_stream(request, None, chunk_tx)
+            .complete_stream(request, options_ref, chunk_tx)
             .await?;
         Ok(PromptChatCompletion {
             response,

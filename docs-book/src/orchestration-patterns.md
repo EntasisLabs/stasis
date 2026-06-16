@@ -104,6 +104,7 @@ All branches execute simultaneously using `tokio::task::JoinSet`. Branch results
   "correlation_id": "string | null",
   "policy_profile": "string | null",
   "model_hint": "string | null",
+  "reasoning_effort": "none | minimal | low | medium | high | xhigh | max | budget:N | null",
   "merge_strategy": "join_with_headers | join_lines | null",
   "tool_call_mode": "auto | strict | null",
   "memory_policy": "MemoryPolicyPayload | null",
@@ -115,6 +116,7 @@ All branches execute simultaneously using `tokio::task::JoinSet`. Branch results
       "system_prompt": "string | null",
       "policy_profile": "string | null",
       "model_hint": "string | null",
+      "reasoning_effort": "string | null",
       "tool_name": "string | null",
       "tool_input": "object | null",
       "tool_call_mode": "auto | strict | null",
@@ -129,6 +131,8 @@ All branches execute simultaneously using `tokio::task::JoinSet`. Branch results
 Use `ConcurrentBranchJobPayload::prompt(...)` or `::tool_loop(...)` in Rust for ergonomic construction.
 
 For `tool_loop` branches, `memory_policy` resolves branch override → pattern default. Recall runs before execution; store uses session id `{correlation_id}::concurrent-branch::{branch_id}` to avoid parallel write collisions.
+
+`reasoning_effort` follows the same override order: branch → pattern. When omitted, `GenaiChatClient` may still infer effort from a model name suffix (e.g. `gpt-5-mini-high`). See [LLM Providers](./llm-providers.md).
 
 Rust type: `ConcurrentPatternJobPayload` → `ConcurrentBranchJobPayload` → `ConcurrentBranchExecutionMode`
 

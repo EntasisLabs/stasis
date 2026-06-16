@@ -20,6 +20,7 @@ async fn production_example_dry_run_jobs_enqueue_without_provider() {
         system_prompt: Some("You are concise and operations-focused.".to_string()),
         policy_profile: Some("prod.sre".to_string()),
         model_hint: Some("fast-reasoning".to_string()),
+        reasoning_effort: None,
         memory_policy: None,
     };
 
@@ -28,6 +29,7 @@ async fn production_example_dry_run_jobs_enqueue_without_provider() {
         system_prompt: Some("Prefer deterministic structure in output.".to_string()),
         policy_profile: Some("prod.ops".to_string()),
         model_hint: Some("tool-use".to_string()),
+        reasoning_effort: None,
         tool_name: "fetch_knowledge_base".to_string(),
         tool_input: Some(json!({ "topic": "incident" })),
         tool_call_mode: Some(AgentToolCallMode::Strict),
@@ -53,6 +55,7 @@ async fn production_example_dry_run_jobs_enqueue_without_provider() {
         ],
         policy_profile: Some("prod.review".to_string()),
         model_hint: Some("balanced".to_string()),
+        reasoning_effort: None,
         max_turns: Some(2),
         tool_call_mode: Some(AgentToolCallMode::Auto),
         memory_policy: None,
@@ -106,6 +109,7 @@ async fn surreal_mem_runtime_profile_boots_for_smoke() {
         system_prompt: Some("Return concise output".to_string()),
         policy_profile: Some("prod.smoke".to_string()),
         model_hint: Some("fast-reasoning".to_string()),
+        reasoning_effort: None,
         memory_policy: None,
     };
 

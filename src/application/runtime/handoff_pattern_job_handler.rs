@@ -7,6 +7,7 @@ use serde_json::json;
 use crate::application::orchestration::runtime_job_payloads::{
     HandoffPatternJobPayload, HandoffTurnJobPayload,
 };
+use crate::application::runtime::chat_options_resolver::validate_reasoning_effort;
 use crate::application::orchestration::handoff_pattern_pipeline::{
     HandoffPatternExecutionRequest, HandoffPatternPipeline, HandoffPatternTurn,
 };
@@ -103,6 +104,9 @@ impl HandoffPatternJobHandler {
             Self::validate_turn(turn)?;
         }
 
+        validate_reasoning_effort(payload.reasoning_effort.as_deref())
+            .map_err(|err| format!("policy violation: {err}"))?;
+
         Ok(payload)
     }
 
@@ -119,6 +123,9 @@ impl HandoffPatternJobHandler {
                     .to_string(),
             );
         }
+
+        validate_reasoning_effort(turn.reasoning_effort.as_deref())
+            .map_err(|err| format!("policy violation: {err}"))?;
 
         Ok(())
     }
@@ -158,6 +165,7 @@ impl JobHandler for HandoffPatternJobHandler {
             initial_user_prompt,
             policy_profile,
             model_hint,
+            reasoning_effort,
             turns,
         } = payload;
 
@@ -179,6 +187,7 @@ impl JobHandler for HandoffPatternJobHandler {
             correlation_id: Some(job.correlation_id.clone()),
             policy_profile,
             model_hint,
+            reasoning_effort,
             turns: turns
                 .into_iter()
                 .map(|turn| HandoffPatternTurn {
@@ -187,6 +196,7 @@ impl JobHandler for HandoffPatternJobHandler {
                     system_prompt: turn.system_prompt,
                     policy_profile: turn.policy_profile,
                     model_hint: turn.model_hint,
+                    reasoning_effort: turn.reasoning_effort,
                 })
                 .collect(),
         };

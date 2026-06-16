@@ -67,6 +67,7 @@ pub struct AgentSessionJobPayload {
     pub participants: Vec<AgentSessionParticipantPayload>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub max_turns: Option<usize>,
     pub tool_call_mode: Option<AgentToolCallMode>,
     pub memory_policy: Option<MemoryPolicyPayload>,
@@ -88,6 +89,7 @@ pub struct AgentTurnJobPayload {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub tool_name: String,
     pub tool_input: Option<Value>,
     pub tool_call_mode: Option<AgentToolCallMode>,
@@ -108,6 +110,7 @@ pub struct ToolLoopJobPayload {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub tool_name: String,
     pub tool_input: Option<Value>,
     pub tool_call_mode: Option<AgentToolCallMode>,
@@ -128,6 +131,7 @@ pub struct PromptJobPayload {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub memory_policy: Option<MemoryPolicyPayload>,
 }
 
@@ -146,6 +150,7 @@ pub struct SequentialStageJobPayload {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -154,6 +159,7 @@ pub struct SequentialPatternJobPayload {
     pub initial_user_prompt: String,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub stages: Vec<SequentialStageJobPayload>,
 }
 
@@ -182,6 +188,7 @@ pub struct ConcurrentBranchJobPayload {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     #[serde(default)]
     pub execution_mode: ConcurrentBranchExecutionMode,
     pub tool_name: Option<String>,
@@ -196,6 +203,7 @@ pub struct ConcurrentPatternJobPayload {
     pub initial_user_prompt: String,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub merge_strategy: Option<String>,
     pub tool_call_mode: Option<AgentToolCallMode>,
     pub memory_policy: Option<MemoryPolicyPayload>,
@@ -213,6 +221,7 @@ impl ConcurrentBranchJobPayload {
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
             execution_mode: ConcurrentBranchExecutionMode::Prompt,
             tool_name: None,
             tool_input: None,
@@ -233,6 +242,7 @@ impl ConcurrentBranchJobPayload {
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
             execution_mode: ConcurrentBranchExecutionMode::ToolLoop,
             tool_name: Some(tool_name.into()),
             tool_input,
@@ -259,6 +269,7 @@ pub struct HandoffTurnJobPayload {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -267,6 +278,7 @@ pub struct HandoffPatternJobPayload {
     pub initial_user_prompt: String,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub turns: Vec<HandoffTurnJobPayload>,
 }
 
@@ -286,6 +298,7 @@ pub struct OrchestratorRouteJobPayload {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -294,6 +307,7 @@ pub struct OrchestratorPatternJobPayload {
     pub initial_user_prompt: String,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub routes: Vec<OrchestratorRouteJobPayload>,
 }
 

@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bbd140bb.js";
+            window.path_to_searchindex_js = "searchindex-c23014dc.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d13a89d.js"></script>
+        <script src="toc-81824faf.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -2036,6 +2036,7 @@ cargo run --features otel --bin stasis_dashboard
   "correlation_id": "string | null",
   "policy_profile": "string | null",
   "model_hint": "string | null",
+  "reasoning_effort": "none | minimal | low | medium | high | xhigh | max | budget:N | null",
   "merge_strategy": "join_with_headers | join_lines | null",
   "tool_call_mode": "auto | strict | null",
   "memory_policy": "MemoryPolicyPayload | null",
@@ -2047,6 +2048,7 @@ cargo run --features otel --bin stasis_dashboard
       "system_prompt": "string | null",
       "policy_profile": "string | null",
       "model_hint": "string | null",
+      "reasoning_effort": "string | null",
       "tool_name": "string | null",
       "tool_input": "object | null",
       "tool_call_mode": "auto | strict | null",
@@ -2058,6 +2060,7 @@ cargo run --features otel --bin stasis_dashboard
 <p><code>execution_mode</code> defaults to <code>prompt</code> when omitted. When <code>execution_mode</code> is <code>tool_loop</code>, <code>tool_name</code> is required.</p>
 <p>Use <code>ConcurrentBranchJobPayload::prompt(...)</code> or <code>::tool_loop(...)</code> in Rust for ergonomic construction.</p>
 <p>For <code>tool_loop</code> branches, <code>memory_policy</code> resolves branch override → pattern default. Recall runs before execution; store uses session id <code>{correlation_id}::concurrent-branch::{branch_id}</code> to avoid parallel write collisions.</p>
+<p><code>reasoning_effort</code> follows the same override order: branch → pattern. When omitted, <code>GenaiChatClient</code> may still infer effort from a model name suffix (e.g. <code>gpt-5-mini-high</code>). See <a href="#llm-providers-genai-06x">LLM Providers</a>.</p>
 <p>Rust type: <code>ConcurrentPatternJobPayload</code> → <code>ConcurrentBranchJobPayload</code> → <code>ConcurrentBranchExecutionMode</code></p>
 <h3 id="merge-strategies"><a class="header" href="#merge-strategies">Merge strategies</a></h3>
 <div class="table-wrapper">
@@ -3878,7 +3881,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </thead>
 <tbody>
 <tr><td><code>STASIS_LLM_PROVIDER</code></td><td>LLM adapter id (<code>openai</code>, <code>anthropic</code>, …)</td></tr>
-<tr><td><code>STASIS_LLM_MODEL</code></td><td>Default model id</td></tr>
+<tr><td><code>STASIS_LLM_MODEL</code></td><td>Default model id (genai namespaced targets — see <a href="#llm-providers-genai-06x">LLM Providers</a>)</td></tr>
 <tr><td><code>STASIS_LLM_API_KEY</code></td><td>Global LLM API key fallback</td></tr>
 <tr><td><code>STASIS_DASHBOARD_RUNTIME_BACKEND</code></td><td>Dashboard persistence backend</td></tr>
 <tr><td><code>STASIS_DASHBOARD_SURREAL_*</code></td><td>Surreal connection settings</td></tr>
@@ -3887,6 +3890,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </table>
 </div>
 <p>Surreal helpers in <code>surreal_backend_config</code> (<code>resolve_surreal_namespace_from_env</code>, <code>resolve_surreal_auth_from_env</code>, …) use the same resolver when <code>bootstrap()</code> has run.</p>
+<p>For provider namespaces, reasoning effort keywords, and Groq migration notes, see <a href="#llm-providers-genai-06x">LLM Providers</a>.</p>
 <h2 id="safety-notes"><a class="header" href="#safety-notes">Safety notes</a></h2>
 <ul>
 <li><code>.env</code> is gitignored — never commit secrets.</li>
@@ -3895,8 +3899,97 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 <li>Prefer platform/Vault injection in production over long-lived <code>.env</code> files.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="extension-points-and-port-contracts"><a class="header" href="#extension-points-and-port-contracts">Extension Points and Port Contracts</a></h1>
+<h1 id="llm-providers-genai-06x"><a class="header" href="#llm-providers-genai-06x">LLM Providers (genai 0.6.x)</a></h1>
 <h2 id="document-metadata-16"><a class="header" href="#document-metadata-16">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Reference Standard</li>
+<li>Audience: Engineer, Operator</li>
+<li>Stability: Stable</li>
+<li>Last Verified: 2026-06-02</li>
+<li>Verified Against:
+<ul>
+<li><code>Cargo.toml</code> (<code>genai = "0.6.5"</code>)</li>
+<li><code>src/infrastructure/llm/genai_chat_client.rs</code></li>
+<li><a href="https://github.com/jeremychone/rust-genai/blob/HEAD/CHANGELOG.md">genai CHANGELOG</a></li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-13"><a class="header" href="#purpose-13">Purpose</a></h2>
+<p>Stasis routes chat completions through <strong>genai 0.6.x</strong>. This page documents how to configure providers at deploy time and how per-job <strong><code>reasoning_effort</code></strong> overrides interact with env-based defaults.</p>
+<h2 id="default-wiring"><a class="header" href="#default-wiring">Default wiring</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>STASIS_LLM_PROVIDER</code></td><td>Adapter id passed to genai (<code>openai</code>, <code>anthropic</code>, <code>gemini</code>, …)</td></tr>
+<tr><td><code>STASIS_LLM_MODEL</code></td><td>Default model target (supports genai namespaced targets)</td></tr>
+<tr><td><code>STASIS_LLM_API_KEY</code></td><td>Global API key fallback when adapter-specific key is unset</td></tr>
+</tbody>
+</table>
+</div>
+<p>Adapter-specific keys follow the existing pattern: <code>STASIS_OPENAI_API_KEY</code>, <code>STASIS_ANTHROPIC_API_KEY</code>, <code>STASIS_GEMINI_API_KEY</code>, and so on. See <code>.env.example</code> for the full list.</p>
+<h2 id="namespaced-model-targets"><a class="header" href="#namespaced-model-targets">Namespaced model targets</a></h2>
+<p>genai 0.6.x expects <strong>namespaced</strong> model targets for most adapters:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Provider</th><th>Example model target</th><th>Auth env</th></tr>
+</thead>
+<tbody>
+<tr><td>OpenAI / OpenAI Responses</td><td><code>openai::gpt-5-mini</code></td><td><code>STASIS_OPENAI_API_KEY</code></td></tr>
+<tr><td>Anthropic</td><td><code>anthropic::claude-sonnet-4-20250514</code></td><td><code>STASIS_ANTHROPIC_API_KEY</code></td></tr>
+<tr><td>Gemini</td><td><code>gemini::gemini-2.5-flash</code></td><td><code>STASIS_GEMINI_API_KEY</code></td></tr>
+<tr><td>Groq</td><td><code>groq::llama-3.3-70b-versatile</code></td><td><code>STASIS_GROQ_API_KEY</code></td></tr>
+<tr><td>Bedrock</td><td><code>bedrock::anthropic.claude-3-5-sonnet-20241022-v2:0</code></td><td><code>STASIS_BEDROCK_API_KEY</code> (+ region)</td></tr>
+<tr><td>Vertex</td><td><code>vertex::gemini-2.5-pro</code></td><td><code>STASIS_VERTEX_API_KEY</code> / ADC</td></tr>
+<tr><td>OpenRouter</td><td><code>open_router::anthropic/claude-3.5-sonnet</code></td><td><code>STASIS_OPEN_ROUTER_API_KEY</code></td></tr>
+<tr><td>Ollama (local)</td><td><code>ollama::gemma3:4b</code></td><td>none</td></tr>
+</tbody>
+</table>
+</div>
+<p>Set <code>STASIS_LLM_MODEL</code> to the namespaced target, or pass a hint via job payload <code>model_hint</code> (metadata-only in 0.6.0 — routing still uses the configured client model).</p>
+<h2 id="reasoning-effort"><a class="header" href="#reasoning-effort">Reasoning effort</a></h2>
+<h3 id="per-job-override-recommended"><a class="header" href="#per-job-override-recommended">Per-job override (recommended)</a></h3>
+<p>All LLM job payloads accept optional <code>reasoning_effort</code> as a string keyword:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Keyword</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>none</code></td><td>Disable extra reasoning budget where supported</td></tr>
+<tr><td><code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code></td><td>Provider-supported effort levels</td></tr>
+<tr><td><code>budget:N</code></td><td>Token budget style hint (e.g. <code>budget:8192</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Orchestration patterns resolve <strong>branch / stage / turn / route override → pattern default</strong> (same semantics as <code>memory_policy</code> and <code>tool_call_mode</code> on concurrent branches).</p>
+<p>Example concurrent branch mix:</p>
+<pre><code class="language-json">{
+  "reasoning_effort": "low",
+  "branches": [
+    { "branch_id": "research", "reasoning_effort": "high", "execution_mode": "tool_loop", "tool_name": "stasis.web.search" },
+    { "branch_id": "summary", "execution_mode": "prompt" }
+  ]
+}
+</code></pre>
+<p>The <code>research</code> branch runs at <code>high</code>; <code>summary</code> inherits pattern default <code>low</code>.</p>
+<h3 id="model-suffix-fallback"><a class="header" href="#model-suffix-fallback">Model suffix fallback</a></h3>
+<p>When no payload override is set, <code>GenaiChatClient</code> parses reasoning effort from the configured model name suffix (genai convention), e.g. <code>gpt-5-mini-high</code> → <code>high</code>.</p>
+<h3 id="env-level-defaults"><a class="header" href="#env-level-defaults">Env-level defaults</a></h3>
+<p>Stasis does <strong>not</strong> add a separate <code>STASIS_LLM_REASONING_EFFORT</code> variable in 0.6.0. Use genai client env configuration or model suffix naming for global defaults; use payload fields for per-job control.</p>
+<h2 id="groq-migration-note"><a class="header" href="#groq-migration-note">Groq migration note</a></h2>
+<p>Bare Groq model names from genai 0.5.x must be prefixed: <code>groq::model-name</code>.</p>
+<h2 id="deferred-not-in-060"><a class="header" href="#deferred-not-in-060">Deferred (not in 0.6.0)</a></h2>
+<ul>
+<li>Built-in provider <strong>WebSearch</strong> tools — custom <code>StasisTool</code> registry remains the supported search path</li>
+<li>Dynamic <strong>model_hint → model router</strong> — planned for a follow-on release</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="extension-points-and-port-contracts"><a class="header" href="#extension-points-and-port-contracts">Extension Points and Port Contracts</a></h1>
+<h2 id="document-metadata-17"><a class="header" href="#document-metadata-17">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
@@ -3923,7 +4016,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-13"><a class="header" href="#purpose-13">Purpose</a></h2>
+<h2 id="purpose-14"><a class="header" href="#purpose-14">Purpose</a></h2>
 <p>Document all port contracts that SDK consumers can implement to extend or replace Stasis infrastructure. Each entry covers the trait signature, what Stasis guarantees about call semantics, and the built-in implementation(s) provided.</p>
 <p>This reference includes both outbound ports and selected inbound control-plane contracts used to drive runtime operations.</p>
 <h2 id="architecture-principle"><a class="header" href="#architecture-principle">Architecture Principle</a></h2>
@@ -4302,7 +4395,7 @@ pub trait StasisTool: Send + Sync {
 <p>No port is strictly required. The runtime boots with all defaults when <code>StasisRuntimeBuilder::new(backend).build().await?</code> is called with no additional configuration.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="stasis-tool-macro"><a class="header" href="#stasis-tool-macro">Stasis Tool Macro</a></h1>
-<h2 id="document-metadata-17"><a class="header" href="#document-metadata-17">Document Metadata</a></h2>
+<h2 id="document-metadata-18"><a class="header" href="#document-metadata-18">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Guide</li>
 <li>Audience: Engineer</li>
@@ -4390,7 +4483,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 <p>Compile-fail and compile-pass cases are covered by trybuild tests under <code>stasis-macros/tests/ui</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="control-plane-and-endpoint-routing"><a class="header" href="#control-plane-and-endpoint-routing">Control Plane and Endpoint Routing</a></h1>
-<h2 id="document-metadata-18"><a class="header" href="#document-metadata-18">Document Metadata</a></h2>
+<h2 id="document-metadata-19"><a class="header" href="#document-metadata-19">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture and Delivery Reference</li>
 <li>Audience: Engineer, Platform, SRE, Architect</li>
@@ -4410,7 +4503,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-14"><a class="header" href="#purpose-14">Purpose</a></h2>
+<h2 id="purpose-15"><a class="header" href="#purpose-15">Purpose</a></h2>
 <p>Document the command-center foundation for Stasis runtime operations and outbound delivery routing.</p>
 <p>This reference covers:</p>
 <ol>
@@ -4527,7 +4620,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="command-center-dashboard-concept"><a class="header" href="#command-center-dashboard-concept">Command Center Dashboard Concept</a></h1>
-<h2 id="document-metadata-19"><a class="header" href="#document-metadata-19">Document Metadata</a></h2>
+<h2 id="document-metadata-20"><a class="header" href="#document-metadata-20">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Concept Guide</li>
 <li>Audience: Operator, Architect</li>
@@ -4540,7 +4633,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-15"><a class="header" href="#purpose-15">Purpose</a></h2>
+<h2 id="purpose-16"><a class="header" href="#purpose-16">Purpose</a></h2>
 <p>This page documents an operator-facing command center surface for runtime control and observability.</p>
 <p>For implemented route contracts, auth controls, and workflow builder behavior, use the <a href="#dashboard-operations-guide">Dashboard Operations Guide</a>.</p>
 <p>It is intentionally a concept slice focused on:</p>
@@ -4888,7 +4981,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </style>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="dashboard-operations-guide"><a class="header" href="#dashboard-operations-guide">Dashboard Operations Guide</a></h1>
-<h2 id="document-metadata-20"><a class="header" href="#document-metadata-20">Document Metadata</a></h2>
+<h2 id="document-metadata-21"><a class="header" href="#document-metadata-21">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Operations Guide</li>
 <li>Audience: Operator, SRE, Runtime Engineer</li>
@@ -4905,7 +4998,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-16"><a class="header" href="#purpose-16">Purpose</a></h2>
+<h2 id="purpose-17"><a class="header" href="#purpose-17">Purpose</a></h2>
 <p>This page documents the implemented dashboard behavior for production operators.</p>
 <p>Use this guide for:</p>
 <ol>
@@ -5117,7 +5210,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="cookbook-overview"><a class="header" href="#cookbook-overview">Cookbook Overview</a></h1>
-<h2 id="document-metadata-21"><a class="header" href="#document-metadata-21">Document Metadata</a></h2>
+<h2 id="document-metadata-22"><a class="header" href="#document-metadata-22">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Index</li>
 <li>Audience: Engineer, Operator</li>
@@ -5125,7 +5218,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <li>Last Verified: 2026-06-04</li>
 <li>Verified Against: docs-book/src/cookbook/</li>
 </ul>
-<h2 id="purpose-17"><a class="header" href="#purpose-17">Purpose</a></h2>
+<h2 id="purpose-18"><a class="header" href="#purpose-18">Purpose</a></h2>
 <p>This cookbook provides implementation-first recipes for teams taking Stasis from local experiments to production deployment.</p>
 <p>Each recipe is:</p>
 <ol>
@@ -5151,7 +5244,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="production-agentic-workflows"><a class="header" href="#production-agentic-workflows">Production Agentic Workflows</a></h1>
-<h2 id="document-metadata-22"><a class="header" href="#document-metadata-22">Document Metadata</a></h2>
+<h2 id="document-metadata-23"><a class="header" href="#document-metadata-23">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer, Operator</li>
@@ -5596,7 +5689,7 @@ STASIS_EXAMPLE_DRY_RUN=1 STASIS_EXAMPLE_TEAM_PROFILE=support cargo run --example
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="runtime-and-dashboard-bootstrap"><a class="header" href="#runtime-and-dashboard-bootstrap">Runtime and Dashboard Bootstrap</a></h1>
-<h2 id="document-metadata-23"><a class="header" href="#document-metadata-23">Document Metadata</a></h2>
+<h2 id="document-metadata-24"><a class="header" href="#document-metadata-24">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer, Operator</li>
@@ -5696,7 +5789,7 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="workflow-builder-starting-object"><a class="header" href="#workflow-builder-starting-object">Workflow Builder Starting Object</a></h1>
-<h2 id="document-metadata-24"><a class="header" href="#document-metadata-24">Document Metadata</a></h2>
+<h2 id="document-metadata-25"><a class="header" href="#document-metadata-25">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer, Operator</li>
@@ -5793,7 +5886,7 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="identity-memory-change-control"><a class="header" href="#identity-memory-change-control">Identity Memory Change Control</a></h1>
-<h2 id="document-metadata-25"><a class="header" href="#document-metadata-25">Document Metadata</a></h2>
+<h2 id="document-metadata-26"><a class="header" href="#document-metadata-26">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer</li>
@@ -6082,7 +6175,7 @@ assert!(policy.user.expect("user").preferences.is_empty());
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="memory-maintenance-and-rollups"><a class="header" href="#memory-maintenance-and-rollups">Memory Maintenance and Rollups</a></h1>
-<h2 id="document-metadata-26"><a class="header" href="#document-metadata-26">Document Metadata</a></h2>
+<h2 id="document-metadata-27"><a class="header" href="#document-metadata-27">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer, Operator</li>
@@ -6208,7 +6301,7 @@ println!("transform_ops={:?}", schema.transform_operations);
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
-<h2 id="document-metadata-27"><a class="header" href="#document-metadata-27">Document Metadata</a></h2>
+<h2 id="document-metadata-28"><a class="header" href="#document-metadata-28">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
@@ -6227,7 +6320,7 @@ println!("transform_ops={:?}", schema.transform_operations);
 </ul>
 </li>
 </ul>
-<h2 id="purpose-18"><a class="header" href="#purpose-18">Purpose</a></h2>
+<h2 id="purpose-19"><a class="header" href="#purpose-19">Purpose</a></h2>
 <p>Define the V1 SurrealDB schema and indexing strategy for Stasis durable job orchestration.</p>
 <h2 id="design-constraints"><a class="header" href="#design-constraints">Design Constraints</a></h2>
 <ol>
@@ -6530,7 +6623,7 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture-decision-records"><a class="header" href="#architecture-decision-records">Architecture Decision Records</a></h1>
-<h2 id="document-metadata-28"><a class="header" href="#document-metadata-28">Document Metadata</a></h2>
+<h2 id="document-metadata-29"><a class="header" href="#document-metadata-29">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>
@@ -6543,7 +6636,7 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
 </ul>
 </li>
 </ul>
-<h2 id="purpose-19"><a class="header" href="#purpose-19">Purpose</a></h2>
+<h2 id="purpose-20"><a class="header" href="#purpose-20">Purpose</a></h2>
 <p>Track major architectural decisions with rationale, alternatives, and consequences.</p>
 <h2 id="adr-index"><a class="header" href="#adr-index">ADR Index</a></h2>
 <div class="table-wrapper">

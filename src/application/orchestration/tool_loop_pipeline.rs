@@ -179,9 +179,10 @@ impl ToolLoopPipeline {
             let selected_sanitized = sanitize_tool_name_for_model(shared_inputs.selected_tool_name());
             let selected_prefix = format!("{selected_sanitized}_");
             tools.retain(|tool| {
-                tool.name == shared_inputs.selected_tool_name()
-                    || tool.name == selected_sanitized
-                    || tool.name.starts_with(&selected_prefix)
+                let tool_name = tool.name.as_ref();
+                tool_name == shared_inputs.selected_tool_name()
+                    || tool_name == selected_sanitized
+                    || tool_name.starts_with(&selected_prefix)
             });
         }
 

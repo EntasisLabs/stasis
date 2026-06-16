@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bbd140bb.js";
+            window.path_to_searchindex_js = "searchindex-c23014dc.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d13a89d.js"></script>
+        <script src="toc-81824faf.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -256,7 +256,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </thead>
 <tbody>
 <tr><td><code>STASIS_LLM_PROVIDER</code></td><td>LLM adapter id (<code>openai</code>, <code>anthropic</code>, …)</td></tr>
-<tr><td><code>STASIS_LLM_MODEL</code></td><td>Default model id</td></tr>
+<tr><td><code>STASIS_LLM_MODEL</code></td><td>Default model id (genai namespaced targets — see <a href="./llm-providers.html">LLM Providers</a>)</td></tr>
 <tr><td><code>STASIS_LLM_API_KEY</code></td><td>Global LLM API key fallback</td></tr>
 <tr><td><code>STASIS_DASHBOARD_RUNTIME_BACKEND</code></td><td>Dashboard persistence backend</td></tr>
 <tr><td><code>STASIS_DASHBOARD_SURREAL_*</code></td><td>Surreal connection settings</td></tr>
@@ -265,6 +265,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </table>
 </div>
 <p>Surreal helpers in <code>surreal_backend_config</code> (<code>resolve_surreal_namespace_from_env</code>, <code>resolve_surreal_auth_from_env</code>, …) use the same resolver when <code>bootstrap()</code> has run.</p>
+<p>For provider namespaces, reasoning effort keywords, and Groq migration notes, see <a href="./llm-providers.html">LLM Providers</a>.</p>
 <h2 id="safety-notes"><a class="header" href="#safety-notes">Safety notes</a></h2>
 <ul>
 <li><code>.env</code> is gitignored — never commit secrets.</li>
@@ -281,7 +282,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="extension-points.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="llm-providers.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -295,7 +296,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="extension-points.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="llm-providers.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

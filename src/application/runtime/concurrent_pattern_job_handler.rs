@@ -14,6 +14,7 @@ use crate::application::orchestration::concurrent_pattern_pipeline::{
 use crate::application::orchestration::prompt_pipeline::PromptExecutionPipeline;
 use crate::application::orchestration::tool_loop_pipeline::ToolCallMode;
 use crate::application::orchestration::tool_registry::ToolRegistry;
+use crate::application::runtime::chat_options_resolver::validate_reasoning_effort;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
@@ -148,6 +149,9 @@ impl ConcurrentPatternJobHandler {
             Self::validate_branch(branch)?;
         }
 
+        validate_reasoning_effort(payload.reasoning_effort.as_deref())
+            .map_err(|err| format!("policy violation: {err}"))?;
+
         Ok(payload)
     }
 
@@ -173,6 +177,9 @@ impl ConcurrentPatternJobHandler {
                 );
             }
         }
+
+        validate_reasoning_effort(branch.reasoning_effort.as_deref())
+            .map_err(|err| format!("policy violation: {err}"))?;
 
         Ok(())
     }
@@ -229,6 +236,7 @@ impl JobHandler for ConcurrentPatternJobHandler {
             initial_user_prompt,
             policy_profile,
             model_hint,
+            reasoning_effort,
             merge_strategy,
             tool_call_mode,
             memory_policy,
@@ -257,6 +265,7 @@ impl JobHandler for ConcurrentPatternJobHandler {
             correlation_id: Some(job.correlation_id.clone()),
             policy_profile,
             model_hint,
+            reasoning_effort,
             default_memory_policy: pattern_memory_policy.clone(),
             merge_strategy,
             branches: branches
@@ -268,6 +277,7 @@ impl JobHandler for ConcurrentPatternJobHandler {
                         system_prompt,
                         policy_profile,
                         model_hint,
+                        reasoning_effort,
                         execution_mode,
                         tool_name,
                         tool_input,
@@ -281,6 +291,7 @@ impl JobHandler for ConcurrentPatternJobHandler {
                         system_prompt,
                         policy_profile,
                         model_hint,
+                        reasoning_effort,
                         execution_mode,
                         tool_name,
                         tool_input,

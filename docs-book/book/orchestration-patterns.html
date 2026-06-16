@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bbd140bb.js";
+            window.path_to_searchindex_js = "searchindex-c23014dc.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d13a89d.js"></script>
+        <script src="toc-81824faf.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -267,6 +267,7 @@
   "correlation_id": "string | null",
   "policy_profile": "string | null",
   "model_hint": "string | null",
+  "reasoning_effort": "none | minimal | low | medium | high | xhigh | max | budget:N | null",
   "merge_strategy": "join_with_headers | join_lines | null",
   "tool_call_mode": "auto | strict | null",
   "memory_policy": "MemoryPolicyPayload | null",
@@ -278,6 +279,7 @@
       "system_prompt": "string | null",
       "policy_profile": "string | null",
       "model_hint": "string | null",
+      "reasoning_effort": "string | null",
       "tool_name": "string | null",
       "tool_input": "object | null",
       "tool_call_mode": "auto | strict | null",
@@ -289,6 +291,7 @@
 <p><code>execution_mode</code> defaults to <code>prompt</code> when omitted. When <code>execution_mode</code> is <code>tool_loop</code>, <code>tool_name</code> is required.</p>
 <p>Use <code>ConcurrentBranchJobPayload::prompt(...)</code> or <code>::tool_loop(...)</code> in Rust for ergonomic construction.</p>
 <p>For <code>tool_loop</code> branches, <code>memory_policy</code> resolves branch override → pattern default. Recall runs before execution; store uses session id <code>{correlation_id}::concurrent-branch::{branch_id}</code> to avoid parallel write collisions.</p>
+<p><code>reasoning_effort</code> follows the same override order: branch → pattern. When omitted, <code>GenaiChatClient</code> may still infer effort from a model name suffix (e.g. <code>gpt-5-mini-high</code>). See <a href="./llm-providers.html">LLM Providers</a>.</p>
 <p>Rust type: <code>ConcurrentPatternJobPayload</code> → <code>ConcurrentBranchJobPayload</code> → <code>ConcurrentBranchExecutionMode</code></p>
 <h3 id="merge-strategies"><a class="header" href="#merge-strategies">Merge strategies</a></h3>
 <div class="table-wrapper">

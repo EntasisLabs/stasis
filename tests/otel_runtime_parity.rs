@@ -127,6 +127,7 @@ async fn runtime_workflow_job_builder_with_traceparent_sets_w3c_trace_id() {
             system_prompt: None,
             policy_profile: None,
             model_hint: None,
+            reasoning_effort: None,
             memory_policy: None,
         },
     )

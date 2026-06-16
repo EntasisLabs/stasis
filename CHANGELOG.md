@@ -7,6 +7,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-02
+
+### Added
+
+- **genai 0.6.5 baseline** — Bedrock, Vertex, OpenRouter, native Ollama adapter, GPT-5 / Responses improvements, prompt cache hooks, streaming capture updates.
+- **`reasoning_effort` on runtime job payloads** — optional string keywords on prompt, tool-loop, agent, and orchestration payloads; branch/stage/turn/route override → pattern default (same semantics as 0.5.0 concurrent overrides).
+- **`chat_options_resolver`** — keyword validation, `PromptExecutionContext` → `ChatOptions`, model suffix fallback in `GenaiChatClient`.
+- **Provider docs** — [llm-providers.md](docs-book/src/llm-providers.md); orchestration patterns updated for `reasoning_effort`.
+- **Roadmap:** [genai-0.6.0-runtime-upgrade-roadmap.md](docs/design/genai-0.6.0-runtime-upgrade-roadmap.md)
+
+### Changed
+
+- **`PromptExecutionPipeline`** — passes resolved `ChatOptions` (reasoning effort) to `AiChatClient`.
+- **Groq models** — require `groq::` namespace prefix (genai 0.6.x).
+
+### Deferred
+
+- Built-in provider WebSearch tools (Slice 6)
+- `STASIS_LLM_REASONING_EFFORT` env alias
+- Full `model_hint` model routing (Track B → ~0.7.0)
+
 ## [0.5.0] - 2026-06-02
 
 ### Added

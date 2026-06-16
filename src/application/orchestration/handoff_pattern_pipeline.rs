@@ -1,6 +1,7 @@
 use crate::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline, PromptExecutionRequest,
 };
+use crate::application::runtime::chat_options_resolver::resolve_reasoning_effort;
 use crate::domain::errors::Result;
 
 #[derive(Clone, Debug)]
@@ -10,6 +11,7 @@ pub struct HandoffPatternTurn {
     pub system_prompt: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -19,6 +21,7 @@ pub struct HandoffPatternExecutionRequest {
     pub correlation_id: Option<String>,
     pub policy_profile: Option<String>,
     pub model_hint: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub turns: Vec<HandoffPatternTurn>,
 }
 
@@ -86,6 +89,10 @@ impl HandoffPatternPipeline {
                     .model_hint
                     .clone()
                     .or_else(|| request.model_hint.clone()),
+                reasoning_effort: resolve_reasoning_effort(
+                    turn.reasoning_effort.clone(),
+                    request.reasoning_effort.clone(),
+                ),
             };
 
             let mut prompt_request =

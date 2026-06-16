@@ -6,6 +6,7 @@ use genai::resolver::{AuthData, Endpoint};
 use genai::{Client, ServiceTarget};
 use tokio::sync::mpsc;
 
+use crate::application::runtime::chat_options_resolver::apply_model_reasoning_suffix;
 use crate::domain::errors::{Result, StasisError};
 use crate::ports::outbound::ai_chat_client::{AiChatClient, StreamDelta};
 
@@ -144,9 +145,13 @@ impl AiChatClient for GenaiChatClient {
         request: ChatRequest,
         options: Option<&ChatOptions>,
     ) -> Result<ChatResponse> {
+        let options = options
+            .cloned()
+            .unwrap_or_default();
+        let options = apply_model_reasoning_suffix(&self.model, options);
         let response = self
             .client
-            .exec_chat(&self.model, request, options)
+            .exec_chat(&self.model, request, Some(&options))
             .await
             .map_err(|err| {
                 StasisError::PortFailure(format!(
@@ -164,9 +169,11 @@ impl AiChatClient for GenaiChatClient {
         chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<ChatResponse> {
         let fallback_request = request.clone();
-        let stream_options = options
+        let mut stream_options = options
             .cloned()
-            .unwrap_or_default()
+            .unwrap_or_default();
+        stream_options = apply_model_reasoning_suffix(&self.model, stream_options);
+        let stream_options = stream_options
             .with_capture_content(true)
             .with_capture_usage(true)
             .with_capture_reasoning_content(true)
@@ -259,8 +266,10 @@ impl AiChatClient for GenaiChatClient {
             reasoning_content,
             model_iden: model_iden.clone(),
             provider_model_iden: model_iden,
+            stop_reason: None,
             usage,
             captured_raw_body: None,
+            response_id: None,
         })
     }
 }
