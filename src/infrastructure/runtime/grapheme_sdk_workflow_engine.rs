@@ -185,6 +185,7 @@ impl WorkflowEngine for GraphemeSdkWorkflowEngine {
             run_id: format!("grapheme:{}", result.artifact_id),
             execution: serde_json::to_value(&result.execution).unwrap_or(Value::Null),
             final_state: result.final_state,
+            lint_warnings: serde_json::to_value(&result.lint_warnings).unwrap_or(Value::Null),
         })
     }
 }

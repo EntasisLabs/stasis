@@ -15,6 +15,7 @@ pub enum WorkflowExecutableKind {
 pub struct WorkflowExecutableReflection {
     pub name: String,
     pub kind: WorkflowExecutableKind,
+    pub description: Option<String>,
     pub input_type: Option<String>,
     pub output_type: Option<String>,
     pub loop_directive_count: usize,

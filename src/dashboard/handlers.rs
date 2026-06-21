@@ -3315,6 +3315,7 @@ mod tests {
                 executables: vec![WorkflowExecutableReflection {
                     name: "Echo".to_string(),
                     kind: WorkflowExecutableKind::Query,
+                    description: None,
                     input_type: Some("String".to_string()),
                     output_type: Some("String".to_string()),
                     loop_directive_count: 0,

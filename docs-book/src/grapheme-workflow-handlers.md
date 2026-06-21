@@ -108,7 +108,7 @@ let engine = Arc::new(GraphemeSdkWorkflowEngine::with_guardrails(guardrails));
 
 | Guardrail | Default | Description |
 |---|---|---|
-| `allowed_imports` | `["grapheme/core"]` | Import statements not in this list are rejected |
+| `allowed_imports` | `["grapheme/*"]` | Import module paths must match an allowlist entry; `*` suffix matches a prefix |
 | `max_source_bytes` | `131,072` (128 KiB) | Source exceeding this limit is rejected before parsing |
 | `execution_timeout` | `2 seconds` | Execution aborted if the engine does not return within this duration |
 | `max_steps` | `10,000` | Maximum engine evaluation steps (passed to `GraphemeEngine::builder`) |
@@ -116,11 +116,20 @@ let engine = Arc::new(GraphemeSdkWorkflowEngine::with_guardrails(guardrails));
 
 ### Import validation
 
-The engine extracts all `import` statements and checks each module path against `allowed_imports`. Matching is exact string equality.
+The engine extracts all `import` statements and checks each module path against `allowed_imports`. Entries ending in `*` match any import with that prefix (for example `grapheme/*` allows all built-in modules).
 
 ```grapheme
 import core from "grapheme/core"   // ✓ allowed by default
-import text from "grapheme/text"   // ✗ rejected unless added to allowed_imports
+import http from "grapheme/http"   // ✓ allowed by default
+import data from "grapheme/data"  // requires Stasis `grapheme-full` feature at build time
+```
+
+### Cargo feature: `grapheme-full`
+
+By default, Stasis links Grapheme **0.6.1** with the standard stdlib modules (`core`, `http`, `web`, `json`, `sql`, …). Enable the optional **`grapheme-full`** feature on `stasis-rs` to compile in extended modules (`data`, `pdf`, `image`, `plot`, `media`):
+
+```toml
+stasis-rs = { version = "0.6.1", features = ["grapheme-full"] }
 ```
 
 ### Execution model
@@ -380,6 +389,9 @@ impl WorkflowEngine for StubWorkflowEngine {
     async fn execute_grapheme_source(&self, _source: &str) -> Result<WorkflowExecutionOutput> {
         Ok(WorkflowExecutionOutput {
             run_id: "grapheme:stub-001".to_string(),
+            execution: serde_json::json!({"ok": true}),
+            final_state: serde_json::json!({}),
+            lint_warnings: serde_json::json!([]),
         })
     }
 }

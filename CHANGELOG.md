@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-02
+
+### Added
+
+- **`grapheme-full` Cargo feature** — opt-in `grapheme-sdk/full` + `grapheme-compiler/full` for extended stdlib modules (`data`, `pdf`, `image`, `plot`, `media`).
+- **Grapheme 0.6.1** — language/compiler upgrades (fragments, state machines, flow/match sugar, typed signatures, AOT paths, lint warnings).
+- **`lint_warnings`** and **`description`** on workflow execution/reflection diagnostics.
+
+### Changed
+
+- **Grapheme deps** — `grapheme-sdk`, `grapheme-compiler`, and `grapheme-lsp` bumped to **0.6.1** (default build stays lean; use `grapheme-full` for extended modules).
+- **Import guardrails** — default allowlist is `grapheme/*` with prefix wildcard matching (docs corrected).
+
 ## [0.6.0] - 2026-06-02
 
 ### Added

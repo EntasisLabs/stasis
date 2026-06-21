@@ -8,6 +8,7 @@ pub struct WorkflowExecutionOutput {
     pub run_id: String,
     pub execution: Value,
     pub final_state: Value,
+    pub lint_warnings: Value,
 }
 
 #[async_trait]

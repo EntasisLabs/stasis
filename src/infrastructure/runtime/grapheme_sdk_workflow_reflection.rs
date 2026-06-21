@@ -93,6 +93,7 @@ impl WorkflowReflectionPort for GraphemeSdkWorkflowReflection {
             .map(|item| WorkflowExecutableReflection {
                 name: item.name,
                 kind: Self::map_kind(item.kind),
+                description: item.description,
                 input_type: item.input_type,
                 output_type: item.output_type,
                 loop_directive_count: item.loop_directive_count,

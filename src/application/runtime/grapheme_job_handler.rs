@@ -110,6 +110,7 @@ impl GraphemeJobHandler {
         execution_id: &str,
         execution: &serde_json::Value,
         final_state: &serde_json::Value,
+        lint_warnings: &serde_json::Value,
     ) -> String {
         json!({
             "provider": "grapheme-sdk",
@@ -117,7 +118,8 @@ impl GraphemeJobHandler {
             "duration_ms": duration_ms,
             "execution_id": execution_id,
             "execution": execution,
-            "final_state": final_state
+            "final_state": final_state,
+            "lint_warnings": lint_warnings,
         })
         .to_string()
     }
@@ -183,6 +185,7 @@ impl JobHandler for GraphemeJobHandler {
                         &output.run_id,
                         &output.execution,
                         &output.final_state,
+                        &output.lint_warnings,
                     )),
                 })
             }
@@ -238,6 +241,7 @@ mod tests {
                 run_id: "run-1".to_string(),
                 execution: json!({"ok": true}),
                 final_state: json!({"done": true}),
+                lint_warnings: json!([]),
             })
         }
     }
