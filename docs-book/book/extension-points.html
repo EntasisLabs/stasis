@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-c23014dc.js";
+            window.path_to_searchindex_js = "searchindex-512a4c92.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-81824faf.js"></script>
@@ -481,6 +481,9 @@ pub trait WorkflowEngine: Send + Sync {
 </thead>
 <tbody>
 <tr><td><code>run_id</code></td><td><code>String</code></td><td>Execution run identifier</td></tr>
+<tr><td><code>execution</code></td><td><code>Value</code></td><td>Runtime execution summary</td></tr>
+<tr><td><code>final_state</code></td><td><code>Value</code></td><td>Final workflow state</td></tr>
+<tr><td><code>lint_warnings</code></td><td><code>Value</code></td><td>Non-fatal compiler warnings (Grapheme 0.6.x)</td></tr>
 </tbody>
 </table>
 </div>

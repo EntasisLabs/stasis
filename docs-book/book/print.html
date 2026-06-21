@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-c23014dc.js";
+            window.path_to_searchindex_js = "searchindex-512a4c92.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-81824faf.js"></script>
@@ -2480,7 +2480,7 @@ let engine = Arc::new(GraphemeSdkWorkflowEngine::with_guardrails(guardrails));
 <tr><th>Guardrail</th><th>Default</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>allowed_imports</code></td><td><code>["grapheme/core"]</code></td><td>Import statements not in this list are rejected</td></tr>
+<tr><td><code>allowed_imports</code></td><td><code>["grapheme/*"]</code></td><td>Import module paths must match an allowlist entry; <code>*</code> suffix matches a prefix</td></tr>
 <tr><td><code>max_source_bytes</code></td><td><code>131,072</code> (128 KiB)</td><td>Source exceeding this limit is rejected before parsing</td></tr>
 <tr><td><code>execution_timeout</code></td><td><code>2 seconds</code></td><td>Execution aborted if the engine does not return within this duration</td></tr>
 <tr><td><code>max_steps</code></td><td><code>10,000</code></td><td>Maximum engine evaluation steps (passed to <code>GraphemeEngine::builder</code>)</td></tr>
@@ -2489,9 +2489,14 @@ let engine = Arc::new(GraphemeSdkWorkflowEngine::with_guardrails(guardrails));
 </table>
 </div>
 <h3 id="import-validation"><a class="header" href="#import-validation">Import validation</a></h3>
-<p>The engine extracts all <code>import</code> statements and checks each module path against <code>allowed_imports</code>. Matching is exact string equality.</p>
+<p>The engine extracts all <code>import</code> statements and checks each module path against <code>allowed_imports</code>. Entries ending in <code>*</code> match any import with that prefix (for example <code>grapheme/*</code> allows all built-in modules).</p>
 <pre><code class="language-grapheme">import core from "grapheme/core"   // ✓ allowed by default
-import text from "grapheme/text"   // ✗ rejected unless added to allowed_imports
+import http from "grapheme/http"   // ✓ allowed by default
+import data from "grapheme/data"  // requires Stasis `grapheme-full` feature at build time
+</code></pre>
+<h3 id="cargo-feature-grapheme-full"><a class="header" href="#cargo-feature-grapheme-full">Cargo feature: <code>grapheme-full</code></a></h3>
+<p>By default, Stasis links Grapheme <strong>0.6.1</strong> with the standard stdlib modules (<code>core</code>, <code>http</code>, <code>web</code>, <code>json</code>, <code>sql</code>, …). Enable the optional <strong><code>grapheme-full</code></strong> feature on <code>stasis-rs</code> to compile in extended modules (<code>data</code>, <code>pdf</code>, <code>image</code>, <code>plot</code>, <code>media</code>):</p>
+<pre><code class="language-toml">stasis-rs = { version = "0.6.1", features = ["grapheme-full"] }
 </code></pre>
 <h3 id="execution-model"><a class="header" href="#execution-model">Execution model</a></h3>
 <p>Scripts run inside <code>tokio::task::spawn_blocking</code> to prevent blocking the async runtime. The <code>tokio::time::timeout</code> wrapper enforces <code>execution_timeout</code> at the async boundary — the underlying synchronous engine call is cancelled if the deadline is exceeded.</p>
@@ -2733,6 +2738,9 @@ impl WorkflowEngine for StubWorkflowEngine {
     async fn execute_grapheme_source(&amp;self, _source: &amp;str) -&gt; Result&lt;WorkflowExecutionOutput&gt; {
         Ok(WorkflowExecutionOutput {
             run_id: "grapheme:stub-001".to_string(),
+            execution: serde_json::json!({"ok": true}),
+            final_state: serde_json::json!({}),
+            lint_warnings: serde_json::json!([]),
         })
     }
 }
@@ -4295,6 +4303,9 @@ pub trait WorkflowEngine: Send + Sync {
 </thead>
 <tbody>
 <tr><td><code>run_id</code></td><td><code>String</code></td><td>Execution run identifier</td></tr>
+<tr><td><code>execution</code></td><td><code>Value</code></td><td>Runtime execution summary</td></tr>
+<tr><td><code>final_state</code></td><td><code>Value</code></td><td>Final workflow state</td></tr>
+<tr><td><code>lint_warnings</code></td><td><code>Value</code></td><td>Non-fatal compiler warnings (Grapheme 0.6.x)</td></tr>
 </tbody>
 </table>
 </div>
