@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use locus_core_rs::{NodeStore, StoreContextService, SttpNodeParser, TreeSitterValidator};
+use locus_core_rs::{StoreContextService, SttpNodeParser, TreeSitterValidator};
 
 use crate::domain::errors::{Result, StasisError};
+use crate::infrastructure::memory::locus_node_store_factory::LocusMemoryStore;
 use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use crate::ports::outbound::memory::memory_models::{MemoryStoreRequest, MemoryStoreResponse};
 
@@ -13,9 +14,14 @@ pub struct LocusContextWriter {
 }
 
 impl LocusContextWriter {
-    pub fn new(store: Arc<dyn NodeStore>) -> Self {
+    pub fn new(memory: Arc<LocusMemoryStore>) -> Self {
         let validator = Arc::new(TreeSitterValidator::new());
-        let service = StoreContextService::new(store, validator, SttpNodeParser::new());
+        let service = StoreContextService::new(
+            memory.node_store.clone(),
+            validator,
+            SttpNodeParser::new(),
+        )
+        .with_semantic_index(memory.semantic_index.clone());
         Self {
             service: Arc::new(service),
         }

@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-512a4c92.js";
+            window.path_to_searchindex_js = "searchindex-a9f91ad1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-81824faf.js"></script>
@@ -361,7 +361,7 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
 <hr>
 <h2 id="memory-integration"><a class="header" href="#memory-integration">Memory Integration</a></h2>
 <h3 id="automatic-locus-bootstrap"><a class="header" href="#automatic-locus-bootstrap">Automatic Locus bootstrap</a></h3>
-<p><code>.with_locus_memory()</code> bootstraps an in-memory Locus store and wires <code>LocusContextReader</code>, <code>LocusContextWriter</code>, and <code>LocusMemoryOperations</code> if none are provided explicitly:</p>
+<p><code>.with_locus_memory()</code> bootstraps a shared <code>LocusMemoryStore</code> (node store + semantic index) and wires <code>LocusContextReader</code>, <code>LocusContextWriter</code>, and <code>LocusMemoryOperations</code> if none are provided explicitly. When memory operation handlers are enabled, this registers eight workflows: recall, find, graph, aggregate, transform, rollup, schema, and evict.</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
@@ -410,7 +410,7 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
 <tr><td><code>.without_prompt_handler()</code></td><td><code>PromptChatJobHandler</code></td></tr>
 <tr><td><code>.without_tool_loop_handler()</code></td><td><code>ToolLoopJobHandler</code></td></tr>
 <tr><td><code>.without_agent_handlers()</code></td><td><code>AgentTurnJobHandler</code>, <code>AgentSessionJobHandler</code></td></tr>
-<tr><td><code>.without_memory_operation_handlers()</code></td><td><code>MemoryRecallJobHandler</code>, <code>MemoryAggregateJobHandler</code>, <code>MemoryTransformJobHandler</code>, <code>MemoryRollupJobHandler</code>, <code>MemorySchemaJobHandler</code></td></tr>
+<tr><td><code>.without_memory_operation_handlers()</code></td><td><code>MemoryRecallJobHandler</code>, <code>MemoryFindJobHandler</code>, <code>MemoryGraphJobHandler</code>, <code>MemoryAggregateJobHandler</code>, <code>MemoryTransformJobHandler</code>, <code>MemoryRollupJobHandler</code>, <code>MemorySchemaJobHandler</code>, <code>MemoryEvictJobHandler</code></td></tr>
 <tr><td><code>.without_orchestration_pattern_handlers()</code></td><td><code>SequentialPatternJobHandler</code>, <code>ConcurrentPatternJobHandler</code>, <code>HandoffPatternJobHandler</code>, <code>OrchestratorPatternJobHandler</code></td></tr>
 </tbody>
 </table>

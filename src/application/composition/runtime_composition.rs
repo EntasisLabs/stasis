@@ -215,15 +215,15 @@ impl RuntimeFactory {
                 || memory_context_writer.is_none()
                 || memory_operations.is_none())
         {
-            let store = LocusNodeStoreFactory::in_memory().await?;
+            let memory = LocusNodeStoreFactory::in_memory().await?;
             if memory_context_reader.is_none() {
-                memory_context_reader = Some(Arc::new(LocusContextReader::new(store.clone())));
+                memory_context_reader = Some(Arc::new(LocusContextReader::new(memory.clone())));
             }
             if memory_context_writer.is_none() {
-                memory_context_writer = Some(Arc::new(LocusContextWriter::new(store.clone())));
+                memory_context_writer = Some(Arc::new(LocusContextWriter::new(memory.clone())));
             }
             if memory_operations.is_none() {
-                memory_operations = Some(Arc::new(LocusMemoryOperations::new(store, None)));
+                memory_operations = Some(Arc::new(LocusMemoryOperations::new(memory, None)));
             }
         }
 

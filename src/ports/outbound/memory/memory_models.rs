@@ -1,7 +1,10 @@
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Clone, Debug, Default)]
 pub struct MemoryScope {
+    pub tenant_id: Option<String>,
     pub session_ids: Option<Vec<String>>,
     pub tiers: Option<Vec<String>>,
     pub from_utc: Option<DateTime<Utc>>,
@@ -32,35 +35,6 @@ pub enum MemoryStrictnessMode {
     Recall,
 }
 
-#[derive(Clone, Debug)]
-pub struct MemoryRecallRequest {
-    pub scope: MemoryScope,
-    pub current_avec: Option<MemoryAvecState>,
-    pub query_text: Option<String>,
-    pub limit: usize,
-    pub alpha: f32,
-    pub beta: f32,
-    pub fallback_policy: MemoryFallbackPolicy,
-    pub strictness: MemoryStrictnessMode,
-    pub include_explain: bool,
-}
-
-impl Default for MemoryRecallRequest {
-    fn default() -> Self {
-        Self {
-            scope: MemoryScope::default(),
-            current_avec: None,
-            query_text: None,
-            limit: 20,
-            alpha: 0.7,
-            beta: 0.3,
-            fallback_policy: MemoryFallbackPolicy::OnEmpty,
-            strictness: MemoryStrictnessMode::Balanced,
-            include_explain: false,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct MemoryMetricRange {
     pub min: Option<f32>,
@@ -75,6 +49,54 @@ pub struct MemoryFilter {
     pub rho: Option<MemoryMetricRange>,
     pub kappa: Option<MemoryMetricRange>,
     pub text_contains: Option<String>,
+    pub tags_contains: Option<Vec<String>>,
+    pub has_tag: Option<String>,
+    pub indexed_tags: Option<Vec<String>>,
+    pub tag_prefix: Option<String>,
+    pub has_semantic_links: Option<bool>,
+    pub link_rel: Option<String>,
+    pub link_target: Option<String>,
+    pub links_to_ref: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemorySemanticLink {
+    pub rel: String,
+    pub target: String,
+    pub confidence: Option<f32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MemoryRecallRequest {
+    pub scope: MemoryScope,
+    pub filter: MemoryFilter,
+    pub current_avec: Option<MemoryAvecState>,
+    pub query_text: Option<String>,
+    pub limit: usize,
+    pub alpha: f32,
+    pub beta: f32,
+    pub gamma: f32,
+    pub fallback_policy: MemoryFallbackPolicy,
+    pub strictness: MemoryStrictnessMode,
+    pub include_explain: bool,
+}
+
+impl Default for MemoryRecallRequest {
+    fn default() -> Self {
+        Self {
+            scope: MemoryScope::default(),
+            filter: MemoryFilter::default(),
+            current_avec: None,
+            query_text: None,
+            limit: 20,
+            alpha: 0.7,
+            beta: 0.3,
+            gamma: 0.0,
+            fallback_policy: MemoryFallbackPolicy::OnEmpty,
+            strictness: MemoryStrictnessMode::Balanced,
+            include_explain: false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -127,6 +149,8 @@ pub struct MemoryNode {
     pub parent_node_id: Option<String>,
     pub sync_key: String,
     pub context_summary: Option<String>,
+    pub semantic_tags: Option<Vec<String>>,
+    pub semantic_links: Option<Vec<MemorySemanticLink>>,
     pub embedding_model: Option<String>,
     pub embedding_dimensions: Option<usize>,
     pub embedded_at: Option<DateTime<Utc>>,
@@ -192,11 +216,14 @@ pub enum MemoryTransformOperation {
     #[default]
     EmbedBackfill,
     ReindexEmbeddings,
+    EmbedTagBackfill,
+    ReindexTagEmbeddings,
 }
 
 #[derive(Clone, Debug)]
 pub struct MemoryTransformRequest {
     pub scope: MemoryScope,
+    pub filter: MemoryFilter,
     pub operation: MemoryTransformOperation,
     pub dry_run: bool,
     pub batch_size: usize,
@@ -209,6 +236,7 @@ impl Default for MemoryTransformRequest {
     fn default() -> Self {
         Self {
             scope: MemoryScope::default(),
+            filter: MemoryFilter::default(),
             operation: MemoryTransformOperation::EmbedBackfill,
             dry_run: true,
             batch_size: 100,
@@ -252,4 +280,108 @@ pub struct MemorySchemaResponse {
     pub fallback_policies: Vec<String>,
     pub strictness_modes: Vec<String>,
     pub transform_operations: Vec<String>,
+    pub evict_operations: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MemoryEvictMode {
+    #[default]
+    BySyncKeys,
+    ByNodeIds,
+    ByFilter,
+    PurgeSession,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemoryInboundReferencesPreview {
+    pub child_parent_links: Vec<String>,
+    pub incoming_semantic_refs: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemoryEvictRecord {
+    pub node_id: String,
+    pub sync_key: String,
+    pub status: String,
+    pub reason: Option<String>,
+    pub inbound_references: Option<MemoryInboundReferencesPreview>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MemoryEvictRequest {
+    pub mode: MemoryEvictMode,
+    pub scope: MemoryScope,
+    pub filter: MemoryFilter,
+    pub sync_keys: Option<Vec<String>>,
+    pub node_ids: Option<Vec<String>>,
+    pub dry_run: bool,
+    pub force: bool,
+    pub max_nodes: usize,
+    pub include_calibration: bool,
+    pub include_checkpoints: bool,
+}
+
+impl Default for MemoryEvictRequest {
+    fn default() -> Self {
+        Self {
+            mode: MemoryEvictMode::BySyncKeys,
+            scope: MemoryScope::default(),
+            filter: MemoryFilter::default(),
+            sync_keys: None,
+            node_ids: None,
+            dry_run: true,
+            force: false,
+            max_nodes: 5000,
+            include_calibration: false,
+            include_checkpoints: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MemoryEvictResponse {
+    pub dry_run: bool,
+    pub deleted: usize,
+    pub blocked: usize,
+    pub not_found: usize,
+    pub skipped: usize,
+    pub would_delete: Vec<String>,
+    pub calibrations_deleted: usize,
+    pub checkpoints_deleted: usize,
+    pub records: Vec<MemoryEvictRecord>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MemoryGraphRequest {
+    pub scope: MemoryScope,
+    pub filter: MemoryFilter,
+    pub include_lineage: bool,
+    pub include_semantic: bool,
+    pub include_session_topology: bool,
+    pub rel: Option<String>,
+    pub target_prefix: Option<String>,
+    pub limit: usize,
+}
+
+impl Default for MemoryGraphRequest {
+    fn default() -> Self {
+        Self {
+            scope: MemoryScope::default(),
+            filter: MemoryFilter::default(),
+            include_lineage: true,
+            include_semantic: true,
+            include_session_topology: true,
+            rel: None,
+            target_prefix: None,
+            limit: 200,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MemoryGraphResponse {
+    pub sessions: Vec<Value>,
+    pub nodes: Vec<Value>,
+    pub edges: Vec<Value>,
+    pub retrieved: usize,
 }

@@ -2,8 +2,9 @@ use chrono::{DateTime, Utc};
 
 use crate::application::orchestration::runtime_job_payloads::{
     AgentSessionJobPayload, AgentTurnJobPayload, ConcurrentPatternJobPayload,
-    HandoffPatternJobPayload, MemoryAggregateJobPayload, MemoryFindJobPayload,
-    MemoryRecallJobPayload, MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
+    HandoffPatternJobPayload, MemoryAggregateJobPayload, MemoryEvictJobPayload,
+    MemoryFindJobPayload, MemoryGraphJobPayload, MemoryRecallJobPayload, MemoryRollupJobPayload,
+    MemorySchemaJobPayload, MemoryTransformJobPayload,
     OrchestratorPatternJobPayload, PromptJobPayload, SequentialPatternJobPayload,
     ToolLoopJobPayload,
 };
@@ -22,6 +23,8 @@ const JOB_TYPE_MEMORY_AGGREGATE: &str = "workflow.stasis.memory.aggregate";
 const JOB_TYPE_MEMORY_TRANSFORM: &str = "workflow.stasis.memory.transform";
 const JOB_TYPE_MEMORY_ROLLUP: &str = "workflow.stasis.memory.rollup";
 const JOB_TYPE_MEMORY_SCHEMA: &str = "workflow.stasis.memory.schema";
+const JOB_TYPE_MEMORY_EVICT: &str = "workflow.stasis.memory.evict";
+const JOB_TYPE_MEMORY_GRAPH: &str = "workflow.stasis.memory.graph";
 const JOB_TYPE_ORCHESTRATION_SEQUENTIAL: &str = "workflow.stasis.orchestration.sequential";
 const JOB_TYPE_ORCHESTRATION_CONCURRENT: &str = "workflow.stasis.orchestration.concurrent";
 const JOB_TYPE_ORCHESTRATION_HANDOFF: &str = "workflow.stasis.orchestration.handoff";
@@ -71,6 +74,8 @@ impl RuntimeWorkflowJobBuilder {
     );
     define_payload_builder!(for_memory_rollup, MemoryRollupJobPayload, JOB_TYPE_MEMORY_ROLLUP);
     define_payload_builder!(for_memory_schema, MemorySchemaJobPayload, JOB_TYPE_MEMORY_SCHEMA);
+    define_payload_builder!(for_memory_evict, MemoryEvictJobPayload, JOB_TYPE_MEMORY_EVICT);
+    define_payload_builder!(for_memory_graph, MemoryGraphJobPayload, JOB_TYPE_MEMORY_GRAPH);
     define_payload_builder!(
         for_orchestration_sequential,
         SequentialPatternJobPayload,

@@ -5,6 +5,7 @@ use serde_json::json;
 
 use crate::application::orchestration::runtime_job_payloads::MemoryFindJobPayload;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::runtime::memory_job_request_helpers::memory_scope_from_fields;
 use crate::application::runtime::memory_operation_job_outcome_helpers::{
     operation_failure, operation_success, policy_violation_failure,
 };
@@ -13,7 +14,7 @@ use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_models::{
-    MemoryFilter, MemoryFindRequest, MemoryScope, MemorySortDirection, MemorySortField,
+    MemoryFilter, MemoryFindRequest, MemorySortDirection, MemorySortField,
 };
 
 pub struct MemoryFindJobHandler {
@@ -61,14 +62,23 @@ impl JobHandler for MemoryFindJobHandler {
         };
 
         let request = MemoryFindRequest {
-            scope: MemoryScope {
-                session_ids: payload.session_ids,
-                tiers: payload.tiers,
-                from_utc: payload.from_utc,
-                to_utc: payload.to_utc,
-            },
+            scope: memory_scope_from_fields(
+                payload.tenant_id,
+                payload.session_ids,
+                payload.tiers,
+                payload.from_utc,
+                payload.to_utc,
+            ),
             filter: MemoryFilter {
                 text_contains: payload.text_contains,
+                tags_contains: payload.tags_contains,
+                has_tag: payload.has_tag,
+                indexed_tags: payload.indexed_tags,
+                tag_prefix: payload.tag_prefix,
+                has_semantic_links: payload.has_semantic_links,
+                link_rel: payload.link_rel,
+                link_target: payload.link_target,
+                links_to_ref: payload.links_to_ref,
                 ..Default::default()
             },
             limit: payload.limit.unwrap_or(50),

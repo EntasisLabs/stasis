@@ -8,10 +8,15 @@ Depends on:
 - stasis-framework-implementation-plan.md
 - ../v1-runtime-draft.md
 
+Execution update (2026-06-23):
+- **0.7.0** delivers semantic tags/index, eviction policy, and graph workflows on Locus **0.4.1 / locus-sdk 0.2.1**.
+- `LocusMemoryStore` bundles node store + semantic index; ingest and find/recall/evict/transform paths wire `with_semantic_index()`.
+- Memory operation workflows now include `find`, `evict`, and `graph` in addition to recall, aggregate, transform, rollup, and schema.
+
 Execution update (2026-05-14):
 - Phases L1 through L6 are delivered in code and validated in CI-style local runs.
 - Locus-backed memory ports/adapters are wired through Stasis runtime handlers for prompt, tool-loop, agent-turn, and agent-session paths.
-- Memory operation workflows (`workflow.stasis.memory.{recall,aggregate,transform,rollup,schema}`) are registered and exercised in backend parity coverage.
+- Memory operation workflows (`workflow.stasis.memory.{recall,find,graph,aggregate,transform,rollup,schema,evict}`) are registered and exercised in backend parity coverage.
 - Diagnostics contract keys from Section 7.1 are emitted in memory-enabled success paths, including RFC alias keys.
 - Outbox lineage metadata from Section 7.2 is now projected when available: `input_memory_query_id`, `output_memory_node_id`, and `retrieval_path`.
 - Remaining optional follow-up: deepen query lineage semantics beyond deterministic query-id generation if product analytics need richer provenance.
@@ -77,11 +82,11 @@ Already in place:
 - Typed payload builders and runtime parity tests are established.
 - Locus crates are already listed in root dependencies.
 
-Missing today:
-- no concrete Locus service invocation in Stasis runtime handler path
-- no memory retrieval before model execution
-- no memory persistence after successful execution
-- no dedicated memory operations workflow jobs in runtime
+Missing today (historical — resolved by 0.7.0):
+- ~~no concrete Locus service invocation in Stasis runtime handler path~~
+- ~~no memory retrieval before model execution~~
+- ~~no memory persistence after successful execution~~
+- ~~no dedicated memory operations workflow jobs in runtime~~
 
 ## 6. Proposed Architecture
 
@@ -93,9 +98,9 @@ Add new ports under src/ports/outbound/memory:
 - memory_operations.rs
 
 Port responsibilities:
-- MemoryContextReader: recall and explain retrieval operations
-- MemoryContextWriter: persist STTP node content and optional calibration
-- MemoryOperations: aggregation, transform, migration preview/run, schema capability discovery
+- MemoryContextReader: recall, find, and graph retrieval operations
+- MemoryContextWriter: persist STTP node content and sync semantic tag index on ingest
+- MemoryOperations: aggregation, transform, rollup, schema, and evict operations
 
 ## 6.2 Locus Adapters
 
@@ -157,10 +162,13 @@ Defaults:
 
 Add workflow job classes:
 - workflow.stasis.memory.recall
+- workflow.stasis.memory.find
+- workflow.stasis.memory.graph
 - workflow.stasis.memory.aggregate
 - workflow.stasis.memory.transform
 - workflow.stasis.memory.rollup
 - workflow.stasis.memory.schema
+- workflow.stasis.memory.evict
 
 Purpose:
 - operational memory tasks run through existing retry, diagnostics, lineage, and outbox infrastructure

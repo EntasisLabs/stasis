@@ -2,8 +2,9 @@ use async_trait::async_trait;
 
 use crate::domain::errors::Result;
 use crate::ports::outbound::memory::memory_models::{
-    MemoryAggregateRequest, MemoryAggregateResponse, MemoryRollupRequest, MemoryRollupResponse,
-    MemorySchemaResponse, MemoryTransformRequest, MemoryTransformResponse,
+    MemoryAggregateRequest, MemoryAggregateResponse, MemoryEvictRequest, MemoryEvictResponse,
+    MemoryRollupRequest, MemoryRollupResponse, MemorySchemaResponse, MemoryTransformRequest,
+    MemoryTransformResponse,
 };
 
 #[async_trait]
@@ -15,4 +16,6 @@ pub trait MemoryOperations: Send + Sync {
     async fn rollup(&self, request: &MemoryRollupRequest) -> Result<MemoryRollupResponse>;
 
     async fn schema(&self) -> Result<MemorySchemaResponse>;
+
+    async fn evict(&self, request: &MemoryEvictRequest) -> Result<MemoryEvictResponse>;
 }

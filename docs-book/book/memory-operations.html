@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-512a4c92.js";
+            window.path_to_searchindex_js = "searchindex-a9f91ad1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-81824faf.js"></script>
@@ -180,15 +180,18 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-06-02</li>
+<li>Last Verified: 2026-06-23</li>
 <li>Verified Against:
 <ul>
 <li>src/ports/outbound/memory/memory_operations.rs</li>
 <li>src/ports/outbound/memory/memory_context_reader.rs</li>
 <li>src/ports/outbound/memory/memory_context_writer.rs</li>
 <li>src/ports/outbound/memory/memory_models.rs</li>
+<li>src/infrastructure/memory/locus_node_store_factory.rs</li>
 <li>src/application/runtime/memory_recall_job_handler.rs</li>
 <li>src/application/runtime/memory_find_job_handler.rs</li>
+<li>src/application/runtime/memory_evict_job_handler.rs</li>
+<li>src/application/runtime/memory_graph_job_handler.rs</li>
 <li>src/application/runtime/memory_aggregate_job_handler.rs</li>
 <li>src/application/runtime/memory_transform_job_handler.rs</li>
 <li>src/application/runtime/memory_rollup_job_handler.rs</li>
@@ -198,10 +201,10 @@
 </li>
 </ul>
 <h2 id="purpose"><a class="header" href="#purpose">Purpose</a></h2>
-<p>Document the six Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (<code>MemoryContextReader</code>, <code>MemoryContextWriter</code>, <code>MemoryOperations</code>).</p>
+<p>Document the eight Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (<code>MemoryContextReader</code>, <code>MemoryContextWriter</code>, <code>MemoryOperations</code>).</p>
 <h2 id="invariants"><a class="header" href="#invariants">Invariants</a></h2>
 <ol>
-<li>All six memory workflow handlers are durable jobs — they inherit retry, dead-letter, and lineage semantics from the runtime.</li>
+<li>All eight memory workflow handlers are durable jobs — they inherit retry, dead-letter, and lineage semantics from the runtime.</li>
 <li>Memory handlers are only registered when a <code>MemoryContextReader</code> or <code>MemoryOperations</code> port is provided to the builder. Missing ports cause the handler to be silently skipped at build time.</li>
 <li>Invalid payloads produce a <code>FatalFailure</code> with <code>guardrail_code: POLICY_VIOLATION</code> — they are not retried.</li>
 <li><code>MemoryTransformRequest</code> defaults to <code>dry_run: true</code>. Callers must explicitly set <code>dry_run: false</code> to apply changes.</li>
@@ -218,9 +221,11 @@ pub trait MemoryContextReader: Send + Sync {
     async fn recall(&amp;self, request: &amp;MemoryRecallRequest) -&gt; Result&lt;MemoryRecallResponse&gt;;
 
     async fn find(&amp;self, request: &amp;MemoryFindRequest) -&gt; Result&lt;MemoryFindResponse&gt;;
+
+    async fn graph(&amp;self, request: &amp;MemoryGraphRequest) -&gt; Result&lt;MemoryGraphResponse&gt;;
 }
 <span class="boring">}</span></code></pre>
-<p>Custom implementations must provide both methods. The default Locus adapter delegates <code>recall</code> to resonance/semantic retrieval and <code>find</code> to deterministic predicate-based inventory (no AVEC scoring).</p>
+<p>Custom implementations must provide all three methods. The default Locus adapter delegates <code>recall</code> to resonance/semantic retrieval, <code>find</code> to deterministic predicate-based inventory (no AVEC scoring), and <code>graph</code> to session topology and semantic link materialization.</p>
 <h3 id="memorycontextwriter"><a class="header" href="#memorycontextwriter">MemoryContextWriter</a></h3>
 <p>Used by handlers that need to persist execution output for future recall.</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -231,7 +236,7 @@ pub trait MemoryContextWriter: Send + Sync {
 }
 <span class="boring">}</span></code></pre>
 <h3 id="memoryoperations"><a class="header" href="#memoryoperations">MemoryOperations</a></h3>
-<p>Used by the memory maintenance workflow handlers for aggregate, transform, rollup, and schema operations.</p>
+<p>Used by the memory maintenance workflow handlers for aggregate, transform, rollup, schema, and evict operations.</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>#[async_trait]
@@ -240,6 +245,7 @@ pub trait MemoryOperations: Send + Sync {
     async fn transform(&amp;self, request: &amp;MemoryTransformRequest) -&gt; Result&lt;MemoryTransformResponse&gt;;
     async fn rollup(&amp;self, request: &amp;MemoryRollupRequest) -&gt; Result&lt;MemoryRollupResponse&gt;;
     async fn schema(&amp;self) -&gt; Result&lt;MemorySchemaResponse&gt;;
+    async fn evict(&amp;self, request: &amp;MemoryEvictRequest) -&gt; Result&lt;MemoryEvictResponse&gt;;
 }
 <span class="boring">}</span></code></pre>
 <hr>
@@ -252,6 +258,7 @@ pub trait MemoryOperations: Send + Sync {
 <tr><th>Field</th><th>Type</th><th>Description</th></tr>
 </thead>
 <tbody>
+<tr><td><code>tenant_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Tenant scope (derived from session when omitted)</td></tr>
 <tr><td><code>session_ids</code></td><td><code>Option&lt;Vec&lt;String&gt;&gt;</code></td><td>Restrict to specific session IDs. <code>None</code> = all sessions</td></tr>
 <tr><td><code>tiers</code></td><td><code>Option&lt;Vec&lt;String&gt;&gt;</code></td><td>Restrict to specific memory tiers. <code>None</code> = all tiers</td></tr>
 <tr><td><code>from_utc</code></td><td><code>Option&lt;DateTime&lt;Utc&gt;&gt;</code></td><td>Lower bound on node timestamp</td></tr>
@@ -288,6 +295,14 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>rho</code></td><td><code>Option&lt;MemoryMetricRange&gt;</code></td><td>Filter by rho range</td></tr>
 <tr><td><code>kappa</code></td><td><code>Option&lt;MemoryMetricRange&gt;</code></td><td>Filter by kappa range</td></tr>
 <tr><td><code>text_contains</code></td><td><code>Option&lt;String&gt;</code></td><td>Substring match on node text</td></tr>
+<tr><td><code>tags_contains</code></td><td><code>Option&lt;Vec&lt;String&gt;&gt;</code></td><td>Node must contain all listed semantic tags</td></tr>
+<tr><td><code>has_tag</code></td><td><code>Option&lt;String&gt;</code></td><td>Node must include this semantic tag</td></tr>
+<tr><td><code>indexed_tags</code></td><td><code>Option&lt;Vec&lt;String&gt;&gt;</code></td><td>Pre-filter via semantic tag index (requires indexed sync)</td></tr>
+<tr><td><code>tag_prefix</code></td><td><code>Option&lt;String&gt;</code></td><td>Match tags by prefix via semantic index</td></tr>
+<tr><td><code>has_semantic_links</code></td><td><code>Option&lt;bool&gt;</code></td><td>Filter nodes with/without semantic links</td></tr>
+<tr><td><code>link_rel</code></td><td><code>Option&lt;String&gt;</code></td><td>Filter by semantic link relation</td></tr>
+<tr><td><code>link_target</code></td><td><code>Option&lt;String&gt;</code></td><td>Filter by semantic link target</td></tr>
+<tr><td><code>links_to_ref</code></td><td><code>Option&lt;String&gt;</code></td><td>Filter nodes linking to a ref target</td></tr>
 </tbody>
 </table>
 </div>
@@ -328,11 +343,13 @@ pub trait MemoryOperations: Send + Sync {
 </thead>
 <tbody>
 <tr><td><code>scope</code></td><td><code>MemoryScope</code></td><td>empty</td><td>Scope filter</td></tr>
+<tr><td><code>filter</code></td><td><code>MemoryFilter</code></td><td>empty</td><td>Predicate filters (including semantic tags)</td></tr>
 <tr><td><code>current_avec</code></td><td><code>Option&lt;MemoryAvecState&gt;</code></td><td><code>None</code></td><td>AVEC state for resonance ranking</td></tr>
 <tr><td><code>query_text</code></td><td><code>Option&lt;String&gt;</code></td><td><code>None</code></td><td>Semantic query string</td></tr>
 <tr><td><code>limit</code></td><td><code>usize</code></td><td><code>20</code></td><td>Maximum nodes to retrieve</td></tr>
 <tr><td><code>alpha</code></td><td><code>f32</code></td><td><code>0.7</code></td><td>AVEC resonance weight</td></tr>
 <tr><td><code>beta</code></td><td><code>f32</code></td><td><code>0.3</code></td><td>Semantic similarity weight</td></tr>
+<tr><td><code>gamma</code></td><td><code>f32</code></td><td><code>0.0</code></td><td>Tag-embedding fusion weight (hybrid recall)</td></tr>
 <tr><td><code>fallback_policy</code></td><td><code>MemoryFallbackPolicy</code></td><td><code>OnEmpty</code></td><td>Fallback behavior when results are empty</td></tr>
 <tr><td><code>strictness</code></td><td><code>MemoryStrictnessMode</code></td><td><code>Balanced</code></td><td>Retrieval strictness</td></tr>
 <tr><td><code>include_explain</code></td><td><code>bool</code></td><td><code>false</code></td><td>Include retrieval path explanation</td></tr>
@@ -381,6 +398,8 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>parent_node_id</code></td><td><code>Option&lt;String&gt;</code></td><td>Parent node reference</td></tr>
 <tr><td><code>sync_key</code></td><td><code>String</code></td><td>Canonical sync fingerprint</td></tr>
 <tr><td><code>context_summary</code></td><td><code>Option&lt;String&gt;</code></td><td>Short summary when present</td></tr>
+<tr><td><code>semantic_tags</code></td><td><code>Option&lt;Vec&lt;String&gt;&gt;</code></td><td>Canonical semantic tags (lowercase)</td></tr>
+<tr><td><code>semantic_links</code></td><td><code>Option&lt;Vec&lt;MemorySemanticLink&gt;&gt;</code></td><td>Typed semantic link edges</td></tr>
 <tr><td><code>embedding_model</code></td><td><code>Option&lt;String&gt;</code></td><td>Embedding model id</td></tr>
 <tr><td><code>embedding_dimensions</code></td><td><code>Option&lt;usize&gt;</code></td><td>Embedding vector size</td></tr>
 <tr><td><code>embedded_at</code></td><td><code>Option&lt;DateTime&lt;Utc&gt;&gt;</code></td><td>When embedding was computed</td></tr>
@@ -444,6 +463,9 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>limit</code></td><td><code>Option&lt;usize&gt;</code></td><td><code>50</code></td><td>Page size</td></tr>
 <tr><td><code>cursor</code></td><td><code>Option&lt;String&gt;</code></td><td><code>None</code></td><td>Pagination cursor</td></tr>
 <tr><td><code>textContains</code></td><td><code>Option&lt;String&gt;</code></td><td><code>None</code></td><td>Text substring filter</td></tr>
+<tr><td><code>indexedTags</code></td><td><code>Option&lt;Vec&lt;String&gt;&gt;</code></td><td><code>None</code></td><td>Semantic tag index filter</td></tr>
+<tr><td><code>hasTag</code></td><td><code>Option&lt;String&gt;</code></td><td><code>None</code></td><td>Single semantic tag match</td></tr>
+<tr><td><code>tagPrefix</code></td><td><code>Option&lt;String&gt;</code></td><td><code>None</code></td><td>Tag prefix filter</td></tr>
 <tr><td><code>sortField</code></td><td><code>Option&lt;String&gt;</code></td><td><code>timestamp</code></td><td><code>timestamp</code>, <code>updated_at</code>, <code>psi</code>, <code>rho</code>, or <code>kappa</code></td></tr>
 <tr><td><code>sortDirection</code></td><td><code>Option&lt;String&gt;</code></td><td><code>desc</code></td><td><code>asc</code> or <code>desc</code></td></tr>
 </tbody>
@@ -584,6 +606,8 @@ pub trait MemoryOperations: Send + Sync {
 <tbody>
 <tr><td><code>EmbedBackfill</code> (default)</td><td>Generate embeddings for nodes that are missing them</td></tr>
 <tr><td><code>ReindexEmbeddings</code></td><td>Regenerate embeddings for all nodes in scope</td></tr>
+<tr><td><code>EmbedTagBackfill</code></td><td>Generate embeddings for semantic tag index rows</td></tr>
+<tr><td><code>ReindexTagEmbeddings</code></td><td>Reindex semantic tag embeddings</td></tr>
 </tbody>
 </table>
 </div>
@@ -667,6 +691,7 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>fallback_policies</code></td><td><code>Vec&lt;String&gt;</code></td><td>Supported fallback policy names</td></tr>
 <tr><td><code>strictness_modes</code></td><td><code>Vec&lt;String&gt;</code></td><td>Supported strictness mode names</td></tr>
 <tr><td><code>transform_operations</code></td><td><code>Vec&lt;String&gt;</code></td><td>Supported transform operation names</td></tr>
+<tr><td><code>evict_operations</code></td><td><code>Vec&lt;String&gt;</code></td><td>Supported eviction operation names</td></tr>
 </tbody>
 </table>
 </div>
@@ -681,9 +706,69 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>status</code></td><td><code>success</code> or <code>failure</code></td></tr>
 <tr><td><code>schema_version</code></td><td>Schema version string</td></tr>
 <tr><td><code>transform_operations</code></td><td>List of supported operations</td></tr>
+<tr><td><code>evict_operations</code></td><td>List of supported eviction modes</td></tr>
 </tbody>
 </table>
 </div>
+<hr>
+<h2 id="operation-8-evict"><a class="header" href="#operation-8-evict">Operation 8: Evict</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.memory.evict</code><br><strong>Port:</strong> <code>MemoryOperations</code></p>
+<p>Deletes memory nodes with reference safety and optional session purge. Defaults to <code>dry_run: true</code>.</p>
+<h3 id="modes-memoryevictmode"><a class="header" href="#modes-memoryevictmode">Modes: <code>MemoryEvictMode</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Mode</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>BySyncKeys</code> (default)</td><td>Delete by sync key within scope</td></tr>
+<tr><td><code>ByNodeIds</code></td><td>Delete by node id within scope</td></tr>
+<tr><td><code>ByFilter</code></td><td>Delete nodes matching filter predicates</td></tr>
+<tr><td><code>PurgeSession</code></td><td>Bulk delete all nodes in scoped sessions</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="job-payload-highlights"><a class="header" href="#job-payload-highlights">Job payload highlights</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>dryRun</code></td><td><code>true</code></td><td>Preview deletes (<code>deleted</code> counts would-delete rows)</td></tr>
+<tr><td><code>force</code></td><td><code>false</code></td><td>Bypass inbound parent/semantic reference blocking</td></tr>
+<tr><td><code>includeCalibration</code></td><td><code>false</code></td><td>Also remove calibration rows on session purge</td></tr>
+<tr><td><code>includeCheckpoints</code></td><td><code>false</code></td><td>Also remove sync checkpoints on session purge</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="operation-9-graph"><a class="header" href="#operation-9-graph">Operation 9: Graph</a></h2>
+<p><strong>Job type:</strong> <code>workflow.stasis.memory.graph</code><br><strong>Port:</strong> <code>MemoryContextReader</code></p>
+<p>Materializes session topology, lineage, and semantic link edges for observability and tooling.</p>
+<h3 id="request-highlights"><a class="header" href="#request-highlights">Request highlights</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>includeLineage</code></td><td><code>true</code></td><td>Include parent/child lineage edges</td></tr>
+<tr><td><code>includeSemantic</code></td><td><code>true</code></td><td>Include semantic link edges</td></tr>
+<tr><td><code>includeSessionTopology</code></td><td><code>true</code></td><td>Include session-level topology</td></tr>
+<tr><td><code>limit</code></td><td><code>200</code></td><td>Maximum edges/nodes returned</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="semantic-tags-at-store-time"><a class="header" href="#semantic-tags-at-store-time">Semantic tags at store time</a></h2>
+<p>Embed tags in STTP provenance when storing context:</p>
+<pre><code class="language-text">prime: { ..., semantic_tags: ["grammar", "parser"], ... }
+</code></pre>
+<p>Or attach typed links at provenance level:</p>
+<pre><code class="language-text">semantic_links: [{ rel: "related_to", target: "concept:grammar-update", confidence: 0.88 }]
+</code></pre>
+<p>Stasis <code>.with_locus_memory()</code> syncs the semantic tag index on ingest. Use <code>has_tag</code>, <code>tags_contains</code>, or <code>indexed_tags</code> filters on find/recall; set <code>gamma &gt; 0</code> on recall after running <code>embed_tag_backfill</code>.</p>
 <hr>
 <h2 id="non-goals"><a class="header" href="#non-goals">Non-Goals</a></h2>
 <ul>
@@ -694,8 +779,8 @@ pub trait MemoryOperations: Send + Sync {
 <h2 id="locus-dependency-versions"><a class="header" href="#locus-dependency-versions">Locus dependency versions</a></h2>
 <p>Stasis pins Locus crates to prevent resolution drift:</p>
 <ul>
-<li><code>locus-core-rs = 0.3.0</code></li>
-<li><code>locus-sdk = 0.1.2</code></li>
+<li><code>locus-core-rs = 0.4.1</code></li>
+<li><code>locus-sdk = 0.2.1</code></li>
 </ul>
 <p>The default <code>.with_locus_memory()</code> bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via <code>.with_memory_context_reader(...)</code>, <code>.with_memory_context_writer(...)</code>, or <code>.with_memory_operations(...)</code>.</p>
 

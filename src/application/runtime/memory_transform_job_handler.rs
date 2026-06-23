@@ -7,13 +7,14 @@ use crate::application::orchestration::runtime_job_payloads::{
     MemoryTransformJobPayload, MemoryTransformOperationPayload,
 };
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::runtime::memory_job_request_helpers::memory_scope_from_fields;
 use crate::application::runtime::memory_operation_job_outcome_helpers::{
     operation_failure, operation_success, policy_violation_failure,
 };
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 use crate::ports::outbound::memory::memory_models::{
-    MemoryScope, MemoryTransformOperation, MemoryTransformRequest,
+    MemoryTransformOperation, MemoryTransformRequest,
 };
 use crate::ports::outbound::memory::memory_operations::MemoryOperations;
 
@@ -31,6 +32,21 @@ impl MemoryTransformJobHandler {
             format!("policy violation: invalid memory-transform payload json: {err}")
         })
     }
+
+    fn map_operation(value: Option<MemoryTransformOperationPayload>) -> MemoryTransformOperation {
+        match value {
+            Some(MemoryTransformOperationPayload::ReindexEmbeddings) => {
+                MemoryTransformOperation::ReindexEmbeddings
+            }
+            Some(MemoryTransformOperationPayload::EmbedTagBackfill) => {
+                MemoryTransformOperation::EmbedTagBackfill
+            }
+            Some(MemoryTransformOperationPayload::ReindexTagEmbeddings) => {
+                MemoryTransformOperation::ReindexTagEmbeddings
+            }
+            _ => MemoryTransformOperation::EmbedBackfill,
+        }
+    }
 }
 
 #[async_trait]
@@ -46,18 +62,15 @@ impl JobHandler for MemoryTransformJobHandler {
         };
 
         let request = MemoryTransformRequest {
-            scope: MemoryScope {
-                session_ids: payload.session_ids,
-                tiers: payload.tiers,
-                from_utc: payload.from_utc,
-                to_utc: payload.to_utc,
-            },
-            operation: match payload.operation {
-                Some(MemoryTransformOperationPayload::ReindexEmbeddings) => {
-                    MemoryTransformOperation::ReindexEmbeddings
-                }
-                _ => MemoryTransformOperation::EmbedBackfill,
-            },
+            scope: memory_scope_from_fields(
+                None,
+                payload.session_ids,
+                payload.tiers,
+                payload.from_utc,
+                payload.to_utc,
+            ),
+            filter: Default::default(),
+            operation: Self::map_operation(payload.operation),
             dry_run: payload.dry_run.unwrap_or(true),
             batch_size: payload.batch_size.unwrap_or(100),
             max_nodes: payload.max_nodes.unwrap_or(5000),

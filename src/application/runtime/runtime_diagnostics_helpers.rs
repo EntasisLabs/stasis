@@ -15,6 +15,8 @@ pub fn memory_nodes_json(nodes: &[MemoryNode]) -> JsonValue {
                     "tier": node.tier,
                     "raw": node.raw,
                     "context_summary": node.context_summary,
+                    "semantic_tags": node.semantic_tags,
+                    "semantic_links": node.semantic_links,
                     "psi": node.psi,
                     "rho": node.rho,
                     "kappa": node.kappa,

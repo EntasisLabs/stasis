@@ -8,9 +8,10 @@ use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHan
 use crate::application::runtime::memory_operation_job_outcome_helpers::{
     operation_failure, operation_success, policy_violation_failure,
 };
+use crate::application::runtime::memory_job_request_helpers::memory_scope_from_fields;
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
-use crate::ports::outbound::memory::memory_models::{MemoryAggregateRequest, MemoryScope};
+use crate::ports::outbound::memory::memory_models::MemoryAggregateRequest;
 use crate::ports::outbound::memory::memory_operations::MemoryOperations;
 
 pub struct MemoryAggregateJobHandler {
@@ -42,12 +43,13 @@ impl JobHandler for MemoryAggregateJobHandler {
         };
 
         let request = MemoryAggregateRequest {
-            scope: MemoryScope {
-                session_ids: payload.session_ids,
-                tiers: payload.tiers,
-                from_utc: payload.from_utc,
-                to_utc: payload.to_utc,
-            },
+            scope: memory_scope_from_fields(
+                None,
+                payload.session_ids,
+                payload.tiers,
+                payload.from_utc,
+                payload.to_utc,
+            ),
             max_groups: payload.max_groups.unwrap_or(30),
             max_nodes: payload.max_nodes.unwrap_or(5000),
         };

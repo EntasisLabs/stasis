@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
 - Stability: Stable
-- Last Verified: 2026-05-17
+- Last Verified: 2026-06-23
 - Verified Against:
     - src/ports/inbound/control_plane_commands.rs
   - src/ports/outbound/ai_chat_client.rs
@@ -321,9 +321,10 @@ Memory ports are documented in full in [Memory Operations Reference](./memory-op
 
 | Type | Ports implemented | Description |
 |---|---|---|
-| `LocusContextReader` | `MemoryContextReader` | Locus-backed recall and find |
-| `LocusContextWriter` | `MemoryContextWriter` | Locus-backed store |
-| `LocusMemoryOperations` | `MemoryOperations` | Locus-backed aggregate/transform/rollup/schema |
+| `LocusMemoryStore` | Bootstrap bundle | In-memory `NodeStore` + `SemanticIndexStore` |
+| `LocusContextReader` | `MemoryContextReader` | Locus-backed recall, find, and graph |
+| `LocusContextWriter` | `MemoryContextWriter` | Locus-backed store (semantic index sync on ingest) |
+| `LocusMemoryOperations` | `MemoryOperations` | Locus-backed aggregate/transform/rollup/schema/evict |
 
 Custom implementations can replace any built-in adapter. Explicit builder ports take precedence over `.with_locus_memory()` auto-bootstrap.
 

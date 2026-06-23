@@ -46,6 +46,7 @@ impl JobHandler for MemorySchemaJobHandler {
                 json!({
                     "schema_version": result.schema_version,
                     "transform_operations": result.transform_operations,
+                    "evict_operations": result.evict_operations,
                 }),
             )),
             Err(err) => Ok(operation_failure("stasis-memory-schema", err.to_string())),

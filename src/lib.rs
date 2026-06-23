@@ -81,7 +81,9 @@ pub mod memory_prelude_ext {
     pub use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
     pub use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
     pub use crate::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
-    pub use crate::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
+    pub use crate::infrastructure::memory::locus_node_store_factory::{
+        LocusMemoryStore, LocusNodeStoreFactory,
+    };
     pub use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
     pub use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
     pub use crate::ports::outbound::memory::memory_models::{

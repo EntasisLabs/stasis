@@ -5,14 +5,17 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect, SRE
 - Stability: Stable
-- Last Verified: 2026-06-02
+- Last Verified: 2026-06-23
 - Verified Against:
   - src/ports/outbound/memory/memory_operations.rs
   - src/ports/outbound/memory/memory_context_reader.rs
   - src/ports/outbound/memory/memory_context_writer.rs
   - src/ports/outbound/memory/memory_models.rs
+  - src/infrastructure/memory/locus_node_store_factory.rs
   - src/application/runtime/memory_recall_job_handler.rs
   - src/application/runtime/memory_find_job_handler.rs
+  - src/application/runtime/memory_evict_job_handler.rs
+  - src/application/runtime/memory_graph_job_handler.rs
   - src/application/runtime/memory_aggregate_job_handler.rs
   - src/application/runtime/memory_transform_job_handler.rs
   - src/application/runtime/memory_rollup_job_handler.rs
@@ -21,11 +24,11 @@
 
 ## Purpose
 
-Document the six Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (`MemoryContextReader`, `MemoryContextWriter`, `MemoryOperations`).
+Document the eight Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (`MemoryContextReader`, `MemoryContextWriter`, `MemoryOperations`).
 
 ## Invariants
 
-1. All six memory workflow handlers are durable jobs — they inherit retry, dead-letter, and lineage semantics from the runtime.
+1. All eight memory workflow handlers are durable jobs — they inherit retry, dead-letter, and lineage semantics from the runtime.
 2. Memory handlers are only registered when a `MemoryContextReader` or `MemoryOperations` port is provided to the builder. Missing ports cause the handler to be silently skipped at build time.
 3. Invalid payloads produce a `FatalFailure` with `guardrail_code: POLICY_VIOLATION` — they are not retried.
 4. `MemoryTransformRequest` defaults to `dry_run: true`. Callers must explicitly set `dry_run: false` to apply changes.
@@ -45,10 +48,12 @@ pub trait MemoryContextReader: Send + Sync {
     async fn recall(&self, request: &MemoryRecallRequest) -> Result<MemoryRecallResponse>;
 
     async fn find(&self, request: &MemoryFindRequest) -> Result<MemoryFindResponse>;
+
+    async fn graph(&self, request: &MemoryGraphRequest) -> Result<MemoryGraphResponse>;
 }
 ```
 
-Custom implementations must provide both methods. The default Locus adapter delegates `recall` to resonance/semantic retrieval and `find` to deterministic predicate-based inventory (no AVEC scoring).
+Custom implementations must provide all three methods. The default Locus adapter delegates `recall` to resonance/semantic retrieval, `find` to deterministic predicate-based inventory (no AVEC scoring), and `graph` to session topology and semantic link materialization.
 
 ### MemoryContextWriter
 
@@ -63,7 +68,7 @@ pub trait MemoryContextWriter: Send + Sync {
 
 ### MemoryOperations
 
-Used by the memory maintenance workflow handlers for aggregate, transform, rollup, and schema operations.
+Used by the memory maintenance workflow handlers for aggregate, transform, rollup, schema, and evict operations.
 
 ```rust
 #[async_trait]
@@ -72,6 +77,7 @@ pub trait MemoryOperations: Send + Sync {
     async fn transform(&self, request: &MemoryTransformRequest) -> Result<MemoryTransformResponse>;
     async fn rollup(&self, request: &MemoryRollupRequest) -> Result<MemoryRollupResponse>;
     async fn schema(&self) -> Result<MemorySchemaResponse>;
+    async fn evict(&self, request: &MemoryEvictRequest) -> Result<MemoryEvictResponse>;
 }
 ```
 
@@ -85,6 +91,7 @@ Filters applied to recall, find, aggregate, transform, and rollup operations.
 
 | Field | Type | Description |
 |---|---|---|
+| `tenant_id` | `Option<String>` | Tenant scope (derived from session when omitted) |
 | `session_ids` | `Option<Vec<String>>` | Restrict to specific session IDs. `None` = all sessions |
 | `tiers` | `Option<Vec<String>>` | Restrict to specific memory tiers. `None` = all tiers |
 | `from_utc` | `Option<DateTime<Utc>>` | Lower bound on node timestamp |
@@ -113,6 +120,14 @@ Predicate filters for find operations (and available on the Locus SDK recall pat
 | `rho` | `Option<MemoryMetricRange>` | Filter by rho range |
 | `kappa` | `Option<MemoryMetricRange>` | Filter by kappa range |
 | `text_contains` | `Option<String>` | Substring match on node text |
+| `tags_contains` | `Option<Vec<String>>` | Node must contain all listed semantic tags |
+| `has_tag` | `Option<String>` | Node must include this semantic tag |
+| `indexed_tags` | `Option<Vec<String>>` | Pre-filter via semantic tag index (requires indexed sync) |
+| `tag_prefix` | `Option<String>` | Match tags by prefix via semantic index |
+| `has_semantic_links` | `Option<bool>` | Filter nodes with/without semantic links |
+| `link_rel` | `Option<String>` | Filter by semantic link relation |
+| `link_target` | `Option<String>` | Filter by semantic link target |
+| `links_to_ref` | `Option<String>` | Filter nodes linking to a ref target |
 
 ### MemoryMetricRange
 
@@ -144,11 +159,13 @@ Retrieves memory nodes matching the provided scope and query parameters. Used in
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `scope` | `MemoryScope` | empty | Scope filter |
+| `filter` | `MemoryFilter` | empty | Predicate filters (including semantic tags) |
 | `current_avec` | `Option<MemoryAvecState>` | `None` | AVEC state for resonance ranking |
 | `query_text` | `Option<String>` | `None` | Semantic query string |
 | `limit` | `usize` | `20` | Maximum nodes to retrieve |
 | `alpha` | `f32` | `0.7` | AVEC resonance weight |
 | `beta` | `f32` | `0.3` | Semantic similarity weight |
+| `gamma` | `f32` | `0.0` | Tag-embedding fusion weight (hybrid recall) |
 | `fallback_policy` | `MemoryFallbackPolicy` | `OnEmpty` | Fallback behavior when results are empty |
 | `strictness` | `MemoryStrictnessMode` | `Balanced` | Retrieval strictness |
 | `include_explain` | `bool` | `false` | Include retrieval path explanation |
@@ -183,6 +200,8 @@ Each recalled or found node carries the full STTP payload and metadata (aligned 
 | `parent_node_id` | `Option<String>` | Parent node reference |
 | `sync_key` | `String` | Canonical sync fingerprint |
 | `context_summary` | `Option<String>` | Short summary when present |
+| `semantic_tags` | `Option<Vec<String>>` | Canonical semantic tags (lowercase) |
+| `semantic_links` | `Option<Vec<MemorySemanticLink>>` | Typed semantic link edges |
 | `embedding_model` | `Option<String>` | Embedding model id |
 | `embedding_dimensions` | `Option<usize>` | Embedding vector size |
 | `embedded_at` | `Option<DateTime<Utc>>` | When embedding was computed |
@@ -238,6 +257,9 @@ JSON fields accepted by the find workflow handler (camelCase):
 | `limit` | `Option<usize>` | `50` | Page size |
 | `cursor` | `Option<String>` | `None` | Pagination cursor |
 | `textContains` | `Option<String>` | `None` | Text substring filter |
+| `indexedTags` | `Option<Vec<String>>` | `None` | Semantic tag index filter |
+| `hasTag` | `Option<String>` | `None` | Single semantic tag match |
+| `tagPrefix` | `Option<String>` | `None` | Tag prefix filter |
 | `sortField` | `Option<String>` | `timestamp` | `timestamp`, `updated_at`, `psi`, `rho`, or `kappa` |
 | `sortDirection` | `Option<String>` | `desc` | `asc` or `desc` |
 
@@ -348,6 +370,8 @@ Applies a batch transformation operation to memory nodes (embedding backfill or 
 |---|---|
 | `EmbedBackfill` (default) | Generate embeddings for nodes that are missing them |
 | `ReindexEmbeddings` | Regenerate embeddings for all nodes in scope |
+| `EmbedTagBackfill` | Generate embeddings for semantic tag index rows |
+| `ReindexTagEmbeddings` | Reindex semantic tag embeddings |
 
 ### Response: `MemoryTransformResponse`
 
@@ -416,6 +440,7 @@ Returns the current memory schema version and capability descriptor. No payload 
 | `fallback_policies` | `Vec<String>` | Supported fallback policy names |
 | `strictness_modes` | `Vec<String>` | Supported strictness mode names |
 | `transform_operations` | `Vec<String>` | Supported transform operation names |
+| `evict_operations` | `Vec<String>` | Supported eviction operation names |
 
 ### Diagnostics keys
 
@@ -425,6 +450,70 @@ Returns the current memory schema version and capability descriptor. No payload 
 | `status` | `success` or `failure` |
 | `schema_version` | Schema version string |
 | `transform_operations` | List of supported operations |
+| `evict_operations` | List of supported eviction modes |
+
+---
+
+## Operation 8: Evict
+
+**Job type:** `workflow.stasis.memory.evict`  
+**Port:** `MemoryOperations`
+
+Deletes memory nodes with reference safety and optional session purge. Defaults to `dry_run: true`.
+
+### Modes: `MemoryEvictMode`
+
+| Mode | Description |
+|---|---|
+| `BySyncKeys` (default) | Delete by sync key within scope |
+| `ByNodeIds` | Delete by node id within scope |
+| `ByFilter` | Delete nodes matching filter predicates |
+| `PurgeSession` | Bulk delete all nodes in scoped sessions |
+
+### Job payload highlights
+
+| Field | Default | Description |
+|---|---|---|
+| `dryRun` | `true` | Preview deletes (`deleted` counts would-delete rows) |
+| `force` | `false` | Bypass inbound parent/semantic reference blocking |
+| `includeCalibration` | `false` | Also remove calibration rows on session purge |
+| `includeCheckpoints` | `false` | Also remove sync checkpoints on session purge |
+
+---
+
+## Operation 9: Graph
+
+**Job type:** `workflow.stasis.memory.graph`  
+**Port:** `MemoryContextReader`
+
+Materializes session topology, lineage, and semantic link edges for observability and tooling.
+
+### Request highlights
+
+| Field | Default | Description |
+|---|---|---|
+| `includeLineage` | `true` | Include parent/child lineage edges |
+| `includeSemantic` | `true` | Include semantic link edges |
+| `includeSessionTopology` | `true` | Include session-level topology |
+| `limit` | `200` | Maximum edges/nodes returned |
+
+---
+
+## Semantic tags at store time
+
+Embed tags in STTP provenance when storing context:
+
+```text
+prime: { ..., semantic_tags: ["grammar", "parser"], ... }
+```
+
+Or attach typed links at provenance level:
+
+```text
+semantic_links: [{ rel: "related_to", target: "concept:grammar-update", confidence: 0.88 }]
+```
+
+Stasis `.with_locus_memory()` syncs the semantic tag index on ingest. Use `has_tag`, `tags_contains`, or `indexed_tags` filters on find/recall; set `gamma > 0` on recall after running `embed_tag_backfill`.
 
 ---
 
@@ -438,7 +527,7 @@ Returns the current memory schema version and capability descriptor. No payload 
 
 Stasis pins Locus crates to prevent resolution drift:
 
-- `locus-core-rs = 0.3.0`
-- `locus-sdk = 0.1.2`
+- `locus-core-rs = 0.4.1`
+- `locus-sdk = 0.2.1`
 
 The default `.with_locus_memory()` bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via `.with_memory_context_reader(...)`, `.with_memory_context_writer(...)`, or `.with_memory_operations(...)`.

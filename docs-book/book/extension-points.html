@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-512a4c92.js";
+            window.path_to_searchindex_js = "searchindex-a9f91ad1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-81824faf.js"></script>
@@ -180,7 +180,7 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-05-17</li>
+<li>Last Verified: 2026-06-23</li>
 <li>Verified Against:
 <ul>
 <li>src/ports/inbound/control_plane_commands.rs</li>
@@ -520,9 +520,10 @@ pub trait WorkflowEngine: Send + Sync {
 <tr><th>Type</th><th>Ports implemented</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>LocusContextReader</code></td><td><code>MemoryContextReader</code></td><td>Locus-backed recall and find</td></tr>
-<tr><td><code>LocusContextWriter</code></td><td><code>MemoryContextWriter</code></td><td>Locus-backed store</td></tr>
-<tr><td><code>LocusMemoryOperations</code></td><td><code>MemoryOperations</code></td><td>Locus-backed aggregate/transform/rollup/schema</td></tr>
+<tr><td><code>LocusMemoryStore</code></td><td>Bootstrap bundle</td><td>In-memory <code>NodeStore</code> + <code>SemanticIndexStore</code></td></tr>
+<tr><td><code>LocusContextReader</code></td><td><code>MemoryContextReader</code></td><td>Locus-backed recall, find, and graph</td></tr>
+<tr><td><code>LocusContextWriter</code></td><td><code>MemoryContextWriter</code></td><td>Locus-backed store (semantic index sync on ingest)</td></tr>
+<tr><td><code>LocusMemoryOperations</code></td><td><code>MemoryOperations</code></td><td>Locus-backed aggregate/transform/rollup/schema/evict</td></tr>
 </tbody>
 </table>
 </div>

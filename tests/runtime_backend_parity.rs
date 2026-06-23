@@ -651,6 +651,13 @@ impl MemoryContextReader for MockMemoryContextReader {
     async fn find(&self, _request: &MemoryFindRequest) -> Result<MemoryFindResponse> {
         Ok(MemoryFindResponse::default())
     }
+
+    async fn graph(
+        &self,
+        _request: &stasis::ports::outbound::memory::memory_models::MemoryGraphRequest,
+    ) -> Result<stasis::ports::outbound::memory::memory_models::MemoryGraphResponse> {
+        Ok(stasis::ports::outbound::memory::memory_models::MemoryGraphResponse::default())
+    }
 }
 
 #[derive(Clone)]
@@ -711,7 +718,15 @@ impl MemoryOperations for MockMemoryOperations {
             fallback_policies: vec!["on_empty".to_string()],
             strictness_modes: vec!["balanced".to_string()],
             transform_operations: vec!["embed_backfill".to_string()],
+            evict_operations: vec!["delete_nodes".to_string()],
         })
+    }
+
+    async fn evict(
+        &self,
+        _request: &stasis::ports::outbound::memory::memory_models::MemoryEvictRequest,
+    ) -> Result<stasis::ports::outbound::memory::memory_models::MemoryEvictResponse> {
+        Ok(stasis::ports::outbound::memory::memory_models::MemoryEvictResponse::default())
     }
 }
 

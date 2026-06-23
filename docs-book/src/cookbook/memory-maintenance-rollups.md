@@ -5,9 +5,11 @@
 - Document Type: Cookbook Recipe
 - Audience: Engineer, Operator
 - Stability: Stable
-- Last Verified: 2026-06-04
+- Last Verified: 2026-06-23
 - Verified Against:
-  - src/application/use_cases/
+  - src/infrastructure/memory/locus_memory_operations.rs
+  - src/application/runtime/memory_evict_job_handler.rs
+  - tests/locus_memory_adapters.rs
 
 ## Outcome
 
@@ -22,10 +24,9 @@ use std::sync::Arc;
 
 use stasis::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
 use stasis::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
-use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
 
-let store = LocusNodeStoreFactory::in_memory().await?;
-let ops = Arc::new(LocusMemoryOperations::new(store, None));
+let memory = LocusNodeStoreFactory::in_memory().await?;
+let ops = Arc::new(LocusMemoryOperations::new(memory, None));
 ```
 
 ### 2. Run aggregate health snapshot
@@ -113,6 +114,32 @@ let schema = ops.schema().await?;
 
 println!("schema_version={}", schema.schema_version);
 println!("transform_ops={:?}", schema.transform_operations);
+println!("evict_ops={:?}", schema.evict_operations);
+```
+
+### 7. Preview eviction (dry-run)
+
+```rust
+use stasis::ports::outbound::memory::memory_models::{
+    MemoryEvictMode, MemoryEvictRequest, MemoryScope,
+};
+
+let preview = ops
+    .evict(&MemoryEvictRequest {
+        mode: MemoryEvictMode::PurgeSession,
+        scope: MemoryScope {
+            session_ids: Some(vec!["ephemeral-branch-session".to_string()]),
+            ..Default::default()
+        },
+        dry_run: true,
+        ..Default::default()
+    })
+    .await?;
+
+println!(
+    "evict preview deleted={} blocked={} would_delete={:?}",
+    preview.deleted, preview.blocked, preview.would_delete
+);
 ```
 
 ## Operational Cadence

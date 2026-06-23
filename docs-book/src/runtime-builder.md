@@ -199,7 +199,7 @@ Tools must implement the `StasisTool` trait. Input schema validation (required f
 
 ### Automatic Locus bootstrap
 
-`.with_locus_memory()` bootstraps an in-memory Locus store and wires `LocusContextReader`, `LocusContextWriter`, and `LocusMemoryOperations` if none are provided explicitly:
+`.with_locus_memory()` bootstraps a shared `LocusMemoryStore` (node store + semantic index) and wires `LocusContextReader`, `LocusContextWriter`, and `LocusMemoryOperations` if none are provided explicitly. When memory operation handlers are enabled, this registers eight workflows: recall, find, graph, aggregate, transform, rollup, schema, and evict.
 
 ```rust
 let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
@@ -254,7 +254,7 @@ All handler groups are included by default. Opt out with `without_*` methods:
 | `.without_prompt_handler()` | `PromptChatJobHandler` |
 | `.without_tool_loop_handler()` | `ToolLoopJobHandler` |
 | `.without_agent_handlers()` | `AgentTurnJobHandler`, `AgentSessionJobHandler` |
-| `.without_memory_operation_handlers()` | `MemoryRecallJobHandler`, `MemoryAggregateJobHandler`, `MemoryTransformJobHandler`, `MemoryRollupJobHandler`, `MemorySchemaJobHandler` |
+| `.without_memory_operation_handlers()` | `MemoryRecallJobHandler`, `MemoryFindJobHandler`, `MemoryGraphJobHandler`, `MemoryAggregateJobHandler`, `MemoryTransformJobHandler`, `MemoryRollupJobHandler`, `MemorySchemaJobHandler`, `MemoryEvictJobHandler` |
 | `.without_orchestration_pattern_handlers()` | `SequentialPatternJobHandler`, `ConcurrentPatternJobHandler`, `HandoffPatternJobHandler`, `OrchestratorPatternJobHandler` |
 
 Memory operation handlers are only registered when the corresponding memory ports are wired. Calling `.without_memory_operation_handlers()` is a no-op if memory ports are absent.

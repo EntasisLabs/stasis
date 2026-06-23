@@ -30,7 +30,7 @@ Stasis uses DDD + Hexagonal architecture and an event-driven runtime backed by S
 
 1. Stasis orchestration/runtime core for durable job execution and observability.
 2. Grapheme workflow execution for policy-governed workflow jobs.
-3. Locus memory services for retrieval, storage, transform, rollup, and schema workflows.
+3. Locus memory services for retrieval, storage, transform, rollup, schema, evict, and graph workflows.
 
 The runtime now includes an explicit control-plane foundation for command-center operations:
 
@@ -68,7 +68,7 @@ The runtime is designed for at-least-once job execution with deterministic idemp
 
 ### 3) Locus Plane
 
-- Memory recall/write and advanced memory operations (aggregate, transform, rollup, schema).
+- Memory recall/write, find, graph, and advanced memory operations (aggregate, transform, rollup, schema, evict).
 - Memory lineage projection into runtime outbox metadata:
   - input query IDs/fingerprint
   - output memory node IDs

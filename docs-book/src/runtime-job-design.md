@@ -226,7 +226,7 @@ Grapheme handlers execute policy-governed workflow jobs and classify policy fail
 ### Locus Memory Execution
 
 Memory-enabled handlers project memory lineage metadata into runtime outbox events.
-Dedicated memory operation handlers support aggregate, transform, rollup, and schema workflows.
+Dedicated memory operation handlers support recall, find, graph, aggregate, transform, rollup, schema, and evict workflows.
 
 ### Lineage Investigation
 

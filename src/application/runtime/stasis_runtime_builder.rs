@@ -19,7 +19,9 @@ use crate::application::runtime::grapheme_textops_job_handler::GraphemeTextOpsJo
 use crate::application::runtime::handoff_pattern_job_handler::HandoffPatternJobHandler;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::memory_aggregate_job_handler::MemoryAggregateJobHandler;
+use crate::application::runtime::memory_evict_job_handler::MemoryEvictJobHandler;
 use crate::application::runtime::memory_find_job_handler::MemoryFindJobHandler;
+use crate::application::runtime::memory_graph_job_handler::MemoryGraphJobHandler;
 use crate::application::runtime::memory_recall_job_handler::MemoryRecallJobHandler;
 use crate::application::runtime::memory_rollup_job_handler::MemoryRollupJobHandler;
 use crate::application::runtime::memory_schema_job_handler::MemorySchemaJobHandler;
@@ -431,12 +433,14 @@ impl StasisRuntimeBuilder {
                             MemoryRecallJobHandler::new(reader.clone())
                                 .with_operation_telemetry(operation_telemetry.clone()),
                         )?;
-                        rt.register_handler(MemoryFindJobHandler::new(reader))?;
+                        rt.register_handler(MemoryFindJobHandler::new(reader.clone()))?;
+                        rt.register_handler(MemoryGraphJobHandler::new(reader))?;
                     }
                     if let Some(operations) = memory_operations.clone() {
                         rt.register_handler(MemoryAggregateJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemoryTransformJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemoryRollupJobHandler::new(operations.clone()))?;
+                        rt.register_handler(MemoryEvictJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemorySchemaJobHandler::new(operations))?;
                     }
                 }
@@ -557,12 +561,14 @@ impl StasisRuntimeBuilder {
                             MemoryRecallJobHandler::new(reader.clone())
                                 .with_operation_telemetry(operation_telemetry.clone()),
                         )?;
-                        rt.register_handler(MemoryFindJobHandler::new(reader))?;
+                        rt.register_handler(MemoryFindJobHandler::new(reader.clone()))?;
+                        rt.register_handler(MemoryGraphJobHandler::new(reader))?;
                     }
                     if let Some(operations) = memory_operations.clone() {
                         rt.register_handler(MemoryAggregateJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemoryTransformJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemoryRollupJobHandler::new(operations.clone()))?;
+                        rt.register_handler(MemoryEvictJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemorySchemaJobHandler::new(operations))?;
                     }
                 }

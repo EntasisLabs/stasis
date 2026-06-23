@@ -211,7 +211,7 @@ Most AI frameworks optimize for prompt composition. Stasis optimizes for product
 - Cluster coordination and endpoint routing support.
 - Typed tool contracts with schema-aware invocation.
 - Built-In WASM Compatible Workflow Engine with no code builder. Powered by [Grapheme](https://github.com/EntasisLabs/grapheme) 
-- Memory-aware workflows with recall, store, aggregate, and rollup paths. Powered by [Locus](https://github.com/EntasisLabs/locus)
+- Memory-aware workflows with recall, find, graph, store, evict, aggregate, transform, and rollup paths. Powered by [Locus](https://github.com/EntasisLabs/locus)
 
 ## Architecture
 

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-512a4c92.js";
+            window.path_to_searchindex_js = "../searchindex-a9f91ad1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-81824faf.js"></script>
@@ -180,10 +180,12 @@
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer, Operator</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-06-04</li>
+<li>Last Verified: 2026-06-23</li>
 <li>Verified Against:
 <ul>
-<li>src/application/use_cases/</li>
+<li>src/infrastructure/memory/locus_memory_operations.rs</li>
+<li>src/application/runtime/memory_evict_job_handler.rs</li>
+<li>tests/locus_memory_adapters.rs</li>
 </ul>
 </li>
 </ul>
@@ -197,10 +199,9 @@
 
 use stasis::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
 use stasis::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
-use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
 
-let store = LocusNodeStoreFactory::in_memory().await?;
-let ops = Arc::new(LocusMemoryOperations::new(store, None));
+let memory = LocusNodeStoreFactory::in_memory().await?;
+let ops = Arc::new(LocusMemoryOperations::new(memory, None));
 <span class="boring">}</span></code></pre>
 <h3 id="2-run-aggregate-health-snapshot"><a class="header" href="#2-run-aggregate-health-snapshot">2. Run aggregate health snapshot</a></h3>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
@@ -283,6 +284,31 @@ println!("rollup groups={} scanned={}", rollup.total_groups, rollup.scanned_node
 
 println!("schema_version={}", schema.schema_version);
 println!("transform_ops={:?}", schema.transform_operations);
+println!("evict_ops={:?}", schema.evict_operations);
+<span class="boring">}</span></code></pre>
+<h3 id="7-preview-eviction-dry-run"><a class="header" href="#7-preview-eviction-dry-run">7. Preview eviction (dry-run)</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::ports::outbound::memory::memory_models::{
+    MemoryEvictMode, MemoryEvictRequest, MemoryScope,
+};
+
+let preview = ops
+    .evict(&amp;MemoryEvictRequest {
+        mode: MemoryEvictMode::PurgeSession,
+        scope: MemoryScope {
+            session_ids: Some(vec!["ephemeral-branch-session".to_string()]),
+            ..Default::default()
+        },
+        dry_run: true,
+        ..Default::default()
+    })
+    .await?;
+
+println!(
+    "evict preview deleted={} blocked={} would_delete={:?}",
+    preview.deleted, preview.blocked, preview.would_delete
+);
 <span class="boring">}</span></code></pre>
 <h2 id="operational-cadence"><a class="header" href="#operational-cadence">Operational Cadence</a></h2>
 <p>Suggested baseline:</p>
