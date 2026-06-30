@@ -10,6 +10,7 @@ Depends on:
 
 Execution update (2026-06-23):
 - **0.7.0** delivers semantic tags/index, eviction policy, and graph workflows on Locus **0.4.1 / locus-sdk 0.2.1**.
+- **0.7.1** bumps Locus to **0.4.2 / locus-sdk 0.2.2** for semantic `null` handling in parser and SurrealDB storage.
 - `LocusMemoryStore` bundles node store + semantic index; ingest and find/recall/evict/transform paths wire `with_semantic_index()`.
 - Memory operation workflows now include `find`, `evict`, and `graph` in addition to recall, aggregate, transform, rollup, and schema.
 

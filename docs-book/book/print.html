@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a9f91ad1.js";
+            window.path_to_searchindex_js = "searchindex-b67b3bb4.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-81824faf.js"></script>
@@ -182,7 +182,7 @@
 <li>Audience: Engineer, Architect, Operator</li>
 <li>Stability: Stable</li>
 <li>Last Verified: 2026-06-23</li>
-<li>Verified Against: Stasis 0.7.0 release</li>
+<li>Verified Against: Stasis 0.7.1 release</li>
 </ul>
 <p>Stasis is an agentic framework SDK with a durable job orchestration runtime.</p>
 <p>If you are new to Stasis, start with <a href="#getting-started">Getting Started</a> before diving into architecture details.</p>
@@ -202,7 +202,7 @@
 <li>Review Extension Points for integration contracts and ADRs for rationale.</li>
 </ol>
 <h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
-<p>This book documents the Stasis 0.7.0 runtime architecture and operational semantics. Reference pages marked <strong>Stable</strong> are verified against the current release train. It does not define production deployment topology beyond the cookbook recipes.</p>
+<p>This book documents the Stasis 0.7.x runtime architecture and operational semantics. Reference pages marked <strong>Stable</strong> are verified against the current release train. It does not define production deployment topology beyond the cookbook recipes.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
 <h2 id="document-metadata-1"><a class="header" href="#document-metadata-1">Document Metadata</a></h2>
@@ -3633,8 +3633,8 @@ pub trait MemoryOperations: Send + Sync {
 <h2 id="locus-dependency-versions"><a class="header" href="#locus-dependency-versions">Locus dependency versions</a></h2>
 <p>Stasis pins Locus crates to prevent resolution drift:</p>
 <ul>
-<li><code>locus-core-rs = 0.4.1</code></li>
-<li><code>locus-sdk = 0.2.1</code></li>
+<li><code>locus-core-rs = 0.4.2</code></li>
+<li><code>locus-sdk = 0.2.2</code></li>
 </ul>
 <p>The default <code>.with_locus_memory()</code> bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via <code>.with_memory_context_reader(...)</code>, <code>.with_memory_context_writer(...)</code>, or <code>.with_memory_operations(...)</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>

@@ -116,7 +116,7 @@ Not allowed for Medousa core paths after split:
 1. Completed: removed Medousa from Stasis workspace membership and detached Medousa manifest with local `[workspace]` for independent checks.
 2. In progress: switch Medousa dependency to published/git Stasis.
 3. In progress: validate standalone CI and release cadence.
-4. Completed hardening: pinned `locus-core-rs` (`=0.4.1`) and `locus-sdk` (`=0.2.1`) to exact versions in Stasis to prevent independent dependency-resolution drift.
+4. Completed hardening: pinned `locus-core-rs` (`=0.4.2`) and `locus-sdk` (`=0.2.2`) to exact versions in Stasis to prevent independent dependency-resolution drift.
 
 ## Versioning and Compatibility
 

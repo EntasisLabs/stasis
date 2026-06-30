@@ -7,11 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-23
+
+### Changed
+
+- **Locus 0.4.2 / locus-sdk 0.2.2** — fixes semantic tag/link `null` handling in the STTP parser and SurrealDB storage (`semantic_tags` / `semantic_links` treated as absent; optional fields written as `NONE` not `NULL`).
+
 ## [0.7.0] - 2026-06-23
 
 ### Added
 
-- **Locus 0.4.1 / locus-sdk 0.2.1** — semantic tags, semantic index, eviction policy, and memory graph primitives (includes upstream fix for canonical sync-key tag index sync on ingest).
+- **Locus 0.4.1 / locus-sdk 0.2.1** — semantic tags, semantic index, eviction policy, and memory graph primitives (canonical sync-key tag index sync on ingest).
 - **`LocusMemoryStore`** — shared in-memory bundle (`NodeStore` + `SemanticIndexStore`) wired through reader, writer, and operations adapters.
 - **Semantic memory** — `MemoryNode.semantic_tags` / `semantic_links`; extended `MemoryFilter` (tag/link predicates, including `indexed_tags`); recall `gamma` and `filter`; `MemoryPolicyPayload.filter` for agent-time tag-aware recall.
 - **`workflow.stasis.memory.evict`** — governed deletion with modes `by_sync_keys`, `by_node_ids`, `by_filter`, `purge_session`; `dry_run` (default `true`), `force`, reference safety.

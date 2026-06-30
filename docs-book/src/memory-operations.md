@@ -527,7 +527,7 @@ Stasis `.with_locus_memory()` syncs the semantic tag index on ingest. Use `has_t
 
 Stasis pins Locus crates to prevent resolution drift:
 
-- `locus-core-rs = 0.4.1`
-- `locus-sdk = 0.2.1`
+- `locus-core-rs = 0.4.2`
+- `locus-sdk = 0.2.2`
 
 The default `.with_locus_memory()` bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via `.with_memory_context_reader(...)`, `.with_memory_context_writer(...)`, or `.with_memory_operations(...)`.
