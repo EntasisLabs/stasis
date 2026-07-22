@@ -67,6 +67,7 @@ async fn fetch_knowledge_base(input: FetchKnowledgeBaseInput) -> Result<FetchKno
 
 fn production_memory_policy() -> MemoryPolicyPayload {
     MemoryPolicyPayload {
+        tenant_id: None,
         session_ids: None,
         tiers: Some(vec!["summary".to_string(), "episodic".to_string()]),
         from_utc: None,
@@ -74,11 +75,13 @@ fn production_memory_policy() -> MemoryPolicyPayload {
         limit: Some(12),
         alpha: Some(0.7),
         beta: Some(0.3),
+        gamma: None,
         fallback_policy: Some(MemoryFallbackPolicyPayload::OnEmpty),
         strictness: Some(MemoryStrictnessModePayload::Balanced),
         query_text: None,
         include_explain: Some(true),
         store_mode: Some(MemoryStoreModePayload::SummaryOnly),
+        filter: Default::default(),
     }
 }
 

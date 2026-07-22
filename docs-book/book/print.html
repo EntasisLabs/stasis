@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-b67b3bb4.js";
+            window.path_to_searchindex_js = "searchindex-8915afd4.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-81824faf.js"></script>
+        <script src="toc-a298250c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -181,8 +181,8 @@
 <li>Document Type: Book Overview</li>
 <li>Audience: Engineer, Architect, Operator</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-06-23</li>
-<li>Verified Against: Stasis 0.7.1 release</li>
+<li>Last Verified: 2026-07-22</li>
+<li>Verified Against: Stasis 0.8.0 release</li>
 </ul>
 <p>Stasis is an agentic framework SDK with a durable job orchestration runtime.</p>
 <p>If you are new to Stasis, start with <a href="#getting-started">Getting Started</a> before diving into architecture details.</p>
@@ -202,7 +202,7 @@
 <li>Review Extension Points for integration contracts and ADRs for rationale.</li>
 </ol>
 <h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
-<p>This book documents the Stasis 0.7.x runtime architecture and operational semantics. Reference pages marked <strong>Stable</strong> are verified against the current release train. It does not define production deployment topology beyond the cookbook recipes.</p>
+<p>This book documents the Stasis 0.8.x runtime architecture and operational semantics. Reference pages marked <strong>Stable</strong> are verified against the current release train. It does not define production deployment topology beyond the cookbook recipes.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
 <h2 id="document-metadata-1"><a class="header" href="#document-metadata-1">Document Metadata</a></h2>
@@ -1391,8 +1391,155 @@ runtime.recurring_store.save(definition).await?;
 <li>The <code>payload_template_ref</code> is passed as a literal string — no template interpolation is performed at materialization time. Dynamic payloads require a custom scheduler that builds and registers definitions at runtime.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="retention-and-replay"><a class="header" href="#retention-and-replay">Retention and Replay</a></h1>
+<h1 id="stasisd-declarative-engine"><a class="header" href="#stasisd-declarative-engine"><code>stasisd</code> Declarative Engine</a></h1>
 <h2 id="document-metadata-6"><a class="header" href="#document-metadata-6">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Architecture Standard</li>
+<li>Audience: Engineer, Architect, SRE, Platform Owner</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-07-22</li>
+<li>Verified Against:
+<ul>
+<li>docs/adr/ADR-0008-stasisd-declarative-engine.md</li>
+<li>docs/design/stasisd-declarative-engine-plan.md</li>
+<li>docs-book/src/recurring-jobs.md</li>
+<li>docs-book/src/agent-platform-contracts.md</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-3"><a class="header" href="#purpose-3">Purpose</a></h2>
+<p>Introduce <code>stasisd</code> — a small deployable engine that turns YAML/TOML desired state into durable Stasis schedules and jobs. Think “nginx for AI orchestration.”</p>
+<h2 id="idea"><a class="header" href="#idea">Idea</a></h2>
+<pre><code class="language-bash">stasisd --config /etc/stasis/agents.d/
+</code></pre>
+<ul>
+<li>Add a file → recurring agent schedules appear</li>
+<li>Edit a file → definitions update</li>
+<li>Remove a file → managed schedules stop; in-flight jobs follow a drain policy</li>
+</ul>
+<h2 id="layering"><a class="header" href="#layering">Layering</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Layer</th><th>Role</th></tr>
+</thead>
+<tbody>
+<tr><td>Config files</td><td>Desired state</td></tr>
+<tr><td><code>stasisd</code></td><td>Watch, validate, reconcile, run ticks</td></tr>
+<tr><td>Stasis runtime</td><td>Durable execution (jobs, leases, outbox)</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>stasisd</code> is packaging and operator UX. It is not a second orchestrator and does not embed vendor agent adapters.</p>
+<h2 id="relationship-to-platform-contracts"><a class="header" href="#relationship-to-platform-contracts">Relationship to platform contracts</a></h2>
+<p><a href="#agent-platform-runtime-contracts">Agent Platform Runtime Contracts</a> (ADR-0007) define comms, translation, and MCP bridge ports.</p>
+<p><code>stasisd</code> (ADR-0008) is the declarative control surface that can later reference those ports — still without vendor code in-repo.</p>
+<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<p>ADR-0008 is <strong>Accepted</strong>. Phase 1 loads YAML/TOML <code>stasisd/v1</code> schedules, validates (cron/timezone/job_type/duplicates/payload limits), and reconciles managed <code>stasisd:&lt;id&gt;</code> recurring definitions (<code>drain</code> / <code>orphan</code> / <code>cancel</code> policies).</p>
+<p>Phase 2 adds the long-running host: filesystem watch + debounce, periodic reconcile, and a materialize → process → publish tick loop. Backend selection via <code>STASIS_STASISD_RUNTIME_BACKEND</code> (<code>in-memory</code> default, <code>surreal-mem</code> / <code>surreal-ws</code> / <code>surreal-kv</code>).</p>
+<p>Phase 3 hardens operators: <code>--strict</code> quarantine semantics, id-prefix provenance (<code>stasisd:</code>), Ctrl-C/SIGTERM shutdown, optional <code>--healthz-addr</code> (<code>/healthz</code>, <code>/readyz</code>), and a systemd/runbook path.</p>
+<p>Phase 4 joins contracts + <code>stasisd</code>: declarative <code>[[endpoint]]</code> / <code>[[mcp_gateway]]</code>, <code>participant.kind = external</code> + <code>endpoint_ref</code> validation, waitable turns publish <code>TurnGranted</code> via <code>AgentTransport</code>, and a platform-builder cookbook for mixed local + fake external.</p>
+<p>Phased epic board (with ADR-0007 contracts): <a href="../../docs/design/agent-platform-and-stasisd-epic.html">agent-platform-and-stasisd-epic.md</a>.</p>
+<p>Cron dialect matches <code>RecurringDefinition</code> / <code>cron</code> 0.12 (<strong>7 fields</strong>: sec min hour dom month dow year).</p>
+<pre><code class="language-bash">mkdir -p /tmp/stasis-agents.d
+cat &gt; /tmp/stasis-agents.d/nightly.toml &lt;&lt;'EOF'
+api_version = "stasisd/v1"
+[[schedule]]
+id = "nightly"
+queue = "agents"
+job_type = "workflow.stasis.prompt"
+cron = "0 0 2 * * * *"
+payload = { user_prompt = "review open work" }
+EOF
+
+# One-shot reconcile + tick
+cargo run -p stasisd -- --config /tmp/stasis-agents.d --once
+
+# Long-running host (watch + tick). Remove the TOML to drain the schedule.
+cargo run -p stasisd -- --config /tmp/stasis-agents.d \
+  --tick-interval 1s --reconcile-interval 30s --run-for 10s
+</code></pre>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<ul>
+<li>ADR: <a href="../../docs/adr/ADR-0008-stasisd-declarative-engine.html">ADR-0008</a></li>
+<li>Plan: <a href="../../docs/design/stasisd-declarative-engine-plan.html">stasisd-declarative-engine-plan.md</a></li>
+<li>Runbook: <a href="#stasisd-operator-runbook"><code>stasisd</code> Operator Runbook</a></li>
+<li>systemd: <a href="../../docs/deploy/stasisd.service"><code>docs/deploy/stasisd.service</code></a></li>
+<li>Related: <a href="#recurring-jobs">Recurring Jobs</a>, <a href="#agent-platform-runtime-contracts">Agent Platform Runtime Contracts</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="stasisd-operator-runbook"><a class="header" href="#stasisd-operator-runbook"><code>stasisd</code> Operator Runbook</a></h1>
+<h2 id="document-metadata-7"><a class="header" href="#document-metadata-7">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Operations Guide</li>
+<li>Audience: SRE, Platform Owner</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-07-22</li>
+</ul>
+<h2 id="purpose-4"><a class="header" href="#purpose-4">Purpose</a></h2>
+<p>Operate <code>stasisd</code> safely in local and systemd-hosted environments.</p>
+<h2 id="ownership-model"><a class="header" href="#ownership-model">Ownership model</a></h2>
+<p>Managed recurring definitions use the frozen id prefix <code>stasisd:&lt;schedule-id&gt;</code>.</p>
+<ul>
+<li>Reconcile <strong>only</strong> touches ids with that prefix.</li>
+<li>Unmanaged definitions (any other id) are left alone.</li>
+<li><code>managed_by</code> is the constant <code>stasisd</code> (id-prefix ownership in Phase 3).</li>
+</ul>
+<h2 id="quarantine-and---strict"><a class="header" href="#quarantine-and---strict">Quarantine and <code>--strict</code></a></h2>
+<ul>
+<li>Bad sibling files are quarantined into diagnostics; valid siblings still load.</li>
+<li>Default (non-strict): warnings to stderr; good schedules still reconcile.</li>
+<li><code>--strict</code>: any diagnostic fails the reconcile/process (exit code 2).</li>
+</ul>
+<p>Chaos expectation: an invalid file must not break good schedules unless <code>--strict</code> is set.</p>
+<h2 id="host-loop"><a class="header" href="#host-loop">Host loop</a></h2>
+<pre><code class="language-bash">stasisd --config /etc/stasis/agents.d \
+  --strict \
+  --tick-interval 1s \
+  --reconcile-interval 30s \
+  --healthz-addr 127.0.0.1:8081
+</code></pre>
+<ul>
+<li>Filesystem watch + debounce triggers reconcile.</li>
+<li>Periodic reconcile catches missed events.</li>
+<li>Tick: materialize due recurring jobs → process queues → publish outbox.</li>
+<li>Graceful shutdown on Ctrl-C / SIGTERM.</li>
+</ul>
+<h2 id="health-endpoints"><a class="header" href="#health-endpoints">Health endpoints</a></h2>
+<p>When <code>--healthz-addr</code> is set:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Path</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/healthz</code></td><td>Process alive</td></tr>
+<tr><td><code>/readyz</code></td><td>Last reconcile succeeded</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="backend-selection-1"><a class="header" href="#backend-selection-1">Backend selection</a></h2>
+<p><code>STASIS_STASISD_RUNTIME_BACKEND</code>:</p>
+<ul>
+<li><code>in-memory</code> (default)</li>
+<li><code>surreal-mem</code> / <code>surreal-ws</code> / <code>surreal-kv</code></li>
+</ul>
+<p>HA note: run <strong>one active reconciler</strong> per durable store. Multiple <code>stasisd</code> processes against the same Surreal database can race on managed def updates.</p>
+<h2 id="systemd"><a class="header" href="#systemd">systemd</a></h2>
+<p>Example unit: <a href="../../docs/deploy/stasisd.service"><code>docs/deploy/stasisd.service</code></a>.</p>
+<pre><code class="language-bash">sudo install -d /etc/stasis/agents.d
+sudo systemctl enable --now stasisd
+curl -fsS http://127.0.0.1:8081/healthz
+</code></pre>
+<h2 id="related"><a class="header" href="#related">Related</a></h2>
+<ul>
+<li><a href="#stasisd-declarative-engine"><code>stasisd</code> overview</a></li>
+<li><a href="../../docs/adr/ADR-0008-stasisd-declarative-engine.html">ADR-0008</a></li>
+<li>Epic board: <a href="../../docs/design/agent-platform-and-stasisd-epic.html">agent-platform-and-stasisd-epic.md</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="retention-and-replay"><a class="header" href="#retention-and-replay">Retention and Replay</a></h1>
+<h2 id="document-metadata-8"><a class="header" href="#document-metadata-8">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE</li>
@@ -1406,7 +1553,7 @@ runtime.recurring_store.save(definition).await?;
 </ul>
 </li>
 </ul>
-<h2 id="purpose-3"><a class="header" href="#purpose-3">Purpose</a></h2>
+<h2 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h2>
 <p>Document the Stasis retention policy contract and the dead-letter replay interface. Covers policy configuration, what is pruned, prune report fields, replay semantics, and the <code>ReplayReport</code> shape.</p>
 <h2 id="invariants-2"><a class="header" href="#invariants-2">Invariants</a></h2>
 <ol>
@@ -1553,7 +1700,7 @@ println!("events: {}", report.lineage_events.len());
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="lineage-and-observability"><a class="header" href="#lineage-and-observability">Lineage and Observability</a></h1>
-<h2 id="document-metadata-7"><a class="header" href="#document-metadata-7">Document Metadata</a></h2>
+<h2 id="document-metadata-9"><a class="header" href="#document-metadata-9">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
@@ -1571,7 +1718,7 @@ println!("events: {}", report.lineage_events.len());
 </ul>
 </li>
 </ul>
-<h2 id="purpose-4"><a class="header" href="#purpose-4">Purpose</a></h2>
+<h2 id="purpose-6"><a class="header" href="#purpose-6">Purpose</a></h2>
 <p>Document the Stasis lineage and observability surface: the <code>InvestigateRuntimeLineage</code> query interface, the outbox event model, <code>JobAttempt</code> records, and all runtime metric keys emitted by the job processing loop.</p>
 <h2 id="invariants-3"><a class="header" href="#invariants-3">Invariants</a></h2>
 <ol>
@@ -1796,7 +1943,7 @@ runtime.list_lineage_events_by_thread_id("thread-id").await?
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="opentelemetry"><a class="header" href="#opentelemetry">OpenTelemetry</a></h1>
-<h2 id="document-metadata-8"><a class="header" href="#document-metadata-8">Document Metadata</a></h2>
+<h2 id="document-metadata-10"><a class="header" href="#document-metadata-10">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Operator</li>
@@ -1809,10 +1956,10 @@ runtime.list_lineage_events_by_thread_id("thread-id").await?
 </ul>
 </li>
 </ul>
-<h2 id="purpose-5"><a class="header" href="#purpose-5">Purpose</a></h2>
+<h2 id="purpose-7"><a class="header" href="#purpose-7">Purpose</a></h2>
 <p>Document the stable OpenTelemetry contract for Stasis runtime: metrics, traces, propagation, and configuration.</p>
 <p>Full specification: <a href="../../docs/design/opentelemetry-integration-rfc-plan.html">OpenTelemetry Integration RFC</a><br>ADR: <a href="../../docs/adr/ADR-0006-opentelemetry-first-class-observability.html">ADR-0006 OpenTelemetry First-Class Observability</a></p>
-<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<h2 id="status-1"><a class="header" href="#status-1">Status</a></h2>
 <p><strong>Shipped in 0.3.0</strong> behind optional Cargo feature <code>otel</code>. Metrics, traces, and W3C propagation ship together in one release.</p>
 <h2 id="enablement"><a class="header" href="#enablement">Enablement</a></h2>
 <p>Build with the optional feature:</p>
@@ -1944,7 +2091,7 @@ cargo run --features otel --bin stasis_dashboard
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="orchestration-patterns"><a class="header" href="#orchestration-patterns">Orchestration Patterns</a></h1>
-<h2 id="document-metadata-9"><a class="header" href="#document-metadata-9">Document Metadata</a></h2>
+<h2 id="document-metadata-11"><a class="header" href="#document-metadata-11">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
@@ -1965,7 +2112,7 @@ cargo run --features otel --bin stasis_dashboard
 </ul>
 </li>
 </ul>
-<h2 id="purpose-6"><a class="header" href="#purpose-6">Purpose</a></h2>
+<h2 id="purpose-8"><a class="header" href="#purpose-8">Purpose</a></h2>
 <p>Define the four durable orchestration patterns available in Stasis, their execution semantics, payload contracts, and failure behavior. Each pattern maps to a registered job handler and a corresponding pipeline that runs inside the handler’s execution boundary.</p>
 <h2 id="scope-2"><a class="header" href="#scope-2">Scope</a></h2>
 <p>This document covers the four workflow-level patterns: Sequential, Concurrent, Handoff, and Orchestrator-Routed. Agent-level coordination (<code>workflow.stasis.agent_session</code>) is covered separately in the Agent Coordination reference.</p>
@@ -2227,7 +2374,7 @@ runtime.enqueue(job).await?;
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="chat-middleware-pipeline"><a class="header" href="#chat-middleware-pipeline">Chat Middleware Pipeline</a></h1>
-<h2 id="document-metadata-10"><a class="header" href="#document-metadata-10">Document Metadata</a></h2>
+<h2 id="document-metadata-12"><a class="header" href="#document-metadata-12">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
@@ -2241,7 +2388,7 @@ runtime.enqueue(job).await?;
 </ul>
 </li>
 </ul>
-<h2 id="purpose-7"><a class="header" href="#purpose-7">Purpose</a></h2>
+<h2 id="purpose-9"><a class="header" href="#purpose-9">Purpose</a></h2>
 <p>Document the chat middleware pipeline — the composable decorator chain that wraps every <code>AiChatClient</code> invocation inside the Stasis runtime. Covers the four built-in middleware, composition semantics, telemetry key contracts, and the <code>ChatClientMiddleware</code> extension interface.</p>
 <h2 id="invariants-5"><a class="header" href="#invariants-5">Invariants</a></h2>
 <ol>
@@ -2382,7 +2529,7 @@ impl ChatClientMiddleware for MyMiddleware {
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="grapheme-workflow-handlers"><a class="header" href="#grapheme-workflow-handlers">Grapheme Workflow Handlers</a></h1>
-<h2 id="document-metadata-11"><a class="header" href="#document-metadata-11">Document Metadata</a></h2>
+<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
@@ -2400,7 +2547,7 @@ impl ChatClientMiddleware for MyMiddleware {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-8"><a class="header" href="#purpose-8">Purpose</a></h2>
+<h2 id="purpose-10"><a class="header" href="#purpose-10">Purpose</a></h2>
 <p>Document the Grapheme Workflow plane in Stasis — a policy-governed scripted workflow execution layer backed by <code>grapheme-sdk</code>. Covers the four registered job handlers, source resolution semantics, guardrail policy, diagnostics contracts, and tracing behavior.</p>
 <h2 id="scope-3"><a class="header" href="#scope-3">Scope</a></h2>
 <p>Grapheme jobs are one of the three capability planes in Stasis (alongside the orchestration core and Locus memory). They execute compiled Grapheme-language scripts inside a sandboxed engine with enforced policy limits. This document does not cover AI prompt handlers or Locus memory handlers.</p>
@@ -2496,7 +2643,7 @@ import data from "grapheme/data"  // requires Stasis `grapheme-full` feature at 
 </code></pre>
 <h3 id="cargo-feature-grapheme-full"><a class="header" href="#cargo-feature-grapheme-full">Cargo feature: <code>grapheme-full</code></a></h3>
 <p>By default, Stasis links Grapheme <strong>0.6.1</strong> with the standard stdlib modules (<code>core</code>, <code>http</code>, <code>web</code>, <code>json</code>, <code>sql</code>, …). Enable the optional <strong><code>grapheme-full</code></strong> feature on <code>stasis-rs</code> to compile in extended modules (<code>data</code>, <code>pdf</code>, <code>image</code>, <code>plot</code>, <code>media</code>):</p>
-<pre><code class="language-toml">stasis-rs = { version = "0.6.1", features = ["grapheme-full"] }
+<pre><code class="language-toml">stasis-rs = { version = "0.8.0", features = ["grapheme-full"] }
 </code></pre>
 <h3 id="execution-model"><a class="header" href="#execution-model">Execution model</a></h3>
 <p>Scripts run inside <code>tokio::task::spawn_blocking</code> to prevent blocking the async runtime. The <code>tokio::time::timeout</code> wrapper enforces <code>execution_timeout</code> at the async boundary — the underlying synchronous engine call is cancelled if the deadline is exceeded.</p>
@@ -2754,7 +2901,7 @@ let handler = GraphemeEchoJobHandler::new(engine);
 <p>This is the pattern used in tests that call <code>.without_grapheme_handlers()</code> and register a custom handler instead of the default <code>GraphemeSdkWorkflowEngine</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-coordination"><a class="header" href="#agent-coordination">Agent Coordination</a></h1>
-<h2 id="document-metadata-12"><a class="header" href="#document-metadata-12">Document Metadata</a></h2>
+<h2 id="document-metadata-14"><a class="header" href="#document-metadata-14">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
@@ -2771,7 +2918,7 @@ let handler = GraphemeEchoJobHandler::new(engine);
 </ul>
 </li>
 </ul>
-<h2 id="purpose-9"><a class="header" href="#purpose-9">Purpose</a></h2>
+<h2 id="purpose-11"><a class="header" href="#purpose-11">Purpose</a></h2>
 <p>Document the agent coordination layer: <code>AgentSessionPipeline</code>, <code>AgentSessionCoordinator</code>, selection and termination strategy contracts, the <code>ToolLoopPipeline</code> underpinning, and the two job handler entry points (<code>workflow.stasis.agent_turn</code> and <code>workflow.stasis.agent_session</code>).</p>
 <h2 id="invariants-7"><a class="header" href="#invariants-7">Invariants</a></h2>
 <ol>
@@ -3029,7 +3176,7 @@ let response = coordinator.run_session(AgentSessionRunRequest {
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="memory-operations-reference"><a class="header" href="#memory-operations-reference">Memory Operations Reference</a></h1>
-<h2 id="document-metadata-13"><a class="header" href="#document-metadata-13">Document Metadata</a></h2>
+<h2 id="document-metadata-15"><a class="header" href="#document-metadata-15">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
@@ -3054,7 +3201,7 @@ let response = coordinator.run_session(AgentSessionRunRequest {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-10"><a class="header" href="#purpose-10">Purpose</a></h2>
+<h2 id="purpose-12"><a class="header" href="#purpose-12">Purpose</a></h2>
 <p>Document the eight Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (<code>MemoryContextReader</code>, <code>MemoryContextWriter</code>, <code>MemoryOperations</code>).</p>
 <h2 id="invariants-8"><a class="header" href="#invariants-8">Invariants</a></h2>
 <ol>
@@ -3639,7 +3786,7 @@ pub trait MemoryOperations: Send + Sync {
 <p>The default <code>.with_locus_memory()</code> bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via <code>.with_memory_context_reader(...)</code>, <code>.with_memory_context_writer(...)</code>, or <code>.with_memory_operations(...)</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="identity-memory-layer"><a class="header" href="#identity-memory-layer">Identity Memory Layer</a></h1>
-<h2 id="document-metadata-14"><a class="header" href="#document-metadata-14">Document Metadata</a></h2>
+<h2 id="document-metadata-16"><a class="header" href="#document-metadata-16">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture and Operations Guide</li>
 <li>Audience: Engineer, Runtime Owner, Platform Team</li>
@@ -3660,7 +3807,7 @@ pub trait MemoryOperations: Send + Sync {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-11"><a class="header" href="#purpose-11">Purpose</a></h2>
+<h2 id="purpose-13"><a class="header" href="#purpose-13">Purpose</a></h2>
 <p>The identity memory layer gives Stasis durable, policy-aware identity context for runtime decisions. It complements the Locus memory plane:</p>
 <ol>
 <li>Locus memory handles conversational and resonance retrieval.</li>
@@ -3893,7 +4040,7 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="environment-configuration"><a class="header" href="#environment-configuration">Environment Configuration</a></h1>
-<h2 id="document-metadata-15"><a class="header" href="#document-metadata-15">Document Metadata</a></h2>
+<h2 id="document-metadata-17"><a class="header" href="#document-metadata-17">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Operator</li>
@@ -3907,7 +4054,7 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-12"><a class="header" href="#purpose-12">Purpose</a></h2>
+<h2 id="purpose-14"><a class="header" href="#purpose-14">Purpose</a></h2>
 <p>Provide a safe, consistent way to load Stasis configuration from process environment, local <code>.env</code> files, and file-based secret mounts (including Vault Agent sidecars).</p>
 <h2 id="quick-start"><a class="header" href="#quick-start">Quick start</a></h2>
 <ol>
@@ -3993,7 +4140,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="llm-providers-genai-06x"><a class="header" href="#llm-providers-genai-06x">LLM Providers (genai 0.6.x)</a></h1>
-<h2 id="document-metadata-16"><a class="header" href="#document-metadata-16">Document Metadata</a></h2>
+<h2 id="document-metadata-18"><a class="header" href="#document-metadata-18">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Operator</li>
@@ -4007,7 +4154,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-13"><a class="header" href="#purpose-13">Purpose</a></h2>
+<h2 id="purpose-15"><a class="header" href="#purpose-15">Purpose</a></h2>
 <p>Stasis routes chat completions through <strong>genai 0.6.x</strong>. This page documents how to configure providers at deploy time and how per-job <strong><code>reasoning_effort</code></strong> overrides interact with env-based defaults.</p>
 <h2 id="default-wiring"><a class="header" href="#default-wiring">Default wiring</a></h2>
 <div class="table-wrapper">
@@ -4081,8 +4228,70 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 <li>Dynamic <strong>model_hint → model router</strong> — planned for a follow-on release</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="agent-platform-runtime-contracts"><a class="header" href="#agent-platform-runtime-contracts">Agent Platform Runtime Contracts</a></h1>
+<h2 id="document-metadata-19"><a class="header" href="#document-metadata-19">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Architecture Standard</li>
+<li>Audience: Engineer, Architect, Platform Owner</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-07-22</li>
+<li>Verified Against:
+<ul>
+<li>docs/adr/ADR-0007-agent-platform-runtime-contracts.md</li>
+<li>docs/design/agent-platform-runtime-contracts-plan.md</li>
+<li>docs-book/src/extension-points.md</li>
+<li>src/application/orchestration/tool_registry.rs</li>
+<li>src/ports/outbound/runtime/event_publisher.rs</li>
+</ul>
+</li>
+</ul>
+<h2 id="purpose-16"><a class="header" href="#purpose-16">Purpose</a></h2>
+<p>Describe Stasis as a durable runtime kernel for people building agent platforms — analogous to MassTransit/Hangfire for agentic work — and point to the three vendor-neutral contracts that enable that role.</p>
+<h2 id="positioning"><a class="header" href="#positioning">Positioning</a></h2>
+<p>Stasis provides durable jobs, leases, retries, threads, outbox delivery, and tool/job orchestration.</p>
+<p>Stasis does <strong>not</strong> ship product adapters for IDE/CLI agent vendors. Platform builders implement gateways against public ports and inject them at the composition root.</p>
+<h2 id="three-contracts"><a class="header" href="#three-contracts">Three Contracts</a></h2>
+<ol>
+<li><strong>Comms</strong> — bidirectional durable messaging (outbound publish + ingress) over transport ports.</li>
+<li><strong>Translation</strong> — canonical Stasis agent envelopes encoded/decoded by pluggable codecs (ACP, JSON, XML, etc.).</li>
+<li><strong>MCP tool bridge</strong> — injectable <code>McpToolProvider</code> / <code>McpToolExporter</code> around <code>StasisTool</code> / <code>ToolRegistry</code>.</li>
+</ol>
+<pre><code class="language-text">External agent platforms / MCP gateways (outside repo)
+        │ implement ports
+        ▼
+Stasis runtime kernel
+  jobs · leases · retries · threads · outbox · tool loops
+  Comms · Translation · MCP bridge contracts
+</code></pre>
+<h2 id="di-shape"><a class="header" href="#di-shape">DI Shape</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Illustrative target builder surface from the delivery plan
+StasisRuntimeBuilder::new(backend)
+    .with_agent_codec(codec)?
+    .with_agent_event_ingress(ingress)?
+    .with_mcp_tool_provider(provider)?
+    .with_mcp_tool_exporter(exporter)?;
+<span class="boring">}</span></code></pre>
+<p>The gateway crate depends on Stasis ports/SDK. Core Stasis never depends on a concrete gateway.</p>
+<h2 id="status-2"><a class="header" href="#status-2">Status</a></h2>
+<p>ADR-0007 is <strong>Accepted</strong>. Phase 1 adds <code>JsonAgentMessageCodec</code> and <code>InMemoryAgentEventIngress</code> under <code>infrastructure::agent</code>, with round-trip and negative-path tests.</p>
+<p>Phase 2 adds waitable external turns: <code>workflow.stasis.agent_turn.waitable</code> parks via <code>JobExecutionOutcome::Deferred</code> (attempts not consumed), <code>TurnWaitStore</code> + <code>WaitCorrelatingAgentEventIngress</code> complete/fail/cancel/timeout the wait, and fake-gateway tests cover grant→complete plus mixed local+external sessions. Wait store is process-local in Phase 2 (including Surreal backends).</p>
+<p>Phase 3 adds the MCP tool bridge: <code>McpBridgedToolRegistry</code> merges <code>McpToolProvider</code> tools beside local <code>StasisTool</code>s (duplicate names rejected), <code>AllowlistedLocalMcpExporter</code> exports an explicit allowlist (default: nothing), and recursion budget is enforced on MCP ↔ Stasis re-entry. Builder: <code>.with_mcp_tool_provider(...)</code>, <code>.with_mcp_tool_exporter(...)</code>, <code>.with_mcp_export_allowlist(...)</code>, <code>.build_with_handles()</code>.</p>
+<p>Phase 4 wires declarative external participants: builder DI for codec/ingress/transport/wait-store, waitable turns publish encoded grants to <code>endpoint_ref</code>, and <code>stasisd</code> reconciles managed <code>stasisd:endpoint:&lt;id&gt;</code> resources. Cookbook: <a href="#platform-builder-mixed-local--external-participants">Platform Builder: External Participants</a>.</p>
+<h2 id="related-deployable"><a class="header" href="#related-deployable">Related deployable</a></h2>
+<p><a href="#stasisd-declarative-engine"><code>stasisd</code></a> (ADR-0008) is the declarative YAML/TOML engine that reconciles desired state into durable schedules on top of this runtime.</p>
+<h2 id="epic-board"><a class="header" href="#epic-board">Epic board</a></h2>
+<p>Phased execution across contracts + <code>stasisd</code>: <a href="../../docs/design/agent-platform-and-stasisd-epic.html">agent-platform-and-stasisd-epic.md</a>.</p>
+<h2 id="references-1"><a class="header" href="#references-1">References</a></h2>
+<ul>
+<li>ADR: <a href="../../docs/adr/ADR-0007-agent-platform-runtime-contracts.html">ADR-0007 Agent Platform Runtime Contracts</a></li>
+<li>Delivery plan: <a href="../../docs/design/agent-platform-runtime-contracts-plan.html">agent-platform-runtime-contracts-plan.md</a></li>
+<li>Related: <a href="#extension-points-and-port-contracts">Extension Points</a>, <a href="#control-plane-and-endpoint-routing">Control Plane and Endpoint Routing</a>, <a href="#agent-coordination">Agent Coordination</a>, <a href="#stasisd-declarative-engine"><code>stasisd</code></a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="extension-points-and-port-contracts"><a class="header" href="#extension-points-and-port-contracts">Extension Points and Port Contracts</a></h1>
-<h2 id="document-metadata-17"><a class="header" href="#document-metadata-17">Document Metadata</a></h2>
+<h2 id="document-metadata-20"><a class="header" href="#document-metadata-20">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect</li>
@@ -4109,7 +4318,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-14"><a class="header" href="#purpose-14">Purpose</a></h2>
+<h2 id="purpose-17"><a class="header" href="#purpose-17">Purpose</a></h2>
 <p>Document all port contracts that SDK consumers can implement to extend or replace Stasis infrastructure. Each entry covers the trait signature, what Stasis guarantees about call semantics, and the built-in implementation(s) provided.</p>
 <p>This reference includes both outbound ports and selected inbound control-plane contracts used to drive runtime operations.</p>
 <h2 id="architecture-principle"><a class="header" href="#architecture-principle">Architecture Principle</a></h2>
@@ -4436,6 +4645,56 @@ pub trait WorkflowEngine: Send + Sync {
 </div>
 <p>Custom implementations can replace any built-in adapter. Explicit builder ports take precedence over <code>.with_locus_memory()</code> auto-bootstrap.</p>
 <hr>
+<h2 id="agent-platform-ports-adr-0007"><a class="header" href="#agent-platform-ports-adr-0007">Agent Platform Ports (ADR-0007)</a></h2>
+<p>Vendor-neutral agent platform ports and Phase 1 reference adapters.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Module</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>AgentMessageCodec</code></td><td><code>ports::outbound::agent::message_codec</code></td><td>Encode/decode canonical <code>AgentEnvelope</code></td></tr>
+<tr><td><code>AgentEventIngress</code></td><td><code>ports::outbound::agent::event_ingress</code></td><td>Accept inbound agent envelopes</td></tr>
+<tr><td><code>AgentTransport</code></td><td><code>ports::outbound::agent::transport</code></td><td>Publish encoded messages to delivery endpoints</td></tr>
+<tr><td><code>McpToolProvider</code></td><td><code>ports::outbound::agent::mcp_tool_provider</code></td><td>Inject MCP tools into Stasis</td></tr>
+<tr><td><code>McpToolExporter</code></td><td><code>ports::outbound::agent::mcp_tool_exporter</code></td><td>Export Stasis tools as MCP tools</td></tr>
+</tbody>
+</table>
+</div>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Adapter</th><th>Module</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>JsonAgentMessageCodec</code></td><td><code>infrastructure::agent::json_agent_message_codec</code></td><td>JSON v1 reference codec</td></tr>
+<tr><td><code>InMemoryAgentEventIngress</code></td><td><code>infrastructure::agent::in_memory_agent_event_ingress</code></td><td>Idempotent in-process ingress</td></tr>
+<tr><td><code>McpBridgedToolRegistry</code></td><td><code>application::orchestration::mcp_bridged_tool_registry</code></td><td>Merges providers into tool loops</td></tr>
+<tr><td><code>AllowlistedLocalMcpExporter</code></td><td><code>application::orchestration::allowlisted_mcp_tool_exporter</code></td><td>Explicit export allowlist + recursion budget</td></tr>
+</tbody>
+</table>
+</div>
+<p>Canonical types live in <code>domain::agent</code> (<code>AgentEnvelope</code>, <code>McpToolDescriptor</code>, <code>McpInvocationContext</code>).</p>
+<p><strong>MCP + agent builder wiring:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let provider: Arc&lt;dyn McpToolProvider&gt; = /* gateway outside core */;
+let (runtime, handles) = StasisRuntimeBuilder::new(backend)
+    .with_tool(MyLocalTool)?
+    .with_mcp_tool_provider(provider)
+    .with_mcp_export_allowlist(["my_local_tool"])
+    .with_delivery_endpoint_store(endpoints)
+    .with_turn_wait_store(waits)
+    .with_agent_message_codec(codec)
+    .with_agent_event_ingress(ingress)
+    .with_agent_transport(transport)
+    .build_with_handles()
+    .await?;
+// Serve MCP with handles.exporter; complete external turns via ingress.
+<span class="boring">}</span></code></pre>
+<p>Duplicate local/provider tool names are rejected at build time. Recursive export → provider → export bounce fails with <code>mcp recursion budget exhausted</code>.</p>
+<p>See <a href="#agent-platform-runtime-contracts">Agent Platform Runtime Contracts</a>.</p>
+<hr>
 <h2 id="tool-registry"><a class="header" href="#tool-registry">Tool Registry</a></h2>
 <h3 id="stasistool"><a class="header" href="#stasistool">StasisTool</a></h3>
 <p>Implement this trait to register a tool with the runtime for use in tool loop and agent handlers.</p>
@@ -4486,13 +4745,19 @@ pub trait StasisTool: Send + Sync {
 <tr><td><code>MemoryContextWriter</code></td><td>No</td><td>Auto-bootstrapped with <code>.with_locus_memory()</code></td><td><code>.with_memory_context_writer(...)</code></td></tr>
 <tr><td><code>MemoryOperations</code></td><td>No</td><td>Auto-bootstrapped with <code>.with_locus_memory()</code></td><td><code>.with_memory_operations(...)</code></td></tr>
 <tr><td><code>StasisTool</code></td><td>No</td><td>None</td><td><code>.with_tool(tool)?</code></td></tr>
+<tr><td><code>McpToolProvider</code></td><td>No</td><td>None</td><td><code>.with_mcp_tool_provider(provider)</code></td></tr>
+<tr><td><code>McpToolExporter</code></td><td>No</td><td>None (export nothing)</td><td><code>.with_mcp_tool_exporter(...)</code> / <code>.with_mcp_export_allowlist([...])</code></td></tr>
+<tr><td><code>AgentMessageCodec</code></td><td>No</td><td>JSON v1 for waitable</td><td><code>.with_agent_message_codec(...)</code></td></tr>
+<tr><td><code>AgentEventIngress</code></td><td>No</td><td>None</td><td><code>.with_agent_event_ingress(...)</code></td></tr>
+<tr><td><code>AgentTransport</code></td><td>No</td><td>None</td><td><code>.with_agent_transport(...)</code></td></tr>
+<tr><td><code>TurnWaitStore</code></td><td>No</td><td>process-local in-memory</td><td><code>.with_turn_wait_store(...)</code></td></tr>
 </tbody>
 </table>
 </div>
 <p>No port is strictly required. The runtime boots with all defaults when <code>StasisRuntimeBuilder::new(backend).build().await?</code> is called with no additional configuration.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="stasis-tool-macro"><a class="header" href="#stasis-tool-macro">Stasis Tool Macro</a></h1>
-<h2 id="document-metadata-18"><a class="header" href="#document-metadata-18">Document Metadata</a></h2>
+<h2 id="document-metadata-21"><a class="header" href="#document-metadata-21">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Guide</li>
 <li>Audience: Engineer</li>
@@ -4580,7 +4845,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 <p>Compile-fail and compile-pass cases are covered by trybuild tests under <code>stasis-macros/tests/ui</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="control-plane-and-endpoint-routing"><a class="header" href="#control-plane-and-endpoint-routing">Control Plane and Endpoint Routing</a></h1>
-<h2 id="document-metadata-19"><a class="header" href="#document-metadata-19">Document Metadata</a></h2>
+<h2 id="document-metadata-22"><a class="header" href="#document-metadata-22">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture and Delivery Reference</li>
 <li>Audience: Engineer, Platform, SRE, Architect</li>
@@ -4600,7 +4865,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-15"><a class="header" href="#purpose-15">Purpose</a></h2>
+<h2 id="purpose-18"><a class="header" href="#purpose-18">Purpose</a></h2>
 <p>Document the command-center foundation for Stasis runtime operations and outbound delivery routing.</p>
 <p>This reference covers:</p>
 <ol>
@@ -4717,7 +4982,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="command-center-dashboard-concept"><a class="header" href="#command-center-dashboard-concept">Command Center Dashboard Concept</a></h1>
-<h2 id="document-metadata-20"><a class="header" href="#document-metadata-20">Document Metadata</a></h2>
+<h2 id="document-metadata-23"><a class="header" href="#document-metadata-23">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Concept Guide</li>
 <li>Audience: Operator, Architect</li>
@@ -4730,7 +4995,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-16"><a class="header" href="#purpose-16">Purpose</a></h2>
+<h2 id="purpose-19"><a class="header" href="#purpose-19">Purpose</a></h2>
 <p>This page documents an operator-facing command center surface for runtime control and observability.</p>
 <p>For implemented route contracts, auth controls, and workflow builder behavior, use the <a href="#dashboard-operations-guide">Dashboard Operations Guide</a>.</p>
 <p>It is intentionally a concept slice focused on:</p>
@@ -5078,7 +5343,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </style>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="dashboard-operations-guide"><a class="header" href="#dashboard-operations-guide">Dashboard Operations Guide</a></h1>
-<h2 id="document-metadata-21"><a class="header" href="#document-metadata-21">Document Metadata</a></h2>
+<h2 id="document-metadata-24"><a class="header" href="#document-metadata-24">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Operations Guide</li>
 <li>Audience: Operator, SRE, Runtime Engineer</li>
@@ -5095,7 +5360,7 @@ async fn search_docs(input: SearchInput) -&gt; Result&lt;SearchOutput&gt; {
 </ul>
 </li>
 </ul>
-<h2 id="purpose-17"><a class="header" href="#purpose-17">Purpose</a></h2>
+<h2 id="purpose-20"><a class="header" href="#purpose-20">Purpose</a></h2>
 <p>This page documents the implemented dashboard behavior for production operators.</p>
 <p>Use this guide for:</p>
 <ol>
@@ -5307,7 +5572,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="cookbook-overview"><a class="header" href="#cookbook-overview">Cookbook Overview</a></h1>
-<h2 id="document-metadata-22"><a class="header" href="#document-metadata-22">Document Metadata</a></h2>
+<h2 id="document-metadata-25"><a class="header" href="#document-metadata-25">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Index</li>
 <li>Audience: Engineer, Operator</li>
@@ -5315,7 +5580,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <li>Last Verified: 2026-06-04</li>
 <li>Verified Against: docs-book/src/cookbook/</li>
 </ul>
-<h2 id="purpose-18"><a class="header" href="#purpose-18">Purpose</a></h2>
+<h2 id="purpose-21"><a class="header" href="#purpose-21">Purpose</a></h2>
 <p>This cookbook provides implementation-first recipes for teams taking Stasis from local experiments to production deployment.</p>
 <p>Each recipe is:</p>
 <ol>
@@ -5340,8 +5605,93 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <li><a href="#memory-maintenance-and-rollups">Memory Maintenance and Rollups</a></li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="platform-builder-mixed-local--external-participants"><a class="header" href="#platform-builder-mixed-local--external-participants">Platform Builder: Mixed Local + External Participants</a></h1>
+<h2 id="document-metadata-26"><a class="header" href="#document-metadata-26">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Cookbook</li>
+<li>Audience: Engineer, Platform Owner</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-07-22</li>
+</ul>
+<h2 id="goal"><a class="header" href="#goal">Goal</a></h2>
+<p>Run a durable mixed workload from YAML/TOML only: one local job plus one external waitable turn, with zero vendor adapters in-repo.</p>
+<h2 id="config"><a class="header" href="#config">Config</a></h2>
+<pre><code class="language-toml">api_version = "stasisd/v1"
+
+[[endpoint]]
+id = "fake-external"
+name = "Fake external participant"
+protocol = "http_webhook"
+target = "http://127.0.0.1:39001/agent"
+
+[[mcp_gateway]]
+id = "local-mcp"
+transport = "command"
+command = "fake-mcp-gateway"
+args = ["--stdio"]
+export_allowlist = ["summarize"]
+
+[[schedule]]
+id = "local-step"
+queue = "agents"
+job_type = "workflow.stasis.prompt"
+cron = "0/30 * * * * * *"
+payload = { user_prompt = "do local work" }
+
+[[schedule]]
+id = "external-step"
+queue = "agents"
+job_type = "workflow.stasis.agent_turn.waitable"
+cron = "0/30 * * * * * *"
+payload = {
+  agent_id = "external-reviewer",
+  session_id = "sess-1",
+  turn_id = "turn-1",
+  user_prompt = "review the plan",
+  endpoint_ref = "fake-external",
+  mcp_gateway_ref = "local-mcp",
+  timeout_seconds = 30,
+  poll_interval_seconds = 1
+}
+</code></pre>
+<p>Agent session payloads may also declare:</p>
+<pre><code class="language-toml">[[schedule.payload.participants]]
+agent_id = "external-reviewer"
+kind = "external"
+endpoint_ref = "fake-external"
+</code></pre>
+<p><code>stasisd</code> validates those refs. Durable external turns execute via <code>workflow.stasis.agent_turn.waitable</code> (leases, <code>Deferred</code> park, retry/DLQ).</p>
+<h2 id="run"><a class="header" href="#run">Run</a></h2>
+<pre><code class="language-bash">mkdir -p /tmp/stasis-join.d
+# write the TOML above into /tmp/stasis-join.d/mixed.toml
+cargo run -p stasisd -- --config /tmp/stasis-join.d --once --strict
+</code></pre>
+<h2 id="gateway-contract-outside-this-repo"><a class="header" href="#gateway-contract-outside-this-repo">Gateway contract (outside this repo)</a></h2>
+<ol>
+<li>Receive encoded <code>TurnGranted</code> on the endpoint transport.</li>
+<li>Do external work.</li>
+<li>POST/accept <code>TurnCompleted</code> / <code>Failed</code> / <code>Cancelled</code> through <code>AgentEventIngress</code> (JSON codec v1).</li>
+</ol>
+<p>Core Stasis never imports a vendor SDK. Compose gateways at your process root with:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>StasisRuntimeBuilder::new(backend)
+    .with_delivery_endpoint_store(endpoints)
+    .with_turn_wait_store(waits)
+    .with_agent_message_codec(codec)
+    .with_agent_event_ingress(ingress)
+    .with_agent_transport(transport)
+    .with_mcp_tool_provider(provider)
+<span class="boring">}</span></code></pre>
+<h2 id="related-1"><a class="header" href="#related-1">Related</a></h2>
+<ul>
+<li><a href="#stasisd-declarative-engine"><code>stasisd</code></a></li>
+<li><a href="#agent-platform-runtime-contracts">Agent Platform Runtime Contracts</a></li>
+<li>Epic: <a href="../../docs/design/agent-platform-and-stasisd-epic.html">agent-platform-and-stasisd-epic.md</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="production-agentic-workflows"><a class="header" href="#production-agentic-workflows">Production Agentic Workflows</a></h1>
-<h2 id="document-metadata-23"><a class="header" href="#document-metadata-23">Document Metadata</a></h2>
+<h2 id="document-metadata-27"><a class="header" href="#document-metadata-27">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer, Operator</li>
@@ -5412,6 +5762,7 @@ async fn fetch_knowledge_base(input: FetchKnowledgeBaseInput) -&gt; Result&lt;Fe
 
 fn production_memory_policy() -&gt; MemoryPolicyPayload {
     MemoryPolicyPayload {
+        tenant_id: None,
         session_ids: None,
         tiers: Some(vec!["summary".to_string(), "episodic".to_string()]),
         from_utc: None,
@@ -5419,11 +5770,13 @@ fn production_memory_policy() -&gt; MemoryPolicyPayload {
         limit: Some(12),
         alpha: Some(0.7),
         beta: Some(0.3),
+        gamma: None,
         fallback_policy: Some(MemoryFallbackPolicyPayload::OnEmpty),
         strictness: Some(MemoryStrictnessModePayload::Balanced),
         query_text: None,
         include_explain: Some(true),
         store_mode: Some(MemoryStoreModePayload::SummaryOnly),
+        filter: Default::default(),
     }
 }
 
@@ -5786,7 +6139,7 @@ STASIS_EXAMPLE_DRY_RUN=1 STASIS_EXAMPLE_TEAM_PROFILE=support cargo run --example
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="runtime-and-dashboard-bootstrap"><a class="header" href="#runtime-and-dashboard-bootstrap">Runtime and Dashboard Bootstrap</a></h1>
-<h2 id="document-metadata-24"><a class="header" href="#document-metadata-24">Document Metadata</a></h2>
+<h2 id="document-metadata-28"><a class="header" href="#document-metadata-28">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer, Operator</li>
@@ -5886,7 +6239,7 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="workflow-builder-starting-object"><a class="header" href="#workflow-builder-starting-object">Workflow Builder Starting Object</a></h1>
-<h2 id="document-metadata-25"><a class="header" href="#document-metadata-25">Document Metadata</a></h2>
+<h2 id="document-metadata-29"><a class="header" href="#document-metadata-29">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer, Operator</li>
@@ -5983,7 +6336,7 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="identity-memory-change-control"><a class="header" href="#identity-memory-change-control">Identity Memory Change Control</a></h1>
-<h2 id="document-metadata-26"><a class="header" href="#document-metadata-26">Document Metadata</a></h2>
+<h2 id="document-metadata-30"><a class="header" href="#document-metadata-30">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer</li>
@@ -6272,7 +6625,7 @@ assert!(policy.user.expect("user").preferences.is_empty());
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="memory-maintenance-and-rollups"><a class="header" href="#memory-maintenance-and-rollups">Memory Maintenance and Rollups</a></h1>
-<h2 id="document-metadata-27"><a class="header" href="#document-metadata-27">Document Metadata</a></h2>
+<h2 id="document-metadata-31"><a class="header" href="#document-metadata-31">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Cookbook Recipe</li>
 <li>Audience: Engineer, Operator</li>
@@ -6424,7 +6777,7 @@ println!(
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
-<h2 id="document-metadata-28"><a class="header" href="#document-metadata-28">Document Metadata</a></h2>
+<h2 id="document-metadata-32"><a class="header" href="#document-metadata-32">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
@@ -6443,7 +6796,7 @@ println!(
 </ul>
 </li>
 </ul>
-<h2 id="purpose-19"><a class="header" href="#purpose-19">Purpose</a></h2>
+<h2 id="purpose-22"><a class="header" href="#purpose-22">Purpose</a></h2>
 <p>Define the V1 SurrealDB schema and indexing strategy for Stasis durable job orchestration.</p>
 <h2 id="design-constraints"><a class="header" href="#design-constraints">Design Constraints</a></h2>
 <ol>
@@ -6746,20 +7099,24 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
 </ol>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture-decision-records"><a class="header" href="#architecture-decision-records">Architecture Decision Records</a></h1>
-<h2 id="document-metadata-29"><a class="header" href="#document-metadata-29">Document Metadata</a></h2>
+<h2 id="document-metadata-33"><a class="header" href="#document-metadata-33">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-05-25</li>
+<li>Last Verified: 2026-07-22</li>
 <li>Verified Against:
 <ul>
 <li>docs/adr/README.md</li>
+<li>docs/adr/ADR-0007-agent-platform-runtime-contracts.md</li>
+<li>docs/adr/ADR-0008-stasisd-declarative-engine.md</li>
+<li>docs/design/agent-platform-runtime-contracts-plan.md</li>
+<li>docs/design/stasisd-declarative-engine-plan.md</li>
 <li>docs-book/src/adr.md</li>
 </ul>
 </li>
 </ul>
-<h2 id="purpose-20"><a class="header" href="#purpose-20">Purpose</a></h2>
+<h2 id="purpose-23"><a class="header" href="#purpose-23">Purpose</a></h2>
 <p>Track major architectural decisions with rationale, alternatives, and consequences.</p>
 <h2 id="adr-index"><a class="header" href="#adr-index">ADR Index</a></h2>
 <div class="table-wrapper">
@@ -6774,6 +7131,8 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
 <tr><td>ADR-0004</td><td>Recurring Jobs via Materialized Schedule Definitions</td><td>Accepted</td><td>2026-05-07</td></tr>
 <tr><td>ADR-0005</td><td>Agentic Workflow Skill Graph Contract</td><td>Accepted</td><td>2026-05-25</td></tr>
 <tr><td>ADR-0006</td><td>OpenTelemetry First-Class Observability</td><td>Accepted</td><td>2026-06-04</td></tr>
+<tr><td>ADR-0007</td><td>Agent Platform Runtime Contracts</td><td>Accepted</td><td>2026-07-22</td></tr>
+<tr><td>ADR-0008</td><td><code>stasisd</code> Declarative Engine</td><td>Accepted</td><td>2026-07-22</td></tr>
 </tbody>
 </table>
 </div>
@@ -6788,6 +7147,11 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
   A4 --&gt; A2
   A1 --&gt; A6[ADR-0006 OpenTelemetry Observability]
   A2 --&gt; A6
+  A1 --&gt; A7[ADR-0007 Agent Platform Runtime Contracts]
+  A2 --&gt; A7
+  A3 --&gt; A7
+  A4 --&gt; A8[ADR-0008 stasisd Declarative Engine]
+  A7 --&gt; A8
 </pre>
 
 <h2 id="adr-0001-durable-job-runtime-on-surrealdb"><a class="header" href="#adr-0001-durable-job-runtime-on-surrealdb">ADR-0001 Durable Job Runtime on SurrealDB</a></h2>
@@ -6862,6 +7226,35 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
 </ul>
 </li>
 <li>Plan: <a href="../../docs/design/opentelemetry-integration-rfc-plan.html">OpenTelemetry Integration RFC</a></li>
+</ul>
+<h2 id="adr-0007-agent-platform-runtime-contracts"><a class="header" href="#adr-0007-agent-platform-runtime-contracts">ADR-0007 Agent Platform Runtime Contracts</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Stasis should be the durable work runtime for agent platforms (MassTransit/Hangfire role), not a vendor integration hub for IDE/CLI agents.</li>
+<li>Decision: Ship three vendor-neutral contracts — Comms (bidirectional durable messaging), Translation (canonical envelope codecs), and MCP tool bridge (injectable provider/exporter around <code>StasisTool</code>) — with gateways implemented outside core.</li>
+<li>Consequences:
+<ul>
+<li>Positive: platform builders can inject gateways via DI; core stays product-agnostic; durability/leases/outbox remain the coordination backbone.</li>
+<li>Tradeoff: requires frozen canonical envelope versioning, ingress/waitable-turn state, and MCP recursion guards.</li>
+</ul>
+</li>
+<li>Plan: <a href="../../docs/design/agent-platform-runtime-contracts-plan.html">Agent Platform Runtime Contracts Plan</a></li>
+<li>Full ADR: <a href="../../docs/adr/ADR-0007-agent-platform-runtime-contracts.html">ADR-0007</a></li>
+</ul>
+<h2 id="adr-0008-stasisd-declarative-engine"><a class="header" href="#adr-0008-stasisd-declarative-engine">ADR-0008 <code>stasisd</code> Declarative Engine</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Operators need a small deployable that turns YAML/TOML desired state into live agent schedules — the nginx of AI orchestration — without reinventing recurring registration in every app.</li>
+<li>Decision: Ship <code>stasisd</code> as a thin reconcile+tick engine on top of the Stasis runtime: watch config files, map them to managed <code>RecurringDefinition</code>s, and apply drain/cancel/orphan policies on remove.</li>
+<li>Consequences:
+<ul>
+<li>Positive: GitOps-friendly schedules; clear kernel vs deployable split; reuses existing materialization/leases.</li>
+<li>Tradeoff: versioned config schema, provenance ownership, and explicit delete/drain semantics required.</li>
+</ul>
+</li>
+<li>Plan: <a href="../../docs/design/stasisd-declarative-engine-plan.html"><code>stasisd</code> Declarative Engine Plan</a></li>
+<li>Full ADR: <a href="../../docs/adr/ADR-0008-stasisd-declarative-engine.html">ADR-0008</a></li>
+<li>Overview: <a href="#stasisd-declarative-engine"><code>stasisd</code> docs-book page</a></li>
 </ul>
 
                     </main>
