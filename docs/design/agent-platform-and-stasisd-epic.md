@@ -14,7 +14,7 @@
   - docs-book/src/agent-platform-contracts.md
   - docs-book/src/stasisd.md
 
-Status: **Active Epic — Phase 2 Complete (M0 + M1 + M2)**  
+Status: **Active Epic — Phase 3 Complete (M0–M3)**  
 Date: 2026-07-22  
 Owner: Stasis Core
 
@@ -192,10 +192,10 @@ Use this as the epic burndown. Check when exit criteria land.
 - [x] docs-book cookbooks linked from SUMMARY
 
 ### M3 — Bridge + harden
-- [ ] MCP provider/exporter + recursion guard
-- [ ] Builder DI documented in extension-points
-- [ ] `--strict` + provenance ownership tests
-- [ ] Runbook + systemd example
+- [x] MCP provider/exporter + recursion guard
+- [x] Builder DI documented in extension-points
+- [x] `--strict` + provenance ownership tests
+- [x] Runbook + systemd example
 
 ### M4 — Unified platform story
 - [ ] Declarative external participant config

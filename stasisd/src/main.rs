@@ -2,6 +2,7 @@
 
 mod config;
 mod error;
+mod health;
 mod host;
 mod job_types;
 mod model;
@@ -75,6 +76,7 @@ async fn run() -> Result<(), StasisdError> {
             args.max_ticks
         },
         run_for: args.run_for,
+        healthz_addr: args.healthz_addr,
     };
 
     let report = run_host(&runtime, host_options).await?;

@@ -13,6 +13,7 @@
 - [Runtime Builder and Wiring Guide](./runtime-builder.md)
 - [Recurring Jobs](./recurring-jobs.md)
 - [`stasisd` Declarative Engine](./stasisd.md)
+- [`stasisd` Operator Runbook](./stasisd-runbook.md)
 - [Retention and Replay](./retention-replay.md)
 - [Lineage and Observability](./lineage-observability.md)
 - [OpenTelemetry](./opentelemetry.md)

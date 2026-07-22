@@ -346,8 +346,25 @@ Vendor-neutral agent platform ports and Phase 1 reference adapters.
 |---|---|---|
 | `JsonAgentMessageCodec` | `infrastructure::agent::json_agent_message_codec` | JSON v1 reference codec |
 | `InMemoryAgentEventIngress` | `infrastructure::agent::in_memory_agent_event_ingress` | Idempotent in-process ingress |
+| `McpBridgedToolRegistry` | `application::orchestration::mcp_bridged_tool_registry` | Merges providers into tool loops |
+| `AllowlistedLocalMcpExporter` | `application::orchestration::allowlisted_mcp_tool_exporter` | Explicit export allowlist + recursion budget |
 
-Canonical types live in `domain::agent` (`AgentEnvelope`, `McpToolDescriptor`).
+Canonical types live in `domain::agent` (`AgentEnvelope`, `McpToolDescriptor`, `McpInvocationContext`).
+
+**MCP builder wiring:**
+
+```rust
+let provider: Arc<dyn McpToolProvider> = /* gateway outside core */;
+let (runtime, handles) = StasisRuntimeBuilder::new(backend)
+    .with_tool(MyLocalTool)?
+    .with_mcp_tool_provider(provider)
+    .with_mcp_export_allowlist(["my_local_tool"])
+    .build_with_handles()
+    .await?;
+// Serve MCP with handles.exporter (exports allowlisted local tools only).
+```
+
+Duplicate local/provider tool names are rejected at build time. Recursive export → provider → export bounce fails with `mcp recursion budget exhausted`.
 
 See [Agent Platform Runtime Contracts](./agent-platform-contracts.md).
 
@@ -407,5 +424,7 @@ The `InMemoryToolRegistry` is the only provided registry. It is always used inte
 | `MemoryContextWriter` | No | Auto-bootstrapped with `.with_locus_memory()` | `.with_memory_context_writer(...)` |
 | `MemoryOperations` | No | Auto-bootstrapped with `.with_locus_memory()` | `.with_memory_operations(...)` |
 | `StasisTool` | No | None | `.with_tool(tool)?` |
+| `McpToolProvider` | No | None | `.with_mcp_tool_provider(provider)` |
+| `McpToolExporter` | No | None (export nothing) | `.with_mcp_tool_exporter(...)` / `.with_mcp_export_allowlist([...])` |
 
 No port is strictly required. The runtime boots with all defaults when `StasisRuntimeBuilder::new(backend).build().await?` is called with no additional configuration.

@@ -23,7 +23,7 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 notify = "7"
 async-trait = "0.1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "sync", "net", "io-util"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

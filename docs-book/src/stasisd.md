@@ -48,6 +48,8 @@ ADR-0008 is **Accepted**. Phase 1 loads YAML/TOML `stasisd/v1` schedules, valida
 
 Phase 2 adds the long-running host: filesystem watch + debounce, periodic reconcile, and a materialize → process → publish tick loop. Backend selection via `STASIS_STASISD_RUNTIME_BACKEND` (`in-memory` default, `surreal-mem` / `surreal-ws` / `surreal-kv`).
 
+Phase 3 hardens operators: `--strict` quarantine semantics, id-prefix provenance (`stasisd:`), Ctrl-C/SIGTERM shutdown, optional `--healthz-addr` (`/healthz`, `/readyz`), and a systemd/runbook path.
+
 Phased epic board (with ADR-0007 contracts): [agent-platform-and-stasisd-epic.md](../../docs/design/agent-platform-and-stasisd-epic.md).
 
 Cron dialect matches `RecurringDefinition` / `cron` 0.12 (**7 fields**: sec min hour dom month dow year).
@@ -76,4 +78,6 @@ cargo run -p stasisd -- --config /tmp/stasis-agents.d \
 
 - ADR: [ADR-0008](../../docs/adr/ADR-0008-stasisd-declarative-engine.md)
 - Plan: [stasisd-declarative-engine-plan.md](../../docs/design/stasisd-declarative-engine-plan.md)
+- Runbook: [`stasisd` Operator Runbook](./stasisd-runbook.md)
+- systemd: [`docs/deploy/stasisd.service`](../../docs/deploy/stasisd.service)
 - Related: [Recurring Jobs](./recurring-jobs.md), [Agent Platform Runtime Contracts](./agent-platform-contracts.md)

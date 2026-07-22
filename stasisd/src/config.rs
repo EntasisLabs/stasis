@@ -1,6 +1,7 @@
 //! Config discovery + load for `stasisd/v1`.
 
 use std::fs;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -21,6 +22,7 @@ pub struct CliArgs {
     pub debounce: Duration,
     pub max_ticks: Option<u64>,
     pub run_for: Option<Duration>,
+    pub healthz_addr: Option<SocketAddr>,
     pub tick: TickOptions,
 }
 
@@ -39,6 +41,7 @@ impl CliArgs {
         let mut debounce = Duration::from_millis(250);
         let mut max_ticks = None;
         let mut run_for = None;
+        let mut healthz_addr = None;
         let mut tick = TickOptions::default();
         let mut queues: Vec<String> = Vec::new();
 
@@ -98,6 +101,14 @@ impl CliArgs {
                 "--run-for" => {
                     run_for = Some(parse_duration(&next_value(&mut iter, "--run-for")?)?);
                 }
+                "--healthz-addr" => {
+                    let value = next_value(&mut iter, "--healthz-addr")?;
+                    healthz_addr = Some(value.parse::<SocketAddr>().map_err(|_| {
+                        StasisdError::Usage(format!(
+                            "invalid --healthz-addr '{value}' (expected host:port)"
+                        ))
+                    })?);
+                }
                 "--help" | "-h" => {
                     return Err(StasisdError::Usage(help_text()));
                 }
@@ -129,6 +140,7 @@ impl CliArgs {
             debounce,
             max_ticks,
             run_for,
+            healthz_addr,
             tick,
         })
     }
@@ -183,6 +195,7 @@ fn help_text() -> String {
        --queue <name>              Queue to process (repeatable)\n  \
        --max-ticks <n>             Stop after N ticks (testing)\n  \
        --run-for <dur>             Stop after duration (testing)\n  \
+       --healthz-addr <host:port>  Serve /healthz and /readyz\n  \
        -h, --help                  Show help\n"
         .to_string()
 }
@@ -372,6 +385,44 @@ cron = "0 0 * * * * *"
     fn missing_path_fails() {
         let err = load_desired_state(Path::new("/tmp/stasisd-does-not-exist-hopefully")).unwrap_err();
         assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn non_strict_keeps_good_schedules_when_sibling_is_bad() {
+        let dir = temp_dir("nonstrict");
+        fs::write(
+            dir.join("good.toml"),
+            r#"
+api_version = "stasisd/v1"
+[[schedule]]
+id = "nightly"
+queue = "agents"
+job_type = "workflow.stasis.prompt"
+cron = "0 0 2 * * * *"
+"#,
+        )
+        .unwrap();
+        fs::write(dir.join("bad.yaml"), "not: valid: stasisd\n").unwrap();
+        let desired = load_desired_state(&dir).unwrap();
+        assert_eq!(desired.schedules.len(), 1);
+        assert_eq!(desired.schedules[0].id, "nightly");
+        assert!(!desired.diagnostics.is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn parse_healthz_addr() {
+        let args = CliArgs::parse([
+            "--config",
+            "/tmp/agents.d",
+            "--healthz-addr",
+            "127.0.0.1:0",
+        ])
+        .unwrap();
+        assert_eq!(
+            args.healthz_addr.unwrap().to_string(),
+            "127.0.0.1:0"
+        );
     }
 
     #[test]

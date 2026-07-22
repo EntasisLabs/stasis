@@ -57,6 +57,8 @@ ADR-0007 is **Accepted**. Phase 1 adds `JsonAgentMessageCodec` and `InMemoryAgen
 
 Phase 2 adds waitable external turns: `workflow.stasis.agent_turn.waitable` parks via `JobExecutionOutcome::Deferred` (attempts not consumed), `TurnWaitStore` + `WaitCorrelatingAgentEventIngress` complete/fail/cancel/timeout the wait, and fake-gateway tests cover grant→complete plus mixed local+external sessions. Wait store is process-local in Phase 2 (including Surreal backends).
 
+Phase 3 adds the MCP tool bridge: `McpBridgedToolRegistry` merges `McpToolProvider` tools beside local `StasisTool`s (duplicate names rejected), `AllowlistedLocalMcpExporter` exports an explicit allowlist (default: nothing), and recursion budget is enforced on MCP ↔ Stasis re-entry. Builder: `.with_mcp_tool_provider(...)`, `.with_mcp_tool_exporter(...)`, `.with_mcp_export_allowlist(...)`, `.build_with_handles()`.
+
 ## Related deployable
 
 [`stasisd`](./stasisd.md) (ADR-0008) is the declarative YAML/TOML engine that reconciles desired state into durable schedules on top of this runtime.

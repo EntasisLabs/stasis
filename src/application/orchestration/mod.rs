@@ -1,7 +1,10 @@
 pub mod agent_session_payload;
 pub mod agent_session_pipeline;
+pub mod allowlisted_mcp_tool_exporter;
 pub mod concurrent_pattern_pipeline;
 pub mod handoff_pattern_pipeline;
+pub mod mcp_bridged_tool_registry;
+pub mod mcp_recursion;
 pub mod orchestrator_pattern_pipeline;
 pub mod prompt_pipeline;
 pub mod runtime_job_payloads;
