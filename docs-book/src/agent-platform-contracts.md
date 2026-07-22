@@ -53,7 +53,7 @@ The gateway crate depends on Stasis ports/SDK. Core Stasis never depends on a co
 
 ## Status
 
-Contracts are proposed. Implementation is phased in the delivery plan.
+ADR-0007 is **Accepted**. Epic Phase 0 landed canonical `AgentEnvelope` types and outbound agent ports under `src/domain/agent` and `src/ports/outbound/agent`.
 
 ## Related deployable
 

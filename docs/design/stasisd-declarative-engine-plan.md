@@ -16,7 +16,7 @@
   - src/application/runtime/stasis_runtime_builder.rs
   - docs-book/src/recurring-jobs.md
 
-Status: **Proposed — Ready for Phased Implementation**  
+Status: **Accepted — Implementation In Progress (Epic Phase 0)**  
 Date: 2026-07-22  
 Owner: Stasis Core  
 ADR: [ADR-0008-stasisd-declarative-engine.md](../adr/ADR-0008-stasisd-declarative-engine.md)  
@@ -297,11 +297,13 @@ Recommendation: **workspace crate `stasisd`** so deployable packaging, CLI flags
 2. `stasisd/v1` schema draft frozen (schedule fields above).
 3. Workspace crate skeleton + CLI (`--config`, `--once`, `--strict`).
 4. Provenance field convention documented.
-5. Decide ID strategy (`raw id` vs `stasisd:<id>`).
+5. ID strategy frozen: managed recurring ids use `stasisd:<id>` (`stasisd::provenance::managed_recurring_id`).
 
 **Acceptance**
 
 - Binary starts, loads empty dir, exits cleanly with `--once`.
+
+**Phase 0 status:** scaffolding landed — CLI + empty-dir load + provenance helpers + workspace membership.
 
 ### Phase 1 — Load + validate + apply schedules
 

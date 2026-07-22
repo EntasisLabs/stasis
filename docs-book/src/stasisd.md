@@ -44,9 +44,14 @@ stasisd --config /etc/stasis/agents.d/
 
 ## Status
 
-Proposed. See the delivery plan for phases, schema draft, and delete/drain semantics.
+ADR-0008 is **Accepted**. Epic Phase 0 scaffolded the workspace `stasisd` binary (`--config`, `--once`, `--strict`) with empty-dir load and `stasisd:<id>` managed id prefix.
 
 Phased epic board (with ADR-0007 contracts): [agent-platform-and-stasisd-epic.md](../../docs/design/agent-platform-and-stasisd-epic.md).
+
+```bash
+mkdir -p /tmp/stasis-agents.d
+cargo run -p stasisd -- --config /tmp/stasis-agents.d --once
+```
 
 ## References
 

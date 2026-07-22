@@ -16,7 +16,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 

@@ -28,8 +28,8 @@ Track major architectural decisions with rationale, alternatives, and consequenc
 | ADR-0004 | Recurring Jobs via Materialized Schedule Definitions | Accepted | 2026-05-07 |
 | ADR-0005 | Agentic Workflow Skill Graph Contract | Accepted | 2026-05-25 |
 | ADR-0006 | OpenTelemetry First-Class Observability | Accepted | 2026-06-04 |
-| ADR-0007 | Agent Platform Runtime Contracts | Proposed | 2026-07-22 |
-| ADR-0008 | `stasisd` Declarative Engine | Proposed | 2026-07-22 |
+| ADR-0007 | Agent Platform Runtime Contracts | Accepted | 2026-07-22 |
+| ADR-0008 | `stasisd` Declarative Engine | Accepted | 2026-07-22 |
 
 ## Decision Dependency Diagram
 
@@ -53,7 +53,7 @@ flowchart TD
 
 ## ADR-0008 `stasisd` Declarative Engine
 
-- Status: Proposed
+- Status: Accepted
 - Context: Operators need a small deployable that turns YAML/TOML desired state into live agent schedules — the nginx of AI orchestration — without reinventing recurring registration in every app.
 - Decision: Ship `stasisd` as a thin reconcile+tick engine on top of the Stasis runtime: watch config files, map them to managed `RecurringDefinition`s, and apply drain/cancel/orphan policies on remove.
 - Consequences:
@@ -65,7 +65,7 @@ flowchart TD
 
 ## ADR-0007 Agent Platform Runtime Contracts
 
-- Status: Proposed
+- Status: Accepted
 - Context: Stasis should be the durable work runtime for agent platforms (MassTransit/Hangfire role), not a vendor integration hub for IDE/CLI agents.
 - Decision: Ship three vendor-neutral contracts — Comms (bidirectional durable messaging), Translation (canonical envelope codecs), and MCP tool bridge (injectable provider/exporter around `StasisTool`) — with gateways implemented outside core.
 - Consequences:
@@ -73,6 +73,7 @@ flowchart TD
   - Tradeoff: requires frozen canonical envelope versioning, ingress/waitable-turn state, and MCP recursion guards.
 - Plan: [design/agent-platform-runtime-contracts-plan.md](../design/agent-platform-runtime-contracts-plan.md)
 - Full ADR: [ADR-0007-agent-platform-runtime-contracts.md](ADR-0007-agent-platform-runtime-contracts.md)
+- Epic: [design/agent-platform-and-stasisd-epic.md](../design/agent-platform-and-stasisd-epic.md)
 
 ## ADR-0006 OpenTelemetry First-Class Observability
 

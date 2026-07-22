@@ -14,7 +14,7 @@
   - docs-book/src/agent-platform-contracts.md
   - docs-book/src/stasisd.md
 
-Status: **Active Epic — Ready to Execute**  
+Status: **Active Epic — Phase 0 In Progress / M0 Complete**  
 Date: 2026-07-22  
 Owner: Stasis Core
 
@@ -174,11 +174,11 @@ flowchart TD
 Use this as the epic burndown. Check when exit criteria land.
 
 ### M0 — Kickoff
-- [ ] ADR-0007 Accepted
-- [ ] ADR-0008 Accepted
-- [ ] Agent port/module stubs compile
-- [ ] `stasisd` crate `--once` on empty config works
-- [ ] ID strategy + schema freezes documented
+- [x] ADR-0007 Accepted
+- [x] ADR-0008 Accepted
+- [x] Agent port/module stubs compile
+- [x] `stasisd` crate `--once` on empty config works
+- [x] ID strategy + schema freezes documented (`stasisd:<id>` prefix)
 
 ### M1 — Vertical slices
 - [ ] JSON codec golden tests

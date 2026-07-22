@@ -36,7 +36,7 @@ include = [
 name = "stasis"
 
 [workspace]
-members = [".", "stasis-macros"]
+members = [".", "stasis-macros", "stasisd"]
 resolver = "2"
 
 [features]

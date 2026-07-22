@@ -18,7 +18,7 @@
   - docs-book/src/extension-points.md
   - docs-book/src/control-plane-endpoint-routing.md
 
-Status: **Proposed Contract — Ready for Phased Implementation**  
+Status: **Accepted Contract — Implementation In Progress (Epic Phase 0)**  
 Date: 2026-07-22  
 Owner: Stasis Core  
 ADR: [ADR-0007-agent-platform-runtime-contracts.md](../adr/ADR-0007-agent-platform-runtime-contracts.md)  

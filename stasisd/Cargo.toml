@@ -1,0 +1,16 @@
+[package]
+name = "stasisd"
+version = "0.1.0"
+edition = "2024"
+description = "Declarative Stasis engine — YAML/TOML desired state to durable agent schedules"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[[bin]]
+name = "stasisd"
+path = "src/main.rs"
+
+[dependencies]
+stasis-rs = { path = ".." }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

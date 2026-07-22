@@ -8529,6 +8529,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "stasisd"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "stasis-rs",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

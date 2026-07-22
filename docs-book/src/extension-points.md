@@ -330,6 +330,24 @@ Custom implementations can replace any built-in adapter. Explicit builder ports 
 
 ---
 
+## Agent Platform Ports (ADR-0007)
+
+Phase 0 introduces vendor-neutral agent platform ports. Behavior beyond types/traits lands in later epic phases.
+
+| Port | Module | Purpose |
+|---|---|---|
+| `AgentMessageCodec` | `ports::outbound::agent::message_codec` | Encode/decode canonical `AgentEnvelope` |
+| `AgentEventIngress` | `ports::outbound::agent::event_ingress` | Accept inbound agent envelopes |
+| `AgentTransport` | `ports::outbound::agent::transport` | Publish encoded messages to delivery endpoints |
+| `McpToolProvider` | `ports::outbound::agent::mcp_tool_provider` | Inject MCP tools into Stasis |
+| `McpToolExporter` | `ports::outbound::agent::mcp_tool_exporter` | Export Stasis tools as MCP tools |
+
+Canonical types live in `domain::agent` (`AgentEnvelope`, `McpToolDescriptor`).
+
+See [Agent Platform Runtime Contracts](./agent-platform-contracts.md).
+
+---
+
 ## Tool Registry
 
 ### StasisTool
