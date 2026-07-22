@@ -7,6 +7,8 @@ use surrealdb::Surreal;
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
 use crate::application::runtime::surreal_runtime::SurrealRuntime;
 use crate::domain::errors::{Result, StasisError};
+use crate::infrastructure::agent::in_memory_turn_wait_store::InMemoryTurnWaitStore;
+use crate::infrastructure::agent::json_agent_message_codec::JsonAgentMessageCodec;
 use crate::infrastructure::llm::genai_chat_client::GenaiChatClient;
 use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
 use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
@@ -23,6 +25,8 @@ use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNo
 use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
 use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
 use crate::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
+use crate::ports::outbound::agent::message_codec::AgentMessageCodec;
+use crate::ports::outbound::agent::turn_wait_store::TurnWaitStore;
 use crate::ports::outbound::ai_chat_client::AiChatClient;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
@@ -194,6 +198,14 @@ impl RuntimeFactory {
 
     pub fn default_chat_client() -> Arc<dyn AiChatClient> {
         Arc::new(GenaiChatClient::from_env())
+    }
+
+    pub fn default_turn_wait_store() -> Arc<dyn TurnWaitStore> {
+        Arc::new(InMemoryTurnWaitStore::new())
+    }
+
+    pub fn default_agent_message_codec() -> Arc<dyn AgentMessageCodec> {
+        Arc::new(JsonAgentMessageCodec::v1())
     }
 
     pub fn default_workflow_engine() -> Arc<dyn WorkflowEngine> {

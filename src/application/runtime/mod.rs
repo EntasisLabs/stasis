@@ -1,5 +1,6 @@
 pub mod agent_session_job_handler;
 pub mod agent_turn_job_handler;
+pub mod agent_turn_waitable_job_handler;
 pub mod chat_client_middleware;
 pub mod chat_options_resolver;
 pub mod concurrent_pattern_job_handler;

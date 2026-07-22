@@ -2,10 +2,12 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::error::StasisdError;
 use crate::model::{DesiredState, StasisdDocument};
 use crate::parse::parse_config_bytes;
+use crate::tick::TickOptions;
 use crate::validate::validate_desired_state;
 
 #[derive(Debug, Clone)]
@@ -13,6 +15,13 @@ pub struct CliArgs {
     pub config_path: PathBuf,
     pub once: bool,
     pub strict: bool,
+    pub watch: bool,
+    pub tick_interval: Duration,
+    pub reconcile_interval: Duration,
+    pub debounce: Duration,
+    pub max_ticks: Option<u64>,
+    pub run_for: Option<Duration>,
+    pub tick: TickOptions,
 }
 
 impl CliArgs {
@@ -24,19 +33,71 @@ impl CliArgs {
         let mut config_path = None;
         let mut once = false;
         let mut strict = false;
+        let mut watch = true;
+        let mut tick_interval = Duration::from_secs(1);
+        let mut reconcile_interval = Duration::from_secs(60);
+        let mut debounce = Duration::from_millis(250);
+        let mut max_ticks = None;
+        let mut run_for = None;
+        let mut tick = TickOptions::default();
+        let mut queues: Vec<String> = Vec::new();
 
         let mut iter = args.into_iter();
         while let Some(arg) = iter.next() {
             let arg = arg.as_ref();
             match arg {
                 "--config" | "-c" => {
-                    let value = iter.next().ok_or_else(|| {
-                        StasisdError::Usage("--config requires a path".to_string())
-                    })?;
-                    config_path = Some(PathBuf::from(value.as_ref()));
+                    let value = next_value(&mut iter, "--config")?;
+                    config_path = Some(PathBuf::from(value));
                 }
-                "--once" => once = true,
+                "--once" => {
+                    once = true;
+                    watch = false;
+                }
                 "--strict" => strict = true,
+                "--watch" => watch = true,
+                "--no-watch" => watch = false,
+                "--tick-interval" => {
+                    tick_interval = parse_duration(&next_value(&mut iter, "--tick-interval")?)?;
+                }
+                "--reconcile-interval" => {
+                    reconcile_interval =
+                        parse_duration(&next_value(&mut iter, "--reconcile-interval")?)?;
+                }
+                "--debounce" => {
+                    debounce = parse_duration(&next_value(&mut iter, "--debounce")?)?;
+                }
+                "--queue" => {
+                    queues.push(next_value(&mut iter, "--queue")?);
+                }
+                "--worker-id" => {
+                    tick.worker_id = next_value(&mut iter, "--worker-id")?;
+                }
+                "--scheduler-id" => {
+                    tick.scheduler_id = next_value(&mut iter, "--scheduler-id")?;
+                }
+                "--process-limit" => {
+                    tick.process_limit = next_value(&mut iter, "--process-limit")?
+                        .parse()
+                        .map_err(|_| {
+                            StasisdError::Usage("--process-limit must be an integer".into())
+                        })?;
+                }
+                "--publish-limit" => {
+                    tick.publish_limit = next_value(&mut iter, "--publish-limit")?
+                        .parse()
+                        .map_err(|_| {
+                            StasisdError::Usage("--publish-limit must be an integer".into())
+                        })?;
+                }
+                "--max-ticks" => {
+                    max_ticks = Some(next_value(&mut iter, "--max-ticks")?.parse().map_err(
+                        |_| StasisdError::Usage("--max-ticks must be an integer".into()),
+                    )?);
+                }
+                "--run-for" => {
+                    run_for = Some(parse_duration(&next_value(&mut iter, "--run-for")?)?);
+                }
                 "--help" | "-h" => {
                     return Err(StasisdError::Usage(help_text()));
                 }
@@ -54,24 +115,75 @@ impl CliArgs {
         let config_path = config_path.ok_or_else(|| {
             StasisdError::Usage("missing required --config <path>".to_string())
         })?;
+        if !queues.is_empty() {
+            tick.queues = queues;
+        }
 
         Ok(Self {
             config_path,
             once,
             strict,
+            watch,
+            tick_interval,
+            reconcile_interval,
+            debounce,
+            max_ticks,
+            run_for,
+            tick,
         })
     }
+}
+
+fn next_value<I, S>(iter: &mut I, flag: &str) -> Result<String, StasisdError>
+where
+    I: Iterator<Item = S>,
+    S: AsRef<str>,
+{
+    iter.next()
+        .map(|v| v.as_ref().to_string())
+        .ok_or_else(|| StasisdError::Usage(format!("{flag} requires a value")))
+}
+
+fn parse_duration(raw: &str) -> Result<Duration, StasisdError> {
+    if let Some(ms) = raw.strip_suffix("ms") {
+        let value: u64 = ms
+            .parse()
+            .map_err(|_| StasisdError::Usage(format!("invalid duration '{raw}'")))?;
+        return Ok(Duration::from_millis(value));
+    }
+    if let Some(secs) = raw.strip_suffix('s') {
+        let value: u64 = secs
+            .parse()
+            .map_err(|_| StasisdError::Usage(format!("invalid duration '{raw}'")))?;
+        return Ok(Duration::from_secs(value));
+    }
+    if let Some(mins) = raw.strip_suffix('m') {
+        let value: u64 = mins
+            .parse()
+            .map_err(|_| StasisdError::Usage(format!("invalid duration '{raw}'")))?;
+        return Ok(Duration::from_secs(value.saturating_mul(60)));
+    }
+    Err(StasisdError::Usage(format!(
+        "invalid duration '{raw}' (use 250ms, 1s, 5m)"
+    )))
 }
 
 fn help_text() -> String {
     "stasisd — declarative Stasis engine\n\n\
      Usage:\n  \
-       stasisd --config <path> [--once] [--strict]\n\n\
+       stasisd --config <path> [--once] [--strict] [--watch|--no-watch]\n\n\
      Flags:\n  \
-       -c, --config <path>  Config file or directory\n  \
-       --once               Load/reconcile once and exit\n  \
-       --strict             Treat config diagnostics as fatal\n  \
-       -h, --help           Show help\n"
+       -c, --config <path>         Config file or directory\n  \
+       --once                      Reconcile+tick once and exit\n  \
+       --strict                    Treat config diagnostics as fatal\n  \
+       --watch / --no-watch        Enable/disable filesystem watch\n  \
+       --tick-interval <dur>       Worker tick interval (default 1s)\n  \
+       --reconcile-interval <dur>  Full reconcile interval (default 60s)\n  \
+       --debounce <dur>            Watch debounce (default 250ms)\n  \
+       --queue <name>              Queue to process (repeatable)\n  \
+       --max-ticks <n>             Stop after N ticks (testing)\n  \
+       --run-for <dur>             Stop after duration (testing)\n  \
+       -h, --help                  Show help\n"
         .to_string()
 }
 
@@ -174,7 +286,7 @@ fn is_config_file(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn temp_dir(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -194,10 +306,32 @@ mod tests {
 
     #[test]
     fn parse_flags() {
-        let args = CliArgs::parse(["--config", "/tmp/agents.d", "--once", "--strict"]).unwrap();
+        let args = CliArgs::parse([
+            "--config",
+            "/tmp/agents.d",
+            "--once",
+            "--strict",
+            "--tick-interval",
+            "2s",
+            "--queue",
+            "agents",
+            "--max-ticks",
+            "3",
+        ])
+        .unwrap();
         assert_eq!(args.config_path, PathBuf::from("/tmp/agents.d"));
         assert!(args.once);
         assert!(args.strict);
+        assert!(!args.watch);
+        assert_eq!(args.tick_interval, Duration::from_secs(2));
+        assert_eq!(args.tick.queues, vec!["agents".to_string()]);
+        assert_eq!(args.max_ticks, Some(3));
+    }
+
+    #[test]
+    fn rejects_bad_duration() {
+        let err = CliArgs::parse(["--config", "/tmp/x", "--tick-interval", "nope"]).unwrap_err();
+        assert!(err.to_string().contains("invalid duration"));
     }
 
     #[test]

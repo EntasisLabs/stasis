@@ -14,7 +14,7 @@
   - docs-book/src/agent-platform-contracts.md
   - docs-book/src/stasisd.md
 
-Status: **Active Epic — Phase 1 Complete (M0 + M1)**  
+Status: **Active Epic — Phase 2 Complete (M0 + M1 + M2)**  
 Date: 2026-07-22  
 Owner: Stasis Core
 
@@ -187,9 +187,9 @@ Use this as the epic burndown. Check when exit criteria land.
 - [x] Materialize-from-reconcile integration test
 
 ### M2 — Runnable demos
-- [ ] Waitable external turn (fake gateway)
-- [ ] `stasisd` watch cookbook green on Surreal or in-memory
-- [ ] docs-book cookbooks linked from SUMMARY
+- [x] Waitable external turn (fake gateway)
+- [x] `stasisd` watch cookbook green on Surreal or in-memory
+- [x] docs-book cookbooks linked from SUMMARY
 
 ### M3 — Bridge + harden
 - [ ] MCP provider/exporter + recursion guard

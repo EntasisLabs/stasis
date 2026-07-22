@@ -8,9 +8,11 @@ pub mod mcp_tool_exporter;
 pub mod mcp_tool_provider;
 pub mod message_codec;
 pub mod transport;
+pub mod turn_wait_store;
 
 pub use event_ingress::{AgentEventIngress, IngressAck, IngressDisposition};
 pub use mcp_tool_exporter::McpToolExporter;
 pub use mcp_tool_provider::McpToolProvider;
 pub use message_codec::AgentMessageCodec;
 pub use transport::AgentTransport;
+pub use turn_wait_store::TurnWaitStore;

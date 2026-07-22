@@ -46,6 +46,8 @@ stasisd --config /etc/stasis/agents.d/
 
 ADR-0008 is **Accepted**. Phase 1 loads YAML/TOML `stasisd/v1` schedules, validates (cron/timezone/job_type/duplicates/payload limits), and reconciles managed `stasisd:<id>` recurring definitions (`drain` / `orphan` / `cancel` policies).
 
+Phase 2 adds the long-running host: filesystem watch + debounce, periodic reconcile, and a materialize → process → publish tick loop. Backend selection via `STASIS_STASISD_RUNTIME_BACKEND` (`in-memory` default, `surreal-mem` / `surreal-ws` / `surreal-kv`).
+
 Phased epic board (with ADR-0007 contracts): [agent-platform-and-stasisd-epic.md](../../docs/design/agent-platform-and-stasisd-epic.md).
 
 Cron dialect matches `RecurringDefinition` / `cron` 0.12 (**7 fields**: sec min hour dom month dow year).
@@ -61,7 +63,13 @@ job_type = "workflow.stasis.prompt"
 cron = "0 0 2 * * * *"
 payload = { user_prompt = "review open work" }
 EOF
+
+# One-shot reconcile + tick
 cargo run -p stasisd -- --config /tmp/stasis-agents.d --once
+
+# Long-running host (watch + tick). Remove the TOML to drain the schedule.
+cargo run -p stasisd -- --config /tmp/stasis-agents.d \
+  --tick-interval 1s --reconcile-interval 30s --run-for 10s
 ```
 
 ## References

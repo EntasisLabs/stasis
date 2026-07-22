@@ -134,6 +134,31 @@ impl AgentTurnJobPayload {
     }
 }
 
+/// Durable external turn that parks via [`JobExecutionOutcome::Deferred`] until ingress completes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AgentTurnWaitableJobPayload {
+    pub agent_id: String,
+    pub session_id: String,
+    pub turn_id: String,
+    pub thread_id: Option<String>,
+    pub user_prompt: String,
+    pub system_prompt: Option<String>,
+    /// How long to wait for an external `TurnCompleted`/`Failed`/`Cancelled`.
+    pub timeout_seconds: u64,
+    /// Poll interval while waiting (Deferred reschedule delay).
+    pub poll_interval_seconds: u64,
+}
+
+impl AgentTurnWaitableJobPayload {
+    pub fn to_payload_ref(&self) -> Result<String> {
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!(
+                "failed to encode agent-turn-waitable payload: {err}"
+            ))
+        })
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolLoopJobPayload {
     pub user_prompt: String,

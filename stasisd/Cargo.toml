@@ -21,7 +21,9 @@ hex = "0.4"
 cron = "0.12"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+notify = "7"
+async-trait = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "sync"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

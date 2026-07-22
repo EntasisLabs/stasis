@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use crate::application::orchestration::tool_registry::{InMemoryToolRegistry, StasisTool};
 use crate::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
 use crate::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
+use crate::application::runtime::agent_turn_waitable_job_handler::AgentTurnWaitableJobHandler;
 use crate::application::runtime::chat_client_middleware::ChatClientMiddleware;
 use crate::application::runtime::concurrent_pattern_job_handler::ConcurrentPatternJobHandler;
 use crate::application::runtime::coordinator_failover_job_handler::CoordinatorFailoverJobHandler;
@@ -425,6 +426,12 @@ impl StasisRuntimeBuilder {
                         memory_context_writer.clone(),
                         identity_memory_store.clone(),
                     ))?;
+                    // Phase 2A: wait store is process-local even on Surreal backends.
+                    rt.register_handler(AgentTurnWaitableJobHandler::new(
+                        RuntimeFactory::default_turn_wait_store(),
+                        RuntimeFactory::default_agent_message_codec(),
+                        None,
+                    ))?;
                 }
 
                 if self.include_memory_operation_handlers {
@@ -552,6 +559,12 @@ impl StasisRuntimeBuilder {
                         memory_context_reader.clone(),
                         memory_context_writer.clone(),
                         identity_memory_store.clone(),
+                    ))?;
+                    // Phase 2A: wait store is process-local even on Surreal backends.
+                    rt.register_handler(AgentTurnWaitableJobHandler::new(
+                        RuntimeFactory::default_turn_wait_store(),
+                        RuntimeFactory::default_agent_message_codec(),
+                        None,
                     ))?;
                 }
 

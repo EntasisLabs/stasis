@@ -58,6 +58,7 @@ impl From<JobAttempt> for JobAttemptRecord {
                 JobAttemptOutcome::Succeeded => "succeeded".to_string(),
                 JobAttemptOutcome::RetryableFailure => "retryable_failure".to_string(),
                 JobAttemptOutcome::FatalFailure => "fatal_failure".to_string(),
+                JobAttemptOutcome::Deferred => "deferred".to_string(),
             },
             error_message: value.error_message,
             sttp_output_node_id: value.sttp_output_node_id,
@@ -78,6 +79,7 @@ impl TryFrom<JobAttemptRecord> for JobAttempt {
             "succeeded" => JobAttemptOutcome::Succeeded,
             "retryable_failure" => JobAttemptOutcome::RetryableFailure,
             "fatal_failure" => JobAttemptOutcome::FatalFailure,
+            "deferred" => JobAttemptOutcome::Deferred,
             other => {
                 return Err(StasisError::PortFailure(format!(
                     "invalid job attempt outcome: {other}"

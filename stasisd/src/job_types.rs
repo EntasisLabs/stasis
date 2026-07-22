@@ -3,6 +3,7 @@
 pub const KNOWN_JOB_TYPES: &[&str] = &[
     "workflow.stasis.agent_session",
     "workflow.stasis.agent_turn",
+    "workflow.stasis.agent_turn.waitable",
     "workflow.stasis.tool_loop",
     "workflow.stasis.prompt",
     "workflow.stasis.memory.recall",

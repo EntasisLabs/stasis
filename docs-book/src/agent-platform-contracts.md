@@ -55,6 +55,8 @@ The gateway crate depends on Stasis ports/SDK. Core Stasis never depends on a co
 
 ADR-0007 is **Accepted**. Phase 1 adds `JsonAgentMessageCodec` and `InMemoryAgentEventIngress` under `infrastructure::agent`, with round-trip and negative-path tests.
 
+Phase 2 adds waitable external turns: `workflow.stasis.agent_turn.waitable` parks via `JobExecutionOutcome::Deferred` (attempts not consumed), `TurnWaitStore` + `WaitCorrelatingAgentEventIngress` complete/fail/cancel/timeout the wait, and fake-gateway tests cover grant→complete plus mixed local+external sessions. Wait store is process-local in Phase 2 (including Surreal backends).
+
 ## Related deployable
 
 [`stasisd`](./stasisd.md) (ADR-0008) is the declarative YAML/TOML engine that reconciles desired state into durable schedules on top of this runtime.
