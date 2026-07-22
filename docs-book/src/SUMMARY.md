@@ -32,6 +32,7 @@
 
 - [Environment Configuration](./environment-configuration.md)
 - [LLM Providers (genai 0.6.x)](./llm-providers.md)
+- [Agent Platform Runtime Contracts](./agent-platform-contracts.md)
 - [Extension Points and Port Contracts](./extension-points.md)
 - [Stasis Tool Macro](./stasis-tool-macro.md)
 - [Control Plane and Endpoint Routing](./control-plane-endpoint-routing.md)

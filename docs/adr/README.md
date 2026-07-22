@@ -5,9 +5,11 @@
 - Document Type: Architecture Standard
 - Audience: Engineer, Security, Architect
 - Stability: Stable
-- Last Verified: 2026-05-25
+- Last Verified: 2026-07-22
 - Verified Against:
   - docs/adr/README.md
+  - docs/adr/ADR-0007-agent-platform-runtime-contracts.md
+  - docs/design/agent-platform-runtime-contracts-plan.md
   - docs-book/src/adr.md
 
 ## Purpose
@@ -24,6 +26,7 @@ Track major architectural decisions with rationale, alternatives, and consequenc
 | ADR-0004 | Recurring Jobs via Materialized Schedule Definitions | Accepted | 2026-05-07 |
 | ADR-0005 | Agentic Workflow Skill Graph Contract | Accepted | 2026-05-25 |
 | ADR-0006 | OpenTelemetry First-Class Observability | Accepted | 2026-06-04 |
+| ADR-0007 | Agent Platform Runtime Contracts | Proposed | 2026-07-22 |
 
 ## Decision Dependency Diagram
 
@@ -38,7 +41,21 @@ flowchart TD
   A4 --> A2
   A1 --> A6[ADR-0006 OpenTelemetry Observability]
   A2 --> A6
+  A1 --> A7[ADR-0007 Agent Platform Runtime Contracts]
+  A2 --> A7
+  A3 --> A7
 ```
+
+## ADR-0007 Agent Platform Runtime Contracts
+
+- Status: Proposed
+- Context: Stasis should be the durable work runtime for agent platforms (MassTransit/Hangfire role), not a vendor integration hub for IDE/CLI agents.
+- Decision: Ship three vendor-neutral contracts — Comms (bidirectional durable messaging), Translation (canonical envelope codecs), and MCP tool bridge (injectable provider/exporter around `StasisTool`) — with gateways implemented outside core.
+- Consequences:
+  - Positive: platform builders can inject gateways via DI; core stays product-agnostic; durability/leases/outbox remain the coordination backbone.
+  - Tradeoff: requires frozen canonical envelope versioning, ingress/waitable-turn state, and MCP recursion guards.
+- Plan: [design/agent-platform-runtime-contracts-plan.md](../design/agent-platform-runtime-contracts-plan.md)
+- Full ADR: [ADR-0007-agent-platform-runtime-contracts.md](ADR-0007-agent-platform-runtime-contracts.md)
 
 ## ADR-0006 OpenTelemetry First-Class Observability
 
