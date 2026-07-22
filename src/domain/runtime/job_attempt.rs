@@ -5,6 +5,8 @@ pub enum JobAttemptOutcome {
     Succeeded,
     RetryableFailure,
     FatalFailure,
+    /// Job released without consuming an attempt (durable wait / park).
+    Deferred,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

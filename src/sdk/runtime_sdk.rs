@@ -119,6 +119,17 @@ impl RuntimeSdk {
         Ok(Self::new(runtime))
     }
 
+    /// Builds a runtime facade and returns composition-root bridge handles (MCP/agent).
+    pub async fn from_builder_with_handles(
+        builder: StasisRuntimeBuilder,
+    ) -> Result<(
+        Self,
+        crate::application::runtime::stasis_runtime_builder::McpBridgeHandles,
+    )> {
+        let (runtime, handles) = builder.build_with_handles().await?;
+        Ok((Self::new(runtime), handles))
+    }
+
     /// Returns a shared reference to the underlying runtime composition.
     pub fn runtime(&self) -> &RuntimeComposition {
         &self.runtime
@@ -142,6 +153,22 @@ impl RuntimeSdk {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.register_recurring(definition).await,
             RuntimeComposition::Surreal(rt) => rt.register_recurring(definition).await,
+        }
+    }
+
+    /// Lists all recurring definitions currently registered in the runtime store.
+    pub async fn list_recurring(&self) -> Result<Vec<RecurringDefinition>> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.recurring_store.list().await,
+            RuntimeComposition::Surreal(rt) => rt.recurring_store.list().await,
+        }
+    }
+
+    /// Upserts a recurring definition (used by declarative reconcile updates).
+    pub async fn save_recurring(&self, definition: RecurringDefinition) -> Result<()> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.recurring_store.save(definition).await,
+            RuntimeComposition::Surreal(rt) => rt.recurring_store.save(definition).await,
         }
     }
 

@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
 
 use crate::application::orchestration::runtime_job_payloads::{
-    AgentSessionJobPayload, AgentTurnJobPayload, ConcurrentPatternJobPayload,
-    HandoffPatternJobPayload, MemoryAggregateJobPayload, MemoryEvictJobPayload,
-    MemoryFindJobPayload, MemoryGraphJobPayload, MemoryRecallJobPayload, MemoryRollupJobPayload,
-    MemorySchemaJobPayload, MemoryTransformJobPayload,
+    AgentSessionJobPayload, AgentTurnJobPayload, AgentTurnWaitableJobPayload,
+    ConcurrentPatternJobPayload, HandoffPatternJobPayload, MemoryAggregateJobPayload,
+    MemoryEvictJobPayload, MemoryFindJobPayload, MemoryGraphJobPayload, MemoryRecallJobPayload,
+    MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
     OrchestratorPatternJobPayload, PromptJobPayload, SequentialPatternJobPayload,
     ToolLoopJobPayload,
 };
@@ -15,6 +15,7 @@ use crate::ports::outbound::runtime::runtime_tracing::TraceContext;
 
 const JOB_TYPE_AGENT_SESSION: &str = "workflow.stasis.agent_session";
 const JOB_TYPE_AGENT_TURN: &str = "workflow.stasis.agent_turn";
+const JOB_TYPE_AGENT_TURN_WAITABLE: &str = "workflow.stasis.agent_turn.waitable";
 const JOB_TYPE_TOOL_LOOP: &str = "workflow.stasis.tool_loop";
 const JOB_TYPE_PROMPT: &str = "workflow.stasis.prompt";
 const JOB_TYPE_MEMORY_RECALL: &str = "workflow.stasis.memory.recall";
@@ -58,6 +59,11 @@ macro_rules! define_payload_builder {
 impl RuntimeWorkflowJobBuilder {
     define_payload_builder!(for_agent_session, AgentSessionJobPayload, JOB_TYPE_AGENT_SESSION);
     define_payload_builder!(for_agent_turn, AgentTurnJobPayload, JOB_TYPE_AGENT_TURN);
+    define_payload_builder!(
+        for_agent_turn_waitable,
+        AgentTurnWaitableJobPayload,
+        JOB_TYPE_AGENT_TURN_WAITABLE
+    );
     define_payload_builder!(for_tool_loop, ToolLoopJobPayload, JOB_TYPE_TOOL_LOOP);
     define_payload_builder!(for_prompt, PromptJobPayload, JOB_TYPE_PROMPT);
     define_payload_builder!(for_memory_recall, MemoryRecallJobPayload, JOB_TYPE_MEMORY_RECALL);

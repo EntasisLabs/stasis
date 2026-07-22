@@ -12,6 +12,8 @@
 - [Job Runtime Design](./runtime-job-design.md)
 - [Runtime Builder and Wiring Guide](./runtime-builder.md)
 - [Recurring Jobs](./recurring-jobs.md)
+- [`stasisd` Declarative Engine](./stasisd.md)
+- [`stasisd` Operator Runbook](./stasisd-runbook.md)
 - [Retention and Replay](./retention-replay.md)
 - [Lineage and Observability](./lineage-observability.md)
 - [OpenTelemetry](./opentelemetry.md)
@@ -32,6 +34,7 @@
 
 - [Environment Configuration](./environment-configuration.md)
 - [LLM Providers (genai 0.6.x)](./llm-providers.md)
+- [Agent Platform Runtime Contracts](./agent-platform-contracts.md)
 - [Extension Points and Port Contracts](./extension-points.md)
 - [Stasis Tool Macro](./stasis-tool-macro.md)
 - [Control Plane and Endpoint Routing](./control-plane-endpoint-routing.md)
@@ -44,6 +47,7 @@
 ## Cookbook
 
 - [Cookbook Overview](./cookbook.md)
+- [Platform Builder: External Participants](./cookbook/platform-builder-external-participant.md)
 - [Production Agentic Workflows](./cookbook/production-agentic-workflows.md)
 - [Runtime and Dashboard Bootstrap](./cookbook/runtime-dashboard-bootstrap.md)
 - [Workflow Builder Starting Object](./cookbook/workflow-builder-starting-object.md)

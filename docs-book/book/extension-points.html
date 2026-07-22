@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-b67b3bb4.js";
+            window.path_to_searchindex_js = "searchindex-8915afd4.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-81824faf.js"></script>
+        <script src="toc-a298250c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -529,6 +529,56 @@ pub trait WorkflowEngine: Send + Sync {
 </div>
 <p>Custom implementations can replace any built-in adapter. Explicit builder ports take precedence over <code>.with_locus_memory()</code> auto-bootstrap.</p>
 <hr>
+<h2 id="agent-platform-ports-adr-0007"><a class="header" href="#agent-platform-ports-adr-0007">Agent Platform Ports (ADR-0007)</a></h2>
+<p>Vendor-neutral agent platform ports and Phase 1 reference adapters.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Module</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>AgentMessageCodec</code></td><td><code>ports::outbound::agent::message_codec</code></td><td>Encode/decode canonical <code>AgentEnvelope</code></td></tr>
+<tr><td><code>AgentEventIngress</code></td><td><code>ports::outbound::agent::event_ingress</code></td><td>Accept inbound agent envelopes</td></tr>
+<tr><td><code>AgentTransport</code></td><td><code>ports::outbound::agent::transport</code></td><td>Publish encoded messages to delivery endpoints</td></tr>
+<tr><td><code>McpToolProvider</code></td><td><code>ports::outbound::agent::mcp_tool_provider</code></td><td>Inject MCP tools into Stasis</td></tr>
+<tr><td><code>McpToolExporter</code></td><td><code>ports::outbound::agent::mcp_tool_exporter</code></td><td>Export Stasis tools as MCP tools</td></tr>
+</tbody>
+</table>
+</div>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Adapter</th><th>Module</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>JsonAgentMessageCodec</code></td><td><code>infrastructure::agent::json_agent_message_codec</code></td><td>JSON v1 reference codec</td></tr>
+<tr><td><code>InMemoryAgentEventIngress</code></td><td><code>infrastructure::agent::in_memory_agent_event_ingress</code></td><td>Idempotent in-process ingress</td></tr>
+<tr><td><code>McpBridgedToolRegistry</code></td><td><code>application::orchestration::mcp_bridged_tool_registry</code></td><td>Merges providers into tool loops</td></tr>
+<tr><td><code>AllowlistedLocalMcpExporter</code></td><td><code>application::orchestration::allowlisted_mcp_tool_exporter</code></td><td>Explicit export allowlist + recursion budget</td></tr>
+</tbody>
+</table>
+</div>
+<p>Canonical types live in <code>domain::agent</code> (<code>AgentEnvelope</code>, <code>McpToolDescriptor</code>, <code>McpInvocationContext</code>).</p>
+<p><strong>MCP + agent builder wiring:</strong></p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let provider: Arc&lt;dyn McpToolProvider&gt; = /* gateway outside core */;
+let (runtime, handles) = StasisRuntimeBuilder::new(backend)
+    .with_tool(MyLocalTool)?
+    .with_mcp_tool_provider(provider)
+    .with_mcp_export_allowlist(["my_local_tool"])
+    .with_delivery_endpoint_store(endpoints)
+    .with_turn_wait_store(waits)
+    .with_agent_message_codec(codec)
+    .with_agent_event_ingress(ingress)
+    .with_agent_transport(transport)
+    .build_with_handles()
+    .await?;
+// Serve MCP with handles.exporter; complete external turns via ingress.
+<span class="boring">}</span></code></pre>
+<p>Duplicate local/provider tool names are rejected at build time. Recursive export → provider → export bounce fails with <code>mcp recursion budget exhausted</code>.</p>
+<p>See <a href="./agent-platform-contracts.html">Agent Platform Runtime Contracts</a>.</p>
+<hr>
 <h2 id="tool-registry"><a class="header" href="#tool-registry">Tool Registry</a></h2>
 <h3 id="stasistool"><a class="header" href="#stasistool">StasisTool</a></h3>
 <p>Implement this trait to register a tool with the runtime for use in tool loop and agent handlers.</p>
@@ -579,6 +629,12 @@ pub trait StasisTool: Send + Sync {
 <tr><td><code>MemoryContextWriter</code></td><td>No</td><td>Auto-bootstrapped with <code>.with_locus_memory()</code></td><td><code>.with_memory_context_writer(...)</code></td></tr>
 <tr><td><code>MemoryOperations</code></td><td>No</td><td>Auto-bootstrapped with <code>.with_locus_memory()</code></td><td><code>.with_memory_operations(...)</code></td></tr>
 <tr><td><code>StasisTool</code></td><td>No</td><td>None</td><td><code>.with_tool(tool)?</code></td></tr>
+<tr><td><code>McpToolProvider</code></td><td>No</td><td>None</td><td><code>.with_mcp_tool_provider(provider)</code></td></tr>
+<tr><td><code>McpToolExporter</code></td><td>No</td><td>None (export nothing)</td><td><code>.with_mcp_tool_exporter(...)</code> / <code>.with_mcp_export_allowlist([...])</code></td></tr>
+<tr><td><code>AgentMessageCodec</code></td><td>No</td><td>JSON v1 for waitable</td><td><code>.with_agent_message_codec(...)</code></td></tr>
+<tr><td><code>AgentEventIngress</code></td><td>No</td><td>None</td><td><code>.with_agent_event_ingress(...)</code></td></tr>
+<tr><td><code>AgentTransport</code></td><td>No</td><td>None</td><td><code>.with_agent_transport(...)</code></td></tr>
+<tr><td><code>TurnWaitStore</code></td><td>No</td><td>process-local in-memory</td><td><code>.with_turn_wait_store(...)</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -588,7 +644,7 @@ pub trait StasisTool: Send + Sync {
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="llm-providers.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="agent-platform-contracts.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -602,7 +658,7 @@ pub trait StasisTool: Send + Sync {
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="llm-providers.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="agent-platform-contracts.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 

@@ -2,9 +2,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::application::orchestration::tool_registry::{InMemoryToolRegistry, StasisTool};
+use crate::application::orchestration::allowlisted_mcp_tool_exporter::AllowlistedLocalMcpExporter;
+use crate::application::orchestration::mcp_bridged_tool_registry::McpBridgedToolRegistry;
+use crate::application::orchestration::tool_registry::{InMemoryToolRegistry, StasisTool, ToolRegistry};
 use crate::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
 use crate::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
+use crate::application::runtime::agent_turn_waitable_job_handler::AgentTurnWaitableJobHandler;
 use crate::application::runtime::chat_client_middleware::ChatClientMiddleware;
 use crate::application::runtime::concurrent_pattern_job_handler::ConcurrentPatternJobHandler;
 use crate::application::runtime::coordinator_failover_job_handler::CoordinatorFailoverJobHandler;
@@ -36,6 +39,12 @@ use crate::application::runtime::sequential_pattern_job_handler::SequentialPatte
 use crate::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
 use crate::application::telemetry::operation::OperationTelemetry;
 use crate::domain::errors::Result;
+use crate::ports::outbound::agent::event_ingress::AgentEventIngress;
+use crate::ports::outbound::agent::mcp_tool_exporter::McpToolExporter;
+use crate::ports::outbound::agent::mcp_tool_provider::McpToolProvider;
+use crate::ports::outbound::agent::message_codec::AgentMessageCodec;
+use crate::ports::outbound::agent::transport::AgentTransport;
+use crate::ports::outbound::agent::turn_wait_store::TurnWaitStore;
 use crate::ports::outbound::ai_chat_client::AiChatClient;
 use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
 use crate::ports::outbound::ai_chat_tool_interceptor::AiChatToolInterceptor;
@@ -87,6 +96,13 @@ pub struct StasisRuntimeBuilder {
     enable_endpoint_routing_delivery: bool,
     enable_locus_memory: bool,
     tool_registry: InMemoryToolRegistry,
+    mcp_tool_providers: Vec<Arc<dyn McpToolProvider>>,
+    mcp_tool_exporter: Option<Arc<dyn McpToolExporter>>,
+    mcp_export_allowlist: Vec<String>,
+    turn_wait_store: Option<Arc<dyn TurnWaitStore>>,
+    agent_message_codec: Option<Arc<dyn AgentMessageCodec>>,
+    agent_event_ingress: Option<Arc<dyn AgentEventIngress>>,
+    agent_transport: Option<Arc<dyn AgentTransport>>,
     include_grapheme_handlers: bool,
     include_prompt_handler: bool,
     include_tool_loop_handler: bool,
@@ -98,6 +114,17 @@ pub struct StasisRuntimeBuilder {
     runtime_telemetry_metrics: Option<Arc<dyn RuntimeMetrics>>,
     runtime_telemetry_tracing: Option<Arc<dyn RuntimeTracing>>,
     explicit_telemetry_chat_middleware: bool,
+}
+
+/// Handles retained for the composition root after [`StasisRuntimeBuilder::build_with_handles`].
+#[derive(Clone, Default)]
+pub struct McpBridgeHandles {
+    /// Optional MCP exporter (explicit via builder, or auto from export allowlist).
+    pub exporter: Option<Arc<dyn McpToolExporter>>,
+    pub turn_wait_store: Option<Arc<dyn TurnWaitStore>>,
+    pub agent_event_ingress: Option<Arc<dyn AgentEventIngress>>,
+    pub agent_transport: Option<Arc<dyn AgentTransport>>,
+    pub delivery_endpoint_store: Option<Arc<dyn DeliveryEndpointStore>>,
 }
 
 macro_rules! define_arc_option_setter {
@@ -146,6 +173,13 @@ impl StasisRuntimeBuilder {
             enable_endpoint_routing_delivery: false,
             enable_locus_memory: false,
             tool_registry: InMemoryToolRegistry::default(),
+            mcp_tool_providers: Vec::new(),
+            mcp_tool_exporter: None,
+            mcp_export_allowlist: Vec::new(),
+            turn_wait_store: None,
+            agent_message_codec: None,
+            agent_event_ingress: None,
+            agent_transport: None,
             include_grapheme_handlers: true,
             include_prompt_handler: true,
             include_tool_loop_handler: true,
@@ -284,6 +318,45 @@ impl StasisRuntimeBuilder {
         Ok(self)
     }
 
+    /// Inject an MCP tool provider; tools are merged into the runtime tool registry.
+    pub fn with_mcp_tool_provider(mut self, provider: Arc<dyn McpToolProvider>) -> Self {
+        self.mcp_tool_providers.push(provider);
+        self
+    }
+
+    /// Provide an MCP exporter handle retained for the composition root.
+    pub fn with_mcp_tool_exporter(mut self, exporter: Arc<dyn McpToolExporter>) -> Self {
+        self.mcp_tool_exporter = Some(exporter);
+        self
+    }
+
+    /// Allowlist local tool names for the default [`AllowlistedLocalMcpExporter`].
+    ///
+    /// Ignored when [`Self::with_mcp_tool_exporter`] is set. Empty allowlist (default)
+    /// means export nothing.
+    pub fn with_mcp_export_allowlist<I, S>(mut self, names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.mcp_export_allowlist
+            .extend(names.into_iter().map(Into::into));
+        self
+    }
+
+    define_arc_option_setter!(with_turn_wait_store, turn_wait_store, dyn TurnWaitStore);
+    define_arc_option_setter!(
+        with_agent_message_codec,
+        agent_message_codec,
+        dyn AgentMessageCodec
+    );
+    define_arc_option_setter!(
+        with_agent_event_ingress,
+        agent_event_ingress,
+        dyn AgentEventIngress
+    );
+    define_arc_option_setter!(with_agent_transport, agent_transport, dyn AgentTransport);
+
     pub fn with_extra_handler<H: JobHandler + 'static>(mut self, handler: H) -> Self {
         self.extra_handlers.push(Arc::new(handler));
         self
@@ -304,6 +377,11 @@ impl StasisRuntimeBuilder {
     define_disable_flag_setter!(without_cluster_control_handlers, include_cluster_control_handlers);
 
     pub async fn build(self) -> Result<RuntimeComposition> {
+        Ok(self.build_with_handles().await?.0)
+    }
+
+    /// Build the runtime plus MCP bridge handles for the composition root.
+    pub async fn build_with_handles(self) -> Result<(RuntimeComposition, McpBridgeHandles)> {
         let mut runtime = RuntimeFactory::build(self.backend).await?;
         let mut chat_middlewares = self.chat_middlewares;
 
@@ -340,7 +418,35 @@ impl StasisRuntimeBuilder {
         let configured_endpoint_transports = self.endpoint_transport_publishers.clone();
         let configured_endpoint_routing_policy = self.endpoint_routing_policy.clone();
 
-        let tool_registry = Arc::new(self.tool_registry);
+        let bridged =
+            McpBridgedToolRegistry::connect(self.tool_registry, self.mcp_tool_providers).await?;
+        let mcp_exporter = match self.mcp_tool_exporter {
+            Some(exporter) => Some(exporter),
+            None if !self.mcp_export_allowlist.is_empty() => {
+                Some(Arc::new(AllowlistedLocalMcpExporter::new(
+                    Arc::new(bridged.local_registry().clone()),
+                    self.mcp_export_allowlist,
+                )) as Arc<dyn McpToolExporter>)
+            }
+            None => None,
+        };
+        let tool_registry: Arc<dyn ToolRegistry> = Arc::new(bridged);
+
+        let turn_wait_store = self
+            .turn_wait_store
+            .clone()
+            .unwrap_or_else(RuntimeFactory::default_turn_wait_store);
+        let agent_message_codec = self
+            .agent_message_codec
+            .clone()
+            .unwrap_or_else(RuntimeFactory::default_agent_message_codec);
+        let agent_event_ingress = self.agent_event_ingress.clone();
+        let agent_transport = self.agent_transport.clone();
+        let resolved_endpoint_store = RuntimeFactory::resolve_delivery_endpoint_store(
+            &runtime,
+            configured_endpoint_store.clone(),
+        );
+
         let operation_telemetry = self
             .runtime_telemetry_metrics
             .as_ref()
@@ -425,6 +531,19 @@ impl StasisRuntimeBuilder {
                         memory_context_writer.clone(),
                         identity_memory_store.clone(),
                     ))?;
+                    // Phase 2A/4: wait store is process-local even on Surreal backends unless injected.
+                    let mut waitable = AgentTurnWaitableJobHandler::new(
+                        turn_wait_store.clone(),
+                        agent_message_codec.clone(),
+                        agent_event_ingress.clone(),
+                    );
+                    if let Some(transport) = agent_transport.clone() {
+                        waitable = waitable.with_endpoint_publish(
+                            resolved_endpoint_store.clone(),
+                            transport,
+                        );
+                    }
+                    rt.register_handler(waitable)?;
                 }
 
                 if self.include_memory_operation_handlers {
@@ -553,6 +672,19 @@ impl StasisRuntimeBuilder {
                         memory_context_writer.clone(),
                         identity_memory_store.clone(),
                     ))?;
+                    // Phase 2A/4: wait store is process-local even on Surreal backends unless injected.
+                    let mut waitable = AgentTurnWaitableJobHandler::new(
+                        turn_wait_store.clone(),
+                        agent_message_codec.clone(),
+                        agent_event_ingress.clone(),
+                    );
+                    if let Some(transport) = agent_transport.clone() {
+                        waitable = waitable.with_endpoint_publish(
+                            resolved_endpoint_store.clone(),
+                            transport,
+                        );
+                    }
+                    rt.register_handler(waitable)?;
                 }
 
                 if self.include_memory_operation_handlers {
@@ -609,7 +741,16 @@ impl StasisRuntimeBuilder {
             }
         }
 
-        Ok(runtime)
+        Ok((
+            runtime,
+            McpBridgeHandles {
+                exporter: mcp_exporter,
+                turn_wait_store: Some(turn_wait_store),
+                agent_event_ingress,
+                agent_transport,
+                delivery_endpoint_store: Some(resolved_endpoint_store),
+            },
+        ))
     }
 
     /// Builds and returns the primary runtime facade.

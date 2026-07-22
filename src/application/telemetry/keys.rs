@@ -6,6 +6,7 @@ pub const JOB_RETRYABLE_FAILURE_TOTAL: &str = "runtime.job.retryable_failure.tot
 pub const JOB_FATAL_FAILURE_TOTAL: &str = "runtime.job.fatal_failure.total";
 pub const JOB_DEAD_LETTER_TOTAL: &str = "runtime.job.dead_letter.total";
 pub const JOB_RETRY_SCHEDULED_TOTAL: &str = "runtime.job.retry_scheduled.total";
+pub const JOB_DEFERRED_TOTAL: &str = "runtime.job.deferred.total";
 pub const JOB_PROCESS_DURATION_MS: &str = "runtime.job.process.duration_ms";
 
 // Outbox

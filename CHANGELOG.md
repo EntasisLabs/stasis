@@ -7,6 +7,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-22
+
+### Added
+
+- **Agent platform runtime contracts (ADR-0007)** — vendor-neutral ports for comms, translation, and MCP tool bridge under `ports::outbound::agent`.
+- **Canonical agent envelopes** — `AgentEnvelope` kinds plus `JsonAgentMessageCodec` encode/decode (JSON v1).
+- **Agent event ingress** — `AgentEventIngress` with in-memory and wait-correlating adapters; idempotent accept for grant → complete/fail/cancel.
+- **Waitable external turns** — `workflow.stasis.agent_turn.waitable` parks via `JobExecutionOutcome::Deferred` until ingress completes, fails, cancels, or times out (`TurnWaitStore`).
+- **MCP tool bridge** — `McpToolProvider` / `McpToolExporter`; `McpBridgedToolRegistry` merges provider tools beside local `StasisTool`s; `AllowlistedLocalMcpExporter` + recursion budget.
+- **Builder DI** — `StasisRuntimeBuilder` methods: `with_agent_message_codec`, `with_agent_event_ingress`, `with_agent_transport`, `with_turn_wait_store`, `with_mcp_tool_provider`, `with_mcp_tool_exporter`, `with_mcp_export_allowlist`, and `build_with_handles()` → `McpBridgeHandles`.
+- **Declarative external participants** — `AgentParticipantKindPayload::{LocalToolLoop, External}` on session participants; `endpoint_ref` / `mcp_gateway_ref` / timeout fields for external turns.
+- **`stasisd` workspace crate** (ADR-0008, `publish = false`) — YAML/TOML desired-state engine: validate, reconcile managed `stasisd:<id>` schedules, filesystem watch + tick host (materialize / process / publish), `--once` / `--strict`, optional `/healthz`, systemd unit + runbook.
+- **Docs** — ADR-0007/0008, epic + delivery plans, docs-book pages for platform contracts / `stasisd` / external-participant cookbook.
+
+### Changed
+
+- **`AgentSessionParticipantPayload`** — additive fields with serde defaults (`kind` defaults to `local_tool_loop`; `tool_name` defaults empty). Rust struct literals must set the new fields.
+- **Runtime composition** — tool registry is MCP-bridged when providers are configured; waitable agent-turn handler registered with default handlers.
+- **Production examples / cookbook** — `MemoryPolicyPayload` initializers include `tenant_id`, `gamma`, and `filter`.
+
+### Notes
+
+- **`stasisd` is not published to crates.io** in this release (`publish = false`); ship/run from the workspace binary.
+- Core Stasis still ships **no vendor agent adapters** — platform builders inject codecs/gateways at the composition root.
+- Turn wait store remains **process-local** in this release (including when using Surreal job backends).
+
 ## [0.7.1] - 2026-06-23
 
 ### Changed

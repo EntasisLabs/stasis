@@ -67,6 +67,7 @@ async fn fetch_knowledge_base(input: FetchKnowledgeBaseInput) -> Result<FetchKno
 
 fn production_memory_policy() -> MemoryPolicyPayload {
     MemoryPolicyPayload {
+        tenant_id: None,
         session_ids: None,
         tiers: Some(vec!["summary".to_string(), "episodic".to_string()]),
         from_utc: None,
@@ -74,11 +75,13 @@ fn production_memory_policy() -> MemoryPolicyPayload {
         limit: Some(12),
         alpha: Some(0.7),
         beta: Some(0.3),
+        gamma: None,
         fallback_policy: Some(MemoryFallbackPolicyPayload::OnEmpty),
         strictness: Some(MemoryStrictnessModePayload::Balanced),
         query_text: None,
         include_explain: Some(true),
         store_mode: Some(MemoryStoreModePayload::SummaryOnly),
+        filter: Default::default(),
     }
 }
 
@@ -262,12 +265,14 @@ fn build_product_planning_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Re
                 system_prompt: Some("Break the plan into milestones and dependencies.".to_string()),
                 tool_name: "fetch_knowledge_base".to_string(),
                 tool_input: Some(json!({ "topic": "deployment sequencing" })),
+                ..Default::default()
             },
             AgentSessionParticipantPayload {
                 agent_id: "sre_reviewer".to_string(),
                 system_prompt: Some("Focus on blast radius and rollback readiness.".to_string()),
                 tool_name: "fetch_knowledge_base".to_string(),
                 tool_input: Some(json!({ "topic": "rollback policy" })),
+                ..Default::default()
             },
         ],
         policy_profile: Some("prod.review".to_string()),

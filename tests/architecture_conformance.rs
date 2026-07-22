@@ -348,6 +348,48 @@ fn default_chat_middlewares_depend_on_ports_not_runtime_infrastructure() {
 }
 
 #[test]
+fn agent_platform_modules_avoid_vendor_product_names() {
+    let repo_root = env!("CARGO_MANIFEST_DIR");
+    let roots = [
+        format!("{repo_root}/src/domain/agent"),
+        format!("{repo_root}/src/ports/outbound/agent"),
+        format!("{repo_root}/stasisd/src"),
+    ];
+    let banned = [
+        "Cursor",
+        "Codex",
+        "Claude Code",
+        "OpenClaw",
+        "Hermes",
+        "claude code",
+        "openclaw",
+    ];
+
+    let mut violations = Vec::new();
+    for root in roots {
+        for file in collect_rs_files(&root) {
+            let Ok(source) = fs::read_to_string(&file) else {
+                continue;
+            };
+            for (idx, line) in source.lines().enumerate() {
+                let line_no = idx + 1;
+                for needle in banned {
+                    if line.contains(needle) {
+                        violations.push(format!("{file}:{line_no}: contains `{needle}`: {line}"));
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Agent platform modules must stay vendor-neutral. Violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
 fn thread_record_symbol_is_fully_removed() {
     let repo_root = env!("CARGO_MANIFEST_DIR");
     let files = collect_rs_files(&format!("{repo_root}/src"));

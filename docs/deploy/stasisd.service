@@ -1,0 +1,20 @@
+[Unit]
+Description=Stasis declarative engine (stasisd)
+Documentation=https://github.com/EntasisLabs/stasis
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stasis
+Group=stasis
+ExecStart=/usr/local/bin/stasisd --config /etc/stasis/agents.d --strict --healthz-addr 127.0.0.1:8081
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Environment=STASIS_STASISD_RUNTIME_BACKEND=in-memory
+# Prefer a single active reconciler per store; do not run multiple units against the same Surreal DB.
+
+[Install]
+WantedBy=multi-user.target

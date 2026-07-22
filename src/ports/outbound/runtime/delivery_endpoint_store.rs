@@ -9,4 +9,6 @@ pub trait DeliveryEndpointStore: Send + Sync {
     async fn get(&self, endpoint_id: &str) -> Result<Option<DeliveryEndpoint>>;
     async fn list(&self) -> Result<Vec<DeliveryEndpoint>>;
     async fn set_enabled(&self, endpoint_id: &str, enabled: bool) -> Result<bool>;
+    /// Insert or replace an endpoint (declarative reconcile).
+    async fn upsert(&self, endpoint: NewDeliveryEndpoint) -> Result<DeliveryEndpoint>;
 }

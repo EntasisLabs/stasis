@@ -5,9 +5,13 @@
 - Document Type: Architecture Standard
 - Audience: Engineer, Security, Architect
 - Stability: Stable
-- Last Verified: 2026-05-25
+- Last Verified: 2026-07-22
 - Verified Against:
   - docs/adr/README.md
+  - docs/adr/ADR-0007-agent-platform-runtime-contracts.md
+  - docs/adr/ADR-0008-stasisd-declarative-engine.md
+  - docs/design/agent-platform-runtime-contracts-plan.md
+  - docs/design/stasisd-declarative-engine-plan.md
   - docs-book/src/adr.md
 
 ## Purpose
@@ -24,6 +28,8 @@ Track major architectural decisions with rationale, alternatives, and consequenc
 | ADR-0004 | Recurring Jobs via Materialized Schedule Definitions | Accepted | 2026-05-07 |
 | ADR-0005 | Agentic Workflow Skill Graph Contract | Accepted | 2026-05-25 |
 | ADR-0006 | OpenTelemetry First-Class Observability | Accepted | 2026-06-04 |
+| ADR-0007 | Agent Platform Runtime Contracts | Accepted | 2026-07-22 |
+| ADR-0008 | `stasisd` Declarative Engine | Accepted | 2026-07-22 |
 
 ## Decision Dependency Diagram
 
@@ -38,6 +44,11 @@ flowchart TD
   A4 --> A2
   A1 --> A6[ADR-0006 OpenTelemetry Observability]
   A2 --> A6
+  A1 --> A7[ADR-0007 Agent Platform Runtime Contracts]
+  A2 --> A7
+  A3 --> A7
+  A4 --> A8[ADR-0008 stasisd Declarative Engine]
+  A7 --> A8
 ```
 
 ## ADR-0001 Durable Job Runtime on SurrealDB
@@ -94,3 +105,26 @@ flowchart TD
   - Positive: OTLP export, linked traces across jobs/LLM/memory/outbox, stable instrument names.
   - Tradeoff: concentrated instrumentation work; contract maintenance obligation.
 - Plan: [OpenTelemetry Integration RFC](../../docs/design/opentelemetry-integration-rfc-plan.md)
+
+## ADR-0007 Agent Platform Runtime Contracts
+
+- Status: Accepted
+- Context: Stasis should be the durable work runtime for agent platforms (MassTransit/Hangfire role), not a vendor integration hub for IDE/CLI agents.
+- Decision: Ship three vendor-neutral contracts — Comms (bidirectional durable messaging), Translation (canonical envelope codecs), and MCP tool bridge (injectable provider/exporter around `StasisTool`) — with gateways implemented outside core.
+- Consequences:
+  - Positive: platform builders can inject gateways via DI; core stays product-agnostic; durability/leases/outbox remain the coordination backbone.
+  - Tradeoff: requires frozen canonical envelope versioning, ingress/waitable-turn state, and MCP recursion guards.
+- Plan: [Agent Platform Runtime Contracts Plan](../../docs/design/agent-platform-runtime-contracts-plan.md)
+- Full ADR: [ADR-0007](../../docs/adr/ADR-0007-agent-platform-runtime-contracts.md)
+
+## ADR-0008 `stasisd` Declarative Engine
+
+- Status: Accepted
+- Context: Operators need a small deployable that turns YAML/TOML desired state into live agent schedules — the nginx of AI orchestration — without reinventing recurring registration in every app.
+- Decision: Ship `stasisd` as a thin reconcile+tick engine on top of the Stasis runtime: watch config files, map them to managed `RecurringDefinition`s, and apply drain/cancel/orphan policies on remove.
+- Consequences:
+  - Positive: GitOps-friendly schedules; clear kernel vs deployable split; reuses existing materialization/leases.
+  - Tradeoff: versioned config schema, provenance ownership, and explicit delete/drain semantics required.
+- Plan: [`stasisd` Declarative Engine Plan](../../docs/design/stasisd-declarative-engine-plan.md)
+- Full ADR: [ADR-0008](../../docs/adr/ADR-0008-stasisd-declarative-engine.md)
+- Overview: [`stasisd` docs-book page](./stasisd.md)

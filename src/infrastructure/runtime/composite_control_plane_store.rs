@@ -51,6 +51,10 @@ where
     async fn set_enabled(&self, endpoint_id: &str, enabled: bool) -> Result<bool> {
         self.endpoint_store.set_enabled(endpoint_id, enabled).await
     }
+
+    async fn upsert(&self, endpoint: NewDeliveryEndpoint) -> Result<DeliveryEndpoint> {
+        self.endpoint_store.upsert(endpoint).await
+    }
 }
 
 #[async_trait]

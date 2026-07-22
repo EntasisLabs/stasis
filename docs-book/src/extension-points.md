@@ -330,6 +330,51 @@ Custom implementations can replace any built-in adapter. Explicit builder ports 
 
 ---
 
+## Agent Platform Ports (ADR-0007)
+
+Vendor-neutral agent platform ports and Phase 1 reference adapters.
+
+| Port | Module | Purpose |
+|---|---|---|
+| `AgentMessageCodec` | `ports::outbound::agent::message_codec` | Encode/decode canonical `AgentEnvelope` |
+| `AgentEventIngress` | `ports::outbound::agent::event_ingress` | Accept inbound agent envelopes |
+| `AgentTransport` | `ports::outbound::agent::transport` | Publish encoded messages to delivery endpoints |
+| `McpToolProvider` | `ports::outbound::agent::mcp_tool_provider` | Inject MCP tools into Stasis |
+| `McpToolExporter` | `ports::outbound::agent::mcp_tool_exporter` | Export Stasis tools as MCP tools |
+
+| Adapter | Module | Notes |
+|---|---|---|
+| `JsonAgentMessageCodec` | `infrastructure::agent::json_agent_message_codec` | JSON v1 reference codec |
+| `InMemoryAgentEventIngress` | `infrastructure::agent::in_memory_agent_event_ingress` | Idempotent in-process ingress |
+| `McpBridgedToolRegistry` | `application::orchestration::mcp_bridged_tool_registry` | Merges providers into tool loops |
+| `AllowlistedLocalMcpExporter` | `application::orchestration::allowlisted_mcp_tool_exporter` | Explicit export allowlist + recursion budget |
+
+Canonical types live in `domain::agent` (`AgentEnvelope`, `McpToolDescriptor`, `McpInvocationContext`).
+
+**MCP + agent builder wiring:**
+
+```rust
+let provider: Arc<dyn McpToolProvider> = /* gateway outside core */;
+let (runtime, handles) = StasisRuntimeBuilder::new(backend)
+    .with_tool(MyLocalTool)?
+    .with_mcp_tool_provider(provider)
+    .with_mcp_export_allowlist(["my_local_tool"])
+    .with_delivery_endpoint_store(endpoints)
+    .with_turn_wait_store(waits)
+    .with_agent_message_codec(codec)
+    .with_agent_event_ingress(ingress)
+    .with_agent_transport(transport)
+    .build_with_handles()
+    .await?;
+// Serve MCP with handles.exporter; complete external turns via ingress.
+```
+
+Duplicate local/provider tool names are rejected at build time. Recursive export → provider → export bounce fails with `mcp recursion budget exhausted`.
+
+See [Agent Platform Runtime Contracts](./agent-platform-contracts.md).
+
+---
+
 ## Tool Registry
 
 ### StasisTool
@@ -384,5 +429,11 @@ The `InMemoryToolRegistry` is the only provided registry. It is always used inte
 | `MemoryContextWriter` | No | Auto-bootstrapped with `.with_locus_memory()` | `.with_memory_context_writer(...)` |
 | `MemoryOperations` | No | Auto-bootstrapped with `.with_locus_memory()` | `.with_memory_operations(...)` |
 | `StasisTool` | No | None | `.with_tool(tool)?` |
+| `McpToolProvider` | No | None | `.with_mcp_tool_provider(provider)` |
+| `McpToolExporter` | No | None (export nothing) | `.with_mcp_tool_exporter(...)` / `.with_mcp_export_allowlist([...])` |
+| `AgentMessageCodec` | No | JSON v1 for waitable | `.with_agent_message_codec(...)` |
+| `AgentEventIngress` | No | None | `.with_agent_event_ingress(...)` |
+| `AgentTransport` | No | None | `.with_agent_transport(...)` |
+| `TurnWaitStore` | No | process-local in-memory | `.with_turn_wait_store(...)` |
 
 No port is strictly required. The runtime boots with all defaults when `StasisRuntimeBuilder::new(backend).build().await?` is called with no additional configuration.

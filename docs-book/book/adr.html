@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-b67b3bb4.js";
+            window.path_to_searchindex_js = "searchindex-8915afd4.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-81824faf.js"></script>
+        <script src="toc-a298250c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -180,10 +180,14 @@
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-05-25</li>
+<li>Last Verified: 2026-07-22</li>
 <li>Verified Against:
 <ul>
 <li>docs/adr/README.md</li>
+<li>docs/adr/ADR-0007-agent-platform-runtime-contracts.md</li>
+<li>docs/adr/ADR-0008-stasisd-declarative-engine.md</li>
+<li>docs/design/agent-platform-runtime-contracts-plan.md</li>
+<li>docs/design/stasisd-declarative-engine-plan.md</li>
 <li>docs-book/src/adr.md</li>
 </ul>
 </li>
@@ -203,6 +207,8 @@
 <tr><td>ADR-0004</td><td>Recurring Jobs via Materialized Schedule Definitions</td><td>Accepted</td><td>2026-05-07</td></tr>
 <tr><td>ADR-0005</td><td>Agentic Workflow Skill Graph Contract</td><td>Accepted</td><td>2026-05-25</td></tr>
 <tr><td>ADR-0006</td><td>OpenTelemetry First-Class Observability</td><td>Accepted</td><td>2026-06-04</td></tr>
+<tr><td>ADR-0007</td><td>Agent Platform Runtime Contracts</td><td>Accepted</td><td>2026-07-22</td></tr>
+<tr><td>ADR-0008</td><td><code>stasisd</code> Declarative Engine</td><td>Accepted</td><td>2026-07-22</td></tr>
 </tbody>
 </table>
 </div>
@@ -217,6 +223,11 @@
   A4 --&gt; A2
   A1 --&gt; A6[ADR-0006 OpenTelemetry Observability]
   A2 --&gt; A6
+  A1 --&gt; A7[ADR-0007 Agent Platform Runtime Contracts]
+  A2 --&gt; A7
+  A3 --&gt; A7
+  A4 --&gt; A8[ADR-0008 stasisd Declarative Engine]
+  A7 --&gt; A8
 </pre>
 
 <h2 id="adr-0001-durable-job-runtime-on-surrealdb"><a class="header" href="#adr-0001-durable-job-runtime-on-surrealdb">ADR-0001 Durable Job Runtime on SurrealDB</a></h2>
@@ -291,6 +302,35 @@
 </ul>
 </li>
 <li>Plan: <a href="../../docs/design/opentelemetry-integration-rfc-plan.html">OpenTelemetry Integration RFC</a></li>
+</ul>
+<h2 id="adr-0007-agent-platform-runtime-contracts"><a class="header" href="#adr-0007-agent-platform-runtime-contracts">ADR-0007 Agent Platform Runtime Contracts</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Stasis should be the durable work runtime for agent platforms (MassTransit/Hangfire role), not a vendor integration hub for IDE/CLI agents.</li>
+<li>Decision: Ship three vendor-neutral contracts — Comms (bidirectional durable messaging), Translation (canonical envelope codecs), and MCP tool bridge (injectable provider/exporter around <code>StasisTool</code>) — with gateways implemented outside core.</li>
+<li>Consequences:
+<ul>
+<li>Positive: platform builders can inject gateways via DI; core stays product-agnostic; durability/leases/outbox remain the coordination backbone.</li>
+<li>Tradeoff: requires frozen canonical envelope versioning, ingress/waitable-turn state, and MCP recursion guards.</li>
+</ul>
+</li>
+<li>Plan: <a href="../../docs/design/agent-platform-runtime-contracts-plan.html">Agent Platform Runtime Contracts Plan</a></li>
+<li>Full ADR: <a href="../../docs/adr/ADR-0007-agent-platform-runtime-contracts.html">ADR-0007</a></li>
+</ul>
+<h2 id="adr-0008-stasisd-declarative-engine"><a class="header" href="#adr-0008-stasisd-declarative-engine">ADR-0008 <code>stasisd</code> Declarative Engine</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Operators need a small deployable that turns YAML/TOML desired state into live agent schedules — the nginx of AI orchestration — without reinventing recurring registration in every app.</li>
+<li>Decision: Ship <code>stasisd</code> as a thin reconcile+tick engine on top of the Stasis runtime: watch config files, map them to managed <code>RecurringDefinition</code>s, and apply drain/cancel/orphan policies on remove.</li>
+<li>Consequences:
+<ul>
+<li>Positive: GitOps-friendly schedules; clear kernel vs deployable split; reuses existing materialization/leases.</li>
+<li>Tradeoff: versioned config schema, provenance ownership, and explicit delete/drain semantics required.</li>
+</ul>
+</li>
+<li>Plan: <a href="../../docs/design/stasisd-declarative-engine-plan.html"><code>stasisd</code> Declarative Engine Plan</a></li>
+<li>Full ADR: <a href="../../docs/adr/ADR-0008-stasisd-declarative-engine.html">ADR-0008</a></li>
+<li>Overview: <a href="./stasisd.html"><code>stasisd</code> docs-book page</a></li>
 </ul>
 
                     </main>

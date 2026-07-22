@@ -529,6 +529,57 @@ impl SurrealRuntime {
                         .incr_counter(metric_keys::GRAPHEME_GUARDRAIL_FAILURE_TOTAL, 1);
                 }
             }
+            JobExecutionOutcome::Deferred {
+                scheduled_at,
+                message,
+                execution_id,
+                diagnostics,
+            } => {
+                let diagnostics_envelope =
+                    Self::extract_diagnostics_envelope(diagnostics.as_deref());
+                job.state = JobState::Enqueued;
+                job.scheduled_at = scheduled_at;
+                job.last_error = Some(message.clone());
+                job.lease_owner = None;
+                job.lease_expires_at = None;
+                job.heartbeat_at = None;
+                self.job_store.save(job).await?;
+
+                self.append_outbox(
+                    RuntimeEventType::JobRetryScheduled,
+                    &job_identity,
+                    None,
+                    Some(message.clone()),
+                    now,
+                    execution_id.clone(),
+                    &diagnostics_envelope,
+                )
+                .await?;
+
+                self.append_job_attempt(
+                    &job_identity.job_id,
+                    worker_id,
+                    attempt_number,
+                    attempt_started_at,
+                    now,
+                    JobAttemptOutcome::Deferred,
+                    Some(message),
+                    None,
+                    execution_id,
+                    &diagnostics_envelope,
+                    diagnostics,
+                )
+                .await?;
+
+                self.metrics
+                    .incr_counter(metric_keys::JOB_DEFERRED_TOTAL, 1);
+                self.metrics
+                    .incr_counter(metric_keys::JOB_RETRY_SCHEDULED_TOTAL, 1);
+                self.metrics.observe_duration_ms(
+                    metric_keys::JOB_PROCESS_DURATION_MS,
+                    processing_started.elapsed().as_millis() as u64,
+                );
+            }
             JobExecutionOutcome::FatalFailure {
                 message,
                 execution_id,
