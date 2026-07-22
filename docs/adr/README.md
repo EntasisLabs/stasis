@@ -9,7 +9,9 @@
 - Verified Against:
   - docs/adr/README.md
   - docs/adr/ADR-0007-agent-platform-runtime-contracts.md
+  - docs/adr/ADR-0008-stasisd-declarative-engine.md
   - docs/design/agent-platform-runtime-contracts-plan.md
+  - docs/design/stasisd-declarative-engine-plan.md
   - docs-book/src/adr.md
 
 ## Purpose
@@ -27,6 +29,7 @@ Track major architectural decisions with rationale, alternatives, and consequenc
 | ADR-0005 | Agentic Workflow Skill Graph Contract | Accepted | 2026-05-25 |
 | ADR-0006 | OpenTelemetry First-Class Observability | Accepted | 2026-06-04 |
 | ADR-0007 | Agent Platform Runtime Contracts | Proposed | 2026-07-22 |
+| ADR-0008 | `stasisd` Declarative Engine | Proposed | 2026-07-22 |
 
 ## Decision Dependency Diagram
 
@@ -44,7 +47,20 @@ flowchart TD
   A1 --> A7[ADR-0007 Agent Platform Runtime Contracts]
   A2 --> A7
   A3 --> A7
+  A4 --> A8[ADR-0008 stasisd Declarative Engine]
+  A7 --> A8
 ```
+
+## ADR-0008 `stasisd` Declarative Engine
+
+- Status: Proposed
+- Context: Operators need a small deployable that turns YAML/TOML desired state into live agent schedules — the nginx of AI orchestration — without reinventing recurring registration in every app.
+- Decision: Ship `stasisd` as a thin reconcile+tick engine on top of the Stasis runtime: watch config files, map them to managed `RecurringDefinition`s, and apply drain/cancel/orphan policies on remove.
+- Consequences:
+  - Positive: GitOps-friendly schedules; clear kernel vs deployable split; reuses existing materialization/leases.
+  - Tradeoff: versioned config schema, provenance ownership, and explicit delete/drain semantics required.
+- Plan: [design/stasisd-declarative-engine-plan.md](../design/stasisd-declarative-engine-plan.md)
+- Full ADR: [ADR-0008-stasisd-declarative-engine.md](ADR-0008-stasisd-declarative-engine.md)
 
 ## ADR-0007 Agent Platform Runtime Contracts
 

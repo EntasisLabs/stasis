@@ -25,6 +25,7 @@
 - Locus integration RFC and delivery plan: [design/locus-integration-rfc-plan.md](design/locus-integration-rfc-plan.md)
 - OpenTelemetry integration RFC and delivery plan (frozen contract, 0.3.0): [design/opentelemetry-integration-rfc-plan.md](design/opentelemetry-integration-rfc-plan.md)
 - Agent platform runtime contracts plan (comms, translation, MCP bridge): [design/agent-platform-runtime-contracts-plan.md](design/agent-platform-runtime-contracts-plan.md)
+- `stasisd` declarative engine plan (YAML/TOML desired state): [design/stasisd-declarative-engine-plan.md](design/stasisd-declarative-engine-plan.md)
 - Hospice interoperability safety test analysis and gameplan: [design/hospice-interoperability-safety-test-gameplan.md](design/hospice-interoperability-safety-test-gameplan.md)
 - Grapheme reflection and LSP delivery plan: [design/grapheme-reflection-lsp-delivery-plan.md](design/grapheme-reflection-lsp-delivery-plan.md)
 

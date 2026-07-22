@@ -55,8 +55,12 @@ The gateway crate depends on Stasis ports/SDK. Core Stasis never depends on a co
 
 Contracts are proposed. Implementation is phased in the delivery plan.
 
+## Related deployable
+
+[`stasisd`](./stasisd.md) (ADR-0008) is the declarative YAML/TOML engine that reconciles desired state into durable schedules on top of this runtime.
+
 ## References
 
 - ADR: [ADR-0007 Agent Platform Runtime Contracts](../../docs/adr/ADR-0007-agent-platform-runtime-contracts.md)
 - Delivery plan: [agent-platform-runtime-contracts-plan.md](../../docs/design/agent-platform-runtime-contracts-plan.md)
-- Related: [Extension Points](./extension-points.md), [Control Plane and Endpoint Routing](./control-plane-endpoint-routing.md), [Agent Coordination](./agent-coordination.md)
+- Related: [Extension Points](./extension-points.md), [Control Plane and Endpoint Routing](./control-plane-endpoint-routing.md), [Agent Coordination](./agent-coordination.md), [`stasisd`](./stasisd.md)
