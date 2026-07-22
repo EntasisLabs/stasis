@@ -12,14 +12,18 @@ use crate::domain::agent::envelope::{
 use crate::domain::agent::turn_wait::{TurnWaitRecord, TurnWaitStatus};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
+use crate::ports::outbound::agent::transport::AgentTransport;
 use crate::ports::outbound::agent::turn_wait_store::TurnWaitStore;
 use crate::ports::outbound::agent::{AgentEventIngress, AgentMessageCodec};
+use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
 
 pub struct AgentTurnWaitableJobHandler {
     wait_store: Arc<dyn TurnWaitStore>,
     /// Optional ingress used to record the outbound `TurnGranted` locally for tests/fakes.
     grant_ingress: Option<Arc<dyn AgentEventIngress>>,
     codec: Arc<dyn AgentMessageCodec>,
+    endpoint_store: Option<Arc<dyn DeliveryEndpointStore>>,
+    transport: Option<Arc<dyn AgentTransport>>,
 }
 
 impl AgentTurnWaitableJobHandler {
@@ -32,7 +36,19 @@ impl AgentTurnWaitableJobHandler {
             wait_store,
             grant_ingress,
             codec,
+            endpoint_store: None,
+            transport: None,
         }
+    }
+
+    pub fn with_endpoint_publish(
+        mut self,
+        endpoint_store: Arc<dyn DeliveryEndpointStore>,
+        transport: Arc<dyn AgentTransport>,
+    ) -> Self {
+        self.endpoint_store = Some(endpoint_store);
+        self.transport = Some(transport);
+        self
     }
 
     fn parse_payload(raw: &str) -> std::result::Result<AgentTurnWaitableJobPayload, String> {
@@ -221,7 +237,37 @@ impl JobHandler for AgentTurnWaitableJobHandler {
         };
 
         // Validate grant encodes cleanly (codec contract).
-        let _encoded = self.codec.encode(&grant)?;
+        let encoded = self.codec.encode(&grant)?;
+        if let Some(ref endpoint_ref) = payload.endpoint_ref {
+            let (Some(store), Some(transport)) = (&self.endpoint_store, &self.transport) else {
+                return Ok(Self::policy_failure(
+                    "policy violation: endpoint_ref set but agent transport/endpoint store not configured"
+                        .into(),
+                ));
+            };
+            let endpoint_id = if endpoint_ref.starts_with("stasisd:endpoint:") {
+                endpoint_ref.clone()
+            } else {
+                format!("stasisd:endpoint:{endpoint_ref}")
+            };
+            let Some(endpoint) = store.get(&endpoint_id).await? else {
+                return Ok(Self::policy_failure(format!(
+                    "policy violation: delivery endpoint not found: {endpoint_id}"
+                )));
+            };
+            if !endpoint.enabled {
+                return Ok(Self::policy_failure(format!(
+                    "policy violation: delivery endpoint disabled: {endpoint_id}"
+                )));
+            }
+            if !transport.supports(&endpoint.protocol) {
+                return Ok(Self::policy_failure(format!(
+                    "policy violation: agent transport does not support {:?}",
+                    endpoint.protocol
+                )));
+            }
+            transport.publish(&endpoint, &encoded).await?;
+        }
         if let Some(ingress) = &self.grant_ingress {
             let _ = ingress.accept(grant).await?;
         }
@@ -237,6 +283,7 @@ impl JobHandler for AgentTurnWaitableJobHandler {
                     "status": "deferred",
                     "wait_status": "pending",
                     "turn_granted": true,
+                    "endpoint_ref": payload.endpoint_ref,
                 })
                 .to_string(),
             ),
@@ -292,6 +339,8 @@ mod tests {
             system_prompt: None,
             timeout_seconds: 30,
             poll_interval_seconds: 1,
+            endpoint_ref: None,
+            mcp_gateway_ref: None,
         }
     }
 

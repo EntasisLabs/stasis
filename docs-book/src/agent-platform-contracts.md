@@ -59,6 +59,8 @@ Phase 2 adds waitable external turns: `workflow.stasis.agent_turn.waitable` park
 
 Phase 3 adds the MCP tool bridge: `McpBridgedToolRegistry` merges `McpToolProvider` tools beside local `StasisTool`s (duplicate names rejected), `AllowlistedLocalMcpExporter` exports an explicit allowlist (default: nothing), and recursion budget is enforced on MCP ↔ Stasis re-entry. Builder: `.with_mcp_tool_provider(...)`, `.with_mcp_tool_exporter(...)`, `.with_mcp_export_allowlist(...)`, `.build_with_handles()`.
 
+Phase 4 wires declarative external participants: builder DI for codec/ingress/transport/wait-store, waitable turns publish encoded grants to `endpoint_ref`, and `stasisd` reconciles managed `stasisd:endpoint:<id>` resources. Cookbook: [Platform Builder: External Participants](./cookbook/platform-builder-external-participant.md).
+
 ## Related deployable
 
 [`stasisd`](./stasisd.md) (ADR-0008) is the declarative YAML/TOML engine that reconciles desired state into durable schedules on top of this runtime.

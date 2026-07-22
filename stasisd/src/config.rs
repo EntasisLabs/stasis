@@ -232,6 +232,16 @@ pub fn load_desired_state(path: &Path) -> Result<DesiredState, StasisdError> {
         .iter()
         .flat_map(|doc| doc.schedules.clone())
         .collect();
+    desired.endpoints = desired
+        .documents
+        .iter()
+        .flat_map(|doc| doc.endpoints.clone())
+        .collect();
+    desired.mcp_gateways = desired
+        .documents
+        .iter()
+        .flat_map(|doc| doc.mcp_gateways.clone())
+        .collect();
 
     if let Err(errors) = validate_desired_state(&desired) {
         for err in errors {
@@ -248,6 +258,34 @@ pub fn load_desired_state(path: &Path) -> Result<DesiredState, StasisdError> {
                 .iter()
                 .filter(|doc| crate::validate::validate_document(doc).is_ok())
                 .flat_map(|doc| doc.schedules.clone())
+                .collect();
+        }
+        if desired
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("duplicate endpoint id"))
+        {
+            desired.endpoints.clear();
+        } else {
+            desired.endpoints = desired
+                .documents
+                .iter()
+                .filter(|doc| crate::validate::validate_document(doc).is_ok())
+                .flat_map(|doc| doc.endpoints.clone())
+                .collect();
+        }
+        if desired
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("duplicate mcp_gateway id"))
+        {
+            desired.mcp_gateways.clear();
+        } else {
+            desired.mcp_gateways = desired
+                .documents
+                .iter()
+                .filter(|doc| crate::validate::validate_document(doc).is_ok())
+                .flat_map(|doc| doc.mcp_gateways.clone())
                 .collect();
         }
     }

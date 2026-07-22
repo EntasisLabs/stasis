@@ -1,12 +1,22 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use chrono::Utc;
+use stasis::domain::runtime::delivery_endpoint::{
+    DeliveryProtocol, NewDeliveryEndpoint,
+};
 use stasis::domain::runtime::recurring::RecurringDefinition;
+use stasis::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
 use stasis::sdk::runtime_sdk::RuntimeSdk;
 
 use crate::error::StasisdError;
-use crate::model::{DesiredState, OnRemovePolicy, StasisdSchedule};
-use crate::provenance::{is_managed_recurring_id, managed_recurring_id, strip_managed_prefix};
+use crate::model::{
+    DesiredState, OnRemovePolicy, StasisdEndpoint, StasisdEndpointProtocol, StasisdSchedule,
+};
+use crate::provenance::{
+    is_managed_endpoint_id, is_managed_recurring_id, managed_endpoint_id, managed_recurring_id,
+    strip_managed_endpoint_prefix, strip_managed_prefix,
+};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReconcileReport {
@@ -16,6 +26,10 @@ pub struct ReconcileReport {
     pub orphaned: Vec<String>,
     pub unchanged: Vec<String>,
     pub skipped_cancel: Vec<String>,
+    pub endpoint_created: Vec<String>,
+    pub endpoint_updated: Vec<String>,
+    pub endpoint_disabled: Vec<String>,
+    pub endpoint_unchanged: Vec<String>,
 }
 
 /// Apply desired schedules onto a runtime, touching only `stasisd:`-managed definitions.
@@ -25,12 +39,161 @@ pub async fn reconcile(
     runtime: &RuntimeSdk,
     desired: &DesiredState,
 ) -> Result<ReconcileReport, StasisdError> {
+    reconcile_with_endpoint_store(runtime, desired, None).await
+}
+
+/// Reconcile schedules and optional declarative delivery endpoints.
+pub async fn reconcile_with_endpoint_store(
+    runtime: &RuntimeSdk,
+    desired: &DesiredState,
+    endpoint_store: Option<Arc<dyn DeliveryEndpointStore>>,
+) -> Result<ReconcileReport, StasisdError> {
     let removal_policies = desired
         .schedules
         .iter()
         .map(|schedule| (schedule.id.clone(), schedule.on_remove.clone()))
         .collect();
-    reconcile_with_removal_policies(runtime, desired, &removal_policies).await
+    let mut report =
+        reconcile_with_removal_policies(runtime, desired, &removal_policies).await?;
+    if let Some(store) = endpoint_store {
+        let endpoint_report = reconcile_endpoints(store.as_ref(), desired).await?;
+        report.endpoint_created = endpoint_report.endpoint_created;
+        report.endpoint_updated = endpoint_report.endpoint_updated;
+        report.endpoint_disabled = endpoint_report.endpoint_disabled;
+        report.endpoint_unchanged = endpoint_report.endpoint_unchanged;
+    }
+    Ok(report)
+}
+
+/// Reconcile managed delivery endpoints (`stasisd:endpoint:<id>`).
+pub async fn reconcile_endpoints(
+    store: &dyn DeliveryEndpointStore,
+    desired: &DesiredState,
+) -> Result<ReconcileReport, StasisdError> {
+    let existing = store
+        .list()
+        .await
+        .map_err(|err| StasisdError::Runtime(err.to_string()))?;
+    let managed: Vec<_> = existing
+        .into_iter()
+        .filter(|ep| is_managed_endpoint_id(&ep.endpoint_id))
+        .collect();
+
+    let desired_by_id: HashMap<String, &StasisdEndpoint> = desired
+        .endpoints
+        .iter()
+        .map(|endpoint| (managed_endpoint_id(&endpoint.id), endpoint))
+        .collect();
+
+    let mut report = ReconcileReport::default();
+    let now = Utc::now();
+
+    for endpoint in &desired.endpoints {
+        let runtime_id = managed_endpoint_id(&endpoint.id);
+        let next = endpoint_to_new(endpoint, now)?;
+        if let Some(current) = managed.iter().find(|ep| ep.endpoint_id == runtime_id) {
+            if endpoint_effectively_equal(current, &next) {
+                report.endpoint_unchanged.push(runtime_id);
+                continue;
+            }
+            store
+                .upsert(next)
+                .await
+                .map_err(|err| StasisdError::Runtime(err.to_string()))?;
+            report.endpoint_updated.push(runtime_id);
+        } else {
+            store
+                .upsert(next)
+                .await
+                .map_err(|err| StasisdError::Runtime(err.to_string()))?;
+            report.endpoint_created.push(runtime_id);
+        }
+    }
+
+    // Build removal policies from config ids that may still appear in documents
+    // even when filtered out of desired.endpoints; default drain disables the endpoint.
+    let mut removal_policies: HashMap<String, OnRemovePolicy> = HashMap::new();
+    for document in &desired.documents {
+        for endpoint in &document.endpoints {
+            removal_policies.insert(endpoint.id.clone(), endpoint.on_remove.clone());
+        }
+    }
+    for endpoint in &desired.endpoints {
+        removal_policies.insert(endpoint.id.clone(), endpoint.on_remove.clone());
+    }
+
+    for current in &managed {
+        if desired_by_id.contains_key(&current.endpoint_id) {
+            continue;
+        }
+        let config_id = strip_managed_endpoint_prefix(&current.endpoint_id)
+            .unwrap_or(current.endpoint_id.as_str())
+            .to_string();
+        let removal = removal_policies
+            .get(&config_id)
+            .cloned()
+            .unwrap_or(OnRemovePolicy::Drain);
+        match removal {
+            OnRemovePolicy::Orphan => {
+                report.orphaned.push(current.endpoint_id.clone());
+            }
+            OnRemovePolicy::Drain | OnRemovePolicy::Cancel => {
+                store
+                    .set_enabled(&current.endpoint_id, false)
+                    .await
+                    .map_err(|err| StasisdError::Runtime(err.to_string()))?;
+                report.endpoint_disabled.push(current.endpoint_id.clone());
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+fn endpoint_to_new(
+    endpoint: &StasisdEndpoint,
+    now: chrono::DateTime<Utc>,
+) -> Result<NewDeliveryEndpoint, StasisdError> {
+    let protocol = match endpoint.protocol {
+        StasisdEndpointProtocol::HttpWebhook => DeliveryProtocol::HttpWebhook,
+        StasisdEndpointProtocol::Tcp => DeliveryProtocol::Tcp,
+        StasisdEndpointProtocol::Kafka => DeliveryProtocol::Kafka,
+        StasisdEndpointProtocol::RabbitMq => DeliveryProtocol::RabbitMq,
+    };
+    let metadata = if endpoint.metadata.is_null()
+        || endpoint
+            .metadata
+            .as_object()
+            .map(|o| o.is_empty())
+            .unwrap_or(false)
+    {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&endpoint.metadata)
+                .map_err(|err| StasisdError::Validation(format!("endpoint metadata: {err}")))?,
+        )
+    };
+    Ok(NewDeliveryEndpoint {
+        endpoint_id: managed_endpoint_id(&endpoint.id),
+        name: endpoint.name.clone(),
+        protocol,
+        target: endpoint.target.clone(),
+        metadata,
+        created_at: now,
+    })
+}
+
+fn endpoint_effectively_equal(
+    current: &stasis::domain::runtime::delivery_endpoint::DeliveryEndpoint,
+    next: &NewDeliveryEndpoint,
+) -> bool {
+    current.endpoint_id == next.endpoint_id
+        && current.name == next.name
+        && current.protocol == next.protocol
+        && current.target == next.target
+        && current.metadata == next.metadata
+        && current.enabled
 }
 
 /// Reconcile with an explicit removal-policy lookup for schedules that disappeared.
@@ -203,6 +366,8 @@ mod tests {
             sources: Vec::new(),
             documents: Vec::new(),
             schedules,
+            endpoints: Vec::new(),
+            mcp_gateways: Vec::new(),
             diagnostics: Vec::new(),
         }
     }

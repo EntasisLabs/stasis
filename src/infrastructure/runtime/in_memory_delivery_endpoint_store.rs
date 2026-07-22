@@ -63,4 +63,23 @@ impl DeliveryEndpointStore for InMemoryDeliveryEndpointStore {
         endpoint.updated_at = Utc::now();
         Ok(true)
     }
+
+    async fn upsert(&self, endpoint: NewDeliveryEndpoint) -> Result<DeliveryEndpoint> {
+        let mut endpoints = self.endpoints.write().map_err(|_| {
+            StasisError::PortFailure("delivery endpoint store lock poisoned".to_string())
+        })?;
+
+        let now = Utc::now();
+        if let Some(existing) = endpoints.get(&endpoint.endpoint_id) {
+            let mut record = endpoint.into_record();
+            record.created_at = existing.created_at;
+            record.updated_at = now;
+            endpoints.insert(record.endpoint_id.clone(), record.clone());
+            return Ok(record);
+        }
+
+        let record = endpoint.into_record();
+        endpoints.insert(record.endpoint_id.clone(), record.clone());
+        Ok(record)
+    }
 }

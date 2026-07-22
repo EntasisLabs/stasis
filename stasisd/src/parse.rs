@@ -3,7 +3,10 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use crate::error::StasisdError;
-use crate::model::{StasisdDocument, StasisdFileDocument, StasisdSchedule, API_VERSION};
+use crate::model::{
+    StasisdDocument, StasisdEndpoint, StasisdFileDocument, StasisdMcpGateway, StasisdSchedule,
+    API_VERSION,
+};
 
 pub fn parse_config_bytes(
     source_path: &Path,
@@ -52,17 +55,27 @@ pub fn parse_config_bytes(
         )));
     }
 
-    let content_hash = hash_schedules(&file_doc.schedule);
+    let content_hash = hash_document_resources(
+        &file_doc.schedule,
+        &file_doc.endpoint,
+        &file_doc.mcp_gateway,
+    );
     Ok(StasisdDocument {
         api_version: file_doc.api_version,
         source_path: source_path.to_path_buf(),
         content_hash,
         schedules: file_doc.schedule,
+        endpoints: file_doc.endpoint,
+        mcp_gateways: file_doc.mcp_gateway,
     })
 }
 
-pub fn hash_schedules(schedules: &[StasisdSchedule]) -> String {
-    let encoded = serde_json::to_vec(schedules).unwrap_or_default();
+pub fn hash_document_resources(
+    schedules: &[StasisdSchedule],
+    endpoints: &[StasisdEndpoint],
+    mcp_gateways: &[StasisdMcpGateway],
+) -> String {
+    let encoded = serde_json::to_vec(&(schedules, endpoints, mcp_gateways)).unwrap_or_default();
     let digest = Sha256::digest(encoded);
     hex::encode(digest)
 }
@@ -88,6 +101,45 @@ cron = "0 0 2 * * * *"
         assert_eq!(doc.schedules[0].id, "nightly");
         assert_eq!(doc.schedules[0].timezone, "UTC");
         assert!(!doc.content_hash.is_empty());
+    }
+
+    #[test]
+    fn parses_endpoint_and_mcp_gateway() {
+        let toml = r#"
+api_version = "stasisd/v1"
+
+[[endpoint]]
+id = "fake-external"
+name = "Fake external"
+protocol = "http_webhook"
+target = "http://127.0.0.1:39001/agent"
+
+[[mcp_gateway]]
+id = "local-mcp"
+transport = "command"
+command = "fake-mcp-gateway"
+args = ["--stdio"]
+export_allowlist = ["summarize"]
+
+[[schedule]]
+id = "external-turn"
+queue = "agents"
+job_type = "workflow.stasis.agent_turn.waitable"
+cron = "0/5 * * * * * *"
+payload = { agent_id = "external-reviewer", session_id = "s1", turn_id = "t1", user_prompt = "review", endpoint_ref = "fake-external", timeout_seconds = 30, poll_interval_seconds = 1 }
+"#;
+        let doc = parse_config_bytes(Path::new("join.toml"), toml.as_bytes()).unwrap();
+        assert_eq!(doc.endpoints.len(), 1);
+        assert_eq!(doc.endpoints[0].id, "fake-external");
+        assert_eq!(doc.mcp_gateways.len(), 1);
+        assert_eq!(doc.mcp_gateways[0].command.as_deref(), Some("fake-mcp-gateway"));
+        assert_eq!(
+            doc.schedules[0]
+                .payload
+                .get("endpoint_ref")
+                .and_then(|v| v.as_str()),
+            Some("fake-external")
+        );
     }
 
     #[test]

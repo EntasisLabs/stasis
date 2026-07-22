@@ -163,12 +163,14 @@ fn build_product_planning_jobs() -> Result<Vec<NewJob>> {
                 system_prompt: Some("Advocate for customer value and timeline realism.".to_string()),
                 tool_name: "fetch_knowledge_base".to_string(),
                 tool_input: Some(json!({ "topic": "roadmap planning" })),
+                ..Default::default()
             },
             AgentSessionParticipantPayload {
                 agent_id: "staff_engineer".to_string(),
                 system_prompt: Some("Highlight technical risk and architecture constraints.".to_string()),
                 tool_name: "fetch_knowledge_base".to_string(),
                 tool_input: Some(json!({ "topic": "architecture constraints" })),
+                ..Default::default()
             },
         ],
         policy_profile: Some("prod.product".to_string()),

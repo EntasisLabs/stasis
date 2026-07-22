@@ -2831,12 +2831,14 @@ async fn in_memory_agent_session_job_handler_executes_session() {
                 system_prompt: Some("You are agent alpha".to_string()),
                 tool_name: "stasis.web.search.mock".to_string(),
                 tool_input: Some(json!({"query": "rust trends"})),
+                ..Default::default()
             },
             AgentSessionParticipantPayload {
                 agent_id: "agent.beta".to_string(),
                 system_prompt: Some("You are agent beta".to_string()),
                 tool_name: "stasis.web.search.mock".to_string(),
                 tool_input: Some(json!({"query": "rust trends"})),
+                ..Default::default()
             },
         ],
         policy_profile: Some("default".to_string()),
@@ -2947,12 +2949,14 @@ async fn surreal_agent_session_job_handler_executes_session() {
                 system_prompt: Some("You are agent alpha".to_string()),
                 tool_name: "stasis.web.search.mock".to_string(),
                 tool_input: Some(json!({"query": "rust trends"})),
+                ..Default::default()
             },
             AgentSessionParticipantPayload {
                 agent_id: "agent.beta".to_string(),
                 system_prompt: Some("You are agent beta".to_string()),
                 tool_name: "stasis.web.search.mock".to_string(),
                 tool_input: Some(json!({"query": "rust trends"})),
+                ..Default::default()
             },
         ],
         policy_profile: Some("default".to_string()),
@@ -3069,12 +3073,14 @@ async fn in_memory_agent_session_job_handler_with_memory_persists_memory_node_id
                 system_prompt: Some("You are agent alpha".to_string()),
                 tool_name: "stasis.web.search.mock".to_string(),
                 tool_input: Some(json!({"query": "rust trends"})),
+                ..Default::default()
             },
             AgentSessionParticipantPayload {
                 agent_id: "agent.beta".to_string(),
                 system_prompt: Some("You are agent beta".to_string()),
                 tool_name: "stasis.web.search.mock".to_string(),
                 tool_input: Some(json!({"query": "rust trends"})),
+                ..Default::default()
             },
         ],
         policy_profile: Some("default".to_string()),
@@ -3190,12 +3196,14 @@ async fn in_memory_agent_session_identity_trace_includes_replacement_continuity_
                 system_prompt: Some("You are agent alpha".to_string()),
                 tool_name: "stasis.web.search.mock".to_string(),
                 tool_input: Some(json!({"query": "rust trends"})),
+                ..Default::default()
             },
             AgentSessionParticipantPayload {
                 agent_id: "agent.beta".to_string(),
                 system_prompt: Some("You are agent beta".to_string()),
                 tool_name: "stasis.web.search.mock".to_string(),
                 tool_input: Some(json!({"query": "rust trends"})),
+                ..Default::default()
             },
         ],
         policy_profile: Some("default".to_string()),
@@ -3311,12 +3319,14 @@ async fn surreal_agent_session_job_handler_with_memory_persists_memory_node_id_a
                 system_prompt: Some("You are agent alpha".to_string()),
                 tool_name: "stasis.web.search.mock".to_string(),
                 tool_input: Some(json!({"query": "rust trends"})),
+                ..Default::default()
             },
             AgentSessionParticipantPayload {
                 agent_id: "agent.beta".to_string(),
                 system_prompt: Some("You are agent beta".to_string()),
                 tool_name: "stasis.web.search.mock".to_string(),
                 tool_input: Some(json!({"query": "rust trends"})),
+                ..Default::default()
             },
         ],
         policy_profile: Some("default".to_string()),

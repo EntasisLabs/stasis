@@ -20,6 +20,53 @@ impl Default for OnRemovePolicy {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StasisdEndpointProtocol {
+    HttpWebhook,
+    Tcp,
+    Kafka,
+    RabbitMq,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StasisdEndpoint {
+    pub id: String,
+    pub name: String,
+    pub protocol: StasisdEndpointProtocol,
+    pub target: String,
+    #[serde(default)]
+    pub metadata: Value,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub on_remove: OnRemovePolicy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StasisdMcpGatewayTransport {
+    Socket,
+    Command,
+}
+
+/// Declarative MCP gateway reference (composition metadata; not a vendor SDK).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StasisdMcpGateway {
+    pub id: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    pub transport: StasisdMcpGatewayTransport,
+    pub socket_path: Option<String>,
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub export_allowlist: Vec<String>,
+    #[serde(default)]
+    pub metadata: Value,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StasisdSchedule {
     pub id: String,
@@ -61,6 +108,10 @@ pub struct StasisdFileDocument {
     pub api_version: String,
     #[serde(default)]
     pub schedule: Vec<StasisdSchedule>,
+    #[serde(default)]
+    pub endpoint: Vec<StasisdEndpoint>,
+    #[serde(default)]
+    pub mcp_gateway: Vec<StasisdMcpGateway>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -69,6 +120,8 @@ pub struct StasisdDocument {
     pub source_path: PathBuf,
     pub content_hash: String,
     pub schedules: Vec<StasisdSchedule>,
+    pub endpoints: Vec<StasisdEndpoint>,
+    pub mcp_gateways: Vec<StasisdMcpGateway>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -76,8 +129,7 @@ pub struct DesiredState {
     pub sources: Vec<PathBuf>,
     pub documents: Vec<StasisdDocument>,
     pub schedules: Vec<StasisdSchedule>,
+    pub endpoints: Vec<StasisdEndpoint>,
+    pub mcp_gateways: Vec<StasisdMcpGateway>,
     pub diagnostics: Vec<String>,
-}
-
-impl DesiredState {
 }

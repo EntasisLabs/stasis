@@ -351,7 +351,7 @@ Vendor-neutral agent platform ports and Phase 1 reference adapters.
 
 Canonical types live in `domain::agent` (`AgentEnvelope`, `McpToolDescriptor`, `McpInvocationContext`).
 
-**MCP builder wiring:**
+**MCP + agent builder wiring:**
 
 ```rust
 let provider: Arc<dyn McpToolProvider> = /* gateway outside core */;
@@ -359,9 +359,14 @@ let (runtime, handles) = StasisRuntimeBuilder::new(backend)
     .with_tool(MyLocalTool)?
     .with_mcp_tool_provider(provider)
     .with_mcp_export_allowlist(["my_local_tool"])
+    .with_delivery_endpoint_store(endpoints)
+    .with_turn_wait_store(waits)
+    .with_agent_message_codec(codec)
+    .with_agent_event_ingress(ingress)
+    .with_agent_transport(transport)
     .build_with_handles()
     .await?;
-// Serve MCP with handles.exporter (exports allowlisted local tools only).
+// Serve MCP with handles.exporter; complete external turns via ingress.
 ```
 
 Duplicate local/provider tool names are rejected at build time. Recursive export → provider → export bounce fails with `mcp recursion budget exhausted`.
@@ -426,5 +431,9 @@ The `InMemoryToolRegistry` is the only provided registry. It is always used inte
 | `StasisTool` | No | None | `.with_tool(tool)?` |
 | `McpToolProvider` | No | None | `.with_mcp_tool_provider(provider)` |
 | `McpToolExporter` | No | None (export nothing) | `.with_mcp_tool_exporter(...)` / `.with_mcp_export_allowlist([...])` |
+| `AgentMessageCodec` | No | JSON v1 for waitable | `.with_agent_message_codec(...)` |
+| `AgentEventIngress` | No | None | `.with_agent_event_ingress(...)` |
+| `AgentTransport` | No | None | `.with_agent_transport(...)` |
+| `TurnWaitStore` | No | process-local in-memory | `.with_turn_wait_store(...)` |
 
 No port is strictly required. The runtime boots with all defaults when `StasisRuntimeBuilder::new(backend).build().await?` is called with no additional configuration.

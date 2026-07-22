@@ -50,6 +50,8 @@ Phase 2 adds the long-running host: filesystem watch + debounce, periodic reconc
 
 Phase 3 hardens operators: `--strict` quarantine semantics, id-prefix provenance (`stasisd:`), Ctrl-C/SIGTERM shutdown, optional `--healthz-addr` (`/healthz`, `/readyz`), and a systemd/runbook path.
 
+Phase 4 joins contracts + `stasisd`: declarative `[[endpoint]]` / `[[mcp_gateway]]`, `participant.kind = external` + `endpoint_ref` validation, waitable turns publish `TurnGranted` via `AgentTransport`, and a platform-builder cookbook for mixed local + fake external.
+
 Phased epic board (with ADR-0007 contracts): [agent-platform-and-stasisd-epic.md](../../docs/design/agent-platform-and-stasisd-epic.md).
 
 Cron dialect matches `RecurringDefinition` / `cron` 0.12 (**7 fields**: sec min hour dom month dow year).

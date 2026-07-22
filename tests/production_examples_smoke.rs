@@ -45,12 +45,14 @@ async fn production_example_dry_run_jobs_enqueue_without_provider() {
                 system_prompt: Some("Focus on sequencing and dependencies.".to_string()),
                 tool_name: "fetch_knowledge_base".to_string(),
                 tool_input: Some(json!({ "topic": "sequencing" })),
+                ..Default::default()
             },
             AgentSessionParticipantPayload {
                 agent_id: "sre".to_string(),
                 system_prompt: Some("Focus on failure modes and rollback.".to_string()),
                 tool_name: "fetch_knowledge_base".to_string(),
                 tool_input: Some(json!({ "topic": "rollback" })),
+                ..Default::default()
             },
         ],
         policy_profile: Some("prod.review".to_string()),

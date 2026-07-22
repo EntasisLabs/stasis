@@ -173,4 +173,21 @@ impl DeliveryEndpointStore for SurrealDeliveryEndpointStore {
 
         Ok(updated.is_some())
     }
+
+    async fn upsert(&self, endpoint: NewDeliveryEndpoint) -> Result<DeliveryEndpoint> {
+        if let Some(existing) = self.get(&endpoint.endpoint_id).await? {
+            let mut record: DeliveryEndpointRecord = endpoint.into();
+            record.created_at = existing.created_at;
+            record.updated_at = Utc::now();
+            self.db
+                .query("UPDATE type::record($table, $id) CONTENT $data")
+                .bind(("table", self.table.clone()))
+                .bind(("id", record.endpoint_id.clone()))
+                .bind(("data", record.clone()))
+                .await
+                .map_err(|e| Self::port_err("upsert delivery endpoint", e))?;
+            return DeliveryEndpoint::try_from(record);
+        }
+        self.insert(endpoint).await
+    }
 }

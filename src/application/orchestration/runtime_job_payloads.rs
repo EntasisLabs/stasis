@@ -82,12 +82,33 @@ pub struct MemoryPolicyPayload {
     pub filter: MemoryFilterPayload,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentParticipantKindPayload {
+    #[default]
+    LocalToolLoop,
+    External,
+}
+
+fn default_participant_kind() -> AgentParticipantKindPayload {
+    AgentParticipantKindPayload::LocalToolLoop
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AgentSessionParticipantPayload {
     pub agent_id: String,
+    #[serde(default = "default_participant_kind")]
+    pub kind: AgentParticipantKindPayload,
     pub system_prompt: Option<String>,
+    #[serde(default)]
     pub tool_name: String,
     pub tool_input: Option<Value>,
+    /// Required when `kind = external`.
+    pub endpoint_ref: Option<String>,
+    /// Optional MCP gateway composition ref for external participants.
+    pub mcp_gateway_ref: Option<String>,
+    pub timeout_seconds: Option<u64>,
+    pub poll_interval_seconds: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -147,6 +168,10 @@ pub struct AgentTurnWaitableJobPayload {
     pub timeout_seconds: u64,
     /// Poll interval while waiting (Deferred reschedule delay).
     pub poll_interval_seconds: u64,
+    /// Declarative delivery endpoint id (config id or managed `stasisd:endpoint:<id>`).
+    pub endpoint_ref: Option<String>,
+    /// Optional MCP gateway composition ref (validated by stasisd; not launched by core).
+    pub mcp_gateway_ref: Option<String>,
 }
 
 impl AgentTurnWaitableJobPayload {

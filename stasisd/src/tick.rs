@@ -121,6 +121,8 @@ mod tests {
                 sources: vec![],
                 documents: vec![],
                 schedules: vec![schedule],
+                endpoints: vec![],
+                mcp_gateways: vec![],
                 diagnostics: vec![],
             },
         )

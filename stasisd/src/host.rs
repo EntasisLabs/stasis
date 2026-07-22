@@ -1,18 +1,20 @@
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
+use stasis::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
 use stasis::sdk::runtime_sdk::RuntimeSdk;
 use tokio::time::{interval, MissedTickBehavior};
 
 use crate::config::load_desired_state;
 use crate::error::StasisdError;
 use crate::health::{serve_health_endpoints, HealthState};
-use crate::reconcile::{reconcile, ReconcileReport};
+use crate::reconcile::{reconcile_with_endpoint_store, ReconcileReport};
 use crate::tick::{tick_once, TickOptions, TickReport};
 use crate::watch::ConfigWatcher;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct HostOptions {
     pub config_path: std::path::PathBuf,
     pub strict: bool,
@@ -24,6 +26,7 @@ pub struct HostOptions {
     pub max_ticks: Option<u64>,
     pub run_for: Option<Duration>,
     pub healthz_addr: Option<SocketAddr>,
+    pub endpoint_store: Option<Arc<dyn DeliveryEndpointStore>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -46,8 +49,15 @@ pub async fn run_host(runtime: &RuntimeSdk, options: HostOptions) -> Result<Host
     }
 
     let mut report = HostReport::default();
-    report.last_reconcile =
-        Some(reconcile_from_path(runtime, &options.config_path, options.strict).await?);
+    report.last_reconcile = Some(
+        reconcile_from_path(
+            runtime,
+            &options.config_path,
+            options.strict,
+            options.endpoint_store.clone(),
+        )
+        .await?,
+    );
     report.reconciles = 1;
     health.set_ready(true);
 
@@ -102,7 +112,14 @@ pub async fn run_host(runtime: &RuntimeSdk, options: HostOptions) -> Result<Host
             _ = tick_timer.tick() => {
                 if let Some(watcher) = &watcher {
                     if watcher.try_recv_debounced(options.debounce)? {
-                        match reconcile_from_path(runtime, &options.config_path, options.strict).await {
+                        match reconcile_from_path(
+                            runtime,
+                            &options.config_path,
+                            options.strict,
+                            options.endpoint_store.clone(),
+                        )
+                        .await
+                        {
                             Ok(reconcile_report) => {
                                 report.last_reconcile = Some(reconcile_report);
                                 report.reconciles += 1;
@@ -119,7 +136,14 @@ pub async fn run_host(runtime: &RuntimeSdk, options: HostOptions) -> Result<Host
                 report.ticks += 1;
             }
             _ = reconcile_timer.tick() => {
-                match reconcile_from_path(runtime, &options.config_path, options.strict).await {
+                match reconcile_from_path(
+                    runtime,
+                    &options.config_path,
+                    options.strict,
+                    options.endpoint_store.clone(),
+                )
+                .await
+                {
                     Ok(reconcile_report) => {
                         report.last_reconcile = Some(reconcile_report);
                         report.reconciles += 1;
@@ -145,6 +169,7 @@ pub async fn reconcile_from_path(
     runtime: &RuntimeSdk,
     config_path: &Path,
     strict: bool,
+    endpoint_store: Option<Arc<dyn DeliveryEndpointStore>>,
 ) -> Result<ReconcileReport, StasisdError> {
     let desired = load_desired_state(config_path)?;
     if strict && !desired.diagnostics.is_empty() {
@@ -153,7 +178,13 @@ pub async fn reconcile_from_path(
     for diagnostic in &desired.diagnostics {
         eprintln!("stasisd warning: {diagnostic}");
     }
-    reconcile(runtime, &desired).await
+    if !desired.mcp_gateways.is_empty() {
+        eprintln!(
+            "stasisd: {} mcp_gateway ref(s) loaded (composition metadata; not launched by stasisd)",
+            desired.mcp_gateways.len()
+        );
+    }
+    reconcile_with_endpoint_store(runtime, &desired, endpoint_store).await
 }
 
 #[cfg(test)]
@@ -215,6 +246,7 @@ payload = { user_prompt = "review open work" }
                 max_ticks: Some(1),
                 run_for: None,
                 healthz_addr: None,
+                endpoint_store: None,
             },
         )
         .await
@@ -228,7 +260,9 @@ payload = { user_prompt = "review open work" }
             .any(|d| d.id == managed_recurring_id("nightly")));
 
         fs::remove_file(&file).unwrap();
-        let drained = reconcile_from_path(&runtime, &dir, true).await.unwrap();
+        let drained = reconcile_from_path(&runtime, &dir, true, None)
+            .await
+            .unwrap();
         assert!(drained.drained.contains(&managed_recurring_id("nightly")));
         let defs = runtime.list_recurring().await.unwrap();
         let nightly = defs
@@ -261,12 +295,14 @@ cron = "0 0 2 * * * *"
             .await
             .unwrap();
 
-        let err = reconcile_from_path(&runtime, &dir, true)
+        let err = reconcile_from_path(&runtime, &dir, true, None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("api_version") || err.to_string().contains("validation"));
 
-        let report = reconcile_from_path(&runtime, &dir, false).await.unwrap();
+        let report = reconcile_from_path(&runtime, &dir, false, None)
+            .await
+            .unwrap();
         assert!(report.created.contains(&managed_recurring_id("good")));
         let _ = fs::remove_dir_all(dir);
     }

@@ -14,7 +14,7 @@
   - docs-book/src/agent-platform-contracts.md
   - docs-book/src/stasisd.md
 
-Status: **Active Epic — Phase 3 Complete (M0–M3)**  
+Status: **Active Epic — Phase 4 Complete (M0–M4)**  
 Date: 2026-07-22  
 Owner: Stasis Core
 
@@ -198,9 +198,9 @@ Use this as the epic burndown. Check when exit criteria land.
 - [x] Runbook + systemd example
 
 ### M4 — Unified platform story
-- [ ] Declarative external participant config
-- [ ] E2E TOML → mixed local/external session
-- [ ] Epic exit criteria satisfied (section 8)
+- [x] Declarative external participant config
+- [x] E2E TOML → mixed local/external session
+- [x] Epic exit criteria satisfied (section 8)
 
 ## 7. Explicit non-goals (entire epic)
 

@@ -6,13 +6,16 @@ use cron::Schedule;
 
 use crate::error::StasisdError;
 use crate::job_types::is_known_job_type;
-use crate::model::{DesiredState, StasisdDocument, StasisdSchedule, MAX_PAYLOAD_BYTES};
+use crate::model::{
+    DesiredState, StasisdDocument, StasisdEndpoint, StasisdMcpGateway, StasisdMcpGatewayTransport,
+    StasisdSchedule, MAX_PAYLOAD_BYTES,
+};
 
 pub fn validate_document(document: &StasisdDocument) -> Result<(), StasisdError> {
-    let mut seen = HashSet::new();
+    let mut seen_schedules = HashSet::new();
     for schedule in &document.schedules {
         validate_schedule(schedule)?;
-        if !seen.insert(schedule.id.clone()) {
+        if !seen_schedules.insert(schedule.id.clone()) {
             return Err(StasisdError::Validation(format!(
                 "{}: duplicate schedule id '{}' within file",
                 document.source_path.display(),
@@ -20,12 +23,49 @@ pub fn validate_document(document: &StasisdDocument) -> Result<(), StasisdError>
             )));
         }
     }
+
+    let mut seen_endpoints = HashSet::new();
+    for endpoint in &document.endpoints {
+        validate_endpoint(endpoint)?;
+        if !seen_endpoints.insert(endpoint.id.clone()) {
+            return Err(StasisdError::Validation(format!(
+                "{}: duplicate endpoint id '{}' within file",
+                document.source_path.display(),
+                endpoint.id
+            )));
+        }
+    }
+
+    let mut seen_gateways = HashSet::new();
+    for gateway in &document.mcp_gateways {
+        validate_mcp_gateway(gateway)?;
+        if !seen_gateways.insert(gateway.id.clone()) {
+            return Err(StasisdError::Validation(format!(
+                "{}: duplicate mcp_gateway id '{}' within file",
+                document.source_path.display(),
+                gateway.id
+            )));
+        }
+    }
+
+    let endpoint_ids: HashSet<&str> = document.endpoints.iter().map(|e| e.id.as_str()).collect();
+    let gateway_ids: HashSet<&str> = document
+        .mcp_gateways
+        .iter()
+        .map(|g| g.id.as_str())
+        .collect();
+    for schedule in &document.schedules {
+        validate_schedule_participant_refs(schedule, &endpoint_ids, &gateway_ids)?;
+    }
+
     Ok(())
 }
 
 pub fn validate_desired_state(desired: &DesiredState) -> Result<(), Vec<StasisdError>> {
     let mut errors = Vec::new();
-    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut seen_schedule_ids: HashSet<String> = HashSet::new();
+    let mut seen_endpoint_ids: HashSet<String> = HashSet::new();
+    let mut seen_gateway_ids: HashSet<String> = HashSet::new();
 
     for document in &desired.documents {
         if let Err(err) = validate_document(document) {
@@ -33,11 +73,42 @@ pub fn validate_desired_state(desired: &DesiredState) -> Result<(), Vec<StasisdE
             continue;
         }
         for schedule in &document.schedules {
-            if !seen_ids.insert(schedule.id.clone()) {
+            if !seen_schedule_ids.insert(schedule.id.clone()) {
                 errors.push(StasisdError::Validation(format!(
                     "duplicate schedule id '{}' across config sources",
                     schedule.id
                 )));
+            }
+        }
+        for endpoint in &document.endpoints {
+            if !seen_endpoint_ids.insert(endpoint.id.clone()) {
+                errors.push(StasisdError::Validation(format!(
+                    "duplicate endpoint id '{}' across config sources",
+                    endpoint.id
+                )));
+            }
+        }
+        for gateway in &document.mcp_gateways {
+            if !seen_gateway_ids.insert(gateway.id.clone()) {
+                errors.push(StasisdError::Validation(format!(
+                    "duplicate mcp_gateway id '{}' across config sources",
+                    gateway.id
+                )));
+            }
+        }
+    }
+
+    // Cross-document participant refs against the global endpoint/gateway sets.
+    if errors.is_empty() {
+        let endpoint_ids: HashSet<&str> =
+            desired.endpoints.iter().map(|e| e.id.as_str()).collect();
+        let gateway_ids: HashSet<&str> =
+            desired.mcp_gateways.iter().map(|g| g.id.as_str()).collect();
+        for schedule in &desired.schedules {
+            if let Err(err) =
+                validate_schedule_participant_refs(schedule, &endpoint_ids, &gateway_ids)
+            {
+                errors.push(err);
             }
         }
     }
@@ -47,6 +118,78 @@ pub fn validate_desired_state(desired: &DesiredState) -> Result<(), Vec<StasisdE
     } else {
         Err(errors)
     }
+}
+
+pub fn validate_endpoint(endpoint: &StasisdEndpoint) -> Result<(), StasisdError> {
+    if endpoint.id.trim().is_empty() {
+        return Err(StasisdError::Validation(
+            "endpoint id must not be empty".into(),
+        ));
+    }
+    if endpoint.id.contains(':') {
+        return Err(StasisdError::Validation(format!(
+            "endpoint id '{}' must not contain ':' (runtime ids use stasisd:endpoint:<id>)",
+            endpoint.id
+        )));
+    }
+    if endpoint.name.trim().is_empty() {
+        return Err(StasisdError::Validation(format!(
+            "endpoint '{}': name must not be empty",
+            endpoint.id
+        )));
+    }
+    if endpoint.target.trim().is_empty() {
+        return Err(StasisdError::Validation(format!(
+            "endpoint '{}': target must not be empty",
+            endpoint.id
+        )));
+    }
+    Ok(())
+}
+
+pub fn validate_mcp_gateway(gateway: &StasisdMcpGateway) -> Result<(), StasisdError> {
+    if gateway.id.trim().is_empty() {
+        return Err(StasisdError::Validation(
+            "mcp_gateway id must not be empty".into(),
+        ));
+    }
+    if gateway.id.contains(':') {
+        return Err(StasisdError::Validation(format!(
+            "mcp_gateway id '{}' must not contain ':'",
+            gateway.id
+        )));
+    }
+    match gateway.transport {
+        StasisdMcpGatewayTransport::Command => {
+            if gateway
+                .command
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+                .is_empty()
+            {
+                return Err(StasisdError::Validation(format!(
+                    "mcp_gateway '{}': command transport requires command",
+                    gateway.id
+                )));
+            }
+        }
+        StasisdMcpGatewayTransport::Socket => {
+            if gateway
+                .socket_path
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+                .is_empty()
+            {
+                return Err(StasisdError::Validation(format!(
+                    "mcp_gateway '{}': socket transport requires socket_path",
+                    gateway.id
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn validate_schedule(schedule: &StasisdSchedule) -> Result<(), StasisdError> {
@@ -79,8 +222,6 @@ pub fn validate_schedule(schedule: &StasisdSchedule) -> Result<(), StasisdError>
             schedule.id, schedule.job_type
         )));
     }
-    // Same dialect as `RecurringDefinition`: cron crate 7-field
-    // (sec min hour day_of_month month day_of_week year).
     Schedule::from_str(&schedule.cron).map_err(|err| {
         StasisdError::Validation(format!(
             "schedule '{}': invalid cron '{}': {err}",
@@ -123,10 +264,93 @@ pub fn validate_schedule(schedule: &StasisdSchedule) -> Result<(), StasisdError>
     Ok(())
 }
 
+fn validate_schedule_participant_refs(
+    schedule: &StasisdSchedule,
+    endpoint_ids: &HashSet<&str>,
+    gateway_ids: &HashSet<&str>,
+) -> Result<(), StasisdError> {
+    // Waitable turn payload may carry endpoint_ref directly.
+    if schedule.job_type == "workflow.stasis.agent_turn.waitable" {
+        if let Some(endpoint_ref) = schedule
+            .payload
+            .get("endpoint_ref")
+            .and_then(|v| v.as_str())
+        {
+            if !endpoint_ids.contains(endpoint_ref) {
+                return Err(StasisdError::Validation(format!(
+                    "schedule '{}': unknown endpoint_ref '{}'",
+                    schedule.id, endpoint_ref
+                )));
+            }
+        }
+        if let Some(gateway_ref) = schedule
+            .payload
+            .get("mcp_gateway_ref")
+            .and_then(|v| v.as_str())
+        {
+            if !gateway_ids.contains(gateway_ref) {
+                return Err(StasisdError::Validation(format!(
+                    "schedule '{}': unknown mcp_gateway_ref '{}'",
+                    schedule.id, gateway_ref
+                )));
+            }
+        }
+    }
+
+    // Agent session participants may declare kind=external + endpoint_ref.
+    if schedule.job_type == "workflow.stasis.agent_session" {
+        let Some(participants) = schedule.payload.get("participants").and_then(|v| v.as_array())
+        else {
+            return Ok(());
+        };
+        for (idx, participant) in participants.iter().enumerate() {
+            let kind = participant
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("local_tool_loop");
+            if kind != "external" {
+                continue;
+            }
+            let endpoint_ref = participant
+                .get("endpoint_ref")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if endpoint_ref.is_empty() {
+                return Err(StasisdError::Validation(format!(
+                    "schedule '{}': participants[{idx}] kind=external requires endpoint_ref",
+                    schedule.id
+                )));
+            }
+            if !endpoint_ids.contains(endpoint_ref) {
+                return Err(StasisdError::Validation(format!(
+                    "schedule '{}': participants[{idx}] unknown endpoint_ref '{endpoint_ref}'",
+                    schedule.id
+                )));
+            }
+            if let Some(gateway_ref) = participant
+                .get("mcp_gateway_ref")
+                .and_then(|v| v.as_str())
+            {
+                if !gateway_ids.contains(gateway_ref) {
+                    return Err(StasisdError::Validation(format!(
+                        "schedule '{}': participants[{idx}] unknown mcp_gateway_ref '{gateway_ref}'",
+                        schedule.id
+                    )));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{OnRemovePolicy, StasisdDocument};
+    use crate::model::{
+        OnRemovePolicy, StasisdEndpoint, StasisdEndpointProtocol, StasisdMcpGateway,
+        StasisdMcpGatewayTransport,
+    };
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -142,6 +366,18 @@ mod tests {
             max_attempts: 3,
             on_remove: OnRemovePolicy::Drain,
             payload: json!({"user_prompt": "hi"}),
+        }
+    }
+
+    fn valid_endpoint(id: &str) -> StasisdEndpoint {
+        StasisdEndpoint {
+            id: id.into(),
+            name: "Fake".into(),
+            protocol: StasisdEndpointProtocol::HttpWebhook,
+            target: "http://127.0.0.1:9/agent".into(),
+            metadata: json!({}),
+            enabled: true,
+            on_remove: OnRemovePolicy::Drain,
         }
     }
 
@@ -186,23 +422,95 @@ mod tests {
     }
 
     #[test]
+    fn rejects_external_participant_missing_or_unknown_endpoint() {
+        let mut schedule = valid_schedule("mixed");
+        schedule.job_type = "workflow.stasis.agent_session".into();
+        schedule.payload = json!({
+            "initial_user_prompt": "hi",
+            "participants": [{
+                "agent_id": "ext",
+                "kind": "external",
+                "tool_name": ""
+            }]
+        });
+        let doc = StasisdDocument {
+            api_version: "stasisd/v1".into(),
+            source_path: PathBuf::from("a.toml"),
+            content_hash: "a".into(),
+            schedules: vec![schedule.clone()],
+            endpoints: vec![],
+            mcp_gateways: vec![],
+        };
+        assert!(validate_document(&doc)
+            .unwrap_err()
+            .to_string()
+            .contains("requires endpoint_ref"));
+
+        schedule.payload = json!({
+            "initial_user_prompt": "hi",
+            "participants": [{
+                "agent_id": "ext",
+                "kind": "external",
+                "endpoint_ref": "missing",
+                "tool_name": ""
+            }]
+        });
+        let doc = StasisdDocument {
+            api_version: "stasisd/v1".into(),
+            source_path: PathBuf::from("a.toml"),
+            content_hash: "a".into(),
+            schedules: vec![schedule],
+            endpoints: vec![valid_endpoint("fake")],
+            mcp_gateways: vec![],
+        };
+        assert!(validate_document(&doc)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown endpoint_ref"));
+    }
+
+    #[test]
+    fn rejects_mcp_command_without_command() {
+        let gateway = StasisdMcpGateway {
+            id: "g".into(),
+            enabled: true,
+            transport: StasisdMcpGatewayTransport::Command,
+            socket_path: None,
+            command: None,
+            args: vec![],
+            export_allowlist: vec![],
+            metadata: json!({}),
+        };
+        assert!(validate_mcp_gateway(&gateway)
+            .unwrap_err()
+            .to_string()
+            .contains("requires command"));
+    }
+
+    #[test]
     fn rejects_duplicate_ids_across_documents() {
         let doc_a = StasisdDocument {
             api_version: "stasisd/v1".into(),
             source_path: PathBuf::from("a.toml"),
             content_hash: "a".into(),
             schedules: vec![valid_schedule("dup")],
+            endpoints: vec![],
+            mcp_gateways: vec![],
         };
         let doc_b = StasisdDocument {
             api_version: "stasisd/v1".into(),
             source_path: PathBuf::from("b.toml"),
             content_hash: "b".into(),
             schedules: vec![valid_schedule("dup")],
+            endpoints: vec![],
+            mcp_gateways: vec![],
         };
         let desired = DesiredState {
             sources: vec![doc_a.source_path.clone(), doc_b.source_path.clone()],
             documents: vec![doc_a, doc_b],
             schedules: vec![valid_schedule("dup"), valid_schedule("dup")],
+            endpoints: vec![],
+            mcp_gateways: vec![],
             diagnostics: Vec::new(),
         };
         let errs = validate_desired_state(&desired).unwrap_err();

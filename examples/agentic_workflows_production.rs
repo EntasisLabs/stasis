@@ -262,12 +262,14 @@ fn build_product_planning_jobs(memory_policy: Option<MemoryPolicyPayload>) -> Re
                 system_prompt: Some("Break the plan into milestones and dependencies.".to_string()),
                 tool_name: "fetch_knowledge_base".to_string(),
                 tool_input: Some(json!({ "topic": "deployment sequencing" })),
+                ..Default::default()
             },
             AgentSessionParticipantPayload {
                 agent_id: "sre_reviewer".to_string(),
                 system_prompt: Some("Focus on blast radius and rollback readiness.".to_string()),
                 tool_name: "fetch_knowledge_base".to_string(),
                 tool_input: Some(json!({ "topic": "rollback policy" })),
+                ..Default::default()
             },
         ],
         policy_profile: Some("prod.review".to_string()),

@@ -47,6 +47,7 @@
 ## Cookbook
 
 - [Cookbook Overview](./cookbook.md)
+- [Platform Builder: External Participants](./cookbook/platform-builder-external-participant.md)
 - [Production Agentic Workflows](./cookbook/production-agentic-workflows.md)
 - [Runtime and Dashboard Bootstrap](./cookbook/runtime-dashboard-bootstrap.md)
 - [Workflow Builder Starting Object](./cookbook/workflow-builder-starting-object.md)
