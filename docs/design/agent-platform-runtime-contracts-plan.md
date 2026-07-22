@@ -21,7 +21,8 @@
 Status: **Proposed Contract — Ready for Phased Implementation**  
 Date: 2026-07-22  
 Owner: Stasis Core  
-ADR: [ADR-0007-agent-platform-runtime-contracts.md](../adr/ADR-0007-agent-platform-runtime-contracts.md)
+ADR: [ADR-0007-agent-platform-runtime-contracts.md](../adr/ADR-0007-agent-platform-runtime-contracts.md)  
+Epic sequencing: [agent-platform-and-stasisd-epic.md](agent-platform-and-stasisd-epic.md)
 
 Depends on:
 

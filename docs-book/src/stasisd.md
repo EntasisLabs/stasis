@@ -46,6 +46,8 @@ stasisd --config /etc/stasis/agents.d/
 
 Proposed. See the delivery plan for phases, schema draft, and delete/drain semantics.
 
+Phased epic board (with ADR-0007 contracts): [agent-platform-and-stasisd-epic.md](../../docs/design/agent-platform-and-stasisd-epic.md).
+
 ## References
 
 - ADR: [ADR-0008](../../docs/adr/ADR-0008-stasisd-declarative-engine.md)

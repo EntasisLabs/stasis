@@ -59,6 +59,10 @@ Contracts are proposed. Implementation is phased in the delivery plan.
 
 [`stasisd`](./stasisd.md) (ADR-0008) is the declarative YAML/TOML engine that reconciles desired state into durable schedules on top of this runtime.
 
+## Epic board
+
+Phased execution across contracts + `stasisd`: [agent-platform-and-stasisd-epic.md](../../docs/design/agent-platform-and-stasisd-epic.md).
+
 ## References
 
 - ADR: [ADR-0007 Agent Platform Runtime Contracts](../../docs/adr/ADR-0007-agent-platform-runtime-contracts.md)

@@ -61,6 +61,7 @@ flowchart TD
   - Tradeoff: versioned config schema, provenance ownership, and explicit delete/drain semantics required.
 - Plan: [design/stasisd-declarative-engine-plan.md](../design/stasisd-declarative-engine-plan.md)
 - Full ADR: [ADR-0008-stasisd-declarative-engine.md](ADR-0008-stasisd-declarative-engine.md)
+- Epic: [design/agent-platform-and-stasisd-epic.md](../design/agent-platform-and-stasisd-epic.md)
 
 ## ADR-0007 Agent Platform Runtime Contracts
 

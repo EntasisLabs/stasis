@@ -19,7 +19,8 @@
 Status: **Proposed — Ready for Phased Implementation**  
 Date: 2026-07-22  
 Owner: Stasis Core  
-ADR: [ADR-0008-stasisd-declarative-engine.md](../adr/ADR-0008-stasisd-declarative-engine.md)
+ADR: [ADR-0008-stasisd-declarative-engine.md](../adr/ADR-0008-stasisd-declarative-engine.md)  
+Epic sequencing: [agent-platform-and-stasisd-epic.md](agent-platform-and-stasisd-epic.md)
 
 Depends on:
 
