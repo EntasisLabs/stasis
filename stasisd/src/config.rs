@@ -1,11 +1,12 @@
-//! Config discovery for `stasisd/v1` (Phase 0: discovery only).
+//! Config discovery + load for `stasisd/v1`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::StasisdError;
-
-pub const API_VERSION: &str = "stasisd/v1";
+use crate::model::{DesiredState, StasisdDocument};
+use crate::parse::parse_config_bytes;
+use crate::validate::validate_desired_state;
 
 #[derive(Debug, Clone)]
 pub struct CliArgs {
@@ -74,14 +75,10 @@ fn help_text() -> String {
         .to_string()
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DesiredState {
-    pub sources: Vec<PathBuf>,
-    pub schedules: Vec<()>,
-    pub diagnostics: Vec<String>,
-}
-
-/// Discover config sources. Phase 0 does not parse YAML/TOML bodies yet.
+/// Discover, parse, and validate config sources into desired state.
+///
+/// Per-file parse/validation failures are quarantined into `diagnostics` unless the
+/// caller applies `--strict` (which fails the process when diagnostics are present).
 pub fn load_desired_state(path: &Path) -> Result<DesiredState, StasisdError> {
     if !path.exists() {
         return Err(StasisdError::Validation(format!(
@@ -90,18 +87,58 @@ pub fn load_desired_state(path: &Path) -> Result<DesiredState, StasisdError> {
         )));
     }
 
-    let mut desired = DesiredState::default();
+    let source_paths = discover_sources(path)?;
+    let mut desired = DesiredState {
+        sources: source_paths.clone(),
+        ..DesiredState::default()
+    };
 
+    let mut documents = Vec::new();
+    for source in &source_paths {
+        match load_document(source) {
+            Ok(document) => documents.push(document),
+            Err(err) => desired.diagnostics.push(err.to_string()),
+        }
+    }
+
+    desired.documents = documents;
+    desired.schedules = desired
+        .documents
+        .iter()
+        .flat_map(|doc| doc.schedules.clone())
+        .collect();
+
+    if let Err(errors) = validate_desired_state(&desired) {
+        for err in errors {
+            desired.diagnostics.push(err.to_string());
+        }
+        // Drop schedules when cross-file validation fails so reconcile cannot apply a
+        // partially invalid snapshot.
+        if desired.diagnostics.iter().any(|d| d.contains("duplicate schedule id")) {
+            desired.schedules.clear();
+        } else {
+            // Keep only schedules from documents that still validate in isolation.
+            desired.schedules = desired
+                .documents
+                .iter()
+                .filter(|doc| crate::validate::validate_document(doc).is_ok())
+                .flat_map(|doc| doc.schedules.clone())
+                .collect();
+        }
+    }
+
+    Ok(desired)
+}
+
+fn discover_sources(path: &Path) -> Result<Vec<PathBuf>, StasisdError> {
     if path.is_file() {
         if is_config_file(path) {
-            desired.sources.push(path.to_path_buf());
-        } else {
-            desired.diagnostics.push(format!(
-                "ignoring unsupported config file extension: {}",
-                path.display()
-            ));
+            return Ok(vec![path.to_path_buf()]);
         }
-        return Ok(desired);
+        return Err(StasisdError::Validation(format!(
+            "unsupported config file extension: {}",
+            path.display()
+        )));
     }
 
     if !path.is_dir() {
@@ -117,10 +154,14 @@ pub fn load_desired_state(path: &Path) -> Result<DesiredState, StasisdError> {
         .filter(|entry| entry.is_file() && is_config_file(entry))
         .collect::<Vec<_>>();
     entries.sort();
+    Ok(entries)
+}
 
-    desired.sources = entries;
-    // Empty directories are valid desired state (zero schedules).
-    Ok(desired)
+fn load_document(path: &Path) -> Result<StasisdDocument, StasisdError> {
+    let bytes = fs::read(path)?;
+    let document = parse_config_bytes(path, &bytes)?;
+    crate::validate::validate_document(&document)?;
+    Ok(document)
 }
 
 fn is_config_file(path: &Path) -> bool {
@@ -133,7 +174,6 @@ fn is_config_file(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -171,17 +211,65 @@ mod tests {
     }
 
     #[test]
-    fn discovers_yaml_and_toml_files() {
-        let dir = temp_dir("discover");
-        fs::write(dir.join("a.toml"), "api_version = \"stasisd/v1\"\n").unwrap();
-        fs::write(dir.join("b.yaml"), "api_version: stasisd/v1\n").unwrap();
-        fs::write(dir.join("notes.txt"), "ignore me\n").unwrap();
+    fn loads_valid_toml_and_quarantines_bad_sibling() {
+        let dir = temp_dir("mix");
+        fs::write(
+            dir.join("good.toml"),
+            r#"
+api_version = "stasisd/v1"
+[[schedule]]
+id = "good"
+queue = "agents"
+job_type = "workflow.stasis.prompt"
+cron = "0 0 * * * * *"
+"#,
+        )
+        .unwrap();
+        fs::write(dir.join("bad.toml"), "api_version = \"stasisd/v0\"\n").unwrap();
 
         let desired = load_desired_state(&dir).unwrap();
-        assert_eq!(desired.sources.len(), 2);
-        assert!(desired.sources.iter().any(|p| p.ends_with("a.toml")));
-        assert!(desired.sources.iter().any(|p| p.ends_with("b.yaml")));
+        assert_eq!(desired.schedules.len(), 1);
+        assert_eq!(desired.schedules[0].id, "good");
+        assert!(desired.diagnostics.iter().any(|d| d.contains("api_version")));
+        let _ = fs::remove_dir_all(dir);
+    }
 
+    #[test]
+    fn missing_path_fails() {
+        let err = load_desired_state(Path::new("/tmp/stasisd-does-not-exist-hopefully")).unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn duplicate_ids_clear_schedules() {
+        let dir = temp_dir("dup");
+        fs::write(
+            dir.join("a.toml"),
+            r#"
+api_version = "stasisd/v1"
+[[schedule]]
+id = "dup"
+queue = "agents"
+job_type = "workflow.stasis.prompt"
+cron = "0 0 * * * * *"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("b.toml"),
+            r#"
+api_version = "stasisd/v1"
+[[schedule]]
+id = "dup"
+queue = "agents"
+job_type = "workflow.stasis.prompt"
+cron = "0 0 * * * * *"
+"#,
+        )
+        .unwrap();
+        let desired = load_desired_state(&dir).unwrap();
+        assert!(desired.schedules.is_empty());
+        assert!(desired.diagnostics.iter().any(|d| d.contains("duplicate")));
         let _ = fs::remove_dir_all(dir);
     }
 }

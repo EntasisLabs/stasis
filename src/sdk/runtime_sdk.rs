@@ -145,6 +145,22 @@ impl RuntimeSdk {
         }
     }
 
+    /// Lists all recurring definitions currently registered in the runtime store.
+    pub async fn list_recurring(&self) -> Result<Vec<RecurringDefinition>> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.recurring_store.list().await,
+            RuntimeComposition::Surreal(rt) => rt.recurring_store.list().await,
+        }
+    }
+
+    /// Upserts a recurring definition (used by declarative reconcile updates).
+    pub async fn save_recurring(&self, definition: RecurringDefinition) -> Result<()> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.recurring_store.save(definition).await,
+            RuntimeComposition::Surreal(rt) => rt.recurring_store.save(definition).await,
+        }
+    }
+
     /// Attempts to process one job from a queue using the provided worker id.
     pub async fn process_once(&self, queue: &str, worker_id: &str) -> Result<Option<String>> {
         let now = Utc::now();

@@ -2,14 +2,17 @@
 
 Declarative Stasis engine (ADR-0008): YAML/TOML desired state → durable recurring agent schedules.
 
-## Phase 0
+## Phase 1
 
-Skeleton CLI only — discovers config files, does not yet parse schedule bodies or reconcile.
+- Discover `*.toml` / `*.yaml` / `*.yml`
+- Parse `stasisd/v1` schedule documents
+- Validate cron (7-field), timezone, known job types, duplicates, payload size
+- Reconcile managed recurring ids (`stasisd:<id>`) against an in-memory runtime
+- Removal policies: `drain` (default), `orphan`, `cancel` (disables + records skip)
 
 ```bash
 cargo run -p stasisd -- --config ./agents.d --once
+cargo test -p stasisd
 ```
-
-Managed recurring ids use the frozen prefix `stasisd:<id>`.
 
 See [docs/design/stasisd-declarative-engine-plan.md](../docs/design/stasisd-declarative-engine-plan.md).

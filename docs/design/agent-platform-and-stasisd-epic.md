@@ -14,7 +14,7 @@
   - docs-book/src/agent-platform-contracts.md
   - docs-book/src/stasisd.md
 
-Status: **Active Epic — Phase 0 In Progress / M0 Complete**  
+Status: **Active Epic — Phase 1 Complete (M0 + M1)**  
 Date: 2026-07-22  
 Owner: Stasis Core
 
@@ -181,10 +181,10 @@ Use this as the epic burndown. Check when exit criteria land.
 - [x] ID strategy + schema freezes documented (`stasisd:<id>` prefix)
 
 ### M1 — Vertical slices
-- [ ] JSON codec golden tests
-- [ ] Ingress idempotency tests
-- [ ] `stasisd` add/edit/drain reconcile tests
-- [ ] Materialize-from-reconcile integration test
+- [x] JSON codec golden tests
+- [x] Ingress idempotency tests
+- [x] `stasisd` add/edit/drain reconcile tests
+- [x] Materialize-from-reconcile integration test
 
 ### M2 — Runnable demos
 - [ ] Waitable external turn (fake gateway)

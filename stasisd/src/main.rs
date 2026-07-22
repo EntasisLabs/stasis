@@ -1,23 +1,34 @@
 //! `stasisd` — declarative Stasis engine (ADR-0008).
-//!
-//! Phase 0 skeleton: parse CLI flags and load an empty config path successfully.
 
 mod config;
 mod error;
+mod job_types;
+mod model;
+mod parse;
 mod provenance;
+mod reconcile;
+mod validate;
 
 use std::env;
 use std::process::ExitCode;
 
 use stasis::domain::agent::AGENT_ENVELOPE_SCHEMA_VERSION_V1;
+use stasis::sdk::runtime_sdk::RuntimeSdk;
 
-use crate::config::{load_desired_state, API_VERSION, CliArgs};
+use crate::config::{load_desired_state, CliArgs};
 use crate::error::StasisdError;
+use crate::model::API_VERSION;
 use crate::provenance::{managed_recurring_id, MANAGED_BY, MANAGED_ID_PREFIX};
+use crate::reconcile::reconcile;
 
-fn main() -> ExitCode {
-    match run() {
+#[tokio::main]
+async fn main() -> ExitCode {
+    match run().await {
         Ok(()) => ExitCode::SUCCESS,
+        Err(StasisdError::Usage(message)) => {
+            eprintln!("{message}");
+            ExitCode::from(2)
+        }
         Err(StasisdError::Validation(message)) => {
             eprintln!("stasisd validation error: {message}");
             ExitCode::from(2)
@@ -29,7 +40,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), StasisdError> {
+async fn run() -> Result<(), StasisdError> {
     let args = CliArgs::parse(env::args().skip(1))?;
     let desired = load_desired_state(&args.config_path)?;
 
@@ -46,16 +57,31 @@ fn run() -> Result<(), StasisdError> {
         managed_recurring_id("example")
     );
     println!(
-        "stasisd: loaded config from {} (schedules={}, sources={}, once={})",
+        "stasisd: loaded config from {} (schedules={}, sources={}, diagnostics={}, once={})",
         args.config_path.display(),
         desired.schedules.len(),
         desired.sources.len(),
+        desired.diagnostics.len(),
         args.once
     );
 
+    let runtime = RuntimeSdk::in_memory()
+        .await
+        .map_err(|err| StasisdError::Runtime(err.to_string()))?;
+
+    let report = reconcile(&runtime, &desired).await?;
+    println!(
+        "stasisd: reconcile created={} updated={} drained={} orphaned={} unchanged={} cancel_skipped={}",
+        report.created.len(),
+        report.updated.len(),
+        report.drained.len(),
+        report.orphaned.len(),
+        report.unchanged.len(),
+        report.skipped_cancel.len()
+    );
+
     if !args.once {
-        // Phase 2 will run the watch/tick host. Phase 0 exits after one load.
-        eprintln!("stasisd: watch/tick loop not implemented yet; use --once for Phase 0");
+        eprintln!("stasisd: watch/tick loop not implemented yet; use --once for Phase 1");
     }
 
     Ok(())

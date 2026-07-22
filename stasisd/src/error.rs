@@ -6,7 +6,6 @@ pub enum StasisdError {
     Usage(String),
     Validation(String),
     Io(io::Error),
-    #[allow(dead_code)]
     Runtime(String),
 }
 

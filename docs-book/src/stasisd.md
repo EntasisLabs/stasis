@@ -44,12 +44,23 @@ stasisd --config /etc/stasis/agents.d/
 
 ## Status
 
-ADR-0008 is **Accepted**. Epic Phase 0 scaffolded the workspace `stasisd` binary (`--config`, `--once`, `--strict`) with empty-dir load and `stasisd:<id>` managed id prefix.
+ADR-0008 is **Accepted**. Phase 1 loads YAML/TOML `stasisd/v1` schedules, validates (cron/timezone/job_type/duplicates/payload limits), and reconciles managed `stasisd:<id>` recurring definitions (`drain` / `orphan` / `cancel` policies).
 
 Phased epic board (with ADR-0007 contracts): [agent-platform-and-stasisd-epic.md](../../docs/design/agent-platform-and-stasisd-epic.md).
 
+Cron dialect matches `RecurringDefinition` / `cron` 0.12 (**7 fields**: sec min hour dom month dow year).
+
 ```bash
 mkdir -p /tmp/stasis-agents.d
+cat > /tmp/stasis-agents.d/nightly.toml <<'EOF'
+api_version = "stasisd/v1"
+[[schedule]]
+id = "nightly"
+queue = "agents"
+job_type = "workflow.stasis.prompt"
+cron = "0 0 2 * * * *"
+payload = { user_prompt = "review open work" }
+EOF
 cargo run -p stasisd -- --config /tmp/stasis-agents.d --once
 ```
 

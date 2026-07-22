@@ -332,7 +332,7 @@ Custom implementations can replace any built-in adapter. Explicit builder ports 
 
 ## Agent Platform Ports (ADR-0007)
 
-Phase 0 introduces vendor-neutral agent platform ports. Behavior beyond types/traits lands in later epic phases.
+Vendor-neutral agent platform ports and Phase 1 reference adapters.
 
 | Port | Module | Purpose |
 |---|---|---|
@@ -341,6 +341,11 @@ Phase 0 introduces vendor-neutral agent platform ports. Behavior beyond types/tr
 | `AgentTransport` | `ports::outbound::agent::transport` | Publish encoded messages to delivery endpoints |
 | `McpToolProvider` | `ports::outbound::agent::mcp_tool_provider` | Inject MCP tools into Stasis |
 | `McpToolExporter` | `ports::outbound::agent::mcp_tool_exporter` | Export Stasis tools as MCP tools |
+
+| Adapter | Module | Notes |
+|---|---|---|
+| `JsonAgentMessageCodec` | `infrastructure::agent::json_agent_message_codec` | JSON v1 reference codec |
+| `InMemoryAgentEventIngress` | `infrastructure::agent::in_memory_agent_event_ingress` | Idempotent in-process ingress |
 
 Canonical types live in `domain::agent` (`AgentEnvelope`, `McpToolDescriptor`).
 

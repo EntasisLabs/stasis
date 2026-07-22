@@ -16,7 +16,7 @@
   - src/application/runtime/stasis_runtime_builder.rs
   - docs-book/src/recurring-jobs.md
 
-Status: **Accepted — Implementation In Progress (Epic Phase 0)**  
+Status: **Accepted — Implementation In Progress (Epic Phase 1 complete)**  
 Date: 2026-07-22  
 Owner: Stasis Core  
 ADR: [ADR-0008-stasisd-declarative-engine.md](../adr/ADR-0008-stasisd-declarative-engine.md)  
@@ -134,7 +134,7 @@ id = "nightly-review"
 enabled = true
 queue = "agents"
 job_type = "workflow.stasis.agent_session"
-cron = "0 2 * * *"
+cron = "0 0 2 * * * *"   # 7-field dialect (sec min hour dom month dow year)
 timezone = "UTC"
 jitter_seconds = 0
 max_attempts = 3
