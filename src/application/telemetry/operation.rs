@@ -111,5 +111,6 @@ pub fn runtime_event_type_name(
         }
         crate::domain::runtime::outbox::RuntimeEventType::JobDeadLettered => "job.dead_lettered",
         crate::domain::runtime::outbox::RuntimeEventType::JobPublished => "job.published",
+        crate::domain::runtime::outbox::RuntimeEventType::JobCanceled => "job.canceled",
     }
 }

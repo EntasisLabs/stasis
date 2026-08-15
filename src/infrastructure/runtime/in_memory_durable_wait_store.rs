@@ -74,6 +74,15 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
             .collect())
     }
 
+    async fn list_pending_by_job(&self, job_id: &str) -> Result<Vec<DurableWaitRecord>> {
+        let waits = self.waits.read().map_err(|_| lock_err())?;
+        Ok(waits
+            .values()
+            .filter(|wait| wait.job_id == job_id && wait.status == DurableWaitStatus::Pending)
+            .cloned()
+            .collect())
+    }
+
     async fn save_wait(&self, record: DurableWaitRecord) -> Result<()> {
         let mut waits = self.waits.write().map_err(|_| lock_err())?;
         waits.insert(record.wait_id.clone(), record);

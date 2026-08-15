@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::job_context::{JobConsumeError, JobContext, JobResult};
+use crate::application::runtime::job_lifecycle::JobLifecycleEvent;
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job::{Job, NewJob};
 use crate::domain::runtime::typed_contract::{RetryPolicy, StasisJob, TypedJobEnvelope};
@@ -30,6 +31,10 @@ impl<T, H> TypedJobHandler<T, H> {
 #[async_trait]
 pub trait JobConsumer<T: StasisJob>: Send + Sync {
     async fn consume(&self, job: T, ctx: JobContext) -> JobResult<T::Output>;
+    async fn on_lifecycle(&self, job: &Job, event: &JobLifecycleEvent) -> Result<()> {
+        let _ = (job, event);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -109,6 +114,10 @@ where
             }),
             Err(JobConsumeError::Port(err)) => Err(err),
         }
+    }
+
+    async fn on_lifecycle(&self, job: &Job, event: &JobLifecycleEvent) -> Result<()> {
+        self.handler.on_lifecycle(job, event).await
     }
 }
 

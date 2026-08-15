@@ -73,6 +73,7 @@ pub struct JobContext {
     pub deadline: Option<DateTime<Utc>>,
     pub fencing_token: Option<FencingToken>,
     worker_id: String,
+    lease_seconds: i64,
     job: Job,
     services: JobContextServices,
 }
@@ -83,6 +84,7 @@ impl JobContext {
         worker_id: impl Into<String>,
         cancellation: watch::Receiver<bool>,
         services: JobContextServices,
+        lease_seconds: i64,
     ) -> Self {
         Self {
             job_id: job.id.clone(),
@@ -93,6 +95,7 @@ impl JobContext {
             deadline: None,
             fencing_token: None,
             worker_id: worker_id.into(),
+            lease_seconds,
             job: job.clone(),
             services,
         }
@@ -101,7 +104,12 @@ impl JobContext {
     pub async fn heartbeat(&self) -> Result<()> {
         self.services
             .job_store
-            .heartbeat(&self.job_id, &self.worker_id, self.services.clock.now())
+            .heartbeat(
+                &self.job_id,
+                &self.worker_id,
+                self.services.clock.now(),
+                self.lease_seconds,
+            )
             .await
     }
 

@@ -16,7 +16,15 @@ pub trait JobStore: Send + Sync {
         now: DateTime<Utc>,
         lease_seconds: i64,
     ) -> Result<Option<Job>>;
-    async fn heartbeat(&self, job_id: &str, worker_id: &str, now: DateTime<Utc>) -> Result<()>;
+    async fn heartbeat(
+        &self,
+        job_id: &str,
+        worker_id: &str,
+        now: DateTime<Utc>,
+        lease_seconds: i64,
+    ) -> Result<()>;
     async fn list_by_state(&self, state: JobState) -> Result<Vec<Job>>;
+    async fn list_expired_leases(&self, now: DateTime<Utc>) -> Result<Vec<Job>>;
+    async fn delete(&self, id: &str) -> Result<bool>;
     async fn prune_terminal_before(&self, cutoff: DateTime<Utc>) -> Result<usize>;
 }

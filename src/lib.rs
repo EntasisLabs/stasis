@@ -20,11 +20,16 @@ pub mod macro_support {
 }
 
 /// Minimal runtime imports for consumers integrating job handlers and runtime wiring.
+///
+/// `JobConsumer::on_lifecycle` receives [`JobLifecycleEvent`] after each persisted
+/// transition so app-level pending/finishing status can roll back on defer, retry,
+/// cancel, or dead-letter.
 pub mod runtime_prelude {
     pub use crate::application::runtime::in_memory_runtime::{
         InMemoryRuntime, JobExecutionOutcome, JobHandler,
     };
     pub use crate::application::runtime::job_context::{JobConsumeError, JobContext, JobResult};
+    pub use crate::application::runtime::job_lifecycle::{JobLifecycleEvent, StaleRecoverReport};
     pub use crate::application::runtime::runtime_factory::{
         RuntimeBackend, RuntimeComposition, RuntimeFactory, SurrealAuth,
     };

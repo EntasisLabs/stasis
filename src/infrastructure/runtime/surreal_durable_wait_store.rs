@@ -217,6 +217,32 @@ impl DurableWaitStore for SurrealDurableWaitStore {
         Ok(out)
     }
 
+    async fn list_pending_by_job(&self, job_id: &str) -> Result<Vec<DurableWaitRecord>> {
+        let mut response = match self
+            .db
+            .query("SELECT * FROM type::table($table)")
+            .bind(("table", self.wait_table.clone()))
+            .await
+        {
+            Ok(response) => response,
+            Err(err) if Self::missing_table(&err, &self.wait_table) => return Ok(Vec::new()),
+            Err(err) => return Err(Self::port_err("list durable waits by job", err)),
+        };
+        let rows: Vec<WaitRow> = match response.take(0) {
+            Ok(rows) => rows,
+            Err(err) if Self::missing_table(&err, &self.wait_table) => return Ok(Vec::new()),
+            Err(err) => return Err(Self::port_err("decode durable waits by job", err)),
+        };
+        let mut out = Vec::new();
+        for row in rows {
+            let wait = DurableWaitRecord::try_from(row)?;
+            if wait.job_id == job_id && wait.status == DurableWaitStatus::Pending {
+                out.push(wait);
+            }
+        }
+        Ok(out)
+    }
+
     async fn save_wait(&self, record: DurableWaitRecord) -> Result<()> {
         let row: WaitRow = record.into();
         self.db

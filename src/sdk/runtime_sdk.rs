@@ -1,6 +1,7 @@
 use chrono::Utc;
 
 use crate::application::runtime::in_memory_runtime::JobHandler;
+use crate::application::runtime::job_lifecycle::StaleRecoverReport;
 use crate::application::runtime::runtime_factory::RuntimeComposition;
 use crate::application::runtime::runtime_factory::{RuntimeBackend, SurrealAuth};
 use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
@@ -179,11 +180,43 @@ impl RuntimeSdk {
         }
     }
 
-    /// Cancels a non-terminal job and trips any in-flight cancellation watch.
+    /// Cancels a non-terminal job, completes pending waits, and fires the cancel hook.
     pub async fn cancel(&self, job_id: &str) -> Result<bool> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.cancel(job_id).await,
             RuntimeComposition::Surreal(rt) => rt.cancel(job_id).await,
+        }
+    }
+
+    /// Recovers expired `Leased`/`Running` jobs as retryable failures.
+    pub async fn recover_stale(&self) -> Result<StaleRecoverReport> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.recover_stale_now().await,
+            RuntimeComposition::Surreal(rt) => rt.recover_stale_now().await,
+        }
+    }
+
+    /// Replays a dead-lettered job back to `Enqueued`.
+    pub async fn replay_dead_letter(&self, job_id: &str) -> Result<bool> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.replay_dead_letter_now(job_id).await,
+            RuntimeComposition::Surreal(rt) => rt.replay_dead_letter_now(job_id).await,
+        }
+    }
+
+    /// Operator abort: mark a non-terminal job dead-lettered.
+    pub async fn fail(&self, job_id: &str) -> Result<bool> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.fail(job_id).await,
+            RuntimeComposition::Surreal(rt) => rt.fail(job_id).await,
+        }
+    }
+
+    /// Deletes a terminal job. Refuse in-flight jobs; cancel or fail first.
+    pub async fn delete(&self, job_id: &str) -> Result<bool> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.delete(job_id).await,
+            RuntimeComposition::Surreal(rt) => rt.delete(job_id).await,
         }
     }
 

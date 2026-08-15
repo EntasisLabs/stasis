@@ -86,6 +86,14 @@ impl JobHandler for DelegatingJobHandler {
     ) -> Result<JobExecutionOutcome> {
         self.inner.execute_with_context(job, ctx).await
     }
+
+    async fn on_lifecycle(
+        &self,
+        job: &crate::domain::runtime::job::Job,
+        event: &crate::application::runtime::job_lifecycle::JobLifecycleEvent,
+    ) -> Result<()> {
+        self.inner.on_lifecycle(job, event).await
+    }
 }
 
 #[derive(Clone)]

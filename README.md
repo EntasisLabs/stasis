@@ -259,7 +259,7 @@ Memory + Tool + LLM Adapters
 ## SDK Surface
 
 - `StasisSdk`: agent registration and prompt invocation flows.
-- `RuntimeSdk`: enqueue, process, publish, recurring materialization, runtime stats.
+- `RuntimeSdk`: enqueue, process, publish, recurring materialization, runtime stats, plus `cancel` / `fail` / `delete` / `recover_stale` / `replay_dead_letter`.
 - `ControlPlaneSdk`: endpoint and cluster coordination commands.
 
 ## When To Use Which SDK
@@ -287,6 +287,18 @@ Typical adoption path:
 - Durable backend options for queue/thread state (`surreal-ws` / `surreal-kv`), with `in-memory` for local runs.
 - Typed job consumers (`StasisJob` / `JobConsumer` / `JobContext`) with `enqueue_job` builders; raw `NewJob` still works.
 - Durable `wait_for` / `signal` correlation and cooperative `cancel` for in-flight or deferred jobs.
+- Lifecycle hooks (`JobConsumer::on_lifecycle`) so app statuses such as pending/finishing can roll back on defer, retry, cancel, or dead-letter:
+
+```rust
+async fn on_lifecycle(&self, job: &Job, event: &JobLifecycleEvent) -> Result<()> {
+    match event {
+        JobLifecycleEvent::Succeeded => mark_done(job),
+        JobLifecycleEvent::Deferred { .. } | JobLifecycleEvent::RetryScheduled { .. } => revert_pending(job),
+        JobLifecycleEvent::Canceled { .. } | JobLifecycleEvent::DeadLettered { .. } => fail_card(job),
+    }
+}
+```
+- Stale `Leased`/`Running` recovery as retryable failure; heartbeat extends the job lease.
 - Fenced resource leases (`acquire_lease`, fencing tokens, `force_acquire_lease`).
 - Retry and failure-policy aware job execution with bounded attempts.
 - Recurring schedule materialization and worker-driven queue processing.

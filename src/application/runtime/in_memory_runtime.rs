@@ -6,6 +6,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::application::runtime::job_context::{JobContext, JobContextServices};
+use crate::application::runtime::job_lifecycle::{
+    DEFAULT_JOB_LEASE_SECONDS, JobLifecycleEvent, STALE_LEASE_MESSAGE, StaleRecoverReport,
+    apply_retryable_failure,
+};
 use crate::application::runtime::replay_report::ReplayReport;
 use crate::application::runtime::retention::{RetentionPolicy, RetentionPruneReport};
 use crate::application::runtime::runtime_diagnostics_helpers;
@@ -86,6 +90,11 @@ pub trait JobHandler: Send + Sync {
         _ctx: JobContext,
     ) -> Result<JobExecutionOutcome> {
         self.execute(job).await
+    }
+
+    async fn on_lifecycle(&self, job: &Job, event: &JobLifecycleEvent) -> Result<()> {
+        let _ = (job, event);
+        Ok(())
     }
 }
 
@@ -230,14 +239,204 @@ impl InMemoryRuntime {
         }
     }
 
+    fn handler_for(&self, job_type: &str) -> Result<Option<Arc<dyn JobHandler>>> {
+        let handlers = self
+            .handlers
+            .read()
+            .map_err(|_| StasisError::PortFailure("handlers lock poisoned".to_string()))?;
+        Ok(handlers.get(job_type).cloned())
+    }
+
+    async fn emit_lifecycle(&self, job: &Job, event: JobLifecycleEvent) -> Result<()> {
+        let Some(handler) = self.handler_for(&job.job_type)? else {
+            return Ok(());
+        };
+        if let Err(err) = handler.on_lifecycle(job, &event).await {
+            self.metrics
+                .incr_counter(metric_keys::JOB_LIFECYCLE_HOOK_FAILURE_TOTAL, 1);
+            if let Some(mut current) = self.job_store.get(&job.id).await? {
+                let note = format!("lifecycle hook failed: {err}");
+                current.last_error = Some(match current.last_error {
+                    Some(existing) => format!("{existing}; {note}"),
+                    None => note,
+                });
+                self.job_store.save(current).await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn recover_stale_now(&self) -> Result<StaleRecoverReport> {
+        self.recover_stale(self.clock.now()).await
+    }
+
+    pub async fn recover_stale(&self, now: DateTime<Utc>) -> Result<StaleRecoverReport> {
+        let expired = self.job_store.list_expired_leases(now).await?;
+        let mut report = StaleRecoverReport::default();
+        let empty = Self::extract_diagnostics_envelope(None);
+        for mut job in expired {
+            if runtime_job_dx::is_terminal(&job.state) {
+                continue;
+            }
+            let identity = RuntimeJobIdentityContext::from(&job);
+            let attempt_number = job.attempts + 1;
+            let dead_lettered = apply_retryable_failure(&mut job, now, STALE_LEASE_MESSAGE);
+            self.job_store.save(job.clone()).await?;
+            if dead_lettered {
+                self.append_outbox(
+                    RuntimeEventType::JobDeadLettered,
+                    &identity,
+                    None,
+                    Some(STALE_LEASE_MESSAGE.to_string()),
+                    now,
+                    Some(identity.job_id.clone()),
+                    &empty,
+                )
+                .await?;
+                self.emit_lifecycle(
+                    &job,
+                    JobLifecycleEvent::DeadLettered {
+                        message: STALE_LEASE_MESSAGE.to_string(),
+                    },
+                )
+                .await?;
+                self.metrics
+                    .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
+                report.dead_lettered += 1;
+            } else {
+                self.append_outbox(
+                    RuntimeEventType::JobRetryScheduled,
+                    &identity,
+                    None,
+                    Some(STALE_LEASE_MESSAGE.to_string()),
+                    now,
+                    Some(identity.job_id.clone()),
+                    &empty,
+                )
+                .await?;
+                self.emit_lifecycle(
+                    &job,
+                    JobLifecycleEvent::RetryScheduled {
+                        attempt: job.attempts,
+                        message: STALE_LEASE_MESSAGE.to_string(),
+                    },
+                )
+                .await?;
+                self.metrics
+                    .incr_counter(metric_keys::JOB_RETRY_SCHEDULED_TOTAL, 1);
+                report.recovered += 1;
+            }
+            self.append_job_attempt(
+                &identity.job_id,
+                "stale-recover",
+                attempt_number,
+                now,
+                now,
+                JobAttemptOutcome::RetryableFailure,
+                Some(STALE_LEASE_MESSAGE.to_string()),
+                None,
+                Some(identity.job_id.clone()),
+                &empty,
+                None,
+            )
+            .await?;
+            self.metrics
+                .incr_counter(metric_keys::JOB_RETRYABLE_FAILURE_TOTAL, 1);
+            self.metrics
+                .incr_counter(metric_keys::JOB_STALE_RECOVERED_TOTAL, 1);
+        }
+        Ok(report)
+    }
+
     pub async fn cancel(&self, job_id: &str) -> Result<bool> {
-        runtime_job_dx::cancel_job(
+        let Some(job) = runtime_job_dx::cancel_job(
             &self.job_store,
+            &self.wait_store,
             &self.in_flight,
             self.clock.as_ref(),
             job_id,
         )
-        .await
+        .await?
+        else {
+            return Ok(false);
+        };
+        let now = job.finished_at.unwrap_or_else(|| self.clock.now());
+        let identity = RuntimeJobIdentityContext::from(&job);
+        let empty = Self::extract_diagnostics_envelope(None);
+        self.append_outbox(
+            RuntimeEventType::JobCanceled,
+            &identity,
+            None,
+            Some("job cancelled".into()),
+            now,
+            Some(job.id.clone()),
+            &empty,
+        )
+        .await?;
+        self.emit_lifecycle(
+            &job,
+            JobLifecycleEvent::Canceled {
+                reason: "job cancelled".into(),
+            },
+        )
+        .await?;
+        self.metrics
+            .incr_counter(metric_keys::JOB_CANCELED_TOTAL, 1);
+        Ok(true)
+    }
+
+    pub async fn fail(&self, job_id: &str) -> Result<bool> {
+        let Some(mut job) = self.job_store.get(job_id).await? else {
+            return Ok(false);
+        };
+        if runtime_job_dx::is_terminal(&job.state) {
+            return Ok(false);
+        }
+        let now = self.clock.now();
+        let identity = RuntimeJobIdentityContext::from(&job);
+        job.attempts = job.attempts.saturating_add(1);
+        job.state = JobState::DeadLetter;
+        job.last_error = Some("operator fail".into());
+        job.finished_at = Some(now);
+        job.lease_owner = None;
+        job.lease_expires_at = None;
+        job.heartbeat_at = None;
+        self.job_store.save(job.clone()).await?;
+        let empty = Self::extract_diagnostics_envelope(None);
+        self.append_outbox(
+            RuntimeEventType::JobDeadLettered,
+            &identity,
+            None,
+            Some("operator fail".into()),
+            now,
+            Some(job.id.clone()),
+            &empty,
+        )
+        .await?;
+        self.emit_lifecycle(
+            &job,
+            JobLifecycleEvent::DeadLettered {
+                message: "operator fail".into(),
+            },
+        )
+        .await?;
+        self.metrics
+            .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
+        runtime_job_dx::request_cancel(&self.in_flight, job_id);
+        Ok(true)
+    }
+
+    pub async fn delete(&self, job_id: &str) -> Result<bool> {
+        let Some(job) = self.job_store.get(job_id).await? else {
+            return Ok(false);
+        };
+        if !runtime_job_dx::is_terminal(&job.state) {
+            return Err(StasisError::PortFailure(format!(
+                "refusing to delete non-terminal job {} ({:?}); cancel or fail first",
+                job.id, job.state
+            )));
+        }
+        self.job_store.delete(job_id).await
     }
 
     pub async fn signal<E: StasisEvent>(
@@ -560,7 +759,13 @@ impl InMemoryRuntime {
         self.metrics
             .incr_counter(metric_keys::WORKER_PROCESS_ONCE_TOTAL, 1);
 
-        let Some(mut job) = self.job_store.lease_due(queue, worker_id, now, 30).await? else {
+        self.recover_stale(now).await?;
+
+        let Some(mut job) = self
+            .job_store
+            .lease_due(queue, worker_id, now, DEFAULT_JOB_LEASE_SECONDS)
+            .await?
+        else {
             self.metrics.observe_duration_ms(
                 metric_keys::WORKER_PROCESS_ONCE_DURATION_MS,
                 worker_started.elapsed().as_millis() as u64,
@@ -630,7 +835,9 @@ impl InMemoryRuntime {
                 job.lease_owner = None;
                 job.lease_expires_at = None;
                 job.heartbeat_at = None;
-                self.job_store.save(job).await?;
+                self.job_store.save(job.clone()).await?;
+                self.emit_lifecycle(&job, JobLifecycleEvent::Succeeded)
+                    .await?;
 
                 self.append_outbox(
                     RuntimeEventType::JobSucceeded,
@@ -723,7 +930,18 @@ impl InMemoryRuntime {
                         .incr_counter(metric_keys::JOB_RETRY_SCHEDULED_TOTAL, 1);
                 }
 
-                self.job_store.save(job).await?;
+                self.job_store.save(job.clone()).await?;
+                let lifecycle = if job.state == JobState::DeadLetter {
+                    JobLifecycleEvent::DeadLettered {
+                        message: message.clone(),
+                    }
+                } else {
+                    JobLifecycleEvent::RetryScheduled {
+                        attempt: job.attempts,
+                        message: message.clone(),
+                    }
+                };
+                self.emit_lifecycle(&job, lifecycle).await?;
 
                 self.append_job_attempt(
                     &job_identity.job_id,
@@ -766,7 +984,15 @@ impl InMemoryRuntime {
                 job.lease_owner = None;
                 job.lease_expires_at = None;
                 job.heartbeat_at = None;
-                self.job_store.save(job).await?;
+                self.job_store.save(job.clone()).await?;
+                self.emit_lifecycle(
+                    &job,
+                    JobLifecycleEvent::Deferred {
+                        scheduled_at,
+                        message: message.clone(),
+                    },
+                )
+                .await?;
 
                 self.append_outbox(
                     RuntimeEventType::JobRetryScheduled,
@@ -821,7 +1047,14 @@ impl InMemoryRuntime {
                 job.lease_owner = None;
                 job.lease_expires_at = None;
                 job.heartbeat_at = None;
-                self.job_store.save(job).await?;
+                self.job_store.save(job.clone()).await?;
+                self.emit_lifecycle(
+                    &job,
+                    JobLifecycleEvent::DeadLettered {
+                        message: message.clone(),
+                    },
+                )
+                .await?;
 
                 self.append_outbox(
                     RuntimeEventType::JobDeadLettered,
@@ -1134,7 +1367,13 @@ impl JobStore for InMemoryJobStore {
         Ok(Some(job.clone()))
     }
 
-    async fn heartbeat(&self, job_id: &str, worker_id: &str, now: DateTime<Utc>) -> Result<()> {
+    async fn heartbeat(
+        &self,
+        job_id: &str,
+        worker_id: &str,
+        now: DateTime<Utc>,
+        lease_seconds: i64,
+    ) -> Result<()> {
         let mut state = self
             .jobs
             .write()
@@ -1146,6 +1385,7 @@ impl JobStore for InMemoryJobStore {
 
         if job.lease_owner.as_deref() == Some(worker_id) {
             job.heartbeat_at = Some(now);
+            job.lease_expires_at = Some(now + Duration::seconds(lease_seconds.max(0)));
         }
 
         Ok(())
@@ -1162,6 +1402,32 @@ impl JobStore for InMemoryJobStore {
             .filter(|job| job.state == state_filter)
             .cloned()
             .collect())
+    }
+
+    async fn list_expired_leases(&self, now: DateTime<Utc>) -> Result<Vec<Job>> {
+        let state = self
+            .jobs
+            .read()
+            .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
+        Ok(state
+            .values()
+            .filter(|job| {
+                matches!(job.state, JobState::Leased | JobState::Running)
+                    && job
+                        .lease_expires_at
+                        .map(|expiry| expiry <= now)
+                        .unwrap_or(false)
+            })
+            .cloned()
+            .collect())
+    }
+
+    async fn delete(&self, id: &str) -> Result<bool> {
+        let mut state = self
+            .jobs
+            .write()
+            .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
+        Ok(state.remove(id).is_some())
     }
 
     async fn prune_terminal_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {

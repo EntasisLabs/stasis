@@ -20,6 +20,28 @@ client.complete_stream(request, options, Some(&tx)).await?;
 
 - **Typed jobs, durable waits, and fenced resource leases.** `StasisJob` / `JobConsumer` enqueue via `runtime.enqueue_job(payload).queue(...).retry(...).send().await`. Handlers receive `JobContext` (`heartbeat`, `progress`, `publish`, `enqueue`, `wait_for`). `wait_for` is re-entrant (`Deferred`); `runtime.signal` resumes waiters. `runtime.cancel` marks non-terminal jobs `Canceled` and trips in-flight watches. Resource leases (`acquire_lease` / `renew_lease` / `release_lease` / `transfer_lease` / `force_acquire_lease` / `validate_fence`) carry a generation fencing token. Raw `JobHandler::execute` and `enqueue(NewJob)` remain.
 
+- **Job lifecycle recovery.** Expired `Leased`/`Running` jobs are recovered as retryable failures (attempt consumed, backoff, dead-letter at `max_attempts`). `JobContext::heartbeat` extends `lease_expires_at`. `JobHandler` / `JobConsumer::on_lifecycle` fires after persist for success, defer, retry, dead-letter, and cancel. `RuntimeSdk` adds `recover_stale`, `fail`, `delete` (terminal only), and `replay_dead_letter`. `cancel` completes pending durable waits and emits `JobCanceled`. `stasisd` sweeps stale leases before processing.
+
+Migration:
+
+```rust
+async fn consume(&self, job: PrepareReplica, ctx: JobContext) -> JobResult<()> {
+    mark_pending(&job)?;
+    ctx.wait_for::<ReplicaReady>().correlated_by(&job.replica_id).await?;
+    mark_finishing(&job)?;
+    Ok(())
+}
+
+async fn on_lifecycle(&self, job: &Job, event: &JobLifecycleEvent) -> Result<()> {
+    match event {
+        JobLifecycleEvent::Succeeded => mark_done(job),
+        JobLifecycleEvent::Deferred { .. } => revert_pending(job),
+        JobLifecycleEvent::Canceled { .. } | JobLifecycleEvent::DeadLettered { .. } => fail_card(job),
+        JobLifecycleEvent::RetryScheduled { .. } => revert_pending(job),
+    }
+}
+```
+
 Migration:
 
 ```rust

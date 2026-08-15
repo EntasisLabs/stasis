@@ -94,7 +94,13 @@ pub async fn execute_handler(
         ));
     };
     let (rx, guard) = begin_in_flight(in_flight, &job.id)?;
-    let ctx = JobContext::new(job, worker_id, rx, services);
+    let ctx = JobContext::new(
+        job,
+        worker_id,
+        rx,
+        services,
+        crate::application::runtime::job_lifecycle::DEFAULT_JOB_LEASE_SECONDS,
+    );
     let outcome = handler.execute_with_context(job, ctx).await?;
     Ok((outcome, guard))
 }
@@ -116,26 +122,33 @@ pub async fn job_was_canceled(
 
 pub async fn cancel_job(
     job_store: &dyn JobStore,
+    wait_store: &dyn DurableWaitStore,
     in_flight: &InFlightMap,
     clock: &dyn Clock,
     job_id: &str,
-) -> Result<bool> {
+) -> Result<Option<Job>> {
     let Some(mut job) = job_store.get(job_id).await? else {
-        return Ok(false);
+        return Ok(None);
     };
     if is_terminal(&job.state) {
-        return Ok(false);
+        return Ok(None);
     }
     let now = clock.now();
+    let pending_waits = wait_store.list_pending_by_job(job_id).await?;
+    for wait in pending_waits {
+        let _ = wait_store
+            .complete_wait(&wait.wait_id, DurableWaitStatus::Cancelled, None, None, now)
+            .await?;
+    }
     job.state = JobState::Canceled;
     job.finished_at = Some(now);
     job.lease_owner = None;
     job.lease_expires_at = None;
     job.heartbeat_at = None;
     job.last_error = Some("job cancelled".into());
-    job_store.save(job).await?;
+    job_store.save(job.clone()).await?;
     request_cancel(in_flight, job_id);
-    Ok(true)
+    Ok(Some(job))
 }
 
 pub fn chrono_ttl(ttl: std::time::Duration) -> chrono::Duration {

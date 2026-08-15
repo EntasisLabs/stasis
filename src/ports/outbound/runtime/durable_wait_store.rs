@@ -21,6 +21,7 @@ pub trait DurableWaitStore: Send + Sync {
         signal_type: &str,
         correlation_key: &str,
     ) -> Result<Vec<DurableWaitRecord>>;
+    async fn list_pending_by_job(&self, job_id: &str) -> Result<Vec<DurableWaitRecord>>;
     async fn save_wait(&self, record: DurableWaitRecord) -> Result<()>;
     async fn insert_signal(&self, record: DurableSignalRecord) -> Result<bool>;
     async fn get_signal(&self, signal_id: &str) -> Result<Option<DurableSignalRecord>>;
