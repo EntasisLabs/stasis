@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect, SRE
 - Stability: Stable
-- Last Verified: 2026-05-15
+- Last Verified: 2026-08-15
 - Verified Against:
   - src/application/runtime/grapheme_job_handler.rs
   - src/application/runtime/grapheme_echo_job_handler.rs
@@ -129,7 +129,7 @@ import data from "grapheme/data"  // requires Stasis `grapheme-full` feature at 
 By default, Stasis links Grapheme **0.6.1** with the standard stdlib modules (`core`, `http`, `web`, `json`, `sql`, …). Enable the optional **`grapheme-full`** feature on `stasis-rs` to compile in extended modules (`data`, `pdf`, `image`, `plot`, `media`):
 
 ```toml
-stasis-rs = { version = "0.8.0", features = ["grapheme-full"] }
+stasis-rs = { version = "0.9.0", features = ["grapheme-full"] }
 ```
 
 ### Execution model
