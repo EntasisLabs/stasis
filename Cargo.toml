@@ -1,6 +1,6 @@
 [package]
 name = "stasis-rs"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 description = "Durable AI orchestration framework with runtime jobs, lineage, and memory integration"
 license = "MIT OR Apache-2.0"
@@ -64,7 +64,7 @@ axum = "0.8"
 askama = { version = "0.12", features = ["with-axum"] }
 askama_axum = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 surrealdb = { version = "3", default-features = false, features = ["kv-surrealkv", "rustls", "kv-mem", "protocol-ws"] }
 surrealdb-types = "3"
 rust-embed = "8"

@@ -84,7 +84,7 @@ impl PromptExecutionPipeline {
         &self,
         request: ChatRequest,
         context: PromptExecutionContext,
-        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
+        chunk_tx: Option<&mpsc::Sender<StreamDelta>>,
     ) -> Result<PromptChatCompletion> {
         let options = chat_options_for_context(&context).map_err(StasisError::PortFailure)?;
         let options_ref = options.as_ref();
@@ -102,6 +102,14 @@ impl PromptExecutionPipeline {
         &self,
         request: PromptExecutionRequest,
     ) -> Result<PromptExecutionResponse> {
+        self.execute_with_stream(request, None).await
+    }
+
+    pub async fn execute_with_stream(
+        &self,
+        request: PromptExecutionRequest,
+        chunk_tx: Option<&mpsc::Sender<StreamDelta>>,
+    ) -> Result<PromptExecutionResponse> {
         let context = request.context.clone();
         let mut messages = Vec::with_capacity(2);
         if let Some(system_prompt) = request.system_prompt {
@@ -109,10 +117,16 @@ impl PromptExecutionPipeline {
         }
         messages.push(ChatMessage::user(request.user_prompt));
 
-        let chat_response = self
-            .complete_chat(ChatRequest::new(messages), context.clone())
-            .await?
-            .response;
+        let chat_request = ChatRequest::new(messages);
+        let chat_response = if chunk_tx.is_some() {
+            self.complete_chat_stream(chat_request, context.clone(), chunk_tx)
+                .await?
+                .response
+        } else {
+            self.complete_chat(chat_request, context.clone())
+                .await?
+                .response
+        };
 
         let text = chat_response
             .into_first_text()

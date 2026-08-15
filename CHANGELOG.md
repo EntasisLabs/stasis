@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: bounded provider streaming.** `AiChatClient::complete_stream`, `PromptExecutionPipeline::complete_chat_stream`, and `ToolLoopPipeline::execute_with_stream*` now take `Option<&tokio::sync::mpsc::Sender<StreamDelta>>`. The caller owns channel capacity; every delta awaits capacity. A closed receiver returns `StasisError::StreamClosed` and is not treated as a successful completion. Chat middlewares forward `complete_stream` so backpressure reaches the provider.
+
+Migration:
+
+```rust
+let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamDelta>(32);
+client.complete_stream(request, options, Some(&tx)).await?;
+```
+
 ## [0.8.0] - 2026-07-22
 
 ### Added

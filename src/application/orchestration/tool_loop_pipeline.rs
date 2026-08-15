@@ -98,22 +98,24 @@ impl ToolLoopPipeline {
         request: ToolLoopExecutionRequest,
         prior_messages: Vec<ChatMessage>,
     ) -> Result<ToolLoopExecutionResponse> {
-        self.execute_with_defaults(request, prior_messages, None).await
+        self.execute_with_defaults(request, prior_messages, None)
+            .await
     }
 
     pub async fn execute_with_stream(
         &self,
         request: ToolLoopExecutionRequest,
-        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
+        chunk_tx: Option<&mpsc::Sender<StreamDelta>>,
     ) -> Result<ToolLoopExecutionResponse> {
-        self.execute_with_defaults(request, Vec::new(), chunk_tx).await
+        self.execute_with_defaults(request, Vec::new(), chunk_tx)
+            .await
     }
 
     pub async fn execute_with_stream_prior_messages(
         &self,
         request: ToolLoopExecutionRequest,
         prior_messages: Vec<ChatMessage>,
-        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
+        chunk_tx: Option<&mpsc::Sender<StreamDelta>>,
     ) -> Result<ToolLoopExecutionResponse> {
         self.execute_with_defaults(request, prior_messages, chunk_tx)
             .await
@@ -123,7 +125,7 @@ impl ToolLoopPipeline {
         &self,
         request: ToolLoopExecutionRequest,
         prior_messages: Vec<ChatMessage>,
-        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
+        chunk_tx: Option<&mpsc::Sender<StreamDelta>>,
         max_tool_rounds: usize,
     ) -> Result<ToolLoopExecutionResponse> {
         self.execute_internal(request, prior_messages, chunk_tx, max_tool_rounds)
@@ -134,7 +136,7 @@ impl ToolLoopPipeline {
         &self,
         request: ToolLoopExecutionRequest,
         prior_messages: Vec<ChatMessage>,
-        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
+        chunk_tx: Option<&mpsc::Sender<StreamDelta>>,
     ) -> Result<ToolLoopExecutionResponse> {
         self.execute_internal(request, prior_messages, chunk_tx, DEFAULT_MAX_TOOL_ROUNDS)
             .await
@@ -144,7 +146,7 @@ impl ToolLoopPipeline {
         &self,
         request: ToolLoopExecutionRequest,
         prior_messages: Vec<ChatMessage>,
-        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
+        chunk_tx: Option<&mpsc::Sender<StreamDelta>>,
         max_tool_rounds: usize,
     ) -> Result<ToolLoopExecutionResponse> {
         let ToolLoopExecutionRequest {
@@ -176,7 +178,8 @@ impl ToolLoopPipeline {
 
         let mut tools = self.tool_registry.list_tools().await?;
         if has_selected_tool {
-            let selected_sanitized = sanitize_tool_name_for_model(shared_inputs.selected_tool_name());
+            let selected_sanitized =
+                sanitize_tool_name_for_model(shared_inputs.selected_tool_name());
             let selected_prefix = format!("{selected_sanitized}_");
             tools.retain(|tool| {
                 let tool_name = tool.name.as_ref();
@@ -197,7 +200,11 @@ impl ToolLoopPipeline {
                 let completion = match chunk_tx {
                     Some(tx) => {
                         self.prompt_pipeline
-                            .complete_chat_stream(chat_request, shared_inputs.context_clone(), Some(tx))
+                            .complete_chat_stream(
+                                chat_request,
+                                shared_inputs.context_clone(),
+                                Some(tx),
+                            )
                             .await?
                     }
                     None => {
@@ -292,11 +299,17 @@ impl ToolLoopPipeline {
             if let Some(system_prompt) = shared_inputs.system_prompt.as_ref() {
                 first_request = first_request.with_system_prompt(system_prompt.to_string());
             }
-            self.prompt_pipeline.execute(first_request).await?.text
+            self.prompt_pipeline
+                .execute_with_stream(first_request, chunk_tx)
+                .await?
+                .text
         };
         let tool_output = self
             .tool_registry
-            .invoke_tool(shared_inputs.selected_tool_name(), (*shared_inputs.tool_input).clone())
+            .invoke_tool(
+                shared_inputs.selected_tool_name(),
+                (*shared_inputs.tool_input).clone(),
+            )
             .await?;
 
         let synthesis_prompt = build_fallback_synthesis_prompt(
@@ -312,7 +325,10 @@ impl ToolLoopPipeline {
             final_request = final_request.with_system_prompt(system_prompt.to_string());
         }
 
-        let final_response = self.prompt_pipeline.execute(final_request).await?;
+        let final_response = self
+            .prompt_pipeline
+            .execute_with_stream(final_request, chunk_tx)
+            .await?;
 
         let fallback_invocation = ToolInvocation {
             tool_name: shared_inputs.selected_tool_name().to_string(),

@@ -11,6 +11,8 @@ pub enum StasisError {
     AgentAlreadyExists(String),
     AgentNotFound(String),
     PortFailure(String),
+    /// Bounded stream consumer closed (or dropped) before all deltas were delivered.
+    StreamClosed,
 }
 
 impl Display for StasisError {
@@ -22,6 +24,7 @@ impl Display for StasisError {
             Self::AgentAlreadyExists(id) => write!(f, "agent already exists: {id}"),
             Self::AgentNotFound(id) => write!(f, "agent not found: {id}"),
             Self::PortFailure(message) => write!(f, "port failure: {message}"),
+            Self::StreamClosed => write!(f, "provider stream closed before delivery completed"),
         }
     }
 }
