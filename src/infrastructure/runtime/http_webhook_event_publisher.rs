@@ -151,6 +151,7 @@ impl From<&OutboxEvent> for WebhookRuntimeEvent {
             RuntimeEventType::JobSucceeded => "job_succeeded",
             RuntimeEventType::JobRetryScheduled => "job_retry_scheduled",
             RuntimeEventType::JobDeadLettered => "job_dead_lettered",
+            RuntimeEventType::JobPublished => "job_published",
         };
 
         Self {
@@ -227,7 +228,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener should bind");
-        let addr = listener.local_addr().expect("listener should have local addr");
+        let addr = listener
+            .local_addr()
+            .expect("listener should have local addr");
 
         let server_task = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.expect("socket should accept");
@@ -265,9 +268,8 @@ mod tests {
                 success_status
             };
 
-            let response = format!(
-                "HTTP/1.1 {status_line}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            );
+            let response =
+                format!("HTTP/1.1 {status_line}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             socket
                 .write_all(response.as_bytes())
                 .await
@@ -292,12 +294,17 @@ mod tests {
 
     #[tokio::test]
     async fn publish_includes_bearer_header_when_configured() {
-        let (endpoint_url, server_task) = spawn_webhook_server(Some("Bearer test-token"), "200 OK").await;
+        let (endpoint_url, server_task) =
+            spawn_webhook_server(Some("Bearer test-token"), "200 OK").await;
         let event = sample_event();
-        let publisher = HttpWebhookEventPublisher::new(endpoint_url).with_bearer_token("test-token");
+        let publisher =
+            HttpWebhookEventPublisher::new(endpoint_url).with_bearer_token("test-token");
 
         let result = publisher.publish(&event).await;
-        assert!(result.is_ok(), "publish should succeed with valid auth header");
+        assert!(
+            result.is_ok(),
+            "publish should succeed with valid auth header"
+        );
 
         let auth_header = server_task.await.expect("server task should complete");
         assert_eq!(auth_header.as_deref(), Some("Bearer test-token"));
@@ -322,7 +329,8 @@ mod tests {
 
     #[tokio::test]
     async fn publish_fails_on_non_success_status() {
-        let (endpoint_url, _server_task) = spawn_webhook_server(None, "503 Service Unavailable").await;
+        let (endpoint_url, _server_task) =
+            spawn_webhook_server(None, "503 Service Unavailable").await;
         let event = sample_event();
         let publisher = HttpWebhookEventPublisher::new(endpoint_url);
 

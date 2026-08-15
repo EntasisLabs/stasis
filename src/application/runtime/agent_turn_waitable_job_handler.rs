@@ -7,7 +7,7 @@ use serde_json::json;
 use crate::application::orchestration::runtime_job_payloads::AgentTurnWaitableJobPayload;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::domain::agent::envelope::{
-    AgentEnvelope, AgentEnvelopeKind, AGENT_ENVELOPE_SCHEMA_VERSION_V1,
+    AGENT_ENVELOPE_SCHEMA_VERSION_V1, AgentEnvelope, AgentEnvelopeKind,
 };
 use crate::domain::agent::turn_wait::{TurnWaitRecord, TurnWaitStatus};
 use crate::domain::errors::Result;
@@ -183,9 +183,9 @@ impl JobHandler for AgentTurnWaitableJobHandler {
                 },
                 TurnWaitStatus::Failed | TurnWaitStatus::Cancelled | TurnWaitStatus::TimedOut => {
                     JobExecutionOutcome::FatalFailure {
-                        message: record
-                            .error_message
-                            .unwrap_or_else(|| format!("external turn ended as {:?}", record.status)),
+                        message: record.error_message.unwrap_or_else(|| {
+                            format!("external turn ended as {:?}", record.status)
+                        }),
                         execution_id: Some(payload.turn_id.clone()),
                         diagnostics: Some(
                             json!({
@@ -326,6 +326,7 @@ mod tests {
             finished_at: None,
             last_error: None,
             backoff_policy: BackoffPolicy::default(),
+            progress_json: None,
         }
     }
 
@@ -602,12 +603,13 @@ mod tests {
 
         let mut wait_payload = payload();
         wait_payload.turn_id = "turn-rt".into();
-        let waitable = RuntimeWorkflowJobBuilder::for_agent_turn_waitable("job-wait-rt", &wait_payload)
-            .unwrap()
-            .with_queue("agents")
-            .with_max_attempts(3)
-            .with_correlation_id("corr-1")
-            .build();
+        let waitable =
+            RuntimeWorkflowJobBuilder::for_agent_turn_waitable("job-wait-rt", &wait_payload)
+                .unwrap()
+                .with_queue("agents")
+                .with_max_attempts(3)
+                .with_correlation_id("corr-1")
+                .build();
         runtime.enqueue(waitable).await.unwrap();
 
         assert_eq!(

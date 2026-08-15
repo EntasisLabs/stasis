@@ -285,6 +285,9 @@ Typical adoption path:
 ## Runtime Capabilities
 
 - Durable backend options for queue/thread state (`surreal-ws` / `surreal-kv`), with `in-memory` for local runs.
+- Typed job consumers (`StasisJob` / `JobConsumer` / `JobContext`) with `enqueue_job` builders; raw `NewJob` still works.
+- Durable `wait_for` / `signal` correlation and cooperative `cancel` for in-flight or deferred jobs.
+- Fenced resource leases (`acquire_lease`, fencing tokens, `force_acquire_lease`).
 - Retry and failure-policy aware job execution with bounded attempts.
 - Recurring schedule materialization and worker-driven queue processing.
 - Outbox publication workflows for delivery and endpoint diagnostics.

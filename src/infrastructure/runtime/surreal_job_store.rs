@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::{engine::any::Any, Surreal};
+use surrealdb::{Surreal, engine::any::Any};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
@@ -86,6 +86,8 @@ struct JobRecord {
     started_at: Option<DateTime<Utc>>,
     finished_at: Option<DateTime<Utc>>,
     last_error: Option<String>,
+    #[serde(default)]
+    progress_json: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
@@ -128,6 +130,7 @@ impl From<Job> for JobRecord {
             started_at: job.started_at,
             finished_at: job.finished_at,
             last_error: job.last_error,
+            progress_json: job.progress_json,
         }
     }
 }
@@ -174,6 +177,7 @@ impl TryFrom<JobRecord> for Job {
             started_at: record.started_at,
             finished_at: record.finished_at,
             last_error: record.last_error,
+            progress_json: record.progress_json,
         })
     }
 }

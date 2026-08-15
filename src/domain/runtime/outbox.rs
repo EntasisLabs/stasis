@@ -22,6 +22,7 @@ pub enum RuntimeEventType {
     JobSucceeded,
     JobRetryScheduled,
     JobDeadLettered,
+    JobPublished,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

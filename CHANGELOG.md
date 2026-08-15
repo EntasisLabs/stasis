@@ -18,6 +18,27 @@ let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamDelta>(32);
 client.complete_stream(request, options, Some(&tx)).await?;
 ```
 
+- **Typed jobs, durable waits, and fenced resource leases.** `StasisJob` / `JobConsumer` enqueue via `runtime.enqueue_job(payload).queue(...).retry(...).send().await`. Handlers receive `JobContext` (`heartbeat`, `progress`, `publish`, `enqueue`, `wait_for`). `wait_for` is re-entrant (`Deferred`); `runtime.signal` resumes waiters. `runtime.cancel` marks non-terminal jobs `Canceled` and trips in-flight watches. Resource leases (`acquire_lease` / `renew_lease` / `release_lease` / `transfer_lease` / `force_acquire_lease` / `validate_fence`) carry a generation fencing token. Raw `JobHandler::execute` and `enqueue(NewJob)` remain.
+
+Migration:
+
+```rust
+#[derive(Serialize, Deserialize)]
+struct PrepareReplica { replica_id: String }
+impl StasisJob for PrepareReplica {
+    const NAME: &'static str = "prepare_replica";
+    const VERSION: u32 = 1;
+    type Output = ();
+}
+
+runtime.register_consumer(MyConsumer)?;
+runtime.enqueue_job(PrepareReplica { replica_id: "r1".into() })
+    .queue("replicas")
+    .retry(RetryPolicy::exponential(8))
+    .send()
+    .await?;
+```
+
 ## [0.8.0] - 2026-07-22
 
 ### Added

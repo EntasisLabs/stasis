@@ -3,14 +3,26 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use chrono::{DateTime, Duration, Utc};
-use surrealdb::engine::any::Any;
 use surrealdb::Surreal;
+use surrealdb::engine::any::Any;
 
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::runtime::job_context::JobContextServices;
 use crate::application::runtime::replay_report::ReplayReport;
 use crate::application::runtime::retention::{RetentionPolicy, RetentionPruneReport};
 use crate::application::runtime::runtime_diagnostics_helpers;
+use crate::application::runtime::runtime_job_dx::{self, InFlightMap};
 use crate::application::runtime::runtime_job_identity_context::RuntimeJobIdentityContext;
+use crate::application::runtime::typed_job::{JobConsumer, TypedEnqueueBuilder, TypedJobHandler};
+use crate::application::telemetry::keys as metric_keys;
+use crate::application::telemetry::operation::{OperationTelemetry, runtime_event_type_name};
+use crate::application::telemetry::propagation::{
+    job_execute_span_attributes, parent_trace_context,
+};
+use crate::application::telemetry::request_context::{
+    inbound_trace_context_for_propagation, trace_id_for_enqueue,
+};
+use crate::application::telemetry::spans as span_names;
 use crate::application::use_cases::investigate_runtime_lineage::{
     InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
 };
@@ -21,23 +33,18 @@ use crate::domain::runtime::outbox::{
     OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
 };
 use crate::domain::runtime::recurring::RecurringDefinition;
-use crate::application::telemetry::keys as metric_keys;
-use crate::application::telemetry::operation::{runtime_event_type_name, OperationTelemetry};
-use crate::application::telemetry::propagation::{
-    job_execute_span_attributes, parent_trace_context,
-};
-use crate::application::telemetry::request_context::{
-    inbound_trace_context_for_propagation, trace_id_for_enqueue,
-};
-use crate::application::telemetry::spans as span_names;
+use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey, ResourceLease};
+use crate::domain::runtime::typed_contract::{StasisEvent, StasisJob};
 use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
 use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
-use crate::infrastructure::telemetry::NoopRuntimeTracing;
+use crate::infrastructure::runtime::surreal_durable_wait_store::SurrealDurableWaitStore;
 use crate::infrastructure::runtime::surreal_job_attempt_store::SurrealJobAttemptStore;
 use crate::infrastructure::runtime::surreal_job_store::SurrealJobStore;
 use crate::infrastructure::runtime::surreal_outbox_store::SurrealOutboxStore;
 use crate::infrastructure::runtime::surreal_recurring_store::SurrealRecurringStore;
+use crate::infrastructure::runtime::surreal_resource_lease_store::SurrealResourceLeaseStore;
 use crate::infrastructure::runtime::system_clock::SystemClock;
+use crate::infrastructure::telemetry::NoopRuntimeTracing;
 use crate::ports::outbound::runtime::clock::Clock;
 use crate::ports::outbound::runtime::event_publisher::EventPublisher;
 use crate::ports::outbound::runtime::id_generator::IdGenerator;
@@ -45,6 +52,7 @@ use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
+use crate::ports::outbound::runtime::resource_lease_store::ResourceLeaseStore;
 use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
 use crate::ports::outbound::runtime::runtime_tracing::{OtelAttribute, RuntimeTracing};
 
@@ -54,6 +62,8 @@ pub struct SurrealRuntime {
     pub recurring_store: SurrealRecurringStore,
     pub outbox_store: SurrealOutboxStore,
     pub job_attempt_store: SurrealJobAttemptStore,
+    pub wait_store: SurrealDurableWaitStore,
+    pub lease_store: SurrealResourceLeaseStore,
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
     publish_policy: Arc<RwLock<OutboxPublishPolicy>>,
@@ -62,6 +72,7 @@ pub struct SurrealRuntime {
     metrics: Arc<dyn RuntimeMetrics>,
     tracing: Arc<dyn RuntimeTracing>,
     retention_policy: Arc<RwLock<RetentionPolicy>>,
+    in_flight: InFlightMap,
 }
 
 impl SurrealRuntime {
@@ -95,7 +106,13 @@ impl SurrealRuntime {
         id_generator: Arc<dyn IdGenerator>,
         metrics: Arc<dyn RuntimeMetrics>,
     ) -> Self {
-        Self::with_dependencies_and_telemetry(db, clock, id_generator, metrics, Arc::new(NoopRuntimeTracing))
+        Self::with_dependencies_and_telemetry(
+            db,
+            clock,
+            id_generator,
+            metrics,
+            Arc::new(NoopRuntimeTracing),
+        )
     }
 
     pub fn with_dependencies_and_telemetry(
@@ -109,7 +126,9 @@ impl SurrealRuntime {
             job_store: SurrealJobStore::new(db.clone()),
             recurring_store: SurrealRecurringStore::new(db.clone()),
             outbox_store: SurrealOutboxStore::new(db.clone()),
-            job_attempt_store: SurrealJobAttemptStore::new(db),
+            job_attempt_store: SurrealJobAttemptStore::new(db.clone()),
+            wait_store: SurrealDurableWaitStore::new(db.clone()),
+            lease_store: SurrealResourceLeaseStore::new(db),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
             publish_policy: Arc::new(RwLock::new(OutboxPublishPolicy::default())),
@@ -118,6 +137,7 @@ impl SurrealRuntime {
             metrics,
             tracing,
             retention_policy: Arc::new(RwLock::new(RetentionPolicy::default())),
+            in_flight: runtime_job_dx::new_in_flight_map(),
         }
     }
 
@@ -151,6 +171,164 @@ impl SurrealRuntime {
 
         handlers.insert(handler.job_type().to_string(), Arc::new(handler));
         Ok(())
+    }
+
+    pub fn register_consumer<T, H>(&self, handler: H) -> Result<()>
+    where
+        T: StasisJob,
+        H: JobConsumer<T> + 'static,
+    {
+        self.register_handler(TypedJobHandler::<T, H>::new(handler))
+    }
+
+    pub fn enqueue_job<T: StasisJob>(&self, payload: T) -> TypedEnqueueBuilder<T> {
+        TypedEnqueueBuilder::new(
+            payload,
+            self.clock.clone(),
+            self.id_generator.clone(),
+            Arc::new(self.job_store.clone()),
+        )
+    }
+
+    pub fn job_context_services(&self) -> JobContextServices {
+        JobContextServices {
+            job_store: Arc::new(self.job_store.clone()),
+            outbox_store: Arc::new(self.outbox_store.clone()),
+            wait_store: Arc::new(self.wait_store.clone()),
+            clock: self.clock.clone(),
+            id_generator: self.id_generator.clone(),
+        }
+    }
+
+    pub async fn cancel(&self, job_id: &str) -> Result<bool> {
+        runtime_job_dx::cancel_job(
+            &self.job_store,
+            &self.in_flight,
+            self.clock.as_ref(),
+            job_id,
+        )
+        .await
+    }
+
+    pub async fn signal<E: StasisEvent>(
+        &self,
+        correlation_key: impl Into<String>,
+        event: E,
+    ) -> Result<bool> {
+        runtime_job_dx::signal_event(
+            &self.job_store,
+            &self.wait_store,
+            self.clock.as_ref(),
+            correlation_key.into(),
+            event,
+        )
+        .await
+    }
+
+    pub async fn acquire_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        self.lease_store
+            .acquire(
+                ResourceKey(resource.into()),
+                OwnerId(owner.into()),
+                runtime_job_dx::chrono_ttl(ttl),
+                self.clock.now(),
+                false,
+            )
+            .await
+    }
+
+    pub async fn force_acquire_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        self.lease_store
+            .acquire(
+                ResourceKey(resource.into()),
+                OwnerId(owner.into()),
+                runtime_job_dx::chrono_ttl(ttl),
+                self.clock.now(),
+                true,
+            )
+            .await
+    }
+
+    pub async fn renew_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        fencing_token: FencingToken,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        self.lease_store
+            .renew(
+                &ResourceKey(resource.into()),
+                &OwnerId(owner.into()),
+                fencing_token,
+                runtime_job_dx::chrono_ttl(ttl),
+                self.clock.now(),
+            )
+            .await
+    }
+
+    pub async fn release_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        fencing_token: FencingToken,
+    ) -> Result<bool> {
+        self.lease_store
+            .release(
+                &ResourceKey(resource.into()),
+                &OwnerId(owner.into()),
+                fencing_token,
+                self.clock.now(),
+            )
+            .await
+    }
+
+    pub async fn transfer_lease(
+        &self,
+        resource: impl Into<String>,
+        from: impl Into<String>,
+        to: impl Into<String>,
+        fencing_token: FencingToken,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        self.lease_store
+            .transfer(
+                &ResourceKey(resource.into()),
+                &OwnerId(from.into()),
+                OwnerId(to.into()),
+                fencing_token,
+                runtime_job_dx::chrono_ttl(ttl),
+                self.clock.now(),
+            )
+            .await
+    }
+
+    pub async fn validate_fence(
+        &self,
+        resource: impl Into<String>,
+        fencing_token: FencingToken,
+    ) -> Result<bool> {
+        self.lease_store
+            .validate_fence(
+                &ResourceKey(resource.into()),
+                fencing_token,
+                self.clock.now(),
+            )
+            .await
+    }
+
+    pub async fn watch_lease(&self, resource: impl Into<String>) -> Result<Option<ResourceLease>> {
+        self.lease_store.get(&ResourceKey(resource.into())).await
     }
 
     pub fn register_event_publisher<P: EventPublisher + 'static>(
@@ -375,22 +553,34 @@ impl SurrealRuntime {
             handlers.get(&job.job_type).cloned()
         };
 
-        let job_parent = parent_trace_context(&job.trace_id)
-            .or_else(inbound_trace_context_for_propagation);
+        let job_parent =
+            parent_trace_context(&job.trace_id).or_else(inbound_trace_context_for_propagation);
         let _job_span = self.tracing.start_span_with_trace_context(
             span_names::JOB_EXECUTE,
             &job_execute_span_attributes(&job),
             job_parent.as_ref(),
         );
 
-        let outcome = if let Some(handler) = handler {
-            handler.execute(&job).await?
-        } else {
-            JobExecutionOutcome::FatalFailure {
-                message: format!("no handler registered for job_type={}", job.job_type),
-                execution_id: None,
-                diagnostics: None,
+        let outcome = {
+            let (outcome, _guard) = runtime_job_dx::execute_handler(
+                handler,
+                &job,
+                worker_id,
+                self.job_context_services(),
+                &self.in_flight,
+            )
+            .await?;
+            if runtime_job_dx::job_was_canceled(&self.job_store, &self.in_flight, &job.id).await? {
+                self.metrics.observe_duration_ms(
+                    metric_keys::WORKER_PROCESS_ONCE_DURATION_MS,
+                    worker_started.elapsed().as_millis() as u64,
+                );
+                return Ok(Some(job_identity.job_id));
             }
+            if let Some(latest) = self.job_store.get(&job.id).await? {
+                job.progress_json = latest.progress_json;
+            }
+            outcome
         };
 
         let attempt_number = job.attempts + 1;
@@ -438,7 +628,8 @@ impl SurrealRuntime {
                 )
                 .await?;
 
-                self.metrics.incr_counter(metric_keys::JOB_SUCCEEDED_TOTAL, 1);
+                self.metrics
+                    .incr_counter(metric_keys::JOB_SUCCEEDED_TOTAL, 1);
                 self.metrics.observe_duration_ms(
                     metric_keys::JOB_PROCESS_DURATION_MS,
                     processing_started.elapsed().as_millis() as u64,
@@ -475,7 +666,8 @@ impl SurrealRuntime {
                     )
                     .await?;
 
-                    self.metrics.incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
+                    self.metrics
+                        .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
                 } else {
                     job.state = JobState::Enqueued;
                     let exponent = job.attempts - 1;
@@ -626,8 +818,10 @@ impl SurrealRuntime {
                 )
                 .await?;
 
-                self.metrics.incr_counter(metric_keys::JOB_FATAL_FAILURE_TOTAL, 1);
-                self.metrics.incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
+                self.metrics
+                    .incr_counter(metric_keys::JOB_FATAL_FAILURE_TOTAL, 1);
+                self.metrics
+                    .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
                 self.metrics.observe_duration_ms(
                     metric_keys::JOB_PROCESS_DURATION_MS,
                     processing_started.elapsed().as_millis() as u64,
@@ -689,7 +883,8 @@ impl SurrealRuntime {
 
         let pending = self.outbox_store.list_pending(limit).await?;
         let mut published = 0usize;
-        let operation_telemetry = OperationTelemetry::new(self.metrics.clone(), self.tracing.clone());
+        let operation_telemetry =
+            OperationTelemetry::new(self.metrics.clone(), self.tracing.clone());
 
         for mut event in pending {
             if event
@@ -701,7 +896,8 @@ impl SurrealRuntime {
             }
 
             let event_type = runtime_event_type_name(&event.event.event_type);
-            let _publish_span = operation_telemetry.outbox_publish_span(event_type, &event.event.job_id);
+            let _publish_span =
+                operation_telemetry.outbox_publish_span(event_type, &event.event.job_id);
 
             match publisher.publish(&event).await {
                 Ok(()) => {
@@ -774,9 +970,7 @@ impl SurrealRuntime {
                 sttp_output_node_id,
                 execution_id,
                 input_memory_query_id: diagnostics.input_memory_query_id.clone(),
-                input_memory_query_fingerprint: diagnostics
-                    .input_memory_query_fingerprint
-                    .clone(),
+                input_memory_query_fingerprint: diagnostics.input_memory_query_fingerprint.clone(),
                 output_memory_node_id: diagnostics.output_memory_node_id.clone(),
                 retrieval_path: diagnostics.retrieval_path.clone(),
                 occurred_at: now,
@@ -827,5 +1021,4 @@ impl SurrealRuntime {
     ) -> runtime_diagnostics_helpers::RuntimeDiagnosticsEnvelope {
         runtime_diagnostics_helpers::extract_runtime_diagnostics_envelope(diagnostics)
     }
-
 }

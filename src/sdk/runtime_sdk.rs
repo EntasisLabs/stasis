@@ -1,11 +1,15 @@
 use chrono::Utc;
 
+use crate::application::runtime::in_memory_runtime::JobHandler;
+use crate::application::runtime::runtime_factory::RuntimeComposition;
 use crate::application::runtime::runtime_factory::{RuntimeBackend, SurrealAuth};
 use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
-use crate::application::runtime::runtime_factory::RuntimeComposition;
+use crate::application::runtime::typed_job::{JobConsumer, TypedEnqueueBuilder};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::{JobState, NewJob};
 use crate::domain::runtime::recurring::RecurringDefinition;
+use crate::domain::runtime::resource_lease::{FencingToken, ResourceLease};
+use crate::domain::runtime::typed_contract::{StasisEvent, StasisJob};
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
@@ -48,8 +52,7 @@ impl RuntimeSdk {
         database: impl Into<String>,
     ) -> Result<Self> {
         Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::surreal_mem(
-            namespace,
-            database,
+            namespace, database,
         )))
         .await
     }
@@ -145,6 +148,149 @@ impl RuntimeSdk {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.enqueue(job).await,
             RuntimeComposition::Surreal(rt) => rt.enqueue(job).await,
+        }
+    }
+
+    /// Enqueues a typed job payload. Call `.queue(...)`, `.retry(...)`, then `.send().await`.
+    pub fn enqueue_job<T: StasisJob>(&self, payload: T) -> TypedEnqueueBuilder<T> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.enqueue_job(payload),
+            RuntimeComposition::Surreal(rt) => rt.enqueue_job(payload),
+        }
+    }
+
+    /// Registers a raw job handler.
+    pub fn register_handler<H: JobHandler + 'static>(&self, handler: H) -> Result<()> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.register_handler(handler),
+            RuntimeComposition::Surreal(rt) => rt.register_handler(handler),
+        }
+    }
+
+    /// Registers a typed job consumer.
+    pub fn register_consumer<T, H>(&self, handler: H) -> Result<()>
+    where
+        T: StasisJob,
+        H: JobConsumer<T> + 'static,
+    {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.register_consumer(handler),
+            RuntimeComposition::Surreal(rt) => rt.register_consumer(handler),
+        }
+    }
+
+    /// Cancels a non-terminal job and trips any in-flight cancellation watch.
+    pub async fn cancel(&self, job_id: &str) -> Result<bool> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.cancel(job_id).await,
+            RuntimeComposition::Surreal(rt) => rt.cancel(job_id).await,
+        }
+    }
+
+    /// Publishes a typed signal. Duplicate `(type, key, payload)` ids are ignored.
+    pub async fn signal<E: StasisEvent>(
+        &self,
+        correlation_key: impl Into<String>,
+        event: E,
+    ) -> Result<bool> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.signal(correlation_key, event).await,
+            RuntimeComposition::Surreal(rt) => rt.signal(correlation_key, event).await,
+        }
+    }
+
+    pub async fn acquire_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.acquire_lease(resource, owner, ttl).await,
+            RuntimeComposition::Surreal(rt) => rt.acquire_lease(resource, owner, ttl).await,
+        }
+    }
+
+    pub async fn force_acquire_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.force_acquire_lease(resource, owner, ttl).await,
+            RuntimeComposition::Surreal(rt) => rt.force_acquire_lease(resource, owner, ttl).await,
+        }
+    }
+
+    pub async fn renew_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        fencing_token: FencingToken,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => {
+                rt.renew_lease(resource, owner, fencing_token, ttl).await
+            }
+            RuntimeComposition::Surreal(rt) => {
+                rt.renew_lease(resource, owner, fencing_token, ttl).await
+            }
+        }
+    }
+
+    pub async fn release_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        fencing_token: FencingToken,
+    ) -> Result<bool> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => {
+                rt.release_lease(resource, owner, fencing_token).await
+            }
+            RuntimeComposition::Surreal(rt) => {
+                rt.release_lease(resource, owner, fencing_token).await
+            }
+        }
+    }
+
+    pub async fn transfer_lease(
+        &self,
+        resource: impl Into<String>,
+        from: impl Into<String>,
+        to: impl Into<String>,
+        fencing_token: FencingToken,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => {
+                rt.transfer_lease(resource, from, to, fencing_token, ttl)
+                    .await
+            }
+            RuntimeComposition::Surreal(rt) => {
+                rt.transfer_lease(resource, from, to, fencing_token, ttl)
+                    .await
+            }
+        }
+    }
+
+    pub async fn validate_fence(
+        &self,
+        resource: impl Into<String>,
+        fencing_token: FencingToken,
+    ) -> Result<bool> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.validate_fence(resource, fencing_token).await,
+            RuntimeComposition::Surreal(rt) => rt.validate_fence(resource, fencing_token).await,
+        }
+    }
+
+    pub async fn watch_lease(&self, resource: impl Into<String>) -> Result<Option<ResourceLease>> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.watch_lease(resource).await,
+            RuntimeComposition::Surreal(rt) => rt.watch_lease(resource).await,
         }
     }
 

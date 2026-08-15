@@ -45,6 +45,7 @@ impl LapinRabbitMqTransportPublisher {
             crate::domain::runtime::outbox::RuntimeEventType::JobDeadLettered => {
                 "job_dead_lettered"
             }
+            crate::domain::runtime::outbox::RuntimeEventType::JobPublished => "job_published",
         };
 
         let payload = json!({
