@@ -12,7 +12,7 @@ pub enum JobState {
     Canceled,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BackoffPolicy {
     pub base_delay_seconds: i64,
     pub max_delay_seconds: i64,
@@ -51,6 +51,7 @@ pub struct Job {
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
+    pub progress_json: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -95,6 +96,7 @@ impl NewJob {
             started_at: None,
             finished_at: None,
             last_error: None,
+            progress_json: None,
         }
     }
 }

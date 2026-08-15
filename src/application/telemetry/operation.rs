@@ -101,10 +101,16 @@ impl OperationTelemetry {
     }
 }
 
-pub fn runtime_event_type_name(event_type: &crate::domain::runtime::outbox::RuntimeEventType) -> &'static str {
+pub fn runtime_event_type_name(
+    event_type: &crate::domain::runtime::outbox::RuntimeEventType,
+) -> &'static str {
     match event_type {
         crate::domain::runtime::outbox::RuntimeEventType::JobSucceeded => "job.succeeded",
-        crate::domain::runtime::outbox::RuntimeEventType::JobRetryScheduled => "job.retry_scheduled",
+        crate::domain::runtime::outbox::RuntimeEventType::JobRetryScheduled => {
+            "job.retry_scheduled"
+        }
         crate::domain::runtime::outbox::RuntimeEventType::JobDeadLettered => "job.dead_lettered",
+        crate::domain::runtime::outbox::RuntimeEventType::JobPublished => "job.published",
+        crate::domain::runtime::outbox::RuntimeEventType::JobCanceled => "job.canceled",
     }
 }

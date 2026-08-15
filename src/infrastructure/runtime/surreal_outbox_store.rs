@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::{engine::any::Any, Surreal};
+use surrealdb::{Surreal, engine::any::Any};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
@@ -69,6 +69,8 @@ impl From<OutboxEvent> for OutboxRecord {
                 RuntimeEventType::JobSucceeded => "job_succeeded".to_string(),
                 RuntimeEventType::JobRetryScheduled => "job_retry_scheduled".to_string(),
                 RuntimeEventType::JobDeadLettered => "job_dead_lettered".to_string(),
+                RuntimeEventType::JobPublished => "job_published".to_string(),
+                RuntimeEventType::JobCanceled => "job_canceled".to_string(),
             },
             job_id: value.event.job_id,
             thread_id: value.event.thread_id,
@@ -107,6 +109,8 @@ impl TryFrom<OutboxRecord> for OutboxEvent {
             "job_succeeded" => RuntimeEventType::JobSucceeded,
             "job_retry_scheduled" => RuntimeEventType::JobRetryScheduled,
             "job_dead_lettered" => RuntimeEventType::JobDeadLettered,
+            "job_published" => RuntimeEventType::JobPublished,
+            "job_canceled" => RuntimeEventType::JobCanceled,
             other => {
                 return Err(StasisError::PortFailure(format!(
                     "invalid runtime event type: {other}"

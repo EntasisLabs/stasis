@@ -435,3 +435,29 @@ fn thread_record_symbol_is_fully_removed() {
         violations.join("\n")
     );
 }
+
+#[test]
+fn provider_stream_contract_must_not_use_unbounded_sender() {
+    let repo_root = env!("CARGO_MANIFEST_DIR");
+    let files = collect_rs_files(&format!("{repo_root}/src"));
+    let mut violations = Vec::new();
+
+    for file in files {
+        let Ok(source) = fs::read_to_string(&file) else {
+            continue;
+        };
+        for (idx, line) in source.lines().enumerate() {
+            if line.contains("UnboundedSender<StreamDelta>")
+                || (line.contains("UnboundedSender") && line.contains("StreamDelta"))
+            {
+                violations.push(format!("{}:{}: {line}", file, idx + 1));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Provider streaming must use bounded mpsc::Sender<StreamDelta>, not UnboundedSender. Violations:\n{}",
+        violations.join("\n")
+    );
+}

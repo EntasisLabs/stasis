@@ -1,9 +1,12 @@
 pub mod cluster_node;
 pub mod delivery_endpoint;
+pub mod durable_wait;
 pub mod endpoint_delivery_status;
 pub mod job;
 pub mod job_attempt;
 pub mod outbox;
 pub mod recurring;
+pub mod resource_lease;
 pub mod thread;
+pub mod typed_contract;
 pub mod workflow_definition;

@@ -29,6 +29,8 @@ impl From<&OutboxEvent> for TcpRuntimeEvent {
             RuntimeEventType::JobSucceeded => "job_succeeded",
             RuntimeEventType::JobRetryScheduled => "job_retry_scheduled",
             RuntimeEventType::JobDeadLettered => "job_dead_lettered",
+            RuntimeEventType::JobPublished => "job_published",
+            RuntimeEventType::JobCanceled => "job_canceled",
         };
 
         Self {

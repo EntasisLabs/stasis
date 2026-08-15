@@ -223,6 +223,7 @@ mod tests {
             started_at: None,
             finished_at: None,
             last_error: None,
+            progress_json: None,
         }
     }
 

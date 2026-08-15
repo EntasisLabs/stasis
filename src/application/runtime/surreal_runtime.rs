@@ -3,26 +3,23 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use chrono::{DateTime, Duration, Utc};
-use surrealdb::engine::any::Any;
 use surrealdb::Surreal;
+use surrealdb::engine::any::Any;
 
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::runtime::job_context::JobContextServices;
+use crate::application::runtime::job_lifecycle::{
+    DEFAULT_JOB_LEASE_SECONDS, JobLifecycleEvent, STALE_LEASE_MESSAGE, StaleRecoverReport,
+    apply_retryable_failure,
+};
 use crate::application::runtime::replay_report::ReplayReport;
 use crate::application::runtime::retention::{RetentionPolicy, RetentionPruneReport};
 use crate::application::runtime::runtime_diagnostics_helpers;
+use crate::application::runtime::runtime_job_dx::{self, InFlightMap};
 use crate::application::runtime::runtime_job_identity_context::RuntimeJobIdentityContext;
-use crate::application::use_cases::investigate_runtime_lineage::{
-    InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
-};
-use crate::domain::errors::{Result, StasisError};
-use crate::domain::runtime::job::{JobState, NewJob};
-use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
-use crate::domain::runtime::outbox::{
-    OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
-};
-use crate::domain::runtime::recurring::RecurringDefinition;
+use crate::application::runtime::typed_job::{JobConsumer, TypedEnqueueBuilder, TypedJobHandler};
 use crate::application::telemetry::keys as metric_keys;
-use crate::application::telemetry::operation::{runtime_event_type_name, OperationTelemetry};
+use crate::application::telemetry::operation::{OperationTelemetry, runtime_event_type_name};
 use crate::application::telemetry::propagation::{
     job_execute_span_attributes, parent_trace_context,
 };
@@ -30,14 +27,28 @@ use crate::application::telemetry::request_context::{
     inbound_trace_context_for_propagation, trace_id_for_enqueue,
 };
 use crate::application::telemetry::spans as span_names;
+use crate::application::use_cases::investigate_runtime_lineage::{
+    InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
+};
+use crate::domain::errors::{Result, StasisError};
+use crate::domain::runtime::job::{Job, JobState, NewJob};
+use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
+use crate::domain::runtime::outbox::{
+    OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
+};
+use crate::domain::runtime::recurring::RecurringDefinition;
+use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey, ResourceLease};
+use crate::domain::runtime::typed_contract::{StasisEvent, StasisJob};
 use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
 use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
-use crate::infrastructure::telemetry::NoopRuntimeTracing;
+use crate::infrastructure::runtime::surreal_durable_wait_store::SurrealDurableWaitStore;
 use crate::infrastructure::runtime::surreal_job_attempt_store::SurrealJobAttemptStore;
 use crate::infrastructure::runtime::surreal_job_store::SurrealJobStore;
 use crate::infrastructure::runtime::surreal_outbox_store::SurrealOutboxStore;
 use crate::infrastructure::runtime::surreal_recurring_store::SurrealRecurringStore;
+use crate::infrastructure::runtime::surreal_resource_lease_store::SurrealResourceLeaseStore;
 use crate::infrastructure::runtime::system_clock::SystemClock;
+use crate::infrastructure::telemetry::NoopRuntimeTracing;
 use crate::ports::outbound::runtime::clock::Clock;
 use crate::ports::outbound::runtime::event_publisher::EventPublisher;
 use crate::ports::outbound::runtime::id_generator::IdGenerator;
@@ -45,6 +56,7 @@ use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
+use crate::ports::outbound::runtime::resource_lease_store::ResourceLeaseStore;
 use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
 use crate::ports::outbound::runtime::runtime_tracing::{OtelAttribute, RuntimeTracing};
 
@@ -54,6 +66,8 @@ pub struct SurrealRuntime {
     pub recurring_store: SurrealRecurringStore,
     pub outbox_store: SurrealOutboxStore,
     pub job_attempt_store: SurrealJobAttemptStore,
+    pub wait_store: SurrealDurableWaitStore,
+    pub lease_store: SurrealResourceLeaseStore,
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
     publish_policy: Arc<RwLock<OutboxPublishPolicy>>,
@@ -62,6 +76,7 @@ pub struct SurrealRuntime {
     metrics: Arc<dyn RuntimeMetrics>,
     tracing: Arc<dyn RuntimeTracing>,
     retention_policy: Arc<RwLock<RetentionPolicy>>,
+    in_flight: InFlightMap,
 }
 
 impl SurrealRuntime {
@@ -95,7 +110,13 @@ impl SurrealRuntime {
         id_generator: Arc<dyn IdGenerator>,
         metrics: Arc<dyn RuntimeMetrics>,
     ) -> Self {
-        Self::with_dependencies_and_telemetry(db, clock, id_generator, metrics, Arc::new(NoopRuntimeTracing))
+        Self::with_dependencies_and_telemetry(
+            db,
+            clock,
+            id_generator,
+            metrics,
+            Arc::new(NoopRuntimeTracing),
+        )
     }
 
     pub fn with_dependencies_and_telemetry(
@@ -109,7 +130,9 @@ impl SurrealRuntime {
             job_store: SurrealJobStore::new(db.clone()),
             recurring_store: SurrealRecurringStore::new(db.clone()),
             outbox_store: SurrealOutboxStore::new(db.clone()),
-            job_attempt_store: SurrealJobAttemptStore::new(db),
+            job_attempt_store: SurrealJobAttemptStore::new(db.clone()),
+            wait_store: SurrealDurableWaitStore::new(db.clone()),
+            lease_store: SurrealResourceLeaseStore::new(db),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
             publish_policy: Arc::new(RwLock::new(OutboxPublishPolicy::default())),
@@ -118,6 +141,7 @@ impl SurrealRuntime {
             metrics,
             tracing,
             retention_policy: Arc::new(RwLock::new(RetentionPolicy::default())),
+            in_flight: runtime_job_dx::new_in_flight_map(),
         }
     }
 
@@ -151,6 +175,354 @@ impl SurrealRuntime {
 
         handlers.insert(handler.job_type().to_string(), Arc::new(handler));
         Ok(())
+    }
+
+    pub fn register_consumer<T, H>(&self, handler: H) -> Result<()>
+    where
+        T: StasisJob,
+        H: JobConsumer<T> + 'static,
+    {
+        self.register_handler(TypedJobHandler::<T, H>::new(handler))
+    }
+
+    pub fn enqueue_job<T: StasisJob>(&self, payload: T) -> TypedEnqueueBuilder<T> {
+        TypedEnqueueBuilder::new(
+            payload,
+            self.clock.clone(),
+            self.id_generator.clone(),
+            Arc::new(self.job_store.clone()),
+        )
+    }
+
+    pub fn job_context_services(&self) -> JobContextServices {
+        JobContextServices {
+            job_store: Arc::new(self.job_store.clone()),
+            outbox_store: Arc::new(self.outbox_store.clone()),
+            wait_store: Arc::new(self.wait_store.clone()),
+            clock: self.clock.clone(),
+            id_generator: self.id_generator.clone(),
+        }
+    }
+
+    fn handler_for(&self, job_type: &str) -> Result<Option<Arc<dyn JobHandler>>> {
+        let handlers = self
+            .handlers
+            .read()
+            .map_err(|_| StasisError::PortFailure("handlers lock poisoned".to_string()))?;
+        Ok(handlers.get(job_type).cloned())
+    }
+
+    async fn emit_lifecycle(&self, job: &Job, event: JobLifecycleEvent) -> Result<()> {
+        let Some(handler) = self.handler_for(&job.job_type)? else {
+            return Ok(());
+        };
+        if let Err(err) = handler.on_lifecycle(job, &event).await {
+            self.metrics
+                .incr_counter(metric_keys::JOB_LIFECYCLE_HOOK_FAILURE_TOTAL, 1);
+            if let Some(mut current) = self.job_store.get(&job.id).await? {
+                let note = format!("lifecycle hook failed: {err}");
+                current.last_error = Some(match current.last_error {
+                    Some(existing) => format!("{existing}; {note}"),
+                    None => note,
+                });
+                self.job_store.save(current).await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn recover_stale_now(&self) -> Result<StaleRecoverReport> {
+        self.recover_stale(self.clock.now()).await
+    }
+
+    pub async fn recover_stale(&self, now: DateTime<Utc>) -> Result<StaleRecoverReport> {
+        let expired = self.job_store.list_expired_leases(now).await?;
+        let mut report = StaleRecoverReport::default();
+        let empty = Self::extract_diagnostics_envelope(None);
+        for mut job in expired {
+            if runtime_job_dx::is_terminal(&job.state) {
+                continue;
+            }
+            let identity = RuntimeJobIdentityContext::from(&job);
+            let attempt_number = job.attempts + 1;
+            let dead_lettered = apply_retryable_failure(&mut job, now, STALE_LEASE_MESSAGE);
+            self.job_store.save(job.clone()).await?;
+            if dead_lettered {
+                self.append_outbox(
+                    RuntimeEventType::JobDeadLettered,
+                    &identity,
+                    None,
+                    Some(STALE_LEASE_MESSAGE.to_string()),
+                    now,
+                    Some(identity.job_id.clone()),
+                    &empty,
+                )
+                .await?;
+                self.emit_lifecycle(
+                    &job,
+                    JobLifecycleEvent::DeadLettered {
+                        message: STALE_LEASE_MESSAGE.to_string(),
+                    },
+                )
+                .await?;
+                self.metrics
+                    .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
+                report.dead_lettered += 1;
+            } else {
+                self.append_outbox(
+                    RuntimeEventType::JobRetryScheduled,
+                    &identity,
+                    None,
+                    Some(STALE_LEASE_MESSAGE.to_string()),
+                    now,
+                    Some(identity.job_id.clone()),
+                    &empty,
+                )
+                .await?;
+                self.emit_lifecycle(
+                    &job,
+                    JobLifecycleEvent::RetryScheduled {
+                        attempt: job.attempts,
+                        message: STALE_LEASE_MESSAGE.to_string(),
+                    },
+                )
+                .await?;
+                self.metrics
+                    .incr_counter(metric_keys::JOB_RETRY_SCHEDULED_TOTAL, 1);
+                report.recovered += 1;
+            }
+            self.append_job_attempt(
+                &identity.job_id,
+                "stale-recover",
+                attempt_number,
+                now,
+                now,
+                JobAttemptOutcome::RetryableFailure,
+                Some(STALE_LEASE_MESSAGE.to_string()),
+                None,
+                Some(identity.job_id.clone()),
+                &empty,
+                None,
+            )
+            .await?;
+            self.metrics
+                .incr_counter(metric_keys::JOB_RETRYABLE_FAILURE_TOTAL, 1);
+            self.metrics
+                .incr_counter(metric_keys::JOB_STALE_RECOVERED_TOTAL, 1);
+        }
+        Ok(report)
+    }
+
+    pub async fn cancel(&self, job_id: &str) -> Result<bool> {
+        let Some(job) = runtime_job_dx::cancel_job(
+            &self.job_store,
+            &self.wait_store,
+            &self.in_flight,
+            self.clock.as_ref(),
+            job_id,
+        )
+        .await?
+        else {
+            return Ok(false);
+        };
+        let now = job.finished_at.unwrap_or_else(|| self.clock.now());
+        let identity = RuntimeJobIdentityContext::from(&job);
+        let empty = Self::extract_diagnostics_envelope(None);
+        self.append_outbox(
+            RuntimeEventType::JobCanceled,
+            &identity,
+            None,
+            Some("job cancelled".into()),
+            now,
+            Some(job.id.clone()),
+            &empty,
+        )
+        .await?;
+        self.emit_lifecycle(
+            &job,
+            JobLifecycleEvent::Canceled {
+                reason: "job cancelled".into(),
+            },
+        )
+        .await?;
+        self.metrics
+            .incr_counter(metric_keys::JOB_CANCELED_TOTAL, 1);
+        Ok(true)
+    }
+
+    pub async fn fail(&self, job_id: &str) -> Result<bool> {
+        let Some(mut job) = self.job_store.get(job_id).await? else {
+            return Ok(false);
+        };
+        if runtime_job_dx::is_terminal(&job.state) {
+            return Ok(false);
+        }
+        let now = self.clock.now();
+        let identity = RuntimeJobIdentityContext::from(&job);
+        job.attempts = job.attempts.saturating_add(1);
+        job.state = JobState::DeadLetter;
+        job.last_error = Some("operator fail".into());
+        job.finished_at = Some(now);
+        job.lease_owner = None;
+        job.lease_expires_at = None;
+        job.heartbeat_at = None;
+        self.job_store.save(job.clone()).await?;
+        let empty = Self::extract_diagnostics_envelope(None);
+        self.append_outbox(
+            RuntimeEventType::JobDeadLettered,
+            &identity,
+            None,
+            Some("operator fail".into()),
+            now,
+            Some(job.id.clone()),
+            &empty,
+        )
+        .await?;
+        self.emit_lifecycle(
+            &job,
+            JobLifecycleEvent::DeadLettered {
+                message: "operator fail".into(),
+            },
+        )
+        .await?;
+        self.metrics
+            .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
+        runtime_job_dx::request_cancel(&self.in_flight, job_id);
+        Ok(true)
+    }
+
+    pub async fn delete(&self, job_id: &str) -> Result<bool> {
+        let Some(job) = self.job_store.get(job_id).await? else {
+            return Ok(false);
+        };
+        if !runtime_job_dx::is_terminal(&job.state) {
+            return Err(StasisError::PortFailure(format!(
+                "refusing to delete non-terminal job {} ({:?}); cancel or fail first",
+                job.id, job.state
+            )));
+        }
+        self.job_store.delete(job_id).await
+    }
+
+    pub async fn signal<E: StasisEvent>(
+        &self,
+        correlation_key: impl Into<String>,
+        event: E,
+    ) -> Result<bool> {
+        runtime_job_dx::signal_event(
+            &self.job_store,
+            &self.wait_store,
+            self.clock.as_ref(),
+            correlation_key.into(),
+            event,
+        )
+        .await
+    }
+
+    pub async fn acquire_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        self.lease_store
+            .acquire(
+                ResourceKey(resource.into()),
+                OwnerId(owner.into()),
+                runtime_job_dx::chrono_ttl(ttl),
+                self.clock.now(),
+                false,
+            )
+            .await
+    }
+
+    pub async fn force_acquire_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        self.lease_store
+            .acquire(
+                ResourceKey(resource.into()),
+                OwnerId(owner.into()),
+                runtime_job_dx::chrono_ttl(ttl),
+                self.clock.now(),
+                true,
+            )
+            .await
+    }
+
+    pub async fn renew_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        fencing_token: FencingToken,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        self.lease_store
+            .renew(
+                &ResourceKey(resource.into()),
+                &OwnerId(owner.into()),
+                fencing_token,
+                runtime_job_dx::chrono_ttl(ttl),
+                self.clock.now(),
+            )
+            .await
+    }
+
+    pub async fn release_lease(
+        &self,
+        resource: impl Into<String>,
+        owner: impl Into<String>,
+        fencing_token: FencingToken,
+    ) -> Result<bool> {
+        self.lease_store
+            .release(
+                &ResourceKey(resource.into()),
+                &OwnerId(owner.into()),
+                fencing_token,
+                self.clock.now(),
+            )
+            .await
+    }
+
+    pub async fn transfer_lease(
+        &self,
+        resource: impl Into<String>,
+        from: impl Into<String>,
+        to: impl Into<String>,
+        fencing_token: FencingToken,
+        ttl: std::time::Duration,
+    ) -> Result<ResourceLease> {
+        self.lease_store
+            .transfer(
+                &ResourceKey(resource.into()),
+                &OwnerId(from.into()),
+                OwnerId(to.into()),
+                fencing_token,
+                runtime_job_dx::chrono_ttl(ttl),
+                self.clock.now(),
+            )
+            .await
+    }
+
+    pub async fn validate_fence(
+        &self,
+        resource: impl Into<String>,
+        fencing_token: FencingToken,
+    ) -> Result<bool> {
+        self.lease_store
+            .validate_fence(
+                &ResourceKey(resource.into()),
+                fencing_token,
+                self.clock.now(),
+            )
+            .await
+    }
+
+    pub async fn watch_lease(&self, resource: impl Into<String>) -> Result<Option<ResourceLease>> {
+        self.lease_store.get(&ResourceKey(resource.into())).await
     }
 
     pub fn register_event_publisher<P: EventPublisher + 'static>(
@@ -352,7 +724,13 @@ impl SurrealRuntime {
         self.metrics
             .incr_counter(metric_keys::WORKER_PROCESS_ONCE_TOTAL, 1);
 
-        let Some(mut job) = self.job_store.lease_due(queue, worker_id, now, 30).await? else {
+        self.recover_stale(now).await?;
+
+        let Some(mut job) = self
+            .job_store
+            .lease_due(queue, worker_id, now, DEFAULT_JOB_LEASE_SECONDS)
+            .await?
+        else {
             self.metrics.observe_duration_ms(
                 metric_keys::WORKER_PROCESS_ONCE_DURATION_MS,
                 worker_started.elapsed().as_millis() as u64,
@@ -375,22 +753,34 @@ impl SurrealRuntime {
             handlers.get(&job.job_type).cloned()
         };
 
-        let job_parent = parent_trace_context(&job.trace_id)
-            .or_else(inbound_trace_context_for_propagation);
+        let job_parent =
+            parent_trace_context(&job.trace_id).or_else(inbound_trace_context_for_propagation);
         let _job_span = self.tracing.start_span_with_trace_context(
             span_names::JOB_EXECUTE,
             &job_execute_span_attributes(&job),
             job_parent.as_ref(),
         );
 
-        let outcome = if let Some(handler) = handler {
-            handler.execute(&job).await?
-        } else {
-            JobExecutionOutcome::FatalFailure {
-                message: format!("no handler registered for job_type={}", job.job_type),
-                execution_id: None,
-                diagnostics: None,
+        let outcome = {
+            let (outcome, _guard) = runtime_job_dx::execute_handler(
+                handler,
+                &job,
+                worker_id,
+                self.job_context_services(),
+                &self.in_flight,
+            )
+            .await?;
+            if runtime_job_dx::job_was_canceled(&self.job_store, &self.in_flight, &job.id).await? {
+                self.metrics.observe_duration_ms(
+                    metric_keys::WORKER_PROCESS_ONCE_DURATION_MS,
+                    worker_started.elapsed().as_millis() as u64,
+                );
+                return Ok(Some(job_identity.job_id));
             }
+            if let Some(latest) = self.job_store.get(&job.id).await? {
+                job.progress_json = latest.progress_json;
+            }
+            outcome
         };
 
         let attempt_number = job.attempts + 1;
@@ -410,7 +800,9 @@ impl SurrealRuntime {
                 job.lease_owner = None;
                 job.lease_expires_at = None;
                 job.heartbeat_at = None;
-                self.job_store.save(job).await?;
+                self.job_store.save(job.clone()).await?;
+                self.emit_lifecycle(&job, JobLifecycleEvent::Succeeded)
+                    .await?;
 
                 self.append_outbox(
                     RuntimeEventType::JobSucceeded,
@@ -438,7 +830,8 @@ impl SurrealRuntime {
                 )
                 .await?;
 
-                self.metrics.incr_counter(metric_keys::JOB_SUCCEEDED_TOTAL, 1);
+                self.metrics
+                    .incr_counter(metric_keys::JOB_SUCCEEDED_TOTAL, 1);
                 self.metrics.observe_duration_ms(
                     metric_keys::JOB_PROCESS_DURATION_MS,
                     processing_started.elapsed().as_millis() as u64,
@@ -475,7 +868,8 @@ impl SurrealRuntime {
                     )
                     .await?;
 
-                    self.metrics.incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
+                    self.metrics
+                        .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
                 } else {
                     job.state = JobState::Enqueued;
                     let exponent = job.attempts - 1;
@@ -501,7 +895,18 @@ impl SurrealRuntime {
                         .incr_counter(metric_keys::JOB_RETRY_SCHEDULED_TOTAL, 1);
                 }
 
-                self.job_store.save(job).await?;
+                self.job_store.save(job.clone()).await?;
+                let lifecycle = if job.state == JobState::DeadLetter {
+                    JobLifecycleEvent::DeadLettered {
+                        message: message.clone(),
+                    }
+                } else {
+                    JobLifecycleEvent::RetryScheduled {
+                        attempt: job.attempts,
+                        message: message.clone(),
+                    }
+                };
+                self.emit_lifecycle(&job, lifecycle).await?;
 
                 self.append_job_attempt(
                     &job_identity.job_id,
@@ -543,7 +948,15 @@ impl SurrealRuntime {
                 job.lease_owner = None;
                 job.lease_expires_at = None;
                 job.heartbeat_at = None;
-                self.job_store.save(job).await?;
+                self.job_store.save(job.clone()).await?;
+                self.emit_lifecycle(
+                    &job,
+                    JobLifecycleEvent::Deferred {
+                        scheduled_at,
+                        message: message.clone(),
+                    },
+                )
+                .await?;
 
                 self.append_outbox(
                     RuntimeEventType::JobRetryScheduled,
@@ -598,7 +1011,14 @@ impl SurrealRuntime {
                 job.lease_owner = None;
                 job.lease_expires_at = None;
                 job.heartbeat_at = None;
-                self.job_store.save(job).await?;
+                self.job_store.save(job.clone()).await?;
+                self.emit_lifecycle(
+                    &job,
+                    JobLifecycleEvent::DeadLettered {
+                        message: message.clone(),
+                    },
+                )
+                .await?;
 
                 self.append_outbox(
                     RuntimeEventType::JobDeadLettered,
@@ -626,8 +1046,10 @@ impl SurrealRuntime {
                 )
                 .await?;
 
-                self.metrics.incr_counter(metric_keys::JOB_FATAL_FAILURE_TOTAL, 1);
-                self.metrics.incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
+                self.metrics
+                    .incr_counter(metric_keys::JOB_FATAL_FAILURE_TOTAL, 1);
+                self.metrics
+                    .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
                 self.metrics.observe_duration_ms(
                     metric_keys::JOB_PROCESS_DURATION_MS,
                     processing_started.elapsed().as_millis() as u64,
@@ -689,7 +1111,8 @@ impl SurrealRuntime {
 
         let pending = self.outbox_store.list_pending(limit).await?;
         let mut published = 0usize;
-        let operation_telemetry = OperationTelemetry::new(self.metrics.clone(), self.tracing.clone());
+        let operation_telemetry =
+            OperationTelemetry::new(self.metrics.clone(), self.tracing.clone());
 
         for mut event in pending {
             if event
@@ -701,7 +1124,8 @@ impl SurrealRuntime {
             }
 
             let event_type = runtime_event_type_name(&event.event.event_type);
-            let _publish_span = operation_telemetry.outbox_publish_span(event_type, &event.event.job_id);
+            let _publish_span =
+                operation_telemetry.outbox_publish_span(event_type, &event.event.job_id);
 
             match publisher.publish(&event).await {
                 Ok(()) => {
@@ -774,9 +1198,7 @@ impl SurrealRuntime {
                 sttp_output_node_id,
                 execution_id,
                 input_memory_query_id: diagnostics.input_memory_query_id.clone(),
-                input_memory_query_fingerprint: diagnostics
-                    .input_memory_query_fingerprint
-                    .clone(),
+                input_memory_query_fingerprint: diagnostics.input_memory_query_fingerprint.clone(),
                 output_memory_node_id: diagnostics.output_memory_node_id.clone(),
                 retrieval_path: diagnostics.retrieval_path.clone(),
                 occurred_at: now,
@@ -827,5 +1249,4 @@ impl SurrealRuntime {
     ) -> runtime_diagnostics_helpers::RuntimeDiagnosticsEnvelope {
         runtime_diagnostics_helpers::extract_runtime_diagnostics_envelope(diagnostics)
     }
-
 }

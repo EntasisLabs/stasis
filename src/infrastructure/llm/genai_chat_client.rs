@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 
 use crate::application::runtime::chat_options_resolver::apply_model_reasoning_suffix;
 use crate::domain::errors::{Result, StasisError};
-use crate::ports::outbound::ai_chat_client::{AiChatClient, StreamDelta};
+use crate::ports::outbound::ai_chat_client::{AiChatClient, StreamDelta, send_stream_delta};
 
 const DEFAULT_MODEL: &str = "gpt-4o-mini";
 const DEFAULT_PROVIDER: &str = "openai";
@@ -145,9 +145,7 @@ impl AiChatClient for GenaiChatClient {
         request: ChatRequest,
         options: Option<&ChatOptions>,
     ) -> Result<ChatResponse> {
-        let options = options
-            .cloned()
-            .unwrap_or_default();
+        let options = options.cloned().unwrap_or_default();
         let options = apply_model_reasoning_suffix(&self.model, options);
         let response = self
             .client
@@ -166,12 +164,10 @@ impl AiChatClient for GenaiChatClient {
         &self,
         request: ChatRequest,
         options: Option<&ChatOptions>,
-        chunk_tx: Option<&mpsc::UnboundedSender<StreamDelta>>,
+        chunk_tx: Option<&mpsc::Sender<StreamDelta>>,
     ) -> Result<ChatResponse> {
         let fallback_request = request.clone();
-        let mut stream_options = options
-            .cloned()
-            .unwrap_or_default();
+        let mut stream_options = options.cloned().unwrap_or_default();
         stream_options = apply_model_reasoning_suffix(&self.model, stream_options);
         let stream_options = stream_options
             .with_capture_content(true)
@@ -208,7 +204,7 @@ impl AiChatClient for GenaiChatClient {
                     if !chunk.content.is_empty() {
                         streamed_text.push_str(&chunk.content);
                         if let Some(tx) = chunk_tx {
-                            let _ = tx.send(StreamDelta::Content(chunk.content));
+                            send_stream_delta(tx, StreamDelta::Content(chunk.content)).await?;
                         }
                     }
                 }
@@ -216,7 +212,7 @@ impl AiChatClient for GenaiChatClient {
                     if !chunk.content.is_empty() {
                         reasoning_text.push_str(&chunk.content);
                         if let Some(tx) = chunk_tx {
-                            let _ = tx.send(StreamDelta::Reasoning(chunk.content));
+                            send_stream_delta(tx, StreamDelta::Reasoning(chunk.content)).await?;
                         }
                     }
                 }
@@ -224,7 +220,7 @@ impl AiChatClient for GenaiChatClient {
                     if !chunk.content.is_empty()
                         && let Some(tx) = chunk_tx
                     {
-                        let _ = tx.send(StreamDelta::ThoughtSignature(chunk.content));
+                        send_stream_delta(tx, StreamDelta::ThoughtSignature(chunk.content)).await?;
                     }
                 }
                 ChatStreamEvent::End(end) => {
@@ -248,7 +244,7 @@ impl AiChatClient for GenaiChatClient {
         if content.first_text().is_none() && content.tool_calls().is_empty() {
             let fallback = self.complete(fallback_request, options).await?;
             if let (Some(tx), Some(text)) = (chunk_tx, fallback.first_text()) {
-                let _ = tx.send(StreamDelta::Content(text.to_string()));
+                send_stream_delta(tx, StreamDelta::Content(text.to_string())).await?;
             }
             return Ok(fallback);
         }

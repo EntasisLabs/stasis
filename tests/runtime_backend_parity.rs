@@ -10,26 +10,28 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use genai::ModelIden;
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatOptions, ChatRequest, ChatResponse, MessageContent, ReasoningEffort, ToolCall, Usage};
+use genai::chat::{
+    ChatOptions, ChatRequest, ChatResponse, MessageContent, ReasoningEffort, ToolCall, Usage,
+};
 use serde_json::{Value as JsonValue, json};
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use tokio::sync::Mutex;
 
-use stasis::application::orchestration::runtime_job_payloads::{
-    AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode, AgentTurnJobPayload,
-    ConcurrentBranchExecutionMode, ConcurrentBranchJobPayload, ConcurrentPatternJobPayload, HandoffPatternJobPayload,
-    HandoffTurnJobPayload, MemoryAggregateJobPayload, MemoryRecallJobPayload,
-    MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
-    OrchestratorPatternJobPayload, OrchestratorRouteJobPayload, PromptJobPayload,
-    SequentialPatternJobPayload, SequentialStageJobPayload, ToolLoopJobPayload,
-};
 use stasis::application::orchestration::agent_session_pipeline::{
     AgentParticipant, AgentSessionCoordinator, AgentSessionPipeline, AgentSessionRunRequest,
     AgentTurnExecutionPolicy, MaxTurnsTerminationStrategy, RoundRobinSelectionStrategy,
 };
 use stasis::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline,
+};
+use stasis::application::orchestration::runtime_job_payloads::{
+    AgentSessionJobPayload, AgentSessionParticipantPayload, AgentToolCallMode, AgentTurnJobPayload,
+    ConcurrentBranchExecutionMode, ConcurrentBranchJobPayload, ConcurrentPatternJobPayload,
+    HandoffPatternJobPayload, HandoffTurnJobPayload, MemoryAggregateJobPayload,
+    MemoryRecallJobPayload, MemoryRollupJobPayload, MemorySchemaJobPayload,
+    MemoryTransformJobPayload, OrchestratorPatternJobPayload, OrchestratorRouteJobPayload,
+    PromptJobPayload, SequentialPatternJobPayload, SequentialStageJobPayload, ToolLoopJobPayload,
 };
 use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
 use stasis::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolLoopPipeline};
@@ -76,19 +78,19 @@ use stasis::ports::outbound::ai_chat_client::AiChatClient;
 use stasis::ports::outbound::ai_chat_tool_interceptor::{
     AiChatToolInterceptor, AiToolCallEnvelope,
 };
-use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
-use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use stasis::ports::outbound::memory::identity_memory_models::{
     AutonomyScope, EntityRef, GetIdentityContextRequest, GetIdentityContextResponse,
     ListEntityHistoryRequest, ListEntityHistoryResponse, RelationshipEntity, RelationshipKind,
     RelationshipStatus,
 };
 use stasis::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
+use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
+use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use stasis::ports::outbound::memory::memory_models::{
     MemoryAggregateRequest, MemoryAggregateResponse, MemoryFindRequest, MemoryFindResponse,
-    MemoryNode, MemoryRecallRequest, MemoryRecallResponse,
-    MemoryRollupRequest, MemoryRollupResponse, MemorySchemaResponse, MemoryStoreRequest,
-    MemoryStoreResponse, MemoryTransformRequest, MemoryTransformResponse,
+    MemoryNode, MemoryRecallRequest, MemoryRecallResponse, MemoryRollupRequest,
+    MemoryRollupResponse, MemorySchemaResponse, MemoryStoreRequest, MemoryStoreResponse,
+    MemoryTransformRequest, MemoryTransformResponse,
 };
 use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
 use stasis::ports::outbound::runtime::clock::Clock;
@@ -375,7 +377,11 @@ impl AiChatClient for CapturingChatClient {
             state.push(prompt);
         }
 
-        let index = self.captured_prompts.lock().map(|state| state.len() - 1).unwrap_or(0);
+        let index = self
+            .captured_prompts
+            .lock()
+            .map(|state| state.len() - 1)
+            .unwrap_or(0);
         let text = self
             .responses
             .get(index)
@@ -452,10 +458,10 @@ impl AiChatClient for BranchAwareConcurrentTestClient {
                     reasoning_content: None,
                     model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                     provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
-            stop_reason: None,
+                    stop_reason: None,
                     usage: Usage::default(),
                     captured_raw_body: None,
-            response_id: None,
+                    response_id: None,
                 });
             }
 
@@ -464,10 +470,10 @@ impl AiChatClient for BranchAwareConcurrentTestClient {
                 reasoning_content: None,
                 model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                 provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
-            stop_reason: None,
+                stop_reason: None,
                 usage: Usage::default(),
                 captured_raw_body: None,
-            response_id: None,
+                response_id: None,
             });
         }
 
@@ -586,10 +592,10 @@ impl AiChatClient for ModelToolCallScriptedClient {
                 reasoning_content: None,
                 model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
                 provider_model_iden: ModelIden::new(AdapterKind::OpenAI, "gpt-4o-mini"),
-            stop_reason: None,
+                stop_reason: None,
                 usage: Usage::default(),
                 captured_raw_body: None,
-            response_id: None,
+                response_id: None,
             });
         }
 
@@ -747,18 +753,16 @@ impl IdentityMemoryStore for MockIdentityMemoryStore {
     async fn propose_entity_update(
         &self,
         _request: &stasis::ports::outbound::memory::identity_memory_models::ProposeEntityUpdateRequest,
-    ) -> Result<
-        stasis::ports::outbound::memory::identity_memory_models::ProposeEntityUpdateResponse,
-    > {
+    ) -> Result<stasis::ports::outbound::memory::identity_memory_models::ProposeEntityUpdateResponse>
+    {
         Ok(Default::default())
     }
 
     async fn commit_entity_update(
         &self,
         _request: &stasis::ports::outbound::memory::identity_memory_models::CommitEntityUpdateRequest,
-    ) -> Result<
-        stasis::ports::outbound::memory::identity_memory_models::CommitEntityUpdateResponse,
-    > {
+    ) -> Result<stasis::ports::outbound::memory::identity_memory_models::CommitEntityUpdateResponse>
+    {
         Ok(Default::default())
     }
 
@@ -806,7 +810,8 @@ fn replacement_trace_identity_context() -> GetIdentityContextResponse {
             interruption_policy: Default::default(),
             escalation_policy: Default::default(),
             policy_tags: vec![],
-            provenance: stasis::ports::outbound::memory::identity_memory_models::UpdateSource::UserDirect,
+            provenance:
+                stasis::ports::outbound::memory::identity_memory_models::UpdateSource::UserDirect,
             parent_relationship_id: None,
             governing_relationship_ids: vec![],
             derived_from_relationship_id: Some("rel-old".to_string()),
@@ -1311,10 +1316,7 @@ async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_di
     let memory_reader = Arc::new(MockMemoryContextReader {
         response: mock_recall_response(
             &["sync-a", "sync-b"],
-            &[
-                "◈⟨ prior rust context A ⟩",
-                "◈⟨ prior rust context B ⟩",
-            ],
+            &["◈⟨ prior rust context A ⟩", "◈⟨ prior rust context B ⟩"],
         ),
     });
     let memory_writer = Arc::new(MockMemoryContextWriter {
@@ -1538,9 +1540,9 @@ async fn in_memory_prompt_job_handler_identity_trace_includes_replacement_contin
 #[tokio::test]
 async fn surreal_prompt_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_prompt_memory_parity")
         .await
@@ -1930,9 +1932,9 @@ async fn in_memory_tool_loop_identity_trace_includes_replacement_continuity_rece
 #[tokio::test]
 async fn surreal_tool_loop_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_tool_loop_memory_parity")
         .await
@@ -2328,9 +2330,9 @@ async fn in_memory_agent_turn_identity_trace_includes_replacement_continuity_rec
 #[tokio::test]
 async fn surreal_agent_turn_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_agent_turn_memory_parity")
         .await
@@ -2911,9 +2913,9 @@ async fn in_memory_agent_session_job_handler_executes_session() {
 #[tokio::test]
 async fn surreal_agent_session_job_handler_executes_session() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_agent_session_parity")
         .await
@@ -3261,9 +3263,9 @@ async fn in_memory_agent_session_identity_trace_includes_replacement_continuity_
 #[tokio::test]
 async fn surreal_agent_session_job_handler_with_memory_persists_memory_node_id_and_diagnostics() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_agent_session_memory_parity")
         .await
@@ -3632,9 +3634,9 @@ async fn in_memory_memory_workflow_handlers_execute_and_emit_diagnostics() {
 #[tokio::test]
 async fn surreal_memory_recall_job_handler_executes_and_emits_diagnostics() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_memory_recall_parity")
         .await
@@ -3976,8 +3978,8 @@ async fn surreal_kv_runtime_builder_with_locus_memory_registers_memory_schema_ha
 }
 
 #[tokio::test]
-async fn surreal_ws_runtime_builder_with_locus_memory_registers_memory_schema_handler_if_configured(
-) {
+async fn surreal_ws_runtime_builder_with_locus_memory_registers_memory_schema_handler_if_configured()
+ {
     let Some(endpoint) = env::var("STASIS_TEST_SURREAL_WS_ENDPOINT").ok() else {
         return;
     };
@@ -4981,10 +4983,7 @@ async fn in_memory_concurrent_branch_reasoning_effort() {
         .await
         .expect("concurrent processing should succeed");
 
-    let captured = captured_options
-        .lock()
-        .expect("options lock")
-        .clone();
+    let captured = captured_options.lock().expect("options lock").clone();
     assert_eq!(captured.len(), 2);
 
     let mut high = 0usize;
@@ -5821,9 +5820,9 @@ async fn in_memory_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
 #[tokio::test]
 async fn surreal_tool_loop_job_handler_rejects_tool_input_schema_mismatch() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_tool_loop_schema_violation")
         .await
@@ -6004,9 +6003,9 @@ async fn in_memory_runtime_emits_runtime_metrics_for_job_and_outbox_flow() {
 #[tokio::test]
 async fn surreal_runtime_matches_core_flow_and_recurring_materialization() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_backend_parity")
         .await
@@ -6151,9 +6150,9 @@ async fn in_memory_thread_store_supports_create_append_fork_and_lineage() {
 #[tokio::test]
 async fn surreal_thread_store_supports_create_append_fork_and_lineage() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_thread_store_parity")
         .await
@@ -6240,9 +6239,9 @@ async fn in_memory_thread_store_rejects_event_append_for_unknown_thread() {
 #[tokio::test]
 async fn surreal_runtime_replays_dead_letter_and_retries_outbox_publish() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_retry_replay")
         .await
@@ -6399,9 +6398,9 @@ async fn tokio_channel_publisher_adapter_receives_outbox_events() {
 #[tokio::test]
 async fn surreal_job_leasing_allows_only_one_winner_under_contention() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_lease_contention")
         .await
@@ -6432,9 +6431,9 @@ async fn surreal_job_leasing_allows_only_one_winner_under_contention() {
 #[tokio::test]
 async fn surreal_job_lease_expiry_allows_recovery_by_another_worker() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_lease_recovery")
         .await
@@ -6462,14 +6461,24 @@ async fn surreal_job_lease_expiry_allows_recovery_by_another_worker() {
         .expect("second lease call should succeed");
     assert!(during_lease.is_none());
 
+    let later = now + Duration::seconds(2);
+    let report = runtime
+        .recover_stale(later)
+        .await
+        .expect("stale recovery should succeed");
+    assert_eq!(report.recovered, 1);
+    assert_eq!(report.dead_lettered, 0);
+
+    let after_backoff = later + Duration::seconds(2);
     let recovered = runtime
         .job_store
-        .lease_due("default", "worker-2", now + Duration::seconds(2), 30)
+        .lease_due("default", "worker-2", after_backoff, 30)
         .await
         .expect("recovery lease should succeed")
         .expect("recovery lease should acquire job");
 
     assert_eq!(recovered.lease_owner.as_deref(), Some("worker-2"));
+    assert_eq!(recovered.attempts, 1);
 }
 
 #[tokio::test]
@@ -6747,9 +6756,9 @@ async fn in_memory_grapheme_healthcheck_workflow_executes_successfully() {
 #[tokio::test]
 async fn surreal_grapheme_healthcheck_workflow_executes_successfully() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_grapheme_healthcheck")
         .await
@@ -6857,9 +6866,9 @@ async fn in_memory_grapheme_echo_workflow_executes_successfully() {
 #[tokio::test]
 async fn surreal_grapheme_echo_workflow_executes_successfully() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_grapheme_echo")
         .await
@@ -7024,9 +7033,9 @@ async fn in_memory_grapheme_textops_workflow_executes_successfully() {
 #[tokio::test]
 async fn surreal_grapheme_textops_workflow_executes_successfully() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_grapheme_textops")
         .await
@@ -7368,9 +7377,9 @@ async fn in_memory_runtime_retention_prunes_terminal_records() {
 #[tokio::test]
 async fn surreal_runtime_retention_prunes_terminal_records() {
     let db = Surreal::<Any>::init();
-        db.connect("mem://")
-            .await
-            .expect("surreal mem should initialize");
+    db.connect("mem://")
+        .await
+        .expect("surreal mem should initialize");
     db.use_ns("test")
         .use_db("runtime_retention_prune")
         .await
@@ -7611,7 +7620,7 @@ async fn lineage_investigator_queries_guardrail_failures() {
         .register_handler(GraphemeJobHandler::new(workflow_engine))
         .expect("grapheme handler should register");
 
-        let source = r#"import sql from "acme/sql"
+    let source = r#"import sql from "acme/sql"
 
 query Run {
   sql.query(connection: "local", sql: "select 1") {

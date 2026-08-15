@@ -4,7 +4,9 @@ use async_trait::async_trait;
 
 use crate::application::orchestration::allowlisted_mcp_tool_exporter::AllowlistedLocalMcpExporter;
 use crate::application::orchestration::mcp_bridged_tool_registry::McpBridgedToolRegistry;
-use crate::application::orchestration::tool_registry::{InMemoryToolRegistry, StasisTool, ToolRegistry};
+use crate::application::orchestration::tool_registry::{
+    InMemoryToolRegistry, StasisTool, ToolRegistry,
+};
 use crate::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
 use crate::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
 use crate::application::runtime::agent_turn_waitable_job_handler::AgentTurnWaitableJobHandler;
@@ -48,9 +50,9 @@ use crate::ports::outbound::agent::turn_wait_store::TurnWaitStore;
 use crate::ports::outbound::ai_chat_client::AiChatClient;
 use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
 use crate::ports::outbound::ai_chat_tool_interceptor::AiChatToolInterceptor;
+use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
-use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use crate::ports::outbound::memory::memory_operations::MemoryOperations;
 use crate::ports::outbound::runtime::cluster_node_store::ClusterNodeStore;
 use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
@@ -75,6 +77,22 @@ impl JobHandler for DelegatingJobHandler {
 
     async fn execute(&self, job: &crate::domain::runtime::job::Job) -> Result<JobExecutionOutcome> {
         self.inner.execute(job).await
+    }
+
+    async fn execute_with_context(
+        &self,
+        job: &crate::domain::runtime::job::Job,
+        ctx: crate::application::runtime::job_context::JobContext,
+    ) -> Result<JobExecutionOutcome> {
+        self.inner.execute_with_context(job, ctx).await
+    }
+
+    async fn on_lifecycle(
+        &self,
+        job: &crate::domain::runtime::job::Job,
+        event: &crate::application::runtime::job_lifecycle::JobLifecycleEvent,
+    ) -> Result<()> {
+        self.inner.on_lifecycle(job, event).await
     }
 }
 
@@ -267,9 +285,17 @@ impl StasisRuntimeBuilder {
         identity_memory_store,
         dyn IdentityMemoryStore
     );
-    define_arc_option_setter!(with_memory_operations, memory_operations, dyn MemoryOperations);
+    define_arc_option_setter!(
+        with_memory_operations,
+        memory_operations,
+        dyn MemoryOperations
+    );
     define_arc_option_setter!(with_thread_store, thread_store, dyn ThreadStore);
-    define_arc_option_setter!(with_cluster_node_store, cluster_node_store, dyn ClusterNodeStore);
+    define_arc_option_setter!(
+        with_cluster_node_store,
+        cluster_node_store,
+        dyn ClusterNodeStore
+    );
     define_arc_option_setter!(
         with_delivery_endpoint_store,
         delivery_endpoint_store,
@@ -297,7 +323,10 @@ impl StasisRuntimeBuilder {
         self
     }
 
-    define_enable_flag_setter!(with_endpoint_routing_delivery, enable_endpoint_routing_delivery);
+    define_enable_flag_setter!(
+        with_endpoint_routing_delivery,
+        enable_endpoint_routing_delivery
+    );
 
     pub fn with_endpoint_routing_policy<P: EndpointRoutingPolicy + 'static>(
         mut self,
@@ -374,7 +403,10 @@ impl StasisRuntimeBuilder {
         without_orchestration_pattern_handlers,
         include_orchestration_pattern_handlers
     );
-    define_disable_flag_setter!(without_cluster_control_handlers, include_cluster_control_handlers);
+    define_disable_flag_setter!(
+        without_cluster_control_handlers,
+        include_cluster_control_handlers
+    );
 
     pub async fn build(self) -> Result<RuntimeComposition> {
         Ok(self.build_with_handles().await?.0)
@@ -447,14 +479,11 @@ impl StasisRuntimeBuilder {
             configured_endpoint_store.clone(),
         );
 
-        let operation_telemetry = self
-            .runtime_telemetry_metrics
-            .as_ref()
-            .and_then(|metrics| {
-                self.runtime_telemetry_tracing.as_ref().map(|tracing| {
-                    OperationTelemetry::new(metrics.clone(), tracing.clone())
-                })
-            });
+        let operation_telemetry = self.runtime_telemetry_metrics.as_ref().and_then(|metrics| {
+            self.runtime_telemetry_tracing
+                .as_ref()
+                .map(|tracing| OperationTelemetry::new(metrics.clone(), tracing.clone()))
+        });
 
         match &runtime {
             RuntimeComposition::InMemory(rt) => {
@@ -538,10 +567,8 @@ impl StasisRuntimeBuilder {
                         agent_event_ingress.clone(),
                     );
                     if let Some(transport) = agent_transport.clone() {
-                        waitable = waitable.with_endpoint_publish(
-                            resolved_endpoint_store.clone(),
-                            transport,
-                        );
+                        waitable = waitable
+                            .with_endpoint_publish(resolved_endpoint_store.clone(), transport);
                     }
                     rt.register_handler(waitable)?;
                 }
@@ -565,14 +592,16 @@ impl StasisRuntimeBuilder {
                 }
 
                 if self.include_orchestration_pattern_handlers {
-                    rt.register_handler(ConcurrentPatternJobHandler::new_with_thread_store_and_memory(
-                        chat_client.clone(),
-                        tool_registry.clone(),
-                        Some(thread_store.clone()),
-                        memory_context_reader.clone(),
-                        memory_context_writer.clone(),
-                        identity_memory_store.clone(),
-                    ))?;
+                    rt.register_handler(
+                        ConcurrentPatternJobHandler::new_with_thread_store_and_memory(
+                            chat_client.clone(),
+                            tool_registry.clone(),
+                            Some(thread_store.clone()),
+                            memory_context_reader.clone(),
+                            memory_context_writer.clone(),
+                            identity_memory_store.clone(),
+                        ),
+                    )?;
                     rt.register_handler(HandoffPatternJobHandler::new_with_thread_store(
                         chat_client.clone(),
                         Some(thread_store.clone()),
@@ -679,10 +708,8 @@ impl StasisRuntimeBuilder {
                         agent_event_ingress.clone(),
                     );
                     if let Some(transport) = agent_transport.clone() {
-                        waitable = waitable.with_endpoint_publish(
-                            resolved_endpoint_store.clone(),
-                            transport,
-                        );
+                        waitable = waitable
+                            .with_endpoint_publish(resolved_endpoint_store.clone(), transport);
                     }
                     rt.register_handler(waitable)?;
                 }
@@ -706,14 +733,16 @@ impl StasisRuntimeBuilder {
                 }
 
                 if self.include_orchestration_pattern_handlers {
-                    rt.register_handler(ConcurrentPatternJobHandler::new_with_thread_store_and_memory(
-                        chat_client.clone(),
-                        tool_registry.clone(),
-                        Some(thread_store.clone()),
-                        memory_context_reader.clone(),
-                        memory_context_writer.clone(),
-                        identity_memory_store.clone(),
-                    ))?;
+                    rt.register_handler(
+                        ConcurrentPatternJobHandler::new_with_thread_store_and_memory(
+                            chat_client.clone(),
+                            tool_registry.clone(),
+                            Some(thread_store.clone()),
+                            memory_context_reader.clone(),
+                            memory_context_writer.clone(),
+                            identity_memory_store.clone(),
+                        ),
+                    )?;
                     rt.register_handler(HandoffPatternJobHandler::new_with_thread_store(
                         chat_client.clone(),
                         Some(thread_store.clone()),

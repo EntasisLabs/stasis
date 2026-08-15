@@ -28,9 +28,19 @@ pub struct TickReport {
     pub materialized: usize,
     pub processed: usize,
     pub published: usize,
+    pub stale_recovered: usize,
+    pub stale_dead_lettered: usize,
 }
 
-pub async fn tick_once(runtime: &RuntimeSdk, options: &TickOptions) -> Result<TickReport, StasisdError> {
+pub async fn tick_once(
+    runtime: &RuntimeSdk,
+    options: &TickOptions,
+) -> Result<TickReport, StasisdError> {
+    let stale = runtime
+        .recover_stale()
+        .await
+        .map_err(|err| StasisdError::Runtime(err.to_string()))?;
+
     let materialized = runtime
         .materialize_recurring_now(&options.scheduler_id)
         .await
@@ -59,6 +69,8 @@ pub async fn tick_once(runtime: &RuntimeSdk, options: &TickOptions) -> Result<Ti
         materialized,
         processed,
         published,
+        stale_recovered: stale.recovered,
+        stale_dead_lettered: stale.dead_lettered,
     })
 }
 
@@ -67,6 +79,7 @@ mod tests {
     use super::*;
     use crate::model::{DesiredState, OnRemovePolicy, StasisdSchedule};
     use crate::reconcile::reconcile;
+    use async_trait::async_trait;
     use chrono::{Duration, Utc};
     use serde_json::json;
     use stasis::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
@@ -74,7 +87,6 @@ mod tests {
     use stasis::domain::runtime::job::Job;
     use stasis::prelude::RuntimeBackend;
     use stasis::sdk::runtime_sdk::RuntimeSdk;
-    use async_trait::async_trait;
 
     struct FakePromptHandler;
 

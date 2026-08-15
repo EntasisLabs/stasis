@@ -20,24 +20,36 @@ pub mod macro_support {
 }
 
 /// Minimal runtime imports for consumers integrating job handlers and runtime wiring.
+///
+/// `JobConsumer::on_lifecycle` receives [`JobLifecycleEvent`] after each persisted
+/// transition so app-level pending/finishing status can roll back on defer, retry,
+/// cancel, or dead-letter.
 pub mod runtime_prelude {
     pub use crate::application::runtime::in_memory_runtime::{
         InMemoryRuntime, JobExecutionOutcome, JobHandler,
     };
+    pub use crate::application::runtime::job_context::{JobConsumeError, JobContext, JobResult};
+    pub use crate::application::runtime::job_lifecycle::{JobLifecycleEvent, StaleRecoverReport};
     pub use crate::application::runtime::runtime_factory::{
         RuntimeBackend, RuntimeComposition, RuntimeFactory, SurrealAuth,
     };
     pub use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
+    pub use crate::application::runtime::typed_job::{
+        JobConsumer, TypedEnqueueBuilder, TypedJobHandler,
+    };
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, JobState, NewJob};
     pub use crate::domain::runtime::recurring::RecurringDefinition;
+    pub use crate::domain::runtime::resource_lease::{
+        FencingToken, OwnerId, ResourceKey, ResourceLease,
+    };
+    pub use crate::domain::runtime::typed_contract::{RetryPolicy, StasisEvent, StasisJob};
 }
 
 /// Extended runtime imports including orchestration payloads, endpoint routing, and store adapters.
 pub mod runtime_prelude_ext {
     pub use crate::application::dto::{
-        HeartbeatClusterNodeRequest, RegisterClusterNodeRequest,
-        RegisterDeliveryEndpointRequest,
+        HeartbeatClusterNodeRequest, RegisterClusterNodeRequest, RegisterDeliveryEndpointRequest,
     };
     pub use crate::application::orchestration::runtime_job_payloads::{
         AgentSessionJobPayload, AgentTurnJobPayload, ConcurrentPatternJobPayload,
@@ -96,9 +108,11 @@ pub mod memory_prelude_ext {
 /// Minimal SDK imports for common external consumers.
 pub mod sdk_prelude {
     pub use crate::application::dto::{InvokeAgentRequest, RegisterAgentRequest};
+    pub use crate::application::runtime::runtime_factory::{
+        RuntimeBackend, RuntimeFactory, SurrealAuth,
+    };
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, NewJob};
-    pub use crate::application::runtime::runtime_factory::{RuntimeBackend, RuntimeFactory, SurrealAuth};
     pub use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
     pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
     pub use crate::sdk::runtime_sdk::{RuntimeSdk, StasisRuntime};
@@ -126,8 +140,8 @@ pub mod prelude {
 /// Environment and secrets configuration helpers.
 pub mod config_prelude {
     pub use crate::application::config::env::{
-        bootstrap, bootstrap_with, first_non_empty, load_dotenv_from, non_empty, required, truthy,
-        with_default, EnvBootstrapOptions, EnvBootstrapReport, EnvError,
+        EnvBootstrapOptions, EnvBootstrapReport, EnvError, bootstrap, bootstrap_with,
+        first_non_empty, load_dotenv_from, non_empty, required, truthy, with_default,
     };
     pub use crate::application::config::secrets::{
         ChainedSecretsSource, FileSecretsSource, OsEnvSource, SecretsSource, default_secrets_dir,
@@ -139,8 +153,8 @@ pub mod telemetry_prelude {
     pub use crate::application::telemetry::keys;
     pub use crate::application::telemetry::operation::OperationTelemetry;
     pub use crate::application::telemetry::propagation::{
-        generate_w3c_trace_id, is_w3c_trace_id, job_execute_span_attributes, parse_traceparent,
-        parent_trace_context, trace_propagation_mode, TracePropagationMode,
+        TracePropagationMode, generate_w3c_trace_id, is_w3c_trace_id, job_execute_span_attributes,
+        parent_trace_context, parse_traceparent, trace_propagation_mode,
     };
     pub use crate::application::telemetry::request_context::{
         inbound_trace_context, inbound_trace_context_for_propagation, scope_inbound_trace,
@@ -151,7 +165,7 @@ pub mod telemetry_prelude {
     pub use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
     pub use crate::ports::outbound::runtime::runtime_telemetry::RuntimeTelemetry;
     pub use crate::ports::outbound::runtime::runtime_tracing::{
-        in_span, OtelAttribute, OtelAttributeValue, RuntimeTracing, SpanGuard, TraceContext,
+        OtelAttribute, OtelAttributeValue, RuntimeTracing, SpanGuard, TraceContext, in_span,
     };
 
     #[cfg(feature = "otel")]

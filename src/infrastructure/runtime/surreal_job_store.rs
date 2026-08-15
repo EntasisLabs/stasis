@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::{engine::any::Any, Surreal};
+use surrealdb::{Surreal, engine::any::Any};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
@@ -86,6 +86,8 @@ struct JobRecord {
     started_at: Option<DateTime<Utc>>,
     finished_at: Option<DateTime<Utc>>,
     last_error: Option<String>,
+    #[serde(default)]
+    progress_json: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
@@ -128,6 +130,7 @@ impl From<Job> for JobRecord {
             started_at: job.started_at,
             finished_at: job.finished_at,
             last_error: job.last_error,
+            progress_json: job.progress_json,
         }
     }
 }
@@ -174,6 +177,7 @@ impl TryFrom<JobRecord> for Job {
             started_at: record.started_at,
             finished_at: record.finished_at,
             last_error: record.last_error,
+            progress_json: record.progress_json,
         })
     }
 }
@@ -238,7 +242,7 @@ impl JobStore for SurrealJobStore {
                 .query(
                     "SELECT job_id, scheduled_at, priority FROM type::table($table) \
                      WHERE queue = $queue \
-                                             AND (state = 'enqueued' OR state = 'leased') \
+                       AND state = 'enqueued' \
                        AND scheduled_at <= $now \
                        AND (lease_expires_at = NONE OR lease_expires_at <= $now) \
                      ORDER BY scheduled_at ASC, priority ASC \
@@ -264,7 +268,7 @@ impl JobStore for SurrealJobStore {
                     "UPDATE type::record($table, $id) \
                      SET state = 'leased', lease_owner = $worker_id, lease_expires_at = $lease_expires_at, heartbeat_at = $now \
                      WHERE queue = $queue \
-                                             AND (state = 'enqueued' OR state = 'leased') \
+                       AND state = 'enqueued' \
                        AND scheduled_at <= $now \
                        AND (lease_expires_at = NONE OR lease_expires_at <= $now) \
                      RETURN AFTER"
@@ -290,13 +294,20 @@ impl JobStore for SurrealJobStore {
         Ok(None)
     }
 
-    async fn heartbeat(&self, job_id: &str, worker_id: &str, now: DateTime<Utc>) -> Result<()> {
+    async fn heartbeat(
+        &self,
+        job_id: &str,
+        worker_id: &str,
+        now: DateTime<Utc>,
+        lease_seconds: i64,
+    ) -> Result<()> {
         let Some(mut job) = self.get(job_id).await? else {
             return Ok(());
         };
 
         if job.lease_owner.as_deref() == Some(worker_id) {
             job.heartbeat_at = Some(now);
+            job.lease_expires_at = Some(now + chrono::Duration::seconds(lease_seconds.max(0)));
             self.save(job).await?;
         }
 
@@ -324,6 +335,60 @@ impl JobStore for SurrealJobStore {
         }
 
         Ok(jobs)
+    }
+
+    async fn list_expired_leases(&self, now: DateTime<Utc>) -> Result<Vec<Job>> {
+        let mut response = match self
+            .db
+            .query("SELECT * FROM type::table($table)")
+            .bind(("table", self.table.clone()))
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                let message = err.to_string();
+                if message.contains("does not exist") && message.contains(&self.table) {
+                    return Ok(Vec::new());
+                }
+                return Err(Self::port_err("list expired leases", err));
+            }
+        };
+        let rows: Vec<JobRecord> = match response.take(0) {
+            Ok(rows) => rows,
+            Err(err) => {
+                let message = err.to_string();
+                if message.contains("does not exist") && message.contains(&self.table) {
+                    return Ok(Vec::new());
+                }
+                return Err(Self::port_err("decode expired leases", err));
+            }
+        };
+        let mut jobs = Vec::new();
+        for row in rows {
+            let job = Job::try_from(row)?;
+            if matches!(job.state, JobState::Leased | JobState::Running)
+                && job
+                    .lease_expires_at
+                    .map(|expiry| expiry <= now)
+                    .unwrap_or(false)
+            {
+                jobs.push(job);
+            }
+        }
+        Ok(jobs)
+    }
+
+    async fn delete(&self, id: &str) -> Result<bool> {
+        let Some(_) = self.get(id).await? else {
+            return Ok(false);
+        };
+        self.db
+            .query("DELETE type::record($table, $id)")
+            .bind(("table", self.table.clone()))
+            .bind(("id", id.to_string()))
+            .await
+            .map_err(|e| Self::port_err("delete job", e))?;
+        Ok(true)
     }
 
     async fn prune_terminal_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
