@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-08-22
+
+### Changed
+
+- **Grapheme 0.7.0** — `grapheme-sdk`, `grapheme-compiler`, and `grapheme-lsp` bumped to **0.7.0**. Brings executable parameters / tagged `using` scopes (RFC-0004) and Stage B slim Wasm AOT / host-fulfillment paths (RFC-0005). Default Stasis build stays lean (`default-features = false`); use `grapheme-full` for extended stdlib modules (`data`, `pdf`, `image`, `plot`, `media`).
+
+### Notes
+
+- Grapheme 0.7 requires **Rust 1.92+** (edition 2024).
+- Stage B Wasix sandbox remains opt-in upstream (`wasix-runtime` / `prefer_stage_b_wasix`); Stasis continues to execute via the in-process SDK path by default.
+
 ## [0.9.0] - 2026-08-15
 
 ### Added

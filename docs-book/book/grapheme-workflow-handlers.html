@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bc59967b.js";
+            window.path_to_searchindex_js = "searchindex-a862d831.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-5bb4bf5a.js"></script>
@@ -180,7 +180,7 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-15</li>
+<li>Last Verified: 2026-08-22</li>
 <li>Verified Against:
 <ul>
 <li>src/application/runtime/grapheme_job_handler.rs</li>
@@ -190,6 +190,7 @@
 <li>src/infrastructure/runtime/grapheme_sdk_workflow_engine.rs</li>
 <li>src/ports/outbound/runtime/workflow_engine.rs</li>
 <li>src/application/runtime/stasis_runtime_builder.rs</li>
+<li>Stasis 0.9.1 / Grapheme 0.7.0</li>
 </ul>
 </li>
 </ul>
@@ -288,9 +289,10 @@ import http from "grapheme/http"   // ✓ allowed by default
 import data from "grapheme/data"  // requires Stasis `grapheme-full` feature at build time
 </code></pre>
 <h3 id="cargo-feature-grapheme-full"><a class="header" href="#cargo-feature-grapheme-full">Cargo feature: <code>grapheme-full</code></a></h3>
-<p>By default, Stasis links Grapheme <strong>0.6.1</strong> with the standard stdlib modules (<code>core</code>, <code>http</code>, <code>web</code>, <code>json</code>, <code>sql</code>, …). Enable the optional <strong><code>grapheme-full</code></strong> feature on <code>stasis-rs</code> to compile in extended modules (<code>data</code>, <code>pdf</code>, <code>image</code>, <code>plot</code>, <code>media</code>):</p>
-<pre><code class="language-toml">stasis-rs = { version = "0.9.0", features = ["grapheme-full"] }
+<p>By default, Stasis links Grapheme <strong>0.7.0</strong> with the standard host stdlib modules (<code>core</code>, <code>http</code>, <code>web</code>, <code>json</code>, <code>sql</code>, …). Enable the optional <strong><code>grapheme-full</code></strong> feature on <code>stasis-rs</code> to compile in extended modules (<code>data</code>, <code>pdf</code>, <code>image</code>, <code>plot</code>, <code>media</code>):</p>
+<pre><code class="language-toml">stasis-rs = { version = "0.9.1", features = ["grapheme-full"] }
 </code></pre>
+<p>Grapheme 0.7 also ships Stage B slim Wasm AOT containers and a wasm-safe stdlib profile upstream. Stasis job handlers continue to run the in-process host SDK path; Stage B / Wasix execution is available to embedders that call the Grapheme SDK AOT APIs directly.</p>
 <h3 id="execution-model"><a class="header" href="#execution-model">Execution model</a></h3>
 <p>Scripts run inside <code>tokio::task::spawn_blocking</code> to prevent blocking the async runtime. The <code>tokio::time::timeout</code> wrapper enforces <code>execution_timeout</code> at the async boundary — the underlying synchronous engine call is cancelled if the deadline is exceeded.</p>
 <hr>

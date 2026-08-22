@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect, SRE
 - Stability: Stable
-- Last Verified: 2026-08-15
+- Last Verified: 2026-08-22
 - Verified Against:
   - src/application/runtime/grapheme_job_handler.rs
   - src/application/runtime/grapheme_echo_job_handler.rs
@@ -14,6 +14,7 @@
   - src/infrastructure/runtime/grapheme_sdk_workflow_engine.rs
   - src/ports/outbound/runtime/workflow_engine.rs
   - src/application/runtime/stasis_runtime_builder.rs
+  - Stasis 0.9.1 / Grapheme 0.7.0
 
 ## Purpose
 
@@ -126,11 +127,13 @@ import data from "grapheme/data"  // requires Stasis `grapheme-full` feature at 
 
 ### Cargo feature: `grapheme-full`
 
-By default, Stasis links Grapheme **0.6.1** with the standard stdlib modules (`core`, `http`, `web`, `json`, `sql`, …). Enable the optional **`grapheme-full`** feature on `stasis-rs` to compile in extended modules (`data`, `pdf`, `image`, `plot`, `media`):
+By default, Stasis links Grapheme **0.7.0** with the standard host stdlib modules (`core`, `http`, `web`, `json`, `sql`, …). Enable the optional **`grapheme-full`** feature on `stasis-rs` to compile in extended modules (`data`, `pdf`, `image`, `plot`, `media`):
 
 ```toml
-stasis-rs = { version = "0.9.0", features = ["grapheme-full"] }
+stasis-rs = { version = "0.9.1", features = ["grapheme-full"] }
 ```
+
+Grapheme 0.7 also ships Stage B slim Wasm AOT containers and a wasm-safe stdlib profile upstream. Stasis job handlers continue to run the in-process host SDK path; Stage B / Wasix execution is available to embedders that call the Grapheme SDK AOT APIs directly.
 
 ### Execution model
 
