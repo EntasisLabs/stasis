@@ -297,7 +297,7 @@ pub trait WorkflowEngine: Send + Sync {
 | `run_id` | `String` | Execution run identifier |
 | `execution` | `Value` | Runtime execution summary |
 | `final_state` | `Value` | Final workflow state |
-| `lint_warnings` | `Value` | Non-fatal compiler warnings (Grapheme 0.6.x) |
+| `lint_warnings` | `Value` | Non-fatal compiler warnings (Grapheme 0.7.x) |
 
 **Built-in implementations:**
 
