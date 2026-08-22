@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-08-22
+
+### Changed
+
+- **Grapheme 0.7.1** — `grapheme-sdk`, `grapheme-compiler`, and `grapheme-lsp` bumped to **0.7.1**. Default Stasis build now opts into Grapheme's lean host profile (`default-features = false`, `features = ["host"]`) and drops the unused `grapheme-lsp` dependency from the default graph (Stage B / AOT container no longer pulled transitively).
+
+### Notes
+
+- Enable `dashboard-lsp` when you need the Grapheme language server wired into the dashboard build.
+- `grapheme-full` still opts into extended stdlib modules (`data`, `pdf`, `image`, `plot`, `media`) and Stage B.
+
 ## [0.9.1] - 2026-08-22
 
 ### Changed
