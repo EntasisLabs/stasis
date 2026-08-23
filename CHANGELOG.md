@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-08-23
+
+### Changed
+
+- **Locus 0.5.0 / locus-sdk 0.3.0** — `locus-core-rs` bumped to **0.5.0** and `locus-sdk` to **0.3.0**. Pulls WASM compilation support (in-memory stores, parsing, and services on `wasm32-unknown-unknown`), the `surreal-runtime` feature gate for native Surreal filesystem hosts, and SDK feature splits (`http-providers`, `testing`) so browser builds can opt out of `reqwest`/`genai`.
+
+### Notes
+
+- Native Stasis defaults keep `locus-sdk` default features (`genai-provider` + `http-providers`).
+- Locus's separate `locus-wasm` / `locus-surreal-adapter` crates enable IndexedDB (`kv-indxdb`) and remote WS Surreal clients in browser hosts; Stasis still runs the native in-memory Locus bootstrap via `.with_locus_memory()`.
+
 ## [0.9.2] - 2026-08-22
 
 ### Changed
