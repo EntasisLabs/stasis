@@ -27,6 +27,8 @@
 - Agent platform runtime contracts plan (comms, translation, MCP bridge): [design/agent-platform-runtime-contracts-plan.md](design/agent-platform-runtime-contracts-plan.md)
 - `stasisd` declarative engine plan (YAML/TOML desired state): [design/stasisd-declarative-engine-plan.md](design/stasisd-declarative-engine-plan.md)
 - Agent platform + `stasisd` phased epic (execution board): [design/agent-platform-and-stasisd-epic.md](design/agent-platform-and-stasisd-epic.md)
+- WASM target profile epic (kernel on `wasm32-unknown-unknown`): [design/wasm-target-phase-plan.md](design/wasm-target-phase-plan.md)
+- ADR-0009 WASM target profile (Proposed): [adr/ADR-0009-wasm-target-profile.md](adr/ADR-0009-wasm-target-profile.md)
 - Hospice interoperability safety test analysis and gameplan: [design/hospice-interoperability-safety-test-gameplan.md](design/hospice-interoperability-safety-test-gameplan.md)
 - Grapheme reflection and LSP delivery plan: [design/grapheme-reflection-lsp-delivery-plan.md](design/grapheme-reflection-lsp-delivery-plan.md)
 

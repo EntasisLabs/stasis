@@ -12,6 +12,7 @@ Execution update (2026-06-23):
 - **0.7.0** delivers semantic tags/index, eviction policy, and graph workflows on Locus **0.4.1 / locus-sdk 0.2.1**.
 - **0.7.1** bumps Locus to **0.4.2 / locus-sdk 0.2.2** for semantic `null` handling in parser and SurrealDB storage.
 - **0.9.3** bumps Locus to **0.5.0 / locus-sdk 0.3.0** for WASM compilation support and feature-gated Surreal/HTTP providers.
+- Stasis-on-WASM (compiling the kernel itself) is a separate epic: [wasm-target-phase-plan.md](wasm-target-phase-plan.md) / [ADR-0009](../adr/ADR-0009-wasm-target-profile.md). Locus WASM is a dependency, not the Stasis guest profile.
 - `LocusMemoryStore` bundles node store + semantic index; ingest and find/recall/evict/transform paths wire `with_semantic_index()`.
 - Memory operation workflows now include `find`, `evict`, and `graph` in addition to recall, aggregate, transform, rollup, and schema.
 
