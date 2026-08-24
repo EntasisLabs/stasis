@@ -5,13 +5,15 @@
 - Document Type: Architecture Standard
 - Audience: Engineer, Security, Architect
 - Stability: Stable
-- Last Verified: 2026-07-22
+- Last Verified: 2026-08-24
 - Verified Against:
   - docs/adr/README.md
   - docs/adr/ADR-0007-agent-platform-runtime-contracts.md
   - docs/adr/ADR-0008-stasisd-declarative-engine.md
+  - docs/adr/ADR-0009-wasm-target-profile.md
   - docs/design/agent-platform-runtime-contracts-plan.md
   - docs/design/stasisd-declarative-engine-plan.md
+  - docs/design/wasm-target-phase-plan.md
   - docs-book/src/adr.md
 
 ## Purpose
@@ -30,6 +32,7 @@ Track major architectural decisions with rationale, alternatives, and consequenc
 | ADR-0006 | OpenTelemetry First-Class Observability | Accepted | 2026-06-04 |
 | ADR-0007 | Agent Platform Runtime Contracts | Accepted | 2026-07-22 |
 | ADR-0008 | `stasisd` Declarative Engine | Accepted | 2026-07-22 |
+| ADR-0009 | WASM Target Profile | Proposed | 2026-08-24 |
 
 ## Decision Dependency Diagram
 
@@ -49,7 +52,21 @@ flowchart TD
   A3 --> A7
   A4 --> A8[ADR-0008 stasisd Declarative Engine]
   A7 --> A8
+  A1 --> A9[ADR-0009 WASM Target Profile]
+  A2 --> A9
+  A7 --> A9
 ```
+
+## ADR-0009 WASM Target Profile
+
+- Status: Proposed
+- Context: Locus 0.5 and Grapheme 0.7 can target WASM, but `stasis-rs` is still a native-only crate graph (Axum, SurrealKV, genai, `rt-multi-thread`) with no `wasm32` cfg or CI gate.
+- Decision: Compile the Stasis *kernel* to `wasm32-unknown-unknown` behind `--no-default-features`; keep `stasisd`, dashboard, SurrealKV, and native transports on a `native` default feature bundle.
+- Consequences:
+  - Positive: browser/edge hosts can embed the same job/memory/tool contracts; Locus WASM work becomes consumable.
+  - Tradeoff: optional-dependency and cfg churn; Grapheme host and dashboard stay native-first.
+- Plan: [design/wasm-target-phase-plan.md](../design/wasm-target-phase-plan.md)
+- Full ADR: [ADR-0009-wasm-target-profile.md](ADR-0009-wasm-target-profile.md)
 
 ## ADR-0008 `stasisd` Declarative Engine
 

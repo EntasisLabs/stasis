@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **WASM target profile plan (ADR-0009, Proposed)** — kickoff freeze for compiling the `stasis-rs` kernel to `wasm32-unknown-unknown`. Native process hosts (`stasisd`, dashboard, SurrealKV, genai, Grapheme host) stay on a `native` default-feature bundle; first implementation slice is the feature graph + `cargo check` gate. See [docs/design/wasm-target-phase-plan.md](docs/design/wasm-target-phase-plan.md).
+
 ## [0.9.3] - 2026-08-23
 
 ### Changed
