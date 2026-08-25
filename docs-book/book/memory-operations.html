@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fcb31ca5.js";
+            window.path_to_searchindex_js = "searchindex-6949a05c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-5bb4bf5a.js"></script>
@@ -180,7 +180,7 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-23</li>
+<li>Last Verified: 2026-08-25</li>
 <li>Verified Against:
 <ul>
 <li>src/ports/outbound/memory/memory_operations.rs</li>
@@ -779,8 +779,8 @@ pub trait MemoryOperations: Send + Sync {
 <h2 id="locus-dependency-versions"><a class="header" href="#locus-dependency-versions">Locus dependency versions</a></h2>
 <p>Stasis pins Locus crates to prevent resolution drift:</p>
 <ul>
-<li><code>locus-core-rs = 0.5.0</code></li>
-<li><code>locus-sdk = 0.3.0</code></li>
+<li><code>locus-core-rs = 0.5.1</code></li>
+<li><code>locus-sdk = 0.3.1</code></li>
 </ul>
 <p>The default <code>.with_locus_memory()</code> bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via <code>.with_memory_context_reader(...)</code>, <code>.with_memory_context_writer(...)</code>, or <code>.with_memory_operations(...)</code>.</p>
 
