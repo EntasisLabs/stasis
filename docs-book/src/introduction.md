@@ -5,8 +5,8 @@
 - Document Type: Book Overview
 - Audience: Engineer, Architect, Operator
 - Stability: Stable
-- Last Verified: 2026-08-23
-- Verified Against: Stasis 0.9.3 release
+- Last Verified: 2026-08-25
+- Verified Against: Stasis 0.9.4 release
 
 Stasis is an agentic framework SDK with a durable job orchestration runtime.
 

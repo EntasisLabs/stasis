@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fcb31ca5.js";
+            window.path_to_searchindex_js = "searchindex-6949a05c.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-5bb4bf5a.js"></script>
@@ -180,7 +180,7 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-23</li>
+<li>Last Verified: 2026-08-25</li>
 <li>Verified Against:
 <ul>
 <li>src/application/runtime/grapheme_job_handler.rs</li>
@@ -190,7 +190,7 @@
 <li>src/infrastructure/runtime/grapheme_sdk_workflow_engine.rs</li>
 <li>src/ports/outbound/runtime/workflow_engine.rs</li>
 <li>src/application/runtime/stasis_runtime_builder.rs</li>
-<li>Stasis 0.9.3 / Grapheme 0.7.1</li>
+<li>Stasis 0.9.4 / Grapheme 0.7.1</li>
 </ul>
 </li>
 </ul>
@@ -290,7 +290,7 @@ import data from "grapheme/data"  // requires Stasis `grapheme-full` feature at 
 </code></pre>
 <h3 id="cargo-feature-grapheme-full"><a class="header" href="#cargo-feature-grapheme-full">Cargo feature: <code>grapheme-full</code></a></h3>
 <p>By default, Stasis links Grapheme <strong>0.7.1</strong> with the lean host stdlib profile (<code>core</code>, <code>http</code>, <code>web</code>, <code>json</code>, <code>sql</code>, …) and omits Stage B / AOT container deps from the default build. Enable the optional <strong><code>grapheme-full</code></strong> feature on <code>stasis-rs</code> to compile in extended modules (<code>data</code>, <code>pdf</code>, <code>image</code>, <code>plot</code>, <code>media</code>) plus Stage B:</p>
-<pre><code class="language-toml">stasis-rs = { version = "0.9.3", features = ["grapheme-full"] }
+<pre><code class="language-toml">stasis-rs = { version = "0.9.4", features = ["grapheme-full"] }
 </code></pre>
 <p>Grapheme 0.7.1 also ships a <code>slim</code> SDK profile (core/json only) for iOS/Wasm embedders. Stasis job handlers use the host profile for workflow execution. Enable <code>dashboard-lsp</code> when you need <code>grapheme-lsp</code> in the dashboard build.</p>
 <h3 id="execution-model"><a class="header" href="#execution-model">Execution model</a></h3>

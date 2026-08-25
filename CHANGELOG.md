@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-08-25
+
+### Changed
+
+- **Locus 0.5.1 / locus-sdk 0.3.1** — `locus-core-rs` bumped to **0.5.1** and `locus-sdk` to **0.3.1**. Pulls `SttpDocumentBuilder` for strict canonical STTP composition (shallow content-slice merge, metadata-driven provenance/envelope, finalized metrics, `render_canonical()`), with round-trip coverage through `TreeSitterValidator` + `StrictTypedIr`.
+
+### Notes
+
+- Native defaults unchanged (`genai-provider` + `http-providers`).
+- Stasis prompt/session memory helpers still emit STTP via existing templates; adopting `SttpDocumentBuilder` for `render_prompt_response_sttp_node` / `render_session_summary_sttp_node` is a follow-up (wire-format shift away from `⏣0` tagged templates).
+
 ## [0.9.3] - 2026-08-23
 
 ### Changed
