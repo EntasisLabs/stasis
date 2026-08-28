@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::json;
 use serde_json::Value;
+use serde_json::json;
 
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::telemetry::operation::OperationTelemetry;
@@ -48,11 +48,11 @@ impl GraphemeJobHandler {
             return fs::read_to_string(path)
                 .map(|source| (source, None))
                 .map_err(|e| {
-                crate::domain::errors::StasisError::PortFailure(format!(
-                    "read grapheme source file '{}': {}",
-                    path, e
-                ))
-            });
+                    crate::domain::errors::StasisError::PortFailure(format!(
+                        "read grapheme source file '{}': {}",
+                        path, e
+                    ))
+                });
         }
 
         if let Some(inline) = payload_ref.strip_prefix(INLINE_PREFIX) {
@@ -60,14 +60,13 @@ impl GraphemeJobHandler {
         }
 
         if let Some(payload_json) = payload_ref.strip_prefix(JSON_PREFIX) {
-            let payload: GraphemeExecutionPayload = serde_json::from_str(payload_json).map_err(
-                |e| {
+            let payload: GraphemeExecutionPayload =
+                serde_json::from_str(payload_json).map_err(|e| {
                     StasisError::PortFailure(format!(
                         "invalid grapheme execution payload json: {}",
                         e
                     ))
-                },
-            )?;
+                })?;
             return Ok((payload.source, payload.state_current));
         }
 
@@ -178,7 +177,12 @@ impl JobHandler for GraphemeJobHandler {
             Ok(output) => {
                 let duration_ms = started.elapsed().as_millis();
                 Ok(JobExecutionOutcome::Success {
-                    sttp_output_node_id: format!("sttp:{}:{}", output.run_id, job.id),
+                    output_provenance: Some(
+                        crate::domain::runtime::provenance::ProvenanceRef::sttp(format!(
+                            "sttp:{}:{}",
+                            output.run_id, job.id
+                        )),
+                    ),
                     execution_id: Some(output.run_id.clone()),
                     diagnostics: Some(Self::build_success_diagnostics(
                         duration_ms,
@@ -258,7 +262,9 @@ mod tests {
             correlation_id: "corr-1".to_string(),
             causation_id: "cause-1".to_string(),
             trace_id: "trace-1".to_string(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:input:1".to_string())),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:input:1",
+            )),
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: Utc::now(),
             backoff_policy: BackoffPolicy::default(),
@@ -288,9 +294,8 @@ mod tests {
     async fn execute_passes_state_current_to_engine_when_present() {
         let engine = Arc::new(RecordingWorkflowEngine::new());
         let handler = GraphemeJobHandler::new(engine.clone());
-        let job = sample_job(
-            r#"grapheme:json:{"source":"op echo()","state_current":{"cursor":"abc"}}"#,
-        );
+        let job =
+            sample_job(r#"grapheme:json:{"source":"op echo()","state_current":{"cursor":"abc"}}"#);
 
         let outcome = handler
             .execute(&job)
@@ -305,10 +310,7 @@ mod tests {
         }
 
         assert_eq!(
-            *engine
-                .seen_source
-                .lock()
-                .expect("source mutex poisoned"),
+            *engine.seen_source.lock().expect("source mutex poisoned"),
             Some("op echo()".to_string())
         );
         assert_eq!(

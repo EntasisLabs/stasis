@@ -112,6 +112,10 @@ impl RuntimeBackend {
 }
 
 #[derive(Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing a public variant would break downstream construction and pattern matching"
+)]
 pub enum RuntimeComposition {
     InMemory(InMemoryRuntime),
     Surreal(SurrealRuntime),

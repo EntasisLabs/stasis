@@ -4,14 +4,14 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::json;
 
-use crate::application::orchestration::runtime_job_payloads::{
-    HandoffPatternJobPayload, HandoffTurnJobPayload,
-};
-use crate::application::runtime::chat_options_resolver::validate_reasoning_effort;
 use crate::application::orchestration::handoff_pattern_pipeline::{
     HandoffPatternExecutionRequest, HandoffPatternPipeline, HandoffPatternTurn,
 };
 use crate::application::orchestration::prompt_pipeline::PromptExecutionPipeline;
+use crate::application::orchestration::runtime_job_payloads::{
+    HandoffPatternJobPayload, HandoffTurnJobPayload,
+};
+use crate::application::runtime::chat_options_resolver::validate_reasoning_effort;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
@@ -248,7 +248,9 @@ impl JobHandler for HandoffPatternJobHandler {
         .await;
 
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: format!("sttp:orchestration:handoff:{}", job.id),
+            output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                format!("sttp:orchestration:handoff:{}", job.id),
+            )),
             execution_id: None,
             diagnostics: Some(
                 json!({

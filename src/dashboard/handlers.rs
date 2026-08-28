@@ -255,6 +255,10 @@ fn is_advanced_mode(mode: Option<&str>) -> bool {
         .is_some_and(|value| value.eq_ignore_ascii_case("advanced"))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the arguments mirror independent reflection query filters"
+)]
 async fn build_workflow_reflection_preview(
     service: &dyn DashboardQueryService,
     workflow_id: &str,
@@ -573,6 +577,10 @@ fn workflow_module_visual_token(module_id: &str) -> WorkflowModuleVisualToken {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the arguments map one-to-one to the reflected function tile contract"
+)]
 fn build_workflow_function_tile_dto(
     module_id: &str,
     function_id: &str,

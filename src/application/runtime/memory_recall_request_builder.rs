@@ -38,15 +38,17 @@ pub fn build_memory_recall_request(
     default_query_text: Option<&str>,
     memory_policy: Option<&MemoryPolicyPayload>,
 ) -> MemoryRecallRequest {
-    let mut request = MemoryRecallRequest::default();
-    request.scope = MemoryScope {
-        tenant_id: memory_policy.and_then(|policy| policy.tenant_id.clone()),
-        session_ids: memory_policy
-            .and_then(|policy| policy.session_ids.clone())
-            .or_else(|| Some(vec![correlation_id.to_string()])),
-        tiers: memory_policy.and_then(|policy| policy.tiers.clone()),
-        from_utc: memory_policy.and_then(|policy| policy.from_utc),
-        to_utc: memory_policy.and_then(|policy| policy.to_utc),
+    let mut request = MemoryRecallRequest {
+        scope: MemoryScope {
+            tenant_id: memory_policy.and_then(|policy| policy.tenant_id.clone()),
+            session_ids: memory_policy
+                .and_then(|policy| policy.session_ids.clone())
+                .or_else(|| Some(vec![correlation_id.to_string()])),
+            tiers: memory_policy.and_then(|policy| policy.tiers.clone()),
+            from_utc: memory_policy.and_then(|policy| policy.from_utc),
+            to_utc: memory_policy.and_then(|policy| policy.to_utc),
+        },
+        ..MemoryRecallRequest::default()
     };
 
     if let Some(policy) = memory_policy {

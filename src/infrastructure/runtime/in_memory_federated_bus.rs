@@ -5,7 +5,12 @@ use async_trait::async_trait;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::federation::{FederatedSignalEnvelope, FederatedTerminalResult};
-use crate::domain::runtime::remote_job_envelope::RemoteJobEnvelope;
+use crate::domain::runtime::federation::{
+    verify_federated_signal, verify_federated_terminal_result,
+};
+use crate::domain::runtime::remote_job_envelope::{
+    EnvelopeSignature, RemoteJobEnvelope, verify_remote_job_envelope,
+};
 use crate::ports::outbound::runtime::federated_delivery::{
     FederatedDeliveryPort, FederatedIngressPort,
 };
@@ -25,6 +30,7 @@ pub struct FederatedInbox {
 #[derive(Clone, Default)]
 pub struct InMemoryFederatedBus {
     inboxes: Arc<RwLock<HashMap<String, FederatedInbox>>>,
+    verification_keys: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
 
 impl InMemoryFederatedBus {
@@ -40,12 +46,53 @@ impl InMemoryFederatedBus {
         Ok(())
     }
 
+    pub fn register_verification_key(
+        &self,
+        key_id: impl Into<String>,
+        key: impl Into<Vec<u8>>,
+    ) -> Result<()> {
+        let mut keys = self.verification_keys.write().map_err(|_| lock_err())?;
+        keys.insert(key_id.into(), key.into());
+        Ok(())
+    }
+
+    fn verification_key(&self, signature: &EnvelopeSignature) -> Result<Vec<u8>> {
+        let keys = self.verification_keys.read().map_err(|_| lock_err())?;
+        keys.get(&signature.key_id).cloned().ok_or_else(|| {
+            StasisError::PortFailure(format!(
+                "federated verification key not found: {}",
+                signature.key_id
+            ))
+        })
+    }
+
+    fn verify_remote_job(&self, envelope: &RemoteJobEnvelope) -> Result<()> {
+        envelope
+            .validate_for_acceptance(chrono::Utc::now())
+            .map_err(StasisError::PortFailure)?;
+        let key = self.verification_key(&envelope.signature)?;
+        verify_remote_job_envelope(envelope, &key).map_err(StasisError::PortFailure)
+    }
+
+    fn verify_signal(&self, envelope: &FederatedSignalEnvelope) -> Result<()> {
+        let key = self.verification_key(&envelope.signature)?;
+        verify_federated_signal(envelope, &key).map_err(StasisError::PortFailure)
+    }
+
+    fn verify_terminal_result(&self, result: &FederatedTerminalResult) -> Result<()> {
+        let key = self.verification_key(&result.signature)?;
+        verify_federated_terminal_result(result, &key).map_err(StasisError::PortFailure)
+    }
+
     pub fn inbox(&self, runtime_id: &str) -> Result<FederatedInbox> {
         let inboxes = self.inboxes.read().map_err(|_| lock_err())?;
         Ok(inboxes.get(runtime_id).cloned().unwrap_or_default())
     }
 
-    pub fn delivery_port(&self, destination_runtime_id: impl Into<String>) -> InMemoryFederatedDelivery {
+    pub fn delivery_port(
+        &self,
+        destination_runtime_id: impl Into<String>,
+    ) -> InMemoryFederatedDelivery {
         InMemoryFederatedDelivery {
             bus: self.clone(),
             destination_runtime_id: destination_runtime_id.into(),
@@ -69,40 +116,51 @@ pub struct InMemoryFederatedDelivery {
 #[async_trait]
 impl FederatedDeliveryPort for InMemoryFederatedDelivery {
     async fn submit_remote_job(&self, envelope: RemoteJobEnvelope) -> Result<()> {
-        envelope
-            .validate_schema_version()
-            .map_err(StasisError::PortFailure)?;
+        self.bus.verify_remote_job(&envelope)?;
         let mut inboxes = self.bus.inboxes.write().map_err(|_| lock_err())?;
         let inbox = inboxes
             .entry(self.destination_runtime_id.clone())
             .or_insert_with(FederatedInbox::default);
-        inbox.remote_jobs.push(envelope);
+        if !inbox.remote_jobs.iter().any(|existing| {
+            existing.envelope_id == envelope.envelope_id
+                || existing.idempotency_key == envelope.idempotency_key
+        }) {
+            inbox.remote_jobs.push(envelope);
+        }
         Ok(())
     }
 
     async fn deliver_signal(&self, envelope: FederatedSignalEnvelope) -> Result<()> {
-        envelope
-            .validate_schema_version()
-            .map_err(StasisError::PortFailure)?;
+        self.bus.verify_signal(&envelope)?;
         let destination = envelope.destination_runtime_id.clone();
         let mut inboxes = self.bus.inboxes.write().map_err(|_| lock_err())?;
         let inbox = inboxes
             .entry(destination)
             .or_insert_with(FederatedInbox::default);
-        inbox.signals.push(envelope);
+        if !inbox
+            .signals
+            .iter()
+            .any(|existing| existing.signal_id == envelope.signal_id)
+        {
+            inbox.signals.push(envelope);
+        }
         Ok(())
     }
 
     async fn deliver_terminal_result(&self, result: FederatedTerminalResult) -> Result<()> {
-        result
-            .validate_schema_version()
-            .map_err(StasisError::PortFailure)?;
+        self.bus.verify_terminal_result(&result)?;
         let destination = result.origin_authority.runtime_id.clone();
         let mut inboxes = self.bus.inboxes.write().map_err(|_| lock_err())?;
         let inbox = inboxes
             .entry(destination)
             .or_insert_with(FederatedInbox::default);
-        inbox.terminal_results.push(result);
+        if !inbox
+            .terminal_results
+            .iter()
+            .any(|existing| existing.result_id == result.result_id)
+        {
+            inbox.terminal_results.push(result);
+        }
         Ok(())
     }
 }
@@ -116,15 +174,18 @@ pub struct InMemoryFederatedIngress {
 #[async_trait]
 impl FederatedIngressPort for InMemoryFederatedIngress {
     async fn accept_remote_job(&self, envelope: RemoteJobEnvelope) -> Result<String> {
-        envelope
-            .validate_schema_version()
-            .map_err(StasisError::PortFailure)?;
+        self.bus.verify_remote_job(&envelope)?;
         let id = envelope.envelope_id.clone();
         let mut inboxes = self.bus.inboxes.write().map_err(|_| lock_err())?;
         let inbox = inboxes
             .entry(self.local_runtime_id.clone())
             .or_insert_with(FederatedInbox::default);
-        inbox.remote_jobs.push(envelope);
+        if !inbox.remote_jobs.iter().any(|existing| {
+            existing.envelope_id == envelope.envelope_id
+                || existing.idempotency_key == envelope.idempotency_key
+        }) {
+            inbox.remote_jobs.push(envelope);
+        }
         Ok(id)
     }
 
@@ -135,14 +196,18 @@ impl FederatedIngressPort for InMemoryFederatedIngress {
                 envelope.destination_runtime_id, self.local_runtime_id
             )));
         }
-        envelope
-            .validate_schema_version()
-            .map_err(StasisError::PortFailure)?;
+        self.bus.verify_signal(&envelope)?;
         let mut inboxes = self.bus.inboxes.write().map_err(|_| lock_err())?;
         let inbox = inboxes
             .entry(self.local_runtime_id.clone())
             .or_insert_with(FederatedInbox::default);
-        inbox.signals.push(envelope);
+        if !inbox
+            .signals
+            .iter()
+            .any(|existing| existing.signal_id == envelope.signal_id)
+        {
+            inbox.signals.push(envelope);
+        }
         Ok(())
     }
 
@@ -153,14 +218,18 @@ impl FederatedIngressPort for InMemoryFederatedIngress {
                 result.origin_authority.runtime_id, self.local_runtime_id
             )));
         }
-        result
-            .validate_schema_version()
-            .map_err(StasisError::PortFailure)?;
+        self.bus.verify_terminal_result(&result)?;
         let mut inboxes = self.bus.inboxes.write().map_err(|_| lock_err())?;
         let inbox = inboxes
             .entry(self.local_runtime_id.clone())
             .or_insert_with(FederatedInbox::default);
-        inbox.terminal_results.push(result);
+        if !inbox
+            .terminal_results
+            .iter()
+            .any(|existing| existing.result_id == result.result_id)
+        {
+            inbox.terminal_results.push(result);
+        }
         Ok(())
     }
 }

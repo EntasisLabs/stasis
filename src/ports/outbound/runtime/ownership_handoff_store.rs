@@ -5,6 +5,17 @@ use crate::domain::errors::Result;
 use crate::domain::runtime::ownership_handoff::{OwnershipHandoff, OwnershipHandoffReservation};
 use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey, ResourceLease};
 
+#[derive(Clone, Debug)]
+pub struct ReserveOwnershipHandoff {
+    pub resource: ResourceKey,
+    pub from_owner: OwnerId,
+    pub to_owner: OwnerId,
+    pub fencing_token: FencingToken,
+    pub ttl: Duration,
+    pub now: DateTime<Utc>,
+    pub handoff_id: String,
+}
+
 /// Fenced ownership handoff: reserve → transfer generation → commit|abort.
 ///
 /// Prevents two nodes from executing the same resource generation.
@@ -12,13 +23,7 @@ use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey,
 pub trait OwnershipHandoffStore: Send + Sync {
     async fn reserve(
         &self,
-        resource: &ResourceKey,
-        from: &OwnerId,
-        to: OwnerId,
-        fencing_token: FencingToken,
-        ttl: Duration,
-        now: DateTime<Utc>,
-        handoff_id: String,
+        request: ReserveOwnershipHandoff,
     ) -> Result<OwnershipHandoffReservation>;
 
     async fn commit(

@@ -321,6 +321,7 @@ impl JobStore for SurrealJobStore {
                 if !existing.placement.matches(worker) {
                     continue;
                 }
+                let expected_placement_json = encode_placement(&existing.placement);
 
                 let mut update_response = self
                     .db
@@ -331,6 +332,7 @@ impl JobStore for SurrealJobStore {
                            AND state = 'enqueued' \
                            AND scheduled_at <= $now \
                            AND (lease_expires_at = NONE OR lease_expires_at <= $now) \
+                           AND (($placement_json = NONE AND placement_json = NONE) OR placement_json = $placement_json) \
                          RETURN AFTER",
                     )
                     .bind(("table", self.table.clone()))
@@ -339,6 +341,7 @@ impl JobStore for SurrealJobStore {
                     .bind(("worker_id", worker_id.to_string()))
                     .bind(("now", now))
                     .bind(("lease_expires_at", lease_expires_at))
+                    .bind(("placement_json", expected_placement_json))
                     .await
                     .map_err(|e| Self::port_err("lease due job", e))?;
 
@@ -348,17 +351,6 @@ impl JobStore for SurrealJobStore {
 
                 if let Some(record) = row {
                     let job = Job::try_from(record)?;
-                    // Atomic placement check: if another writer changed placement mid-flight,
-                    // release and continue searching.
-                    if !job.placement.matches(worker) {
-                        let mut rollback = job.clone();
-                        rollback.state = JobState::Enqueued;
-                        rollback.lease_owner = None;
-                        rollback.lease_expires_at = None;
-                        rollback.heartbeat_at = None;
-                        self.save(rollback).await?;
-                        continue;
-                    }
                     return Ok(Some(job));
                 }
             }

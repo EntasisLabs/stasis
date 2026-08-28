@@ -65,6 +65,17 @@ impl RemoteJobEnvelope {
         }
     }
 
+    pub fn validate_for_acceptance(&self, now: DateTime<Utc>) -> Result<(), String> {
+        self.validate_schema_version()?;
+        if self.deadline <= now {
+            return Err(format!(
+                "remote job envelope deadline expired at {}",
+                self.deadline
+            ));
+        }
+        Ok(())
+    }
+
     /// Canonical bytes used for signing/verification (signature field excluded).
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, String> {
         #[derive(Serialize)]
@@ -145,18 +156,36 @@ pub fn sign_remote_job_envelope(
 
 pub fn verify_remote_job_envelope(envelope: &RemoteJobEnvelope, key: &[u8]) -> Result<(), String> {
     envelope.validate_schema_version()?;
-    if envelope.signature.algorithm != EnvelopeSignature::HMAC_SHA256 {
+    let bytes = envelope.canonical_bytes()?;
+    verify_hmac_sha256_signature(&envelope.signature, &bytes, key)
+}
+
+pub(crate) fn verify_hmac_sha256_signature(
+    signature: &EnvelopeSignature,
+    canonical_bytes: &[u8],
+    key: &[u8],
+) -> Result<(), String> {
+    if signature.algorithm != EnvelopeSignature::HMAC_SHA256 {
         return Err(format!(
             "unsupported signature algorithm: {}",
-            envelope.signature.algorithm
+            signature.algorithm
         ));
     }
-    let bytes = envelope.canonical_bytes()?;
-    let expected = hmac_sha256_hex(key, &bytes);
-    if expected != envelope.signature.signature_hex {
+    let expected = hmac_sha256_hex(key, canonical_bytes);
+    if !constant_time_eq(expected.as_bytes(), signature.signature_hex.as_bytes()) {
         return Err("remote job envelope signature mismatch".into());
     }
     Ok(())
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0u8, |difference, (left, right)| difference | (left ^ right))
+        == 0
 }
 
 #[cfg(test)]

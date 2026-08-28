@@ -62,25 +62,25 @@ impl PlacementConstraints {
         {
             return false;
         }
-        if let Some(platform) = &self.platform {
-            if worker.platform.as_ref() != Some(platform) {
-                return false;
-            }
+        if let Some(platform) = &self.platform
+            && worker.platform.as_ref() != Some(platform)
+        {
+            return false;
         }
-        if let Some(architecture) = &self.architecture {
-            if worker.architecture.as_ref() != Some(architecture) {
-                return false;
-            }
+        if let Some(architecture) = &self.architecture
+            && worker.architecture.as_ref() != Some(architecture)
+        {
+            return false;
         }
-        if let Some(region) = &self.region {
-            if worker.region.as_ref() != Some(region) {
-                return false;
-            }
+        if let Some(region) = &self.region
+            && worker.region.as_ref() != Some(region)
+        {
+            return false;
         }
-        if let Some(target) = &self.target_node {
-            if worker.node_id.as_ref() != Some(target) {
-                return false;
-            }
+        if let Some(target) = &self.target_node
+            && worker.node_id.as_ref() != Some(target)
+        {
+            return false;
         }
         true
     }

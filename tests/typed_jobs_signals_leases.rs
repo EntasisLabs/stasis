@@ -136,6 +136,10 @@ impl JobConsumer<HangJob> for HangConsumer {
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the test enum keeps both runtime backends directly accessible"
+)]
 enum TestRuntime {
     Memory(InMemoryRuntime),
     Surreal(SurrealRuntime),

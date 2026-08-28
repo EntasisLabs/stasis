@@ -112,7 +112,7 @@ Suggested fields:
 - finished_at: datetime
 - outcome: enum(succeeded|retryable_failure|fatal_failure)
 - error_message: string | null
-- sttp_output_node_id: string | null
+- output_provenance: object | null
 - execution_id: string | null
 - guardrail_code: string | null
 - policy_reason: string | null
@@ -157,8 +157,8 @@ Runtime event envelope fields:
 - correlation_id
 - causation_id
 - trace_id
-- sttp_input_node_id
-- sttp_output_node_id
+- input_provenance
+- output_provenance
 - execution_id
 - input_memory_query_id
 - input_memory_query_fingerprint
@@ -189,8 +189,10 @@ Inbound ports:
 ### Lease Acquisition
 
 1. Select due enqueued job where scheduled_at <= now, lease_expires_at is null or expired, and `placement` matches the worker capabilities.
-2. Attempt compare-and-set update to assign lease_owner and lease_expires_at.
+2. Attempt compare-and-set update to assign lease_owner and lease_expires_at while the selected placement representation remains unchanged.
 3. Proceed only when update affects one record.
+
+Workers declare capabilities through `RuntimeSdk::process_once_with_capabilities`. The compatibility `process_once` path has no capabilities and leases only unrestricted jobs.
 
 ### Worker Execution
 
@@ -198,10 +200,10 @@ Inbound ports:
 2. Heartbeat every lease_interval/2.
 3. Execute handler with idempotency context.
 4. On success:
-- persist result reference sttp_output_node_id
+- persist optional runtime-neutral `output_provenance`
 - mark succeeded
 - write outbox events
- - include standardized diagnostics for orchestration/policy outcomes when applicable
+  - include standardized diagnostics for orchestration/policy outcomes when applicable
 5. On failure:
 - increment attempts
 - if attempts < max_attempts, compute backoff and re-enqueue

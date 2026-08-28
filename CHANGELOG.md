@@ -16,8 +16,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Job lineage fields are optional and scheme-neutral.** `NewJob` / `Job` / `RuntimeEvent` no longer require `sttp_input_node_id: String`. Use `input_provenance: Option<ProvenanceRef>` and `output_provenance: Option<ProvenanceRef>` (STTP helpers: `ProvenanceRef::sttp(...)`, `Job::sttp_input_node_id()`, `NewJob::with_sttp_input_node_id(...)`).
+- **Successful execution is scheme-neutral.** `JobExecutionOutcome::Success` now carries `output_provenance: Option<ProvenanceRef>`; typed generic jobs use CAS output provenance instead of fabricating STTP ids. Job attempts and durable outbox events persist structured provenance while retaining STTP compatibility columns.
 - **Placement is first-class on every job.** `NewJob` / `Job` include `placement: PlacementConstraints` (default unrestricted).
-- **`JobStore::lease_due` takes worker capabilities.** Callers pass `&WorkerCapabilities` (use `WorkerCapabilities::any()` when unconstrained).
+- **Workers can declare placement capabilities.** `JobStore::lease_due` takes `&WorkerCapabilities`; `RuntimeSdk::process_once_with_capabilities` and the backend equivalents expose the same contract. Existing `process_once` remains the unrestricted compatibility path.
+- **Federated ingress authenticates every message type.** Remote jobs, signals, and terminal results have canonical signing/verification helpers. The reference in-memory bus requires registered verification keys, rejects expired/tampered work, and deduplicates deliveries.
+- **Placement and handoff claims are enforced atomically.** Surreal lease CAS includes the selected placement representation; in-memory ownership handoff reservation performs conflict-check and insert under one state lock.
 
 ### Migration
 
@@ -44,11 +47,24 @@ NewJob {
 job_store
     .lease_due("default", "worker-1", now, 30, &WorkerCapabilities::any())
     .await?;
+
+// Runtime facade worker placement
+runtime
+    .process_once_with_capabilities("default", "worker-1", &worker_capabilities)
+    .await?;
+
+// Successful generic handler outcome
+JobExecutionOutcome::Success {
+    output_provenance: Some(ProvenanceRef::cas(output_digest)),
+    execution_id: Some(execution_id),
+    diagnostics: None,
+}
 ```
 
 ### Notes
 
 - Surreal job/outbox rows keep STTP string columns for compatibility and populate them from the STTP adapter when scheme is `sttp`.
+- `InMemoryFederatedBus` requires `register_verification_key(key_id, key)` before accepting signed federation messages.
 - See `docs/adr/ADR-0010-federated-job-contract.md` and `docs/design/federated-job-contract.md`.
 
 ## [0.9.4] - 2026-08-25

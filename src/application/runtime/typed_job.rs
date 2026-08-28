@@ -86,7 +86,13 @@ where
             Ok(output) => {
                 let diagnostics = serialize_output(&output);
                 Ok(JobExecutionOutcome::Success {
-                    sttp_output_node_id: format!("sttp:typed:{}:{}", T::NAME, job.id),
+                    output_provenance: Some(
+                        crate::domain::runtime::provenance::ProvenanceRef::cas(
+                            crate::domain::runtime::provenance::ContentDigest::sha256_bytes(
+                                diagnostics.as_bytes(),
+                            ),
+                        ),
+                    ),
                     execution_id: Some(job.id.clone()),
                     diagnostics: Some(diagnostics),
                 })
@@ -144,6 +150,8 @@ pub struct TypedEnqueueBuilder<T> {
     retry: RetryPolicy,
     idempotency_key: Option<String>,
     correlation_id: Option<String>,
+    input_provenance: Option<crate::domain::runtime::provenance::ProvenanceRef>,
+    placement: crate::domain::runtime::placement::PlacementConstraints,
     scheduled_at: Option<DateTime<Utc>>,
     clock: Arc<dyn Clock>,
     id_generator: Arc<dyn IdGenerator>,
@@ -164,6 +172,8 @@ impl<T: StasisJob> TypedEnqueueBuilder<T> {
             retry: RetryPolicy::default(),
             idempotency_key: None,
             correlation_id: None,
+            input_provenance: None,
+            placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: None,
             clock,
             id_generator,
@@ -196,6 +206,29 @@ impl<T: StasisJob> TypedEnqueueBuilder<T> {
         self
     }
 
+    pub fn input_provenance(
+        mut self,
+        provenance: crate::domain::runtime::provenance::ProvenanceRef,
+    ) -> Self {
+        self.input_provenance = Some(provenance);
+        self
+    }
+
+    pub fn sttp_input_node_id(mut self, node_id: impl AsRef<str>) -> Self {
+        self.input_provenance = Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+            node_id,
+        ));
+        self
+    }
+
+    pub fn placement(
+        mut self,
+        placement: crate::domain::runtime::placement::PlacementConstraints,
+    ) -> Self {
+        self.placement = placement;
+        self
+    }
+
     pub fn scheduled_at(mut self, scheduled_at: DateTime<Utc>) -> Self {
         self.scheduled_at = Some(scheduled_at);
         self
@@ -220,8 +253,8 @@ impl<T: StasisJob> TypedEnqueueBuilder<T> {
                     correlation_id,
                     causation_id: "stasis-client".into(),
                     trace_id: crate::application::telemetry::propagation::generate_w3c_trace_id(),
-                    input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(format!("sttp:in:typed:{}", T::NAME))),
-                    placement: crate::domain::runtime::placement::PlacementConstraints::default(),
+                    input_provenance: self.input_provenance,
+                    placement: self.placement,
                     scheduled_at,
                     backoff_policy: self.retry.backoff,
                 }

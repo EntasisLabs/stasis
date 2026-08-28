@@ -3,30 +3,30 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use crate::application::orchestration::runtime_job_payloads::{AgentToolCallMode, AgentTurnJobPayload};
+use crate::application::orchestration::agent_session_pipeline::{
+    AgentIdentity, AgentSessionPipeline, AgentTurnExecutionPolicy, AgentTurnExecutionRequest,
+};
+use crate::application::orchestration::prompt_pipeline::PromptExecutionPipeline;
+use crate::application::orchestration::runtime_job_payloads::{
+    AgentToolCallMode, AgentTurnJobPayload,
+};
+use crate::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolLoopPipeline};
+use crate::application::orchestration::tool_registry::ToolRegistry;
 use crate::application::runtime::chat_options_resolver::validate_reasoning_effort;
 use crate::application::runtime::identity_context_compiler::{
     load_identity_context_summary, prepend_identity_snapshot,
 };
-use crate::application::runtime::memory_recall_context_compiler::prepend_memory_recall_context;
+use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::memory_persistence_helpers::{
     SttpPromptNodeFormat, memory_query_fingerprint, memory_query_id, memory_scope_hash,
     render_prompt_response_sttp_node, resolve_sttp_output_node_id, should_store,
 };
+use crate::application::runtime::memory_recall_context_compiler::prepend_memory_recall_context;
 use crate::application::runtime::memory_recall_request_builder::build_memory_recall_request;
-use crate::application::orchestration::agent_session_pipeline::{
-    AgentIdentity, AgentSessionPipeline, AgentTurnExecutionPolicy, AgentTurnExecutionRequest,
-};
-use crate::application::orchestration::prompt_pipeline::{
-    PromptExecutionPipeline,
-};
-use crate::application::orchestration::tool_loop_pipeline::{ToolCallMode, ToolLoopPipeline};
-use crate::application::orchestration::tool_registry::ToolRegistry;
-use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::runtime_diagnostics_helpers::{
-    build_runtime_failure_identity_context_section, build_runtime_failure_memory_recall_section,
-    build_runtime_memory_diagnostics_bundle, RuntimeIdentityDiagnosticsInput,
-    RuntimeMemoryRecallDiagnosticsInput, RuntimeMemoryStoreDiagnosticsInput,
+    RuntimeIdentityDiagnosticsInput, RuntimeMemoryRecallDiagnosticsInput,
+    RuntimeMemoryStoreDiagnosticsInput, build_runtime_failure_identity_context_section,
+    build_runtime_failure_memory_recall_section, build_runtime_memory_diagnostics_bundle,
 };
 use crate::application::runtime::runtime_handler_execution_context::RuntimeHandlerExecutionContext;
 use crate::domain::errors::Result;
@@ -122,7 +122,6 @@ impl AgentTurnJobHandler {
             diagnostics: Some(diagnostics),
         }
     }
-
 }
 
 #[async_trait]
@@ -175,7 +174,8 @@ impl JobHandler for AgentTurnJobHandler {
 
             match reader.recall(&recall_request).await {
                 Ok(response) => {
-                    effective_user_prompt = prepend_memory_recall_context(&effective_user_prompt, &response);
+                    effective_user_prompt =
+                        prepend_memory_recall_context(&effective_user_prompt, &response);
                     memory_recall = Some(response);
                 }
                 Err(err) => memory_recall_error = Some(err.to_string()),
@@ -268,12 +268,14 @@ impl JobHandler for AgentTurnJobHandler {
             }
         }
 
-        let sttp_output_node_id =
-            resolve_sttp_output_node_id(memory_store.as_ref(), format!("sttp:agent-turn:{}", job.id));
-        let memory_scope_hash = memory_scope_hash(execution_context.correlation_id(), memory_policy);
+        let sttp_output_node_id = resolve_sttp_output_node_id(
+            memory_store.as_ref(),
+            format!("sttp:agent-turn:{}", job.id),
+        );
+        let memory_scope_hash =
+            memory_scope_hash(execution_context.correlation_id(), memory_policy);
         let input_memory_query_id_for_top_level = input_memory_query_id.clone();
-        let input_memory_query_fingerprint_for_top_level =
-            input_memory_query_fingerprint.clone();
+        let input_memory_query_fingerprint_for_top_level = input_memory_query_fingerprint.clone();
         let diagnostics_bundle = build_runtime_memory_diagnostics_bundle(
             RuntimeMemoryRecallDiagnosticsInput {
                 attempted: execution_context.memory_reader_enabled(),
@@ -325,7 +327,9 @@ impl JobHandler for AgentTurnJobHandler {
         .to_string();
 
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id,
+            output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                sttp_output_node_id,
+            )),
             execution_id: None,
             diagnostics: Some(diagnostics),
         })

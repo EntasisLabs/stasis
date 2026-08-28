@@ -12,6 +12,7 @@ keywords = ["ai", "agent", "orchestration", "runtime", "workflow"]
 categories = ["asynchronous", "development-tools", "web-programming"]
 include = [
 	"/Cargo.toml",
+	"/CHANGELOG.md",
 	"/README.md",
 	"/LICENSE-MIT",
 	"/LICENSE-APACHE",
@@ -27,6 +28,7 @@ include = [
 	"/docs/v1-runtime-draft.md",
 	"/docs/design/stasis-framework-rfc.md",
 	"/docs/design/stasis-api-sdk-layer-design.md",
+	"/docs/design/federated-job-contract.md",
 	"/scripts/check-doc-metadata.sh",
 	"/examples/**",
 	"/tests/**",

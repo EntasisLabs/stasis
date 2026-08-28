@@ -257,8 +257,8 @@ mod tests {
                 correlation_id: "corr-1".to_string(),
                 causation_id: "cause-1".to_string(),
                 trace_id: "trace-1".to_string(),
-                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1".to_string())),
-                output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:out:1".to_string())),
+                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1")),
+                output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:out:1")),
                 execution_id: None,
                 input_memory_query_id: None,
                 input_memory_query_fingerprint: None,
@@ -517,8 +517,10 @@ mod tests {
         let result = publisher.publish(&sample_event()).await;
         assert!(result.is_err());
 
-        let calls = calls.read().expect("calls read lock should succeed");
-        assert_eq!(calls.as_slice(), ["endpoint.a.fail"]);
+        {
+            let calls = calls.read().expect("calls read lock should succeed");
+            assert_eq!(calls.as_slice(), ["endpoint.a.fail"]);
+        }
 
         let first_status = status_store
             .get("endpoint.a.fail")
@@ -577,8 +579,10 @@ mod tests {
         let result = publisher.publish(&sample_event()).await;
         assert!(result.is_err());
 
-        let calls = calls.read().expect("calls read lock should succeed");
-        assert_eq!(calls.as_slice(), ["endpoint.a.fail", "endpoint.z.success"]);
+        {
+            let calls = calls.read().expect("calls read lock should succeed");
+            assert_eq!(calls.as_slice(), ["endpoint.a.fail", "endpoint.z.success"]);
+        }
 
         let failed_status = status_store
             .get("endpoint.a.fail")
@@ -645,16 +649,18 @@ mod tests {
         let second_result = publisher.publish(&second_event).await;
         assert!(second_result.is_err());
 
-        let calls = calls.read().expect("calls read lock should succeed");
-        assert_eq!(
-            calls.as_slice(),
-            [
-                "endpoint.a.fail",
-                "endpoint.z.success",
-                "endpoint.a.fail",
-                "endpoint.z.success",
-            ]
-        );
+        {
+            let calls = calls.read().expect("calls read lock should succeed");
+            assert_eq!(
+                calls.as_slice(),
+                [
+                    "endpoint.a.fail",
+                    "endpoint.z.success",
+                    "endpoint.a.fail",
+                    "endpoint.z.success",
+                ]
+            );
+        }
 
         let failed_status = status_store
             .get("endpoint.a.fail")

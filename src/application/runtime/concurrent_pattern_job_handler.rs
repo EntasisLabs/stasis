@@ -4,14 +4,14 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::{Value, json};
 
-use crate::application::orchestration::runtime_job_payloads::{
-    AgentToolCallMode, ConcurrentBranchExecutionMode, ConcurrentBranchJobPayload,
-    ConcurrentPatternJobPayload, MemoryPolicyPayload,
-};
 use crate::application::orchestration::concurrent_pattern_pipeline::{
     ConcurrentPatternBranch, ConcurrentPatternExecutionRequest, ConcurrentPatternPipeline,
 };
 use crate::application::orchestration::prompt_pipeline::PromptExecutionPipeline;
+use crate::application::orchestration::runtime_job_payloads::{
+    AgentToolCallMode, ConcurrentBranchExecutionMode, ConcurrentBranchJobPayload,
+    ConcurrentPatternJobPayload, MemoryPolicyPayload,
+};
 use crate::application::orchestration::tool_loop_pipeline::ToolCallMode;
 use crate::application::orchestration::tool_registry::ToolRegistry;
 use crate::application::runtime::chat_options_resolver::validate_reasoning_effort;
@@ -32,14 +32,7 @@ pub struct ConcurrentPatternJobHandler {
 
 impl ConcurrentPatternJobHandler {
     pub fn new(chat_client: Arc<dyn AiChatClient>, tool_registry: Arc<dyn ToolRegistry>) -> Self {
-        Self::new_with_thread_store_and_memory(
-            chat_client,
-            tool_registry,
-            None,
-            None,
-            None,
-            None,
-        )
+        Self::new_with_thread_store_and_memory(chat_client, tool_registry, None, None, None, None)
     }
 
     pub fn new_with_thread_store(
@@ -403,7 +396,9 @@ impl JobHandler for ConcurrentPatternJobHandler {
         .await;
 
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: format!("sttp:orchestration:concurrent:{}", job.id),
+            output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                format!("sttp:orchestration:concurrent:{}", job.id),
+            )),
             execution_id: None,
             diagnostics: Some(
                 json!({

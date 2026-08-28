@@ -35,6 +35,7 @@ pub struct ReconcileReport {
 /// Apply desired schedules onto a runtime, touching only `stasisd:`-managed definitions.
 ///
 /// Removal policy defaults to `drain` for managed ids that disappeared from desired state.
+#[cfg(test)]
 pub async fn reconcile(
     runtime: &RuntimeSdk,
     desired: &DesiredState,

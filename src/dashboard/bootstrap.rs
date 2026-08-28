@@ -3,7 +3,8 @@ use std::sync::Arc;
 use chrono::{Duration, Utc};
 
 use crate::application::composition::surreal_backend_config::{
-    resolve_surreal_auth_from_env, resolve_surreal_database_from_env, resolve_surreal_namespace_from_env,
+    resolve_surreal_auth_from_env, resolve_surreal_database_from_env,
+    resolve_surreal_namespace_from_env,
 };
 use crate::application::config::env::{required, truthy, with_default};
 use crate::application::dto::{
@@ -56,7 +57,9 @@ impl JobHandler for DemoSuccessHandler {
 
     async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: "sttp:out:demo-success".to_string(),
+            output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:out:demo-success",
+            )),
             execution_id: Some("exec-demo-success".to_string()),
             diagnostics: None,
         })
@@ -167,10 +170,9 @@ async fn build_in_memory_dashboard_query_service(
         seed_control_plane_data(&control_plane, endpoint_status_store).await;
     }
 
-    Ok(Arc::new(RuntimeDashboardQueryService::from_in_memory_composition(
-        runtime,
-        control_plane,
-    )))
+    Ok(Arc::new(
+        RuntimeDashboardQueryService::from_in_memory_composition(runtime, control_plane),
+    ))
 }
 
 async fn build_surreal_dashboard_query_service(
@@ -184,9 +186,9 @@ async fn build_surreal_dashboard_query_service(
     let builder = apply_dashboard_builder_options(StasisRuntimeBuilder::new(backend), &options)?;
     let runtime = builder.build().await?;
 
-    Ok(Arc::new(RuntimeDashboardQueryService::from_runtime_composition(
-        runtime,
-    )))
+    Ok(Arc::new(
+        RuntimeDashboardQueryService::from_runtime_composition(runtime),
+    ))
 }
 
 fn apply_dashboard_builder_options(
@@ -266,7 +268,9 @@ async fn seed_demo_jobs(runtime: &InMemoryRuntime) {
             correlation_id: "corr-demo-success-1".to_string(),
             causation_id: "cause-demo-success-1".to_string(),
             trace_id: "trace-demo-success-1".to_string(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:demo-1".to_string())),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:demo-1",
+            )),
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: backoff.clone(),
@@ -286,7 +290,9 @@ async fn seed_demo_jobs(runtime: &InMemoryRuntime) {
             correlation_id: "corr-demo-fatal-1".to_string(),
             causation_id: "cause-demo-fatal-1".to_string(),
             trace_id: "trace-demo-fatal-1".to_string(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:demo-2".to_string())),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:demo-2",
+            )),
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: backoff.clone(),
@@ -306,7 +312,9 @@ async fn seed_demo_jobs(runtime: &InMemoryRuntime) {
             correlation_id: "corr-demo-pending-1".to_string(),
             causation_id: "cause-demo-pending-1".to_string(),
             trace_id: "trace-demo-pending-1".to_string(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:demo-3".to_string())),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:demo-3",
+            )),
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now + Duration::minutes(5),
             backoff_policy: backoff,

@@ -617,6 +617,16 @@ impl SurrealRuntime {
         self.process_once(queue, worker_id, self.clock.now()).await
     }
 
+    pub async fn process_once_now_with_capabilities(
+        &self,
+        queue: &str,
+        worker_id: &str,
+        worker: &crate::domain::runtime::placement::WorkerCapabilities,
+    ) -> Result<Option<String>> {
+        self.process_once_with_capabilities(queue, worker_id, self.clock.now(), worker)
+            .await
+    }
+
     pub async fn replay_dead_letter_now(&self, job_id: &str) -> Result<bool> {
         self.replay_dead_letter(job_id, self.clock.now()).await
     }
@@ -687,7 +697,9 @@ impl SurrealRuntime {
                 correlation_id: definition.id.clone(),
                 causation_id: definition.id.clone(),
                 trace_id: trace_id_for_enqueue(|| definition.id.clone()),
-                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(definition.payload_template_ref.clone())),
+                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                    definition.payload_template_ref.clone(),
+                )),
                 placement: crate::domain::runtime::placement::PlacementConstraints::default(),
                 scheduled_at,
                 backoff_policy: Default::default(),
@@ -712,6 +724,22 @@ impl SurrealRuntime {
         worker_id: &str,
         now: DateTime<Utc>,
     ) -> Result<Option<String>> {
+        self.process_once_with_capabilities(
+            queue,
+            worker_id,
+            now,
+            &crate::domain::runtime::placement::WorkerCapabilities::any(),
+        )
+        .await
+    }
+
+    pub async fn process_once_with_capabilities(
+        &self,
+        queue: &str,
+        worker_id: &str,
+        now: DateTime<Utc>,
+        worker: &crate::domain::runtime::placement::WorkerCapabilities,
+    ) -> Result<Option<String>> {
         let worker_started = Instant::now();
         let worker_parent = inbound_trace_context_for_propagation();
         let _worker_span = self.tracing.start_span_with_trace_context(
@@ -729,7 +757,7 @@ impl SurrealRuntime {
 
         let Some(mut job) = self
             .job_store
-            .lease_due(queue, worker_id, now, DEFAULT_JOB_LEASE_SECONDS, &crate::domain::runtime::placement::WorkerCapabilities::any())
+            .lease_due(queue, worker_id, now, DEFAULT_JOB_LEASE_SECONDS, worker)
             .await?
         else {
             self.metrics.observe_duration_ms(
@@ -789,14 +817,14 @@ impl SurrealRuntime {
 
         match outcome {
             JobExecutionOutcome::Success {
-                sttp_output_node_id,
+                output_provenance,
                 execution_id,
                 diagnostics,
             } => {
                 let diagnostics_envelope =
                     Self::extract_diagnostics_envelope(diagnostics.as_deref());
                 job.state = JobState::Succeeded;
-                job.set_sttp_output_node_id(sttp_output_node_id.clone());
+                job.output_provenance = output_provenance.clone();
                 job.finished_at = Some(now);
                 job.lease_owner = None;
                 job.lease_expires_at = None;
@@ -808,7 +836,7 @@ impl SurrealRuntime {
                 self.append_outbox(
                     RuntimeEventType::JobSucceeded,
                     &job_identity,
-                    Some(sttp_output_node_id.clone()),
+                    output_provenance.clone(),
                     None,
                     now,
                     execution_id.clone(),
@@ -824,7 +852,7 @@ impl SurrealRuntime {
                     now,
                     JobAttemptOutcome::Succeeded,
                     None,
-                    Some(sttp_output_node_id),
+                    output_provenance,
                     execution_id,
                     &diagnostics_envelope,
                     diagnostics,
@@ -1173,7 +1201,7 @@ impl SurrealRuntime {
         &self,
         event_type: RuntimeEventType,
         job_identity: &RuntimeJobIdentityContext,
-        sttp_output_node_id: Option<String>,
+        output_provenance: Option<crate::domain::runtime::provenance::ProvenanceRef>,
         message: Option<String>,
         now: DateTime<Utc>,
         execution_id: Option<String>,
@@ -1196,8 +1224,7 @@ impl SurrealRuntime {
                 causation_id: job_identity.causation_id.clone(),
                 trace_id: job_identity.trace_id.clone(),
                 input_provenance: job_identity.input_provenance.clone(),
-                output_provenance: sttp_output_node_id
-                    .map(crate::domain::runtime::provenance::ProvenanceRef::sttp),
+                output_provenance,
                 execution_id,
                 input_memory_query_id: diagnostics.input_memory_query_id.clone(),
                 input_memory_query_fingerprint: diagnostics.input_memory_query_fingerprint.clone(),
@@ -1221,7 +1248,7 @@ impl SurrealRuntime {
         finished_at: DateTime<Utc>,
         outcome: JobAttemptOutcome,
         error_message: Option<String>,
-        sttp_output_node_id: Option<String>,
+        output_provenance: Option<crate::domain::runtime::provenance::ProvenanceRef>,
         execution_id: Option<String>,
         diagnostics_envelope: &runtime_diagnostics_helpers::RuntimeDiagnosticsEnvelope,
         diagnostics: Option<String>,
@@ -1235,7 +1262,7 @@ impl SurrealRuntime {
             finished_at,
             outcome,
             error_message,
-            sttp_output_node_id,
+            output_provenance,
             execution_id,
             guardrail_code: diagnostics_envelope.guardrail_code.clone(),
             policy_reason: diagnostics_envelope.policy_reason.clone(),

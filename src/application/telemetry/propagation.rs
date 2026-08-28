@@ -168,7 +168,7 @@ mod tests {
             correlation_id: "corr".to_string(),
             causation_id: "cause".to_string(),
             trace_id: "legacy-trace".to_string(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in".to_string())),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in")),
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: chrono::Utc::now(),
             backoff_policy: crate::domain::runtime::job::BackoffPolicy::default(),

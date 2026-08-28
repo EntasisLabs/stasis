@@ -168,7 +168,12 @@ impl JobHandler for AgentTurnWaitableJobHandler {
                     }
                 }
                 TurnWaitStatus::Completed => JobExecutionOutcome::Success {
-                    sttp_output_node_id: format!("sttp:agent-turn-waitable:{}", job.id),
+                    output_provenance: Some(
+                        crate::domain::runtime::provenance::ProvenanceRef::sttp(format!(
+                            "sttp:agent-turn-waitable:{}",
+                            job.id
+                        )),
+                    ),
                     execution_id: Some(payload.turn_id.clone()),
                     diagnostics: Some(
                         json!({
@@ -316,7 +321,9 @@ mod tests {
             correlation_id: "corr-1".into(),
             causation_id: "cause-1".into(),
             trace_id: "trace-1".into(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in")),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in",
+            )),
             output_provenance: None,
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: Utc::now(),
@@ -592,7 +599,9 @@ mod tests {
             correlation_id: "corr-session".into(),
             causation_id: "cause-local".into(),
             trace_id: "trace-local".into(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in")),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in",
+            )),
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: Utc::now(),
             backoff_policy: BackoffPolicy::default(),
@@ -666,7 +675,9 @@ mod tests {
 
         async fn execute(&self, job: &Job) -> Result<JobExecutionOutcome> {
             Ok(JobExecutionOutcome::Success {
-                sttp_output_node_id: format!("sttp:fake-local:{}", job.id),
+                output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                    format!("sttp:fake-local:{}", job.id),
+                )),
                 execution_id: None,
                 diagnostics: Some(r#"{"provider":"fake-local","status":"success"}"#.into()),
             })

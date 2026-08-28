@@ -100,7 +100,7 @@ impl ThreadStore for InMemoryThreadStore {
         })?;
 
         let mut result = events.get(thread_id).cloned().unwrap_or_default();
-        result.sort_by(|a, b| a.occurred_at.cmp(&b.occurred_at));
+        result.sort_by_key(|event| event.occurred_at);
         Ok(result)
     }
 
