@@ -47,7 +47,7 @@ impl WorkflowDefinitionStore for InMemoryWorkflowDefinitionStore {
         })?;
 
         let mut out = revisions.get(workflow_id).cloned().unwrap_or_default();
-        out.sort_by(|left, right| right.reflected_at_utc.cmp(&left.reflected_at_utc));
+        out.sort_by_key(|revision| std::cmp::Reverse(revision.reflected_at_utc));
         Ok(out)
     }
 }

@@ -54,8 +54,8 @@ type DashboardSurrealControlPlane = ControlPlaneSdk<DashboardSurrealControlStore
 
 #[derive(Clone)]
 enum DashboardControlPlaneKind {
-    InMemory(DashboardControlPlane),
-    Surreal(DashboardSurrealControlPlane),
+    InMemory(Box<DashboardControlPlane>),
+    Surreal(Box<DashboardSurrealControlPlane>),
 }
 
 #[derive(Clone, Debug)]
@@ -637,7 +637,7 @@ impl RuntimeDashboardQueryService {
     ) -> Self {
         Self {
             runtime: RuntimeComposition::InMemory(runtime),
-            control_plane: DashboardControlPlaneKind::InMemory(control_plane),
+            control_plane: DashboardControlPlaneKind::InMemory(Box::new(control_plane)),
             workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
             workflow_store: Arc::new(InMemoryWorkflowDefinitionStore::default()),
             workflow_engine: RuntimeFactory::default_workflow_engine(),
@@ -656,7 +656,7 @@ impl RuntimeDashboardQueryService {
 
                 Self {
                     runtime: RuntimeComposition::InMemory(rt),
-                    control_plane: DashboardControlPlaneKind::InMemory(control_plane),
+                    control_plane: DashboardControlPlaneKind::InMemory(Box::new(control_plane)),
                     workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
                     workflow_store: Arc::new(InMemoryWorkflowDefinitionStore::default()),
                     workflow_engine: RuntimeFactory::default_workflow_engine(),
@@ -675,7 +675,7 @@ impl RuntimeDashboardQueryService {
 
                 Self {
                     runtime: RuntimeComposition::Surreal(rt),
-                    control_plane: DashboardControlPlaneKind::Surreal(control_plane),
+                    control_plane: DashboardControlPlaneKind::Surreal(Box::new(control_plane)),
                     workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
                     workflow_store,
                     workflow_engine: RuntimeFactory::default_workflow_engine(),

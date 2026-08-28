@@ -48,17 +48,19 @@ pub async fn run_host(runtime: &RuntimeSdk, options: HostOptions) -> Result<Host
         });
     }
 
-    let mut report = HostReport::default();
-    report.last_reconcile = Some(
-        reconcile_from_path(
-            runtime,
-            &options.config_path,
-            options.strict,
-            options.endpoint_store.clone(),
-        )
-        .await?,
-    );
-    report.reconciles = 1;
+    let mut report = HostReport {
+        last_reconcile: Some(
+            reconcile_from_path(
+                runtime,
+                &options.config_path,
+                options.strict,
+                options.endpoint_store.clone(),
+            )
+            .await?,
+        ),
+        reconciles: 1,
+        ..HostReport::default()
+    };
     health.set_ready(true);
 
     let watcher = if options.watch {
@@ -81,15 +83,15 @@ pub async fn run_host(runtime: &RuntimeSdk, options: HostOptions) -> Result<Host
         .map_err(|err| StasisdError::Runtime(format!("failed to listen for SIGTERM: {err}")))?;
 
     loop {
-        if let Some(max) = options.max_ticks {
-            if report.ticks >= max {
-                break;
-            }
+        if let Some(max) = options.max_ticks
+            && report.ticks >= max
+        {
+            break;
         }
-        if let Some(deadline) = deadline {
-            if tokio::time::Instant::now() >= deadline {
-                break;
-            }
+        if let Some(deadline) = deadline
+            && tokio::time::Instant::now() >= deadline
+        {
+            break;
         }
 
         let shutdown = async {
@@ -110,25 +112,25 @@ pub async fn run_host(runtime: &RuntimeSdk, options: HostOptions) -> Result<Host
 
         tokio::select! {
             _ = tick_timer.tick() => {
-                if let Some(watcher) = &watcher {
-                    if watcher.try_recv_debounced(options.debounce)? {
-                        match reconcile_from_path(
-                            runtime,
-                            &options.config_path,
-                            options.strict,
-                            options.endpoint_store.clone(),
-                        )
-                        .await
-                        {
-                            Ok(reconcile_report) => {
-                                report.last_reconcile = Some(reconcile_report);
-                                report.reconciles += 1;
-                                health.set_ready(true);
-                            }
-                            Err(err) => {
-                                health.set_ready(false);
-                                return Err(err);
-                            }
+                if let Some(watcher) = &watcher
+                    && watcher.try_recv_debounced(options.debounce)?
+                {
+                    match reconcile_from_path(
+                        runtime,
+                        &options.config_path,
+                        options.strict,
+                        options.endpoint_store.clone(),
+                    )
+                    .await
+                    {
+                        Ok(reconcile_report) => {
+                            report.last_reconcile = Some(reconcile_report);
+                            report.reconciles += 1;
+                            health.set_ready(true);
+                        }
+                        Err(err) => {
+                            health.set_ready(false);
+                            return Err(err);
                         }
                     }
                 }

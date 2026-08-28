@@ -275,25 +275,23 @@ fn validate_schedule_participant_refs(
             .payload
             .get("endpoint_ref")
             .and_then(|v| v.as_str())
+            && !endpoint_ids.contains(endpoint_ref)
         {
-            if !endpoint_ids.contains(endpoint_ref) {
-                return Err(StasisdError::Validation(format!(
-                    "schedule '{}': unknown endpoint_ref '{}'",
-                    schedule.id, endpoint_ref
-                )));
-            }
+            return Err(StasisdError::Validation(format!(
+                "schedule '{}': unknown endpoint_ref '{}'",
+                schedule.id, endpoint_ref
+            )));
         }
         if let Some(gateway_ref) = schedule
             .payload
             .get("mcp_gateway_ref")
             .and_then(|v| v.as_str())
+            && !gateway_ids.contains(gateway_ref)
         {
-            if !gateway_ids.contains(gateway_ref) {
-                return Err(StasisdError::Validation(format!(
-                    "schedule '{}': unknown mcp_gateway_ref '{}'",
-                    schedule.id, gateway_ref
-                )));
-            }
+            return Err(StasisdError::Validation(format!(
+                "schedule '{}': unknown mcp_gateway_ref '{}'",
+                schedule.id, gateway_ref
+            )));
         }
     }
 
@@ -330,13 +328,12 @@ fn validate_schedule_participant_refs(
             if let Some(gateway_ref) = participant
                 .get("mcp_gateway_ref")
                 .and_then(|v| v.as_str())
+                && !gateway_ids.contains(gateway_ref)
             {
-                if !gateway_ids.contains(gateway_ref) {
-                    return Err(StasisdError::Validation(format!(
-                        "schedule '{}': participants[{idx}] unknown mcp_gateway_ref '{gateway_ref}'",
-                        schedule.id
-                    )));
-                }
+                return Err(StasisdError::Validation(format!(
+                    "schedule '{}': participants[{idx}] unknown mcp_gateway_ref '{gateway_ref}'",
+                    schedule.id
+                )));
             }
         }
     }

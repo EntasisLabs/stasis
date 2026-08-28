@@ -21,7 +21,7 @@ fn key(resource: &ResourceKey) -> &str {
     resource.0.as_str()
 }
 
-fn live<'a>(lease: &'a ResourceLease, now: DateTime<Utc>) -> Option<&'a ResourceLease> {
+fn live(lease: &ResourceLease, now: DateTime<Utc>) -> Option<&ResourceLease> {
     if lease.is_expired(now) {
         None
     } else {

@@ -139,7 +139,7 @@ mod tests {
                 correlation_id: "corr-1".to_string(),
                 causation_id: "cause-1".to_string(),
                 trace_id: "trace-1".to_string(),
-                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1".to_string())),
+                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1")),
                 output_provenance: None,
                 execution_id: None,
                 input_memory_query_id: None,

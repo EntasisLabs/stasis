@@ -6,18 +6,13 @@ use serde_json::Value;
 pub const API_VERSION: &str = "stasisd/v1";
 pub const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OnRemovePolicy {
+    #[default]
     Drain,
     Orphan,
     Cancel,
-}
-
-impl Default for OnRemovePolicy {
-    fn default() -> Self {
-        Self::Drain
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

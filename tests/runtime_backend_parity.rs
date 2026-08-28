@@ -5014,7 +5014,7 @@ async fn in_memory_concurrent_branch_reasoning_effort() {
 async fn in_memory_orchestration_concurrent_tool_loop_branch_missing_tool_name_rejects() {
     let now = Utc::now();
     let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
-        .with_chat_client(Arc::new(EchoPromptChatClient::default()))
+        .with_chat_client(Arc::new(EchoPromptChatClient))
         .without_grapheme_handlers()
         .without_prompt_handler()
         .without_tool_loop_handler()

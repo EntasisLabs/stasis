@@ -109,6 +109,10 @@ impl JobHandler for RetryOnceHandler {
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the test enum keeps both runtime backends directly accessible"
+)]
 enum TestRuntime {
     Memory(InMemoryRuntime),
     Surreal(SurrealRuntime),
@@ -326,7 +330,7 @@ fn raw_job(id: &str, job_type: &str, now: chrono::DateTime<Utc>, max_attempts: u
         correlation_id: format!("corr-{id}"),
         causation_id: "cause-1".to_string(),
         trace_id: "trace-1".to_string(),
-        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1".to_string())),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1")),
         placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now,
         backoff_policy: BackoffPolicy {

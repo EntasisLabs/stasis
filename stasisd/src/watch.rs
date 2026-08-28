@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
@@ -87,12 +89,7 @@ impl ConfigWatcher {
     }
 
     fn drain_debounce(&self, debounce: Duration) {
-        loop {
-            match self.rx.recv_timeout(debounce) {
-                Ok(()) => continue,
-                Err(_) => break,
-            }
-        }
+        while let Ok(()) = self.rx.recv_timeout(debounce) {}
     }
 }
 

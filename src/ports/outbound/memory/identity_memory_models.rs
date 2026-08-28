@@ -60,8 +60,9 @@ pub enum IdentityContextMode {
     Cognitive,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum RelationshipKind {
+    #[default]
     AssistantUser,
     UserChannel,
     Knows,
@@ -105,12 +106,6 @@ impl RelationshipKind {
             self,
             Self::Knows | Self::Prefers | Self::Delegation | Self::Colleague
         )
-    }
-}
-
-impl Default for RelationshipKind {
-    fn default() -> Self {
-        Self::AssistantUser
     }
 }
 
