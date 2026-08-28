@@ -5,13 +5,15 @@
 - Document Type: Architecture Standard
 - Audience: Engineer, Security, Architect
 - Stability: Stable
-- Last Verified: 2026-07-22
+- Last Verified: 2026-08-28
 - Verified Against:
   - docs/adr/README.md
   - docs/adr/ADR-0007-agent-platform-runtime-contracts.md
   - docs/adr/ADR-0008-stasisd-declarative-engine.md
+  - docs/adr/ADR-0010-federated-job-contract.md
   - docs/design/agent-platform-runtime-contracts-plan.md
   - docs/design/stasisd-declarative-engine-plan.md
+  - docs/design/federated-job-contract.md
   - docs-book/src/adr.md
 
 ## Purpose
