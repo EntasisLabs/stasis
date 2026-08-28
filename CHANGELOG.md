@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Runtime-neutral federated job contract (ADR-0010).** Optional `ProvenanceRef` input/output lineage replaces mandatory STTP fields (STTP retained via `SttpProvenanceAdapter`). Signed `RemoteJobEnvelope` carries job type, content-addressed payload descriptor, idempotency/correlation/causation, deadline, origin authority, terminal-delivery endpoint, and placement. Per-job `PlacementConstraints` are matched atomically in `JobStore::lease_due`. Fenced `OwnershipHandoffStore` (reserve/commit/abort) prevents dual execution of a resource generation. `BlobTransferPort` keeps artifacts out of band; `FederatedDeliveryPort`/`FederatedIngressPort` move signals and terminal results across independent runtimes without a shared DB.
+
 ## [0.9.4] - 2026-08-25
 
 ### Changed

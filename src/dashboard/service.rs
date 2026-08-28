@@ -552,7 +552,8 @@ fn build_workflow_execution_job(
         correlation_id: workflow_id.to_string(),
         causation_id: revision.revision_id.clone(),
         trace_id: trace_id_for_enqueue(|| format!("trace-wf-{}", workflow_id)),
-        sttp_input_node_id: format!("sttp:in:workflow:{workflow_id}"),
+        input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(format!("sttp:in:workflow:{workflow_id}"))),
+        placement: crate::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at,
         backoff_policy: BackoffPolicy::default(),
     }

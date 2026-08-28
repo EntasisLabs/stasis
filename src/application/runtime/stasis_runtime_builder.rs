@@ -916,7 +916,8 @@ mod tests {
             correlation_id: "corr-builder-routing".to_string(),
             causation_id: "cause-builder-routing".to_string(),
             trace_id: "trace-builder-routing".to_string(),
-            sttp_input_node_id: "sttp:in:test".to_string(),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:test".to_string())),
+            placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy::default(),
         })

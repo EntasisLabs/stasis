@@ -220,7 +220,8 @@ impl<T: StasisJob> TypedEnqueueBuilder<T> {
                     correlation_id,
                     causation_id: "stasis-client".into(),
                     trace_id: crate::application::telemetry::propagation::generate_w3c_trace_id(),
-                    sttp_input_node_id: format!("sttp:in:typed:{}", T::NAME),
+                    input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(format!("sttp:in:typed:{}", T::NAME))),
+                    placement: crate::domain::runtime::placement::PlacementConstraints::default(),
                     scheduled_at,
                     backoff_policy: self.retry.backoff,
                 }

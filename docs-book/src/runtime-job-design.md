@@ -65,8 +65,9 @@ Suggested fields:
 - correlation_id: string
 - causation_id: string
 - trace_id: string
-- sttp_input_node_id: string
-- sttp_output_node_id: string | null
+- input_provenance: object | null
+- output_provenance: object | null
+- placement: object
 - lease_owner: string | null
 - lease_expires_at: datetime | null
 - heartbeat_at: datetime | null
@@ -76,8 +77,9 @@ Suggested fields:
 - last_error: object | null
 
 Notes:
-- `sttp_input_node_id` and `sttp_output_node_id` preserve cross-job context continuity.
-- `correlation_id`, `causation_id`, and `trace_id` are mandatory observability fields.
+- `input_provenance` / `output_provenance` are optional runtime-neutral lineage refs (STTP via adapter).
+- `placement` constrains lease eligibility (capabilities, platform, architecture, region, target node).
+- `correlation_id`, `causation_id`, and `trace_id` remain mandatory observability fields.
 
 ### Recurring Definition
 
@@ -182,7 +184,7 @@ Inbound ports:
 
 ### Lease Acquisition
 
-1. Select due enqueued job where scheduled_at <= now and lease_expires_at is null or expired.
+1. Select due enqueued job where scheduled_at <= now, lease_expires_at is null or expired, and `placement` matches the worker capabilities.
 2. Attempt compare-and-set update to assign lease_owner and lease_expires_at.
 3. Proceed only when update affects one record.
 

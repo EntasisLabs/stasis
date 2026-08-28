@@ -266,7 +266,8 @@ async fn seed_demo_jobs(runtime: &InMemoryRuntime) {
             correlation_id: "corr-demo-success-1".to_string(),
             causation_id: "cause-demo-success-1".to_string(),
             trace_id: "trace-demo-success-1".to_string(),
-            sttp_input_node_id: "sttp:in:demo-1".to_string(),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:demo-1".to_string())),
+            placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: backoff.clone(),
         })
@@ -285,7 +286,8 @@ async fn seed_demo_jobs(runtime: &InMemoryRuntime) {
             correlation_id: "corr-demo-fatal-1".to_string(),
             causation_id: "cause-demo-fatal-1".to_string(),
             trace_id: "trace-demo-fatal-1".to_string(),
-            sttp_input_node_id: "sttp:in:demo-2".to_string(),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:demo-2".to_string())),
+            placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: backoff.clone(),
         })
@@ -304,7 +306,8 @@ async fn seed_demo_jobs(runtime: &InMemoryRuntime) {
             correlation_id: "corr-demo-pending-1".to_string(),
             causation_id: "cause-demo-pending-1".to_string(),
             trace_id: "trace-demo-pending-1".to_string(),
-            sttp_input_node_id: "sttp:in:demo-3".to_string(),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:demo-3".to_string())),
+            placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now + Duration::minutes(5),
             backoff_policy: backoff,
         })

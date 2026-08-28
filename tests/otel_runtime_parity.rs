@@ -172,7 +172,8 @@ async fn wired_runtime_emits_worker_and_job_spans_and_metrics() {
             correlation_id: "corr-otel".to_string(),
             causation_id: "cause-otel".to_string(),
             trace_id: "4bf92f3577b34da6a3ce929d0e0e4736".to_string(),
-            sttp_input_node_id: "sttp:in:otel".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:otel".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy::default(),
         })

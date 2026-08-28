@@ -17,7 +17,8 @@ async fn main() -> stasis::sdk_prelude::Result<()> {
         correlation_id: "corr-1".into(),
         causation_id: "cause-1".into(),
         trace_id: "trace-1".into(),
-        sttp_input_node_id: "sttp:demo:1".into(),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:demo:1")),
+        placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: Utc::now(),
         backoff_policy: BackoffPolicy::default(),
     })

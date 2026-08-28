@@ -258,7 +258,8 @@ mod tests {
             correlation_id: "corr-1".to_string(),
             causation_id: "cause-1".to_string(),
             trace_id: "trace-1".to_string(),
-            sttp_input_node_id: "sttp:input:1".to_string(),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:input:1".to_string())),
+            placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: Utc::now(),
             backoff_policy: BackoffPolicy::default(),
         }

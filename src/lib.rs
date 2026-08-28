@@ -39,6 +39,8 @@ pub mod runtime_prelude {
     };
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, JobState, NewJob};
+    pub use crate::domain::runtime::placement::{PlacementConstraints, WorkerCapabilities};
+    pub use crate::domain::runtime::provenance::{ProvenanceRef, ProvenanceScheme, SttpProvenanceAdapter};
     pub use crate::domain::runtime::recurring::RecurringDefinition;
     pub use crate::domain::runtime::resource_lease::{
         FencingToken, OwnerId, ResourceKey, ResourceLease,
@@ -61,22 +63,37 @@ pub mod runtime_prelude_ext {
         InMemoryRuntime, JobExecutionOutcome, JobHandler,
     };
     pub use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
+    pub use crate::domain::runtime::blob_descriptor::BlobDescriptor;
     pub use crate::domain::runtime::cluster_node::ClusterNodeRole;
     pub use crate::domain::runtime::delivery_endpoint::{
         DeliveryEndpoint, DeliveryProtocol, NewDeliveryEndpoint,
     };
+    pub use crate::domain::runtime::federation::{FederatedSignalEnvelope, FederatedTerminalResult};
     pub use crate::domain::runtime::outbox::OutboxEvent;
+    pub use crate::domain::runtime::placement::{PlacementConstraints, WorkerCapabilities};
+    pub use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
+    pub use crate::domain::runtime::remote_job_envelope::{
+        OriginAuthority, RemoteJobEnvelope, TerminalDeliveryEndpoint,
+    };
     pub use crate::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
     pub use crate::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
+    pub use crate::infrastructure::runtime::in_memory_blob_transfer::InMemoryBlobTransfer;
     pub use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
     pub use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
     pub use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
+    pub use crate::infrastructure::runtime::in_memory_federated_bus::InMemoryFederatedBus;
+    pub use crate::infrastructure::runtime::in_memory_ownership_handoff_store::InMemoryOwnershipHandoffStore;
     pub use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
     pub use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
     pub use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
+    pub use crate::ports::outbound::runtime::blob_transfer::BlobTransferPort;
     pub use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
     pub use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
     pub use crate::ports::outbound::runtime::endpoint_transport_publisher::EndpointTransportPublisher;
+    pub use crate::ports::outbound::runtime::federated_delivery::{
+        FederatedDeliveryPort, FederatedIngressPort,
+    };
+    pub use crate::ports::outbound::runtime::ownership_handoff_store::OwnershipHandoffStore;
 }
 
 /// Minimal memory imports for consumers using context store/recall/transform APIs.

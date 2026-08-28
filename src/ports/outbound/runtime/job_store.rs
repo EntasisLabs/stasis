@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::{Job, JobState};
+use crate::domain::runtime::placement::WorkerCapabilities;
 
 #[async_trait]
 pub trait JobStore: Send + Sync {
@@ -15,6 +16,7 @@ pub trait JobStore: Send + Sync {
         worker_id: &str,
         now: DateTime<Utc>,
         lease_seconds: i64,
+        worker: &WorkerCapabilities,
     ) -> Result<Option<Job>>;
     async fn heartbeat(
         &self,

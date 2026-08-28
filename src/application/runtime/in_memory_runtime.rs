@@ -722,7 +722,8 @@ impl InMemoryRuntime {
                 correlation_id: definition.id.clone(),
                 causation_id: definition.id.clone(),
                 trace_id: trace_id_for_enqueue(|| definition.id.clone()),
-                sttp_input_node_id: definition.payload_template_ref.clone(),
+                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(definition.payload_template_ref.clone())),
+                placement: crate::domain::runtime::placement::PlacementConstraints::default(),
                 scheduled_at,
                 backoff_policy: Default::default(),
             };
@@ -763,7 +764,7 @@ impl InMemoryRuntime {
 
         let Some(mut job) = self
             .job_store
-            .lease_due(queue, worker_id, now, DEFAULT_JOB_LEASE_SECONDS)
+            .lease_due(queue, worker_id, now, DEFAULT_JOB_LEASE_SECONDS, &crate::domain::runtime::placement::WorkerCapabilities::any())
             .await?
         else {
             self.metrics.observe_duration_ms(
@@ -830,7 +831,7 @@ impl InMemoryRuntime {
                 let diagnostics_envelope =
                     Self::extract_diagnostics_envelope(diagnostics.as_deref());
                 job.state = JobState::Succeeded;
-                job.sttp_output_node_id = Some(sttp_output_node_id.clone());
+                job.set_sttp_output_node_id(sttp_output_node_id.clone());
                 job.finished_at = Some(now);
                 job.lease_owner = None;
                 job.lease_expires_at = None;
@@ -1230,8 +1231,9 @@ impl InMemoryRuntime {
                 correlation_id: job_identity.correlation_id.clone(),
                 causation_id: job_identity.causation_id.clone(),
                 trace_id: job_identity.trace_id.clone(),
-                sttp_input_node_id: job_identity.sttp_input_node_id.clone(),
-                sttp_output_node_id,
+                input_provenance: job_identity.input_provenance.clone(),
+                output_provenance: sttp_output_node_id
+                    .map(crate::domain::runtime::provenance::ProvenanceRef::sttp),
                 execution_id,
                 input_memory_query_id: diagnostics.input_memory_query_id.clone(),
                 input_memory_query_fingerprint: diagnostics.input_memory_query_fingerprint.clone(),
@@ -1329,6 +1331,7 @@ impl JobStore for InMemoryJobStore {
         worker_id: &str,
         now: DateTime<Utc>,
         lease_seconds: i64,
+        worker: &crate::domain::runtime::placement::WorkerCapabilities,
     ) -> Result<Option<Job>> {
         let mut state = self
             .jobs
@@ -1347,6 +1350,7 @@ impl JobStore for InMemoryJobStore {
                     && job.state == JobState::Enqueued
                     && job.scheduled_at <= now
                     && lease_expired
+                    && job.placement.matches(worker)
             })
             .min_by_key(|(_, job)| (job.scheduled_at, job.priority))
             .map(|(id, _)| id.clone());
@@ -1850,7 +1854,8 @@ mod tests {
             correlation_id: "corr-1".to_string(),
             causation_id: "cause-1".to_string(),
             trace_id: "trace-1".to_string(),
-            sttp_input_node_id: "sttp:in:1".to_string(),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1".to_string())),
+            placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: crate::domain::runtime::job::BackoffPolicy {
                 base_delay_seconds: 1,
@@ -1887,7 +1892,7 @@ mod tests {
             .expect("job should exist");
 
         assert_eq!(job.state, JobState::Succeeded);
-        assert_eq!(job.sttp_output_node_id, Some("sttp:out:1".to_string()));
+        assert_eq!(job.sttp_output_node_id(), Some("sttp:out:1".to_string()));
     }
 
     #[tokio::test]
@@ -2110,7 +2115,8 @@ mod tests {
                 correlation_id: "corr-fairness-1".to_string(),
                 causation_id: "cause-fairness-1".to_string(),
                 trace_id: "trace-fairness-1".to_string(),
-                sttp_input_node_id: "sttp:in:fairness-1".to_string(),
+                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:fairness-1".to_string())),
+                placement: crate::domain::runtime::placement::PlacementConstraints::default(),
                 scheduled_at: now,
                 backoff_policy: crate::domain::runtime::job::BackoffPolicy::default(),
             })
@@ -2128,7 +2134,8 @@ mod tests {
                 correlation_id: "corr-fairness-2".to_string(),
                 causation_id: "cause-fairness-2".to_string(),
                 trace_id: "trace-fairness-2".to_string(),
-                sttp_input_node_id: "sttp:in:fairness-2".to_string(),
+                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:fairness-2".to_string())),
+                placement: crate::domain::runtime::placement::PlacementConstraints::default(),
                 scheduled_at: now,
                 backoff_policy: crate::domain::runtime::job::BackoffPolicy::default(),
             })
@@ -2221,7 +2228,8 @@ mod tests {
                     correlation_id: format!("corr-backlog-{idx}"),
                     causation_id: format!("cause-backlog-{idx}"),
                     trace_id: format!("trace-backlog-{idx}"),
-                    sttp_input_node_id: format!("sttp:in:backlog-{idx}"),
+                    input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(format!("sttp:in:backlog-{idx}"))),
+                    placement: crate::domain::runtime::placement::PlacementConstraints::default(),
                     scheduled_at: now,
                     backoff_policy: crate::domain::runtime::job::BackoffPolicy::default(),
                 })
