@@ -1,11 +1,17 @@
+pub mod blob_descriptor;
 pub mod cluster_node;
 pub mod delivery_endpoint;
 pub mod durable_wait;
 pub mod endpoint_delivery_status;
+pub mod federation;
 pub mod job;
 pub mod job_attempt;
 pub mod outbox;
+pub mod ownership_handoff;
+pub mod placement;
+pub mod provenance;
 pub mod recurring;
+pub mod remote_job_envelope;
 pub mod resource_lease;
 pub mod thread;
 pub mod typed_contract;

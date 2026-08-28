@@ -220,13 +220,13 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt
                 .job_store
-                .lease_due(queue, worker, now, ttl)
+                .lease_due(queue, worker, now, ttl, &stasis::domain::runtime::placement::WorkerCapabilities::any())
                 .await
                 .unwrap()
                 .expect("lease"),
             Self::Surreal(rt) => rt
                 .job_store
-                .lease_due(queue, worker, now, ttl)
+                .lease_due(queue, worker, now, ttl, &stasis::domain::runtime::placement::WorkerCapabilities::any())
                 .await
                 .unwrap()
                 .expect("lease"),
@@ -326,7 +326,8 @@ fn raw_job(id: &str, job_type: &str, now: chrono::DateTime<Utc>, max_attempts: u
         correlation_id: format!("corr-{id}"),
         causation_id: "cause-1".to_string(),
         trace_id: "trace-1".to_string(),
-        sttp_input_node_id: "sttp:in:1".to_string(),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1".to_string())),
+        placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now,
         backoff_policy: BackoffPolicy {
             base_delay_seconds: 0,

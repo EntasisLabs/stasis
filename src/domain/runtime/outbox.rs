@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
 
+use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutboxPublishPolicy {
     pub max_attempts: u32,
@@ -34,8 +36,8 @@ pub struct RuntimeEvent {
     pub correlation_id: String,
     pub causation_id: String,
     pub trace_id: String,
-    pub sttp_input_node_id: String,
-    pub sttp_output_node_id: Option<String>,
+    pub input_provenance: Option<ProvenanceRef>,
+    pub output_provenance: Option<ProvenanceRef>,
     pub execution_id: Option<String>,
     pub input_memory_query_id: Option<String>,
     pub input_memory_query_fingerprint: Option<String>,
@@ -43,6 +45,16 @@ pub struct RuntimeEvent {
     pub retrieval_path: Option<String>,
     pub occurred_at: DateTime<Utc>,
     pub message: Option<String>,
+}
+
+impl RuntimeEvent {
+    pub fn sttp_input_node_id(&self) -> String {
+        SttpProvenanceAdapter::to_compat_string(self.input_provenance.as_ref())
+    }
+
+    pub fn sttp_output_node_id(&self) -> Option<String> {
+        SttpProvenanceAdapter::from_optional(self.output_provenance.as_ref())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

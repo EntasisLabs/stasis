@@ -6,6 +6,7 @@ use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::outbox::{OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType};
+use crate::domain::runtime::provenance::SttpProvenanceAdapter;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 
 #[derive(Clone)]
@@ -54,6 +55,10 @@ struct OutboxRecord {
 
 impl From<OutboxEvent> for OutboxRecord {
     fn from(value: OutboxEvent) -> Self {
+        let sttp_input_node_id =
+            SttpProvenanceAdapter::to_compat_string(value.event.input_provenance.as_ref());
+        let sttp_output_node_id =
+            SttpProvenanceAdapter::from_optional(value.event.output_provenance.as_ref());
         Self {
             event_id: value.event_id,
             status: match value.status {
@@ -77,8 +82,8 @@ impl From<OutboxEvent> for OutboxRecord {
             correlation_id: value.event.correlation_id,
             causation_id: value.event.causation_id,
             trace_id: value.event.trace_id,
-            sttp_input_node_id: value.event.sttp_input_node_id,
-            sttp_output_node_id: value.event.sttp_output_node_id,
+            sttp_input_node_id,
+            sttp_output_node_id,
             execution_id: value.event.execution_id,
             input_memory_query_id: value.event.input_memory_query_id,
             input_memory_query_fingerprint: value.event.input_memory_query_fingerprint,
@@ -132,8 +137,11 @@ impl TryFrom<OutboxRecord> for OutboxEvent {
                 correlation_id: value.correlation_id,
                 causation_id: value.causation_id,
                 trace_id: value.trace_id,
-                sttp_input_node_id: value.sttp_input_node_id,
-                sttp_output_node_id: value.sttp_output_node_id,
+                input_provenance: SttpProvenanceAdapter::from_compat_string(&value.sttp_input_node_id),
+                output_provenance: value
+                    .sttp_output_node_id
+                    .as_deref()
+                    .and_then(SttpProvenanceAdapter::from_compat_string),
                 execution_id: value.execution_id,
                 input_memory_query_id: value.input_memory_query_id,
                 input_memory_query_fingerprint: value.input_memory_query_fingerprint,

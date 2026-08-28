@@ -201,7 +201,8 @@ impl RuntimeWorkflowJobBuilder {
             correlation_id,
             causation_id: self.causation_id,
             trace_id,
-            sttp_input_node_id: self.sttp_input_node_id,
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(self.sttp_input_node_id)),
+            placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: self.scheduled_at,
             backoff_policy: self.backoff_policy,
         }

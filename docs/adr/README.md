@@ -5,13 +5,15 @@
 - Document Type: Architecture Standard
 - Audience: Engineer, Security, Architect
 - Stability: Stable
-- Last Verified: 2026-07-22
+- Last Verified: 2026-08-28
 - Verified Against:
   - docs/adr/README.md
   - docs/adr/ADR-0007-agent-platform-runtime-contracts.md
   - docs/adr/ADR-0008-stasisd-declarative-engine.md
+  - docs/adr/ADR-0010-federated-job-contract.md
   - docs/design/agent-platform-runtime-contracts-plan.md
   - docs/design/stasisd-declarative-engine-plan.md
+  - docs/design/federated-job-contract.md
   - docs-book/src/adr.md
 
 ## Purpose
@@ -30,6 +32,7 @@ Track major architectural decisions with rationale, alternatives, and consequenc
 | ADR-0006 | OpenTelemetry First-Class Observability | Accepted | 2026-06-04 |
 | ADR-0007 | Agent Platform Runtime Contracts | Accepted | 2026-07-22 |
 | ADR-0008 | `stasisd` Declarative Engine | Accepted | 2026-07-22 |
+| ADR-0010 | Runtime-Neutral Federated Job Contract | Accepted | 2026-08-28 |
 
 ## Decision Dependency Diagram
 
@@ -49,7 +52,21 @@ flowchart TD
   A3 --> A7
   A4 --> A8[ADR-0008 stasisd Declarative Engine]
   A7 --> A8
+  A1 --> A10[ADR-0010 Federated Job Contract]
+  A3 --> A10
+  A7 --> A10
 ```
+
+## ADR-0010 Runtime-Neutral Federated Job Contract
+
+- Status: Accepted
+- Context: Multi-runtime deployments need optional (non-STTP-mandatory) provenance, signed remote job envelopes, placement-aware leasing, fenced ownership handoff, content-addressed blobs, and cross-runtime signals/results without a shared database.
+- Decision: Adopt a federated job contract with `ProvenanceRef`, `RemoteJobEnvelope`, placement constraints on lease, `OwnershipHandoffStore`, `BlobTransferPort`, and `FederatedDeliveryPort`/`FederatedIngressPort`.
+- Consequences:
+  - Positive: STTP becomes an adapter; runtimes can federate safely; placement/fencing harden execution.
+  - Tradeoff: Surreal keeps STTP compat columns; workers must declare capabilities for constrained work.
+- Plan: [design/federated-job-contract.md](../design/federated-job-contract.md)
+- Full ADR: [ADR-0010-federated-job-contract.md](ADR-0010-federated-job-contract.md)
 
 ## ADR-0008 `stasisd` Declarative Engine
 

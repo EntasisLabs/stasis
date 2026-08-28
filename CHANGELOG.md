@@ -7,6 +7,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-28
+
+### Added
+
+- **Runtime-neutral federated job contract (ADR-0010).** Optional `ProvenanceRef` input/output lineage replaces mandatory STTP fields (STTP retained via `SttpProvenanceAdapter`). Signed `RemoteJobEnvelope` carries job type, content-addressed payload descriptor, idempotency/correlation/causation, deadline, origin authority, terminal-delivery endpoint, and placement. Per-job `PlacementConstraints` are matched atomically in `JobStore::lease_due`. Fenced `OwnershipHandoffStore` (reserve/commit/abort) prevents dual execution of a resource generation. `BlobTransferPort` keeps artifacts out of band; `FederatedDeliveryPort`/`FederatedIngressPort` move signals and terminal results across independent runtimes without a shared DB.
+
+### Changed
+
+- **Job lineage fields are optional and scheme-neutral.** `NewJob` / `Job` / `RuntimeEvent` no longer require `sttp_input_node_id: String`. Use `input_provenance: Option<ProvenanceRef>` and `output_provenance: Option<ProvenanceRef>` (STTP helpers: `ProvenanceRef::sttp(...)`, `Job::sttp_input_node_id()`, `NewJob::with_sttp_input_node_id(...)`).
+- **Placement is first-class on every job.** `NewJob` / `Job` include `placement: PlacementConstraints` (default unrestricted).
+- **`JobStore::lease_due` takes worker capabilities.** Callers pass `&WorkerCapabilities` (use `WorkerCapabilities::any()` when unconstrained).
+
+### Migration
+
+```rust
+use stasis::domain::runtime::placement::{PlacementConstraints, WorkerCapabilities};
+use stasis::domain::runtime::provenance::ProvenanceRef;
+
+// Before
+NewJob {
+    // ...
+    sttp_input_node_id: "sttp:in:1".into(),
+    // ...
+}
+
+// After
+NewJob {
+    // ...
+    input_provenance: Some(ProvenanceRef::sttp("sttp:in:1")),
+    placement: PlacementConstraints::default(),
+    // ...
+}
+
+// Leasing
+job_store
+    .lease_due("default", "worker-1", now, 30, &WorkerCapabilities::any())
+    .await?;
+```
+
+### Notes
+
+- Surreal job/outbox rows keep STTP string columns for compatibility and populate them from the STTP adapter when scheme is `sttp`.
+- See `docs/adr/ADR-0010-federated-job-contract.md` and `docs/design/federated-job-contract.md`.
+
 ## [0.9.4] - 2026-08-25
 
 ### Changed

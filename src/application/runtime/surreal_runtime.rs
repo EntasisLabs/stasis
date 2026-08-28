@@ -687,7 +687,8 @@ impl SurrealRuntime {
                 correlation_id: definition.id.clone(),
                 causation_id: definition.id.clone(),
                 trace_id: trace_id_for_enqueue(|| definition.id.clone()),
-                sttp_input_node_id: definition.payload_template_ref.clone(),
+                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(definition.payload_template_ref.clone())),
+                placement: crate::domain::runtime::placement::PlacementConstraints::default(),
                 scheduled_at,
                 backoff_policy: Default::default(),
             };
@@ -728,7 +729,7 @@ impl SurrealRuntime {
 
         let Some(mut job) = self
             .job_store
-            .lease_due(queue, worker_id, now, DEFAULT_JOB_LEASE_SECONDS)
+            .lease_due(queue, worker_id, now, DEFAULT_JOB_LEASE_SECONDS, &crate::domain::runtime::placement::WorkerCapabilities::any())
             .await?
         else {
             self.metrics.observe_duration_ms(
@@ -795,7 +796,7 @@ impl SurrealRuntime {
                 let diagnostics_envelope =
                     Self::extract_diagnostics_envelope(diagnostics.as_deref());
                 job.state = JobState::Succeeded;
-                job.sttp_output_node_id = Some(sttp_output_node_id.clone());
+                job.set_sttp_output_node_id(sttp_output_node_id.clone());
                 job.finished_at = Some(now);
                 job.lease_owner = None;
                 job.lease_expires_at = None;
@@ -1194,8 +1195,9 @@ impl SurrealRuntime {
                 correlation_id: job_identity.correlation_id.clone(),
                 causation_id: job_identity.causation_id.clone(),
                 trace_id: job_identity.trace_id.clone(),
-                sttp_input_node_id: job_identity.sttp_input_node_id.clone(),
-                sttp_output_node_id,
+                input_provenance: job_identity.input_provenance.clone(),
+                output_provenance: sttp_output_node_id
+                    .map(crate::domain::runtime::provenance::ProvenanceRef::sttp),
                 execution_id,
                 input_memory_query_id: diagnostics.input_memory_query_id.clone(),
                 input_memory_query_fingerprint: diagnostics.input_memory_query_fingerprint.clone(),

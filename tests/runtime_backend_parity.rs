@@ -878,7 +878,8 @@ fn build_new_job(job_type: &str, now: chrono::DateTime<Utc>) -> NewJob {
         correlation_id: "corr-1".to_string(),
         causation_id: "cause-1".to_string(),
         trace_id: "trace-1".to_string(),
-        sttp_input_node_id: "sttp:in:1".to_string(),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1".to_string())),
+        placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now,
         backoff_policy: BackoffPolicy {
             base_delay_seconds: 1,
@@ -1374,7 +1375,7 @@ async fn in_memory_prompt_job_handler_with_memory_persists_memory_node_id_and_di
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:memory:prompt:1")
     );
 
@@ -1617,7 +1618,7 @@ async fn surreal_prompt_job_handler_with_memory_persists_memory_node_id_and_diag
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:memory:prompt:surreal:1")
     );
 
@@ -1770,7 +1771,7 @@ async fn in_memory_tool_loop_job_handler_with_memory_persists_memory_node_id_and
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:memory:tool-loop:1")
     );
 
@@ -2018,7 +2019,7 @@ async fn surreal_tool_loop_job_handler_with_memory_persists_memory_node_id_and_d
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:memory:tool-loop:surreal:1")
     );
 
@@ -2166,7 +2167,7 @@ async fn in_memory_agent_turn_job_handler_with_memory_persists_memory_node_id_an
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:memory:agent-turn:1")
     );
 
@@ -2419,7 +2420,7 @@ async fn surreal_agent_turn_job_handler_with_memory_persists_memory_node_id_and_
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:memory:agent-turn:surreal:1")
     );
 
@@ -2544,7 +2545,7 @@ async fn in_memory_tool_loop_job_handler_executes_and_persists_diagnostics() {
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:tool-loop:job-tool-loop-1")
     );
 
@@ -2754,7 +2755,7 @@ async fn in_memory_agent_turn_job_handler_executes_single_agent_turn() {
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:agent-turn:job-agent-turn-1")
     );
 
@@ -2878,7 +2879,7 @@ async fn in_memory_agent_session_job_handler_executes_session() {
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:agent-session:job-agent-session-1")
     );
 
@@ -2996,7 +2997,7 @@ async fn surreal_agent_session_job_handler_executes_session() {
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:agent-session:job-surreal-agent-session-1")
     );
 
@@ -3120,7 +3121,7 @@ async fn in_memory_agent_session_job_handler_with_memory_persists_memory_node_id
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:memory:agent-session:1")
     );
 
@@ -3366,7 +3367,7 @@ async fn surreal_agent_session_job_handler_with_memory_persists_memory_node_id_a
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:memory:agent-session:surreal:1")
     );
 
@@ -3690,7 +3691,7 @@ async fn surreal_memory_recall_job_handler_executes_and_emits_diagnostics() {
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:memory-recall:job-surreal-memory-recall-1")
     );
 
@@ -4316,7 +4317,7 @@ async fn in_memory_orchestration_sequential_pattern_executes_all_stages() {
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:orchestration:sequential:job-sequential-in-memory-1")
     );
 
@@ -4516,7 +4517,7 @@ async fn surreal_orchestration_concurrent_pattern_executes_all_branches() {
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:orchestration:concurrent:job-concurrent-surreal-1")
     );
 
@@ -5150,7 +5151,7 @@ async fn in_memory_orchestration_handoff_pattern_executes_turns_and_emits_transi
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:orchestration:handoff:job-handoff-in-memory-1")
     );
 
@@ -5345,7 +5346,7 @@ async fn in_memory_orchestration_orchestrator_pattern_selects_matching_route() {
         .expect("job should exist");
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(
-        job.sttp_output_node_id.as_deref(),
+        job.sttp_output_node_id().as_deref(),
         Some("sttp:orchestration:orchestrator:job-orchestrator-in-memory-1")
     );
 
@@ -6413,9 +6414,11 @@ async fn surreal_job_leasing_allows_only_one_winner_under_contention() {
         .await
         .expect("job should enqueue");
 
+    let caps_a = stasis::domain::runtime::placement::WorkerCapabilities::any();
+    let caps_b = stasis::domain::runtime::placement::WorkerCapabilities::any();
     let (a, b) = tokio::join!(
-        runtime.job_store.lease_due("default", "worker-a", now, 30),
-        runtime.job_store.lease_due("default", "worker-b", now, 30)
+        runtime.job_store.lease_due("default", "worker-a", now, 30, &caps_a),
+        runtime.job_store.lease_due("default", "worker-b", now, 30, &caps_b)
     );
 
     let leased_a = a.expect("lease call a should succeed");
@@ -6448,7 +6451,7 @@ async fn surreal_job_lease_expiry_allows_recovery_by_another_worker() {
 
     let first = runtime
         .job_store
-        .lease_due("default", "worker-1", now, 1)
+        .lease_due("default", "worker-1", now, 1, &stasis::domain::runtime::placement::WorkerCapabilities::any())
         .await
         .expect("first lease should succeed")
         .expect("first lease should acquire job");
@@ -6456,7 +6459,7 @@ async fn surreal_job_lease_expiry_allows_recovery_by_another_worker() {
 
     let during_lease = runtime
         .job_store
-        .lease_due("default", "worker-2", now, 1)
+        .lease_due("default", "worker-2", now, 1, &stasis::domain::runtime::placement::WorkerCapabilities::any())
         .await
         .expect("second lease call should succeed");
     assert!(during_lease.is_none());
@@ -6472,7 +6475,7 @@ async fn surreal_job_lease_expiry_allows_recovery_by_another_worker() {
     let after_backoff = later + Duration::seconds(2);
     let recovered = runtime
         .job_store
-        .lease_due("default", "worker-2", after_backoff, 30)
+        .lease_due("default", "worker-2", after_backoff, 30, &stasis::domain::runtime::placement::WorkerCapabilities::any())
         .await
         .expect("recovery lease should succeed")
         .expect("recovery lease should acquire job");
@@ -6510,7 +6513,8 @@ async fn in_memory_event_driven_continuation_job_executes_end_to_end() {
             correlation_id: "corr-parent-1".to_string(),
             causation_id: "cause-parent-1".to_string(),
             trace_id: "trace-parent-1".to_string(),
-            sttp_input_node_id: "sttp:in:parent".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:parent".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -6536,7 +6540,7 @@ async fn in_memory_event_driven_continuation_job_executes_end_to_end() {
 
     let parent_output = evt
         .event
-        .sttp_output_node_id
+        .sttp_output_node_id()
         .clone()
         .expect("parent output node id should exist");
 
@@ -6553,7 +6557,8 @@ async fn in_memory_event_driven_continuation_job_executes_end_to_end() {
             correlation_id: "corr-parent-1".to_string(),
             causation_id: parent_job_id,
             trace_id: "trace-parent-1".to_string(),
-            sttp_input_node_id: parent_output,
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(parent_output)),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now + Duration::seconds(1),
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -6576,7 +6581,7 @@ async fn in_memory_event_driven_continuation_job_executes_end_to_end() {
         .expect("child should exist");
 
     assert_eq!(child.state, JobState::Succeeded);
-    assert_eq!(child.sttp_input_node_id, "sttp:out:parent");
+    assert_eq!(child.sttp_input_node_id(), "sttp:out:parent");
     assert_eq!(child.correlation_id, "corr-parent-1");
     assert_eq!(child.trace_id, "trace-parent-1");
 }
@@ -6614,7 +6619,8 @@ query Hello {
             correlation_id: "corr-grapheme-1".to_string(),
             causation_id: "cause-grapheme-1".to_string(),
             trace_id: "trace-grapheme-1".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:1".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:1".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -6638,7 +6644,7 @@ query Hello {
 
     assert_eq!(job.state, JobState::Succeeded);
     assert!(
-        job.sttp_output_node_id
+        job.sttp_output_node_id()
             .as_deref()
             .unwrap_or_default()
             .starts_with("sttp:grapheme:")
@@ -6722,7 +6728,8 @@ async fn in_memory_grapheme_healthcheck_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-healthcheck-1".to_string(),
             causation_id: "cause-grapheme-healthcheck-1".to_string(),
             trace_id: "trace-grapheme-healthcheck-1".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:healthcheck:1".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:healthcheck:1".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -6746,7 +6753,7 @@ async fn in_memory_grapheme_healthcheck_workflow_executes_successfully() {
 
     assert_eq!(job.state, JobState::Succeeded);
     assert!(
-        job.sttp_output_node_id
+        job.sttp_output_node_id()
             .as_deref()
             .unwrap_or_default()
             .starts_with("sttp:grapheme:")
@@ -6784,7 +6791,8 @@ async fn surreal_grapheme_healthcheck_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-healthcheck-surreal-1".to_string(),
             causation_id: "cause-grapheme-healthcheck-surreal-1".to_string(),
             trace_id: "trace-grapheme-healthcheck-surreal-1".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:healthcheck:surreal:1".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:healthcheck:surreal:1".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -6808,7 +6816,7 @@ async fn surreal_grapheme_healthcheck_workflow_executes_successfully() {
 
     assert_eq!(job.state, JobState::Succeeded);
     assert!(
-        job.sttp_output_node_id
+        job.sttp_output_node_id()
             .as_deref()
             .unwrap_or_default()
             .starts_with("sttp:grapheme:")
@@ -6838,7 +6846,8 @@ async fn in_memory_grapheme_echo_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-echo-1".to_string(),
             causation_id: "cause-grapheme-echo-1".to_string(),
             trace_id: "trace-grapheme-echo-1".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:echo:1".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:echo:1".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -6894,7 +6903,8 @@ async fn surreal_grapheme_echo_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-echo-surreal-1".to_string(),
             causation_id: "cause-grapheme-echo-surreal-1".to_string(),
             trace_id: "trace-grapheme-echo-surreal-1".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:echo:surreal:1".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:echo:surreal:1".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -6942,7 +6952,8 @@ async fn in_memory_grapheme_echo_rejects_invalid_payload_schema() {
             correlation_id: "corr-grapheme-echo-invalid-1".to_string(),
             causation_id: "cause-grapheme-echo-invalid-1".to_string(),
             trace_id: "trace-grapheme-echo-invalid-1".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:echo:invalid:1".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:echo:invalid:1".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -7006,7 +7017,8 @@ async fn in_memory_grapheme_textops_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-textops-1".to_string(),
             causation_id: "cause-grapheme-textops-1".to_string(),
             trace_id: "trace-grapheme-textops-1".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:textops:1".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:textops:1".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -7061,7 +7073,8 @@ async fn surreal_grapheme_textops_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-textops-surreal-1".to_string(),
             causation_id: "cause-grapheme-textops-surreal-1".to_string(),
             trace_id: "trace-grapheme-textops-surreal-1".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:textops:surreal:1".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:textops:surreal:1".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -7108,7 +7121,8 @@ async fn in_memory_grapheme_textops_rejects_invalid_payload_schema() {
             correlation_id: "corr-grapheme-textops-invalid-1".to_string(),
             causation_id: "cause-grapheme-textops-invalid-1".to_string(),
             trace_id: "trace-grapheme-textops-invalid-1".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:textops:invalid:1".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:textops:invalid:1".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -7232,7 +7246,8 @@ query Run {
             correlation_id: "corr-grapheme-policy-failure".to_string(),
             causation_id: "cause-grapheme-policy-failure".to_string(),
             trace_id: "trace-grapheme-policy-failure".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:policy:1".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:policy:1".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -7466,7 +7481,8 @@ query Hello {
             correlation_id: "corr-grapheme-lineage-success".to_string(),
             causation_id: "cause-grapheme-lineage-success".to_string(),
             trace_id: "trace-grapheme-lineage-success".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:lineage:success".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:lineage:success".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,
@@ -7644,7 +7660,8 @@ query Run {
             correlation_id: "corr-grapheme-lineage-guardrail".to_string(),
             causation_id: "cause-grapheme-lineage-guardrail".to_string(),
             trace_id: "trace-grapheme-lineage-guardrail".to_string(),
-            sttp_input_node_id: "sttp:in:grapheme:lineage:guardrail".to_string(),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:lineage:guardrail".to_string())),
+            placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
                 base_delay_seconds: 1,

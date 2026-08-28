@@ -1,3 +1,4 @@
+pub mod blob_transfer;
 pub mod clock;
 pub mod cluster_command_forwarder;
 pub mod cluster_control_event_sink;
@@ -9,10 +10,12 @@ pub mod endpoint_delivery_status_store;
 pub mod endpoint_routing_policy;
 pub mod endpoint_transport_publisher;
 pub mod event_publisher;
+pub mod federated_delivery;
 pub mod id_generator;
 pub mod job_attempt_store;
 pub mod job_store;
 pub mod outbox_store;
+pub mod ownership_handoff_store;
 pub mod recurring_store;
 pub mod resource_lease_store;
 pub mod runtime_metrics;

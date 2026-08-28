@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::domain::runtime::placement::PlacementConstraints;
+use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JobState {
     Enqueued,
@@ -42,8 +45,11 @@ pub struct Job {
     pub correlation_id: String,
     pub causation_id: String,
     pub trace_id: String,
-    pub sttp_input_node_id: String,
-    pub sttp_output_node_id: Option<String>,
+    /// Optional runtime-neutral input lineage (STTP retained via [`SttpProvenanceAdapter`]).
+    pub input_provenance: Option<ProvenanceRef>,
+    /// Optional runtime-neutral output lineage.
+    pub output_provenance: Option<ProvenanceRef>,
+    pub placement: PlacementConstraints,
     pub lease_owner: Option<String>,
     pub lease_expires_at: Option<DateTime<Utc>>,
     pub heartbeat_at: Option<DateTime<Utc>>,
@@ -52,6 +58,22 @@ pub struct Job {
     pub finished_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
     pub progress_json: Option<String>,
+}
+
+impl Job {
+    /// Compatibility view of STTP input node id when input provenance uses the STTP scheme.
+    pub fn sttp_input_node_id(&self) -> String {
+        SttpProvenanceAdapter::to_compat_string(self.input_provenance.as_ref())
+    }
+
+    /// Compatibility view of STTP output node id when output provenance uses the STTP scheme.
+    pub fn sttp_output_node_id(&self) -> Option<String> {
+        SttpProvenanceAdapter::from_optional(self.output_provenance.as_ref())
+    }
+
+    pub fn set_sttp_output_node_id(&mut self, node_id: impl AsRef<str>) {
+        self.output_provenance = Some(SttpProvenanceAdapter::to_provenance(node_id));
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -66,7 +88,8 @@ pub struct NewJob {
     pub correlation_id: String,
     pub causation_id: String,
     pub trace_id: String,
-    pub sttp_input_node_id: String,
+    pub input_provenance: Option<ProvenanceRef>,
+    pub placement: PlacementConstraints,
     pub scheduled_at: DateTime<Utc>,
     pub backoff_policy: BackoffPolicy,
 }
@@ -87,8 +110,9 @@ impl NewJob {
             correlation_id: self.correlation_id,
             causation_id: self.causation_id,
             trace_id: self.trace_id,
-            sttp_input_node_id: self.sttp_input_node_id,
-            sttp_output_node_id: None,
+            input_provenance: self.input_provenance,
+            output_provenance: None,
+            placement: self.placement,
             lease_owner: None,
             lease_expires_at: None,
             heartbeat_at: None,
@@ -98,5 +122,11 @@ impl NewJob {
             last_error: None,
             progress_json: None,
         }
+    }
+
+    /// Convenience for callers still constructing STTP lineage explicitly.
+    pub fn with_sttp_input_node_id(mut self, node_id: impl AsRef<str>) -> Self {
+        self.input_provenance = Some(SttpProvenanceAdapter::to_provenance(node_id));
+        self
     }
 }

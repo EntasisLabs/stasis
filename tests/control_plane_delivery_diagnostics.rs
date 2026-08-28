@@ -179,7 +179,8 @@ async fn surreal_runtime_persists_endpoint_delivery_status_and_control_plane_que
         correlation_id: "corr-surreal-routing-status".to_string(),
         causation_id: "cause-surreal-routing-status".to_string(),
         trace_id: "trace-surreal-routing-status".to_string(),
-        sttp_input_node_id: "sttp:in:surreal-e2e".to_string(),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:surreal-e2e".to_string())),
+        placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now - Duration::seconds(1),
         backoff_policy: BackoffPolicy::default(),
     })
@@ -316,7 +317,8 @@ async fn surreal_runtime_records_retry_backoff_then_recovery_for_endpoint_delive
         correlation_id: "corr-surreal-routing-backoff".to_string(),
         causation_id: "cause-surreal-routing-backoff".to_string(),
         trace_id: "trace-surreal-routing-backoff".to_string(),
-        sttp_input_node_id: "sttp:in:surreal-backoff".to_string(),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:surreal-backoff".to_string())),
+        placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now - Duration::seconds(1),
         backoff_policy: BackoffPolicy::default(),
     })
@@ -475,7 +477,8 @@ async fn surreal_runtime_marks_outbox_failed_after_max_publish_attempts() {
         correlation_id: "corr-surreal-routing-terminal-failure".to_string(),
         causation_id: "cause-surreal-routing-terminal-failure".to_string(),
         trace_id: "trace-surreal-routing-terminal-failure".to_string(),
-        sttp_input_node_id: "sttp:in:surreal-terminal-failure".to_string(),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:surreal-terminal-failure".to_string())),
+        placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now - Duration::seconds(1),
         backoff_policy: BackoffPolicy::default(),
     })
