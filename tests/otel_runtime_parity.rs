@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use stasis::application::orchestration::runtime_job_payloads::MemoryRecallJobPayload;
 use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
-use stasis::application::runtime::in_memory_runtime::{InMemoryRuntime, JobExecutionOutcome, JobHandler};
+use stasis::application::runtime::in_memory_runtime::{
+    InMemoryRuntime, JobExecutionOutcome, JobHandler,
+};
 use stasis::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
 use stasis::application::telemetry::keys::{
     JOB_SUCCEEDED_TOTAL, MEMORY_RECALL_TOTAL, WORKER_PROCESS_ONCE_TOTAL,
@@ -111,7 +113,9 @@ impl JobHandler for SuccessHandler {
         _job: &stasis::domain::runtime::job::Job,
     ) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: "sttp:out:otel".to_string(),
+            output_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:out:otel",
+            )),
             execution_id: Some("exec:otel".to_string()),
             diagnostics: None,
         })
@@ -148,7 +152,7 @@ async fn wired_runtime_emits_worker_and_job_spans_and_metrics() {
         tracing,
     });
 
-    let mut runtime = InMemoryRuntime::with_dependencies_and_telemetry(
+    let runtime = InMemoryRuntime::with_dependencies_and_telemetry(
         Arc::new(stasis::infrastructure::runtime::system_clock::SystemClock),
         Arc::new(stasis::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator::new(1)),
         metrics.clone(),
@@ -172,7 +176,9 @@ async fn wired_runtime_emits_worker_and_job_spans_and_metrics() {
             correlation_id: "corr-otel".to_string(),
             causation_id: "cause-otel".to_string(),
             trace_id: "4bf92f3577b34da6a3ce929d0e0e4736".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:otel".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:otel",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy::default(),
@@ -190,7 +196,11 @@ async fn wired_runtime_emits_worker_and_job_spans_and_metrics() {
     assert_eq!(snapshot.counters.get(JOB_SUCCEEDED_TOTAL), Some(&1));
 
     let recorded_spans = spans.lock().expect("spans lock");
-    assert!(recorded_spans.iter().any(|name| name == spans::WORKER_PROCESS_ONCE));
+    assert!(
+        recorded_spans
+            .iter()
+            .any(|name| name == spans::WORKER_PROCESS_ONCE)
+    );
     assert!(recorded_spans.iter().any(|name| name == spans::JOB_EXECUTE));
 }
 
@@ -207,18 +217,20 @@ async fn builder_wires_memory_recall_telemetry() {
         tracing,
     });
 
-    let runtime = StasisRuntimeBuilder::new(stasis::application::runtime::runtime_factory::RuntimeBackend::InMemory)
-        .with_runtime_telemetry(telemetry)
-        .with_memory_context_reader(reader)
-        .without_grapheme_handlers()
-        .without_prompt_handler()
-        .without_tool_loop_handler()
-        .without_agent_handlers()
-        .without_orchestration_pattern_handlers()
-        .without_cluster_control_handlers()
-        .build()
-        .await
-        .expect("runtime should build");
+    let runtime = StasisRuntimeBuilder::new(
+        stasis::application::runtime::runtime_factory::RuntimeBackend::InMemory,
+    )
+    .with_runtime_telemetry(telemetry)
+    .with_memory_context_reader(reader)
+    .without_grapheme_handlers()
+    .without_prompt_handler()
+    .without_tool_loop_handler()
+    .without_agent_handlers()
+    .without_orchestration_pattern_handlers()
+    .without_cluster_control_handlers()
+    .build()
+    .await
+    .expect("runtime should build");
 
     let stasis::application::runtime::runtime_factory::RuntimeComposition::InMemory(rt) = runtime
     else {
@@ -241,7 +253,11 @@ async fn builder_wires_memory_recall_telemetry() {
     assert_eq!(snapshot.counters.get(MEMORY_RECALL_TOTAL), Some(&1));
 
     let recorded_spans = spans.lock().expect("spans lock");
-    assert!(recorded_spans.iter().any(|name| name == spans::MEMORY_RECALL));
+    assert!(
+        recorded_spans
+            .iter()
+            .any(|name| name == spans::MEMORY_RECALL)
+    );
 }
 
 #[test]

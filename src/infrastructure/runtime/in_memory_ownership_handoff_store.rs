@@ -8,8 +8,10 @@ use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::ownership_handoff::{
     OwnershipHandoff, OwnershipHandoffPhase, OwnershipHandoffReservation,
 };
-use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey, ResourceLease};
-use crate::ports::outbound::runtime::ownership_handoff_store::OwnershipHandoffStore;
+use crate::domain::runtime::resource_lease::{FencingToken, ResourceKey, ResourceLease};
+use crate::ports::outbound::runtime::ownership_handoff_store::{
+    OwnershipHandoffStore, ReserveOwnershipHandoff,
+};
 use crate::ports::outbound::runtime::resource_lease_store::ResourceLeaseStore;
 
 fn lock_err() -> StasisError {
@@ -20,16 +22,20 @@ fn lock_err() -> StasisError {
 #[derive(Clone)]
 pub struct InMemoryOwnershipHandoffStore {
     leases: Arc<dyn ResourceLeaseStore>,
-    handoffs: Arc<RwLock<HashMap<String, OwnershipHandoff>>>,
-    by_resource: Arc<RwLock<HashMap<String, String>>>,
+    state: Arc<RwLock<OwnershipHandoffState>>,
+}
+
+#[derive(Default)]
+struct OwnershipHandoffState {
+    handoffs: HashMap<String, OwnershipHandoff>,
+    by_resource: HashMap<String, String>,
 }
 
 impl InMemoryOwnershipHandoffStore {
     pub fn new(leases: Arc<dyn ResourceLeaseStore>) -> Self {
         Self {
             leases,
-            handoffs: Arc::new(RwLock::new(HashMap::new())),
-            by_resource: Arc::new(RwLock::new(HashMap::new())),
+            state: Arc::new(RwLock::new(OwnershipHandoffState::default())),
         }
     }
 }
@@ -38,17 +44,20 @@ impl InMemoryOwnershipHandoffStore {
 impl OwnershipHandoffStore for InMemoryOwnershipHandoffStore {
     async fn reserve(
         &self,
-        resource: &ResourceKey,
-        from: &OwnerId,
-        to: OwnerId,
-        fencing_token: FencingToken,
-        ttl: Duration,
-        now: DateTime<Utc>,
-        handoff_id: String,
+        request: ReserveOwnershipHandoff,
     ) -> Result<OwnershipHandoffReservation> {
+        let ReserveOwnershipHandoff {
+            resource,
+            from_owner,
+            to_owner,
+            fencing_token,
+            ttl,
+            now,
+            handoff_id,
+        } = request;
         if !self
             .leases
-            .validate_fence(resource, fencing_token, now)
+            .validate_fence(&resource, fencing_token, now)
             .await?
         {
             return Err(StasisError::PortFailure(
@@ -58,35 +67,20 @@ impl OwnershipHandoffStore for InMemoryOwnershipHandoffStore {
 
         let lease = self
             .leases
-            .get(resource)
+            .get(&resource)
             .await?
             .ok_or_else(|| StasisError::PortFailure("resource lease not found".into()))?;
-        if lease.owner != *from || lease.fencing_token != fencing_token {
+        if lease.owner != from_owner || lease.fencing_token != fencing_token {
             return Err(StasisError::PortFailure(
                 "ownership handoff reserve rejected: owner/fence mismatch".into(),
             ));
         }
 
-        {
-            let by_resource = self.by_resource.read().map_err(|_| lock_err())?;
-            if let Some(existing_id) = by_resource.get(&resource.0) {
-                let handoffs = self.handoffs.read().map_err(|_| lock_err())?;
-                if let Some(existing) = handoffs.get(existing_id) {
-                    if existing.is_active(now) {
-                        return Err(StasisError::PortFailure(format!(
-                            "ownership handoff already reserved for generation {}: {}",
-                            existing.generation, existing.handoff_id
-                        )));
-                    }
-                }
-            }
-        }
-
         let handoff = OwnershipHandoff {
             handoff_id: handoff_id.clone(),
             resource: resource.clone(),
-            from_owner: from.clone(),
-            to_owner: to,
+            from_owner,
+            to_owner,
             generation: lease.generation,
             fencing_token,
             phase: OwnershipHandoffPhase::Reserved,
@@ -95,10 +89,20 @@ impl OwnershipHandoffStore for InMemoryOwnershipHandoffStore {
             expires_at: now + ttl,
         };
 
-        let mut handoffs = self.handoffs.write().map_err(|_| lock_err())?;
-        let mut by_resource = self.by_resource.write().map_err(|_| lock_err())?;
-        handoffs.insert(handoff_id, handoff.clone());
-        by_resource.insert(resource.0.clone(), handoff.handoff_id.clone());
+        let mut state = self.state.write().map_err(|_| lock_err())?;
+        if let Some(existing_id) = state.by_resource.get(&resource.0)
+            && let Some(existing) = state.handoffs.get(existing_id)
+            && existing.is_active(now)
+        {
+            return Err(StasisError::PortFailure(format!(
+                "ownership handoff already reserved for generation {}: {}",
+                existing.generation, existing.handoff_id
+            )));
+        }
+        state.handoffs.insert(handoff_id, handoff.clone());
+        state
+            .by_resource
+            .insert(resource.0, handoff.handoff_id.clone());
 
         Ok(OwnershipHandoffReservation { handoff })
     }
@@ -111,8 +115,9 @@ impl OwnershipHandoffStore for InMemoryOwnershipHandoffStore {
         now: DateTime<Utc>,
     ) -> Result<ResourceLease> {
         let handoff = {
-            let handoffs = self.handoffs.read().map_err(|_| lock_err())?;
-            handoffs
+            let state = self.state.read().map_err(|_| lock_err())?;
+            state
+                .handoffs
                 .get(handoff_id)
                 .cloned()
                 .ok_or_else(|| StasisError::PortFailure("ownership handoff not found".into()))?
@@ -154,13 +159,12 @@ impl OwnershipHandoffStore for InMemoryOwnershipHandoffStore {
             .await?;
 
         {
-            let mut handoffs = self.handoffs.write().map_err(|_| lock_err())?;
-            let mut by_resource = self.by_resource.write().map_err(|_| lock_err())?;
-            if let Some(entry) = handoffs.get_mut(handoff_id) {
+            let mut state = self.state.write().map_err(|_| lock_err())?;
+            if let Some(entry) = state.handoffs.get_mut(handoff_id) {
                 entry.phase = OwnershipHandoffPhase::Committed;
                 entry.updated_at = now;
             }
-            by_resource.remove(&handoff.resource.0);
+            state.by_resource.remove(&handoff.resource.0);
         }
 
         Ok(transferred)
@@ -172,10 +176,11 @@ impl OwnershipHandoffStore for InMemoryOwnershipHandoffStore {
         fencing_token: FencingToken,
         now: DateTime<Utc>,
     ) -> Result<OwnershipHandoff> {
-        let mut handoffs = self.handoffs.write().map_err(|_| lock_err())?;
-        let mut by_resource = self.by_resource.write().map_err(|_| lock_err())?;
-        let Some(handoff) = handoffs.get_mut(handoff_id) else {
-            return Err(StasisError::PortFailure("ownership handoff not found".into()));
+        let mut state = self.state.write().map_err(|_| lock_err())?;
+        let Some(handoff) = state.handoffs.get_mut(handoff_id) else {
+            return Err(StasisError::PortFailure(
+                "ownership handoff not found".into(),
+            ));
         };
         if handoff.fencing_token != fencing_token {
             return Err(StasisError::PortFailure(
@@ -189,13 +194,15 @@ impl OwnershipHandoffStore for InMemoryOwnershipHandoffStore {
         }
         handoff.phase = OwnershipHandoffPhase::Aborted;
         handoff.updated_at = now;
-        by_resource.remove(&handoff.resource.0);
-        Ok(handoff.clone())
+        let resource = handoff.resource.0.clone();
+        let handoff = handoff.clone();
+        state.by_resource.remove(&resource);
+        Ok(handoff)
     }
 
     async fn get(&self, handoff_id: &str) -> Result<Option<OwnershipHandoff>> {
-        let handoffs = self.handoffs.read().map_err(|_| lock_err())?;
-        Ok(handoffs.get(handoff_id).cloned())
+        let state = self.state.read().map_err(|_| lock_err())?;
+        Ok(state.handoffs.get(handoff_id).cloned())
     }
 
     async fn get_active_for_resource(
@@ -203,12 +210,12 @@ impl OwnershipHandoffStore for InMemoryOwnershipHandoffStore {
         resource: &ResourceKey,
         now: DateTime<Utc>,
     ) -> Result<Option<OwnershipHandoff>> {
-        let by_resource = self.by_resource.read().map_err(|_| lock_err())?;
-        let Some(handoff_id) = by_resource.get(&resource.0) else {
+        let state = self.state.read().map_err(|_| lock_err())?;
+        let Some(handoff_id) = state.by_resource.get(&resource.0) else {
             return Ok(None);
         };
-        let handoffs = self.handoffs.read().map_err(|_| lock_err())?;
-        Ok(handoffs
+        Ok(state
+            .handoffs
             .get(handoff_id)
             .filter(|h| h.is_active(now))
             .cloned())

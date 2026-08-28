@@ -86,7 +86,12 @@ impl JobHandler for MemoryRecallJobHandler {
                     telemetry.record_recall_success(recall_started);
                 }
                 Ok(JobExecutionOutcome::Success {
-                    sttp_output_node_id: format!("sttp:memory-recall:{}", job.id),
+                    output_provenance: Some(
+                        crate::domain::runtime::provenance::ProvenanceRef::sttp(format!(
+                            "sttp:memory-recall:{}",
+                            job.id
+                        )),
+                    ),
                     execution_id: None,
                     diagnostics: Some(
                         json!({

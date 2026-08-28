@@ -54,10 +54,9 @@ impl SpanGuard {
         Self { inner: None }
     }
 
+    #[cfg(feature = "otel")]
     pub(crate) fn new(inner: Box<dyn Send + Sync>) -> Self {
-        Self {
-            inner: Some(inner),
-        }
+        Self { inner: Some(inner) }
     }
 }
 

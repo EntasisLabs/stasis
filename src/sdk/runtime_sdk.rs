@@ -8,6 +8,7 @@ use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
 use crate::application::runtime::typed_job::{JobConsumer, TypedEnqueueBuilder};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::{JobState, NewJob};
+use crate::domain::runtime::placement::WorkerCapabilities;
 use crate::domain::runtime::recurring::RecurringDefinition;
 use crate::domain::runtime::resource_lease::{FencingToken, ResourceLease};
 use crate::domain::runtime::typed_contract::{StasisEvent, StasisJob};
@@ -353,10 +354,27 @@ impl RuntimeSdk {
 
     /// Attempts to process one job from a queue using the provided worker id.
     pub async fn process_once(&self, queue: &str, worker_id: &str) -> Result<Option<String>> {
+        self.process_once_with_capabilities(queue, worker_id, &WorkerCapabilities::any())
+            .await
+    }
+
+    /// Attempts to process one compatible job using the worker's declared placement capabilities.
+    pub async fn process_once_with_capabilities(
+        &self,
+        queue: &str,
+        worker_id: &str,
+        worker: &WorkerCapabilities,
+    ) -> Result<Option<String>> {
         let now = Utc::now();
         match &self.runtime {
-            RuntimeComposition::InMemory(rt) => rt.process_once(queue, worker_id, now).await,
-            RuntimeComposition::Surreal(rt) => rt.process_once(queue, worker_id, now).await,
+            RuntimeComposition::InMemory(rt) => {
+                rt.process_once_with_capabilities(queue, worker_id, now, worker)
+                    .await
+            }
+            RuntimeComposition::Surreal(rt) => {
+                rt.process_once_with_capabilities(queue, worker_id, now, worker)
+                    .await
+            }
         }
     }
 

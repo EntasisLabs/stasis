@@ -40,7 +40,9 @@ pub mod runtime_prelude {
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, JobState, NewJob};
     pub use crate::domain::runtime::placement::{PlacementConstraints, WorkerCapabilities};
-    pub use crate::domain::runtime::provenance::{ProvenanceRef, ProvenanceScheme, SttpProvenanceAdapter};
+    pub use crate::domain::runtime::provenance::{
+        ProvenanceRef, ProvenanceScheme, SttpProvenanceAdapter,
+    };
     pub use crate::domain::runtime::recurring::RecurringDefinition;
     pub use crate::domain::runtime::resource_lease::{
         FencingToken, OwnerId, ResourceKey, ResourceLease,
@@ -68,12 +70,16 @@ pub mod runtime_prelude_ext {
     pub use crate::domain::runtime::delivery_endpoint::{
         DeliveryEndpoint, DeliveryProtocol, NewDeliveryEndpoint,
     };
-    pub use crate::domain::runtime::federation::{FederatedSignalEnvelope, FederatedTerminalResult};
+    pub use crate::domain::runtime::federation::{
+        FederatedSignalEnvelope, FederatedTerminalResult, sign_federated_signal,
+        sign_federated_terminal_result, verify_federated_signal, verify_federated_terminal_result,
+    };
     pub use crate::domain::runtime::outbox::OutboxEvent;
     pub use crate::domain::runtime::placement::{PlacementConstraints, WorkerCapabilities};
     pub use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
     pub use crate::domain::runtime::remote_job_envelope::{
-        OriginAuthority, RemoteJobEnvelope, TerminalDeliveryEndpoint,
+        OriginAuthority, RemoteJobEnvelope, TerminalDeliveryEndpoint, sign_remote_job_envelope,
+        verify_remote_job_envelope,
     };
     pub use crate::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
     pub use crate::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
@@ -93,7 +99,9 @@ pub mod runtime_prelude_ext {
     pub use crate::ports::outbound::runtime::federated_delivery::{
         FederatedDeliveryPort, FederatedIngressPort,
     };
-    pub use crate::ports::outbound::runtime::ownership_handoff_store::OwnershipHandoffStore;
+    pub use crate::ports::outbound::runtime::ownership_handoff_store::{
+        OwnershipHandoffStore, ReserveOwnershipHandoff,
+    };
 }
 
 /// Minimal memory imports for consumers using context store/recall/transform APIs.

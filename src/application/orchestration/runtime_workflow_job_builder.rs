@@ -11,6 +11,8 @@ use crate::application::orchestration::runtime_job_payloads::{
 use crate::application::telemetry::propagation::{generate_w3c_trace_id, parse_traceparent};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::{BackoffPolicy, NewJob};
+use crate::domain::runtime::placement::PlacementConstraints;
+use crate::domain::runtime::provenance::ProvenanceRef;
 use crate::ports::outbound::runtime::runtime_tracing::TraceContext;
 
 const JOB_TYPE_AGENT_SESSION: &str = "workflow.stasis.agent_session";
@@ -43,7 +45,8 @@ pub struct RuntimeWorkflowJobBuilder {
     correlation_id: Option<String>,
     causation_id: String,
     trace_id: Option<String>,
-    sttp_input_node_id: String,
+    input_provenance: Option<ProvenanceRef>,
+    placement: PlacementConstraints,
     scheduled_at: DateTime<Utc>,
     backoff_policy: BackoffPolicy,
 }
@@ -57,7 +60,11 @@ macro_rules! define_payload_builder {
 }
 
 impl RuntimeWorkflowJobBuilder {
-    define_payload_builder!(for_agent_session, AgentSessionJobPayload, JOB_TYPE_AGENT_SESSION);
+    define_payload_builder!(
+        for_agent_session,
+        AgentSessionJobPayload,
+        JOB_TYPE_AGENT_SESSION
+    );
     define_payload_builder!(for_agent_turn, AgentTurnJobPayload, JOB_TYPE_AGENT_TURN);
     define_payload_builder!(
         for_agent_turn_waitable,
@@ -66,7 +73,11 @@ impl RuntimeWorkflowJobBuilder {
     );
     define_payload_builder!(for_tool_loop, ToolLoopJobPayload, JOB_TYPE_TOOL_LOOP);
     define_payload_builder!(for_prompt, PromptJobPayload, JOB_TYPE_PROMPT);
-    define_payload_builder!(for_memory_recall, MemoryRecallJobPayload, JOB_TYPE_MEMORY_RECALL);
+    define_payload_builder!(
+        for_memory_recall,
+        MemoryRecallJobPayload,
+        JOB_TYPE_MEMORY_RECALL
+    );
     define_payload_builder!(for_memory_find, MemoryFindJobPayload, JOB_TYPE_MEMORY_FIND);
     define_payload_builder!(
         for_memory_aggregate,
@@ -78,10 +89,26 @@ impl RuntimeWorkflowJobBuilder {
         MemoryTransformJobPayload,
         JOB_TYPE_MEMORY_TRANSFORM
     );
-    define_payload_builder!(for_memory_rollup, MemoryRollupJobPayload, JOB_TYPE_MEMORY_ROLLUP);
-    define_payload_builder!(for_memory_schema, MemorySchemaJobPayload, JOB_TYPE_MEMORY_SCHEMA);
-    define_payload_builder!(for_memory_evict, MemoryEvictJobPayload, JOB_TYPE_MEMORY_EVICT);
-    define_payload_builder!(for_memory_graph, MemoryGraphJobPayload, JOB_TYPE_MEMORY_GRAPH);
+    define_payload_builder!(
+        for_memory_rollup,
+        MemoryRollupJobPayload,
+        JOB_TYPE_MEMORY_ROLLUP
+    );
+    define_payload_builder!(
+        for_memory_schema,
+        MemorySchemaJobPayload,
+        JOB_TYPE_MEMORY_SCHEMA
+    );
+    define_payload_builder!(
+        for_memory_evict,
+        MemoryEvictJobPayload,
+        JOB_TYPE_MEMORY_EVICT
+    );
+    define_payload_builder!(
+        for_memory_graph,
+        MemoryGraphJobPayload,
+        JOB_TYPE_MEMORY_GRAPH
+    );
     define_payload_builder!(
         for_orchestration_sequential,
         SequentialPatternJobPayload,
@@ -115,7 +142,8 @@ impl RuntimeWorkflowJobBuilder {
             correlation_id: None,
             causation_id: "stasis-client".to_string(),
             trace_id: None,
-            sttp_input_node_id: "sttp:in:stasis:workflow".to_string(),
+            input_provenance: Some(ProvenanceRef::sttp("sttp:in:stasis:workflow")),
+            placement: PlacementConstraints::default(),
             scheduled_at: Utc::now(),
             backoff_policy: BackoffPolicy::default(),
         })
@@ -167,7 +195,22 @@ impl RuntimeWorkflowJobBuilder {
     }
 
     pub fn with_sttp_input_node_id(mut self, sttp_input_node_id: impl Into<String>) -> Self {
-        self.sttp_input_node_id = sttp_input_node_id.into();
+        self.input_provenance = Some(ProvenanceRef::sttp(sttp_input_node_id.into()));
+        self
+    }
+
+    pub fn with_input_provenance(mut self, input_provenance: ProvenanceRef) -> Self {
+        self.input_provenance = Some(input_provenance);
+        self
+    }
+
+    pub fn without_input_provenance(mut self) -> Self {
+        self.input_provenance = None;
+        self
+    }
+
+    pub fn with_placement(mut self, placement: PlacementConstraints) -> Self {
+        self.placement = placement;
         self
     }
 
@@ -186,9 +229,7 @@ impl RuntimeWorkflowJobBuilder {
             .idempotency_key
             .unwrap_or_else(|| format!("idem-{}", self.id));
         let correlation_id = self.correlation_id.unwrap_or_else(|| self.id.clone());
-        let trace_id = self
-            .trace_id
-            .unwrap_or_else(generate_w3c_trace_id);
+        let trace_id = self.trace_id.unwrap_or_else(generate_w3c_trace_id);
 
         NewJob {
             id: self.id,
@@ -201,8 +242,8 @@ impl RuntimeWorkflowJobBuilder {
             correlation_id,
             causation_id: self.causation_id,
             trace_id,
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(self.sttp_input_node_id)),
-            placement: crate::domain::runtime::placement::PlacementConstraints::default(),
+            input_provenance: self.input_provenance,
+            placement: self.placement,
             scheduled_at: self.scheduled_at,
             backoff_policy: self.backoff_policy,
         }

@@ -58,6 +58,8 @@ Mandatory STTP input/output fields are removed from the domain model; Surreal pe
 
 `JobStore::lease_due(..., worker: &WorkerCapabilities)` matches constraints atomically with lease CAS.
 
+Runtime workers use `RuntimeSdk::process_once_with_capabilities`. The compatibility `process_once` entry point declares no capabilities and therefore leases only unrestricted jobs.
+
 ## Ownership handoff
 
 `OwnershipHandoffStore`:
@@ -81,6 +83,12 @@ Prevents two nodes from executing the same resource generation.
 - `FederatedTerminalResult`
 
 Independent runtimes bind delivery to destination/origin runtime ids. No shared job/outbox database is required.
+
+All three envelope types are signed over canonical bytes. The reference in-memory bus requires a verification key registered for the envelope `key_id`, rejects invalid signatures and expired remote jobs, and treats repeated envelope/signal/result identities idempotently.
+
+## Successful output
+
+`JobExecutionOutcome::Success` carries optional `output_provenance`. Generic typed jobs emit CAS provenance for their serialized result; STTP-aware handlers explicitly use `ProvenanceRef::sttp`. Jobs, attempts, and outbox events preserve the structured reference through both in-memory and Surreal backends.
 
 ## Test coverage
 

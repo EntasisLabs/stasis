@@ -6,7 +6,7 @@ use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::outbox::{OutboxEvent, OutboxStatus, RuntimeEvent, RuntimeEventType};
-use crate::domain::runtime::provenance::SttpProvenanceAdapter;
+use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 
 #[derive(Clone)]
@@ -44,6 +44,10 @@ struct OutboxRecord {
     trace_id: String,
     sttp_input_node_id: String,
     sttp_output_node_id: Option<String>,
+    #[serde(default)]
+    input_provenance_json: Option<String>,
+    #[serde(default)]
+    output_provenance_json: Option<String>,
     execution_id: Option<String>,
     input_memory_query_id: Option<String>,
     input_memory_query_fingerprint: Option<String>,
@@ -59,6 +63,16 @@ impl From<OutboxEvent> for OutboxRecord {
             SttpProvenanceAdapter::to_compat_string(value.event.input_provenance.as_ref());
         let sttp_output_node_id =
             SttpProvenanceAdapter::from_optional(value.event.output_provenance.as_ref());
+        let input_provenance_json = value
+            .event
+            .input_provenance
+            .as_ref()
+            .and_then(|provenance| serde_json::to_string(provenance).ok());
+        let output_provenance_json = value
+            .event
+            .output_provenance
+            .as_ref()
+            .and_then(|provenance| serde_json::to_string(provenance).ok());
         Self {
             event_id: value.event_id,
             status: match value.status {
@@ -84,6 +98,8 @@ impl From<OutboxEvent> for OutboxRecord {
             trace_id: value.event.trace_id,
             sttp_input_node_id,
             sttp_output_node_id,
+            input_provenance_json,
+            output_provenance_json,
             execution_id: value.event.execution_id,
             input_memory_query_id: value.event.input_memory_query_id,
             input_memory_query_fingerprint: value.event.input_memory_query_fingerprint,
@@ -137,11 +153,23 @@ impl TryFrom<OutboxRecord> for OutboxEvent {
                 correlation_id: value.correlation_id,
                 causation_id: value.causation_id,
                 trace_id: value.trace_id,
-                input_provenance: SttpProvenanceAdapter::from_compat_string(&value.sttp_input_node_id),
-                output_provenance: value
-                    .sttp_output_node_id
+                input_provenance: value
+                    .input_provenance_json
                     .as_deref()
-                    .and_then(SttpProvenanceAdapter::from_compat_string),
+                    .and_then(|json| serde_json::from_str::<ProvenanceRef>(json).ok())
+                    .or_else(|| {
+                        SttpProvenanceAdapter::from_compat_string(&value.sttp_input_node_id)
+                    }),
+                output_provenance: value
+                    .output_provenance_json
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<ProvenanceRef>(json).ok())
+                    .or_else(|| {
+                        value
+                            .sttp_output_node_id
+                            .as_deref()
+                            .and_then(SttpProvenanceAdapter::from_compat_string)
+                    }),
                 execution_id: value.execution_id,
                 input_memory_query_id: value.input_memory_query_id,
                 input_memory_query_fingerprint: value.input_memory_query_fingerprint,

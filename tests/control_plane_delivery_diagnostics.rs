@@ -1,5 +1,5 @@
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
@@ -18,9 +18,9 @@ use stasis::infrastructure::runtime::endpoint_routing_event_publisher::EndpointR
 use stasis::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
 use stasis::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
 use stasis::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
-use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
 use stasis::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
 use stasis::ports::outbound::runtime::endpoint_transport_publisher::EndpointTransportPublisher;
+use stasis::ports::outbound::runtime::outbox_store::OutboxStore;
 use stasis::sdk::control_plane_sdk::ControlPlaneSdk;
 
 #[derive(Clone)]
@@ -37,7 +37,9 @@ impl JobHandler for SuccessHandler {
         _job: &stasis::domain::runtime::job::Job,
     ) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: "sttp:out:surreal-e2e".to_string(),
+            output_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:out:surreal-e2e",
+            )),
             execution_id: Some("exec:surreal-e2e".to_string()),
             diagnostics: None,
         })
@@ -179,7 +181,9 @@ async fn surreal_runtime_persists_endpoint_delivery_status_and_control_plane_que
         correlation_id: "corr-surreal-routing-status".to_string(),
         causation_id: "cause-surreal-routing-status".to_string(),
         trace_id: "trace-surreal-routing-status".to_string(),
-        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:surreal-e2e".to_string())),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+            "sttp:in:surreal-e2e",
+        )),
         placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now - Duration::seconds(1),
         backoff_policy: BackoffPolicy::default(),
@@ -317,7 +321,9 @@ async fn surreal_runtime_records_retry_backoff_then_recovery_for_endpoint_delive
         correlation_id: "corr-surreal-routing-backoff".to_string(),
         causation_id: "cause-surreal-routing-backoff".to_string(),
         trace_id: "trace-surreal-routing-backoff".to_string(),
-        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:surreal-backoff".to_string())),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+            "sttp:in:surreal-backoff",
+        )),
         placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now - Duration::seconds(1),
         backoff_policy: BackoffPolicy::default(),
@@ -405,7 +411,10 @@ async fn surreal_runtime_records_retry_backoff_then_recovery_for_endpoint_delive
         .await
         .expect("read model query should succeed");
     assert_eq!(read_model_rows.len(), 1);
-    assert_eq!(read_model_rows[0].endpoint_id, "endpoint.surreal.webhook.backoff");
+    assert_eq!(
+        read_model_rows[0].endpoint_id,
+        "endpoint.surreal.webhook.backoff"
+    );
     assert_eq!(read_model_rows[0].success_count, 1);
     assert_eq!(read_model_rows[0].failure_count, 1);
 }
@@ -477,7 +486,9 @@ async fn surreal_runtime_marks_outbox_failed_after_max_publish_attempts() {
         correlation_id: "corr-surreal-routing-terminal-failure".to_string(),
         causation_id: "cause-surreal-routing-terminal-failure".to_string(),
         trace_id: "trace-surreal-routing-terminal-failure".to_string(),
-        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:surreal-terminal-failure".to_string())),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+            "sttp:in:surreal-terminal-failure",
+        )),
         placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now - Duration::seconds(1),
         backoff_policy: BackoffPolicy::default(),
@@ -503,7 +514,10 @@ async fn surreal_runtime_marks_outbox_failed_after_max_publish_attempts() {
     assert_eq!(after_first.len(), 1);
     assert_eq!(after_first[0].status, OutboxStatus::Pending);
     assert_eq!(after_first[0].publish_attempts, 1);
-    assert_eq!(after_first[0].next_attempt_at, Some(now + Duration::seconds(1)));
+    assert_eq!(
+        after_first[0].next_attempt_at,
+        Some(now + Duration::seconds(1))
+    );
 
     let second_publish = rt
         .publish_pending_events(10, now + Duration::seconds(1))
@@ -536,7 +550,10 @@ async fn surreal_runtime_marks_outbox_failed_after_max_publish_attempts() {
         .await
         .expect("status list should succeed");
     assert_eq!(statuses.len(), 1);
-    assert_eq!(statuses[0].endpoint_id, "endpoint.surreal.webhook.fail-forever");
+    assert_eq!(
+        statuses[0].endpoint_id,
+        "endpoint.surreal.webhook.fail-forever"
+    );
     assert_eq!(statuses[0].success_count, 0);
     assert_eq!(statuses[0].failure_count, 2);
     assert!(statuses[0].last_error.is_some());

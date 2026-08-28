@@ -180,7 +180,9 @@ impl JobHandler for QueueOwnershipRebalanceJobHandler {
         .to_string();
 
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: "sttp:out:stasis:cluster:queue_ownership_rebalance".to_string(),
+            output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:out:stasis:cluster:queue_ownership_rebalance",
+            )),
             execution_id: None,
             diagnostics: Some(diagnostics),
         })
@@ -214,7 +216,9 @@ mod tests {
             correlation_id: "corr-rebalance".to_string(),
             causation_id: "cause-rebalance".to_string(),
             trace_id: "trace-rebalance".to_string(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:cluster:rebalance".to_string())),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:cluster:rebalance",
+            )),
             output_provenance: None,
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             lease_owner: None,

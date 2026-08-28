@@ -2,19 +2,24 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use chrono::{Duration, Utc};
+use stasis::application::runtime::in_memory_runtime::InMemoryJobStore;
+use stasis::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use stasis::application::runtime::runtime_factory::RuntimeComposition;
 use stasis::domain::runtime::blob_descriptor::BlobDescriptor;
 use stasis::domain::runtime::federation::{
-    FederatedSignalEnvelope, FederatedTerminalResult, FEDERATED_SIGNAL_SCHEMA_VERSION_V1,
-    FEDERATED_TERMINAL_RESULT_SCHEMA_VERSION_V1,
+    FEDERATED_SIGNAL_SCHEMA_VERSION_V1, FEDERATED_TERMINAL_RESULT_SCHEMA_VERSION_V1,
+    FederatedSignalEnvelope, FederatedTerminalResult, sign_federated_signal,
+    sign_federated_terminal_result,
 };
 use stasis::domain::runtime::job::{BackoffPolicy, NewJob};
 use stasis::domain::runtime::ownership_handoff::OwnershipHandoffPhase;
 use stasis::domain::runtime::placement::{PlacementConstraints, WorkerCapabilities};
 use stasis::domain::runtime::provenance::{ProvenanceRef, ProvenanceScheme, SttpProvenanceAdapter};
 use stasis::domain::runtime::remote_job_envelope::{
-    sign_remote_job_envelope, verify_remote_job_envelope, EnvelopeSignature, OriginAuthority,
-    RemoteJobEnvelope, TerminalDeliveryEndpoint, REMOTE_JOB_ENVELOPE_SCHEMA_VERSION_V1,
+    EnvelopeSignature, OriginAuthority, REMOTE_JOB_ENVELOPE_SCHEMA_VERSION_V1, RemoteJobEnvelope,
+    TerminalDeliveryEndpoint, sign_remote_job_envelope, verify_remote_job_envelope,
 };
 use stasis::domain::runtime::resource_lease::{OwnerId, ResourceKey};
 use stasis::infrastructure::runtime::in_memory_blob_transfer::InMemoryBlobTransfer;
@@ -26,9 +31,11 @@ use stasis::ports::outbound::runtime::federated_delivery::{
     FederatedDeliveryPort, FederatedIngressPort,
 };
 use stasis::ports::outbound::runtime::job_store::JobStore;
-use stasis::ports::outbound::runtime::ownership_handoff_store::OwnershipHandoffStore;
+use stasis::ports::outbound::runtime::ownership_handoff_store::{
+    OwnershipHandoffStore, ReserveOwnershipHandoff,
+};
 use stasis::ports::outbound::runtime::resource_lease_store::ResourceLeaseStore;
-use stasis::application::runtime::in_memory_runtime::InMemoryJobStore;
+use stasis::sdk::runtime_sdk::RuntimeSdk;
 
 #[test]
 fn sttp_adapter_preserves_optional_provenance() {
@@ -80,11 +87,13 @@ async fn placement_constraints_applied_atomically_during_lease() {
         .with_capability("cpu")
         .region("us-west")
         .node_id("node-a");
-    assert!(store
-        .lease_due("default", "worker-cpu", now, 30, &cpu_only)
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        store
+            .lease_due("default", "worker-cpu", now, 30, &cpu_only)
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     let gpu_worker = WorkerCapabilities::any()
         .with_capability("gpu")
@@ -118,34 +127,31 @@ async fn fenced_ownership_handoff_prevents_generation_conflict() {
         .unwrap();
 
     let reservation = handoffs
-        .reserve(
-            &resource,
-            &OwnerId("node-a".into()),
-            OwnerId("node-b".into()),
-            lease.fencing_token,
-            Duration::seconds(30),
+        .reserve(ReserveOwnershipHandoff {
+            resource: resource.clone(),
+            from_owner: OwnerId("node-a".into()),
+            to_owner: OwnerId("node-b".into()),
+            fencing_token: lease.fencing_token,
+            ttl: Duration::seconds(30),
             now,
-            "ho-1".into(),
-        )
+            handoff_id: "ho-1".into(),
+        })
         .await
         .unwrap();
-    assert_eq!(
-        reservation.handoff.phase,
-        OwnershipHandoffPhase::Reserved
-    );
+    assert_eq!(reservation.handoff.phase, OwnershipHandoffPhase::Reserved);
     assert_eq!(reservation.handoff.generation, lease.generation);
 
     // Second reserve for same generation must fail while active.
     let conflict = handoffs
-        .reserve(
-            &resource,
-            &OwnerId("node-a".into()),
-            OwnerId("node-c".into()),
-            lease.fencing_token,
-            Duration::seconds(30),
+        .reserve(ReserveOwnershipHandoff {
+            resource: resource.clone(),
+            from_owner: OwnerId("node-a".into()),
+            to_owner: OwnerId("node-c".into()),
+            fencing_token: lease.fencing_token,
+            ttl: Duration::seconds(30),
             now,
-            "ho-2".into(),
-        )
+            handoff_id: "ho-2".into(),
+        })
         .await;
     assert!(conflict.is_err());
 
@@ -171,6 +177,44 @@ async fn fenced_ownership_handoff_prevents_generation_conflict() {
 }
 
 #[tokio::test]
+async fn concurrent_handoff_reservations_have_one_winner() {
+    let leases: Arc<dyn ResourceLeaseStore> = Arc::new(InMemoryResourceLeaseStore::default());
+    let handoffs = InMemoryOwnershipHandoffStore::new(leases.clone());
+    let now = Utc::now();
+    let resource = ResourceKey("res-race".into());
+    let lease = leases
+        .acquire(
+            resource.clone(),
+            OwnerId("node-a".into()),
+            Duration::seconds(60),
+            now,
+            false,
+        )
+        .await
+        .unwrap();
+    let first = handoffs.reserve(ReserveOwnershipHandoff {
+        resource: resource.clone(),
+        from_owner: OwnerId("node-a".into()),
+        to_owner: OwnerId("node-b".into()),
+        fencing_token: lease.fencing_token,
+        ttl: Duration::seconds(30),
+        now,
+        handoff_id: "ho-race-1".into(),
+    });
+    let second = handoffs.reserve(ReserveOwnershipHandoff {
+        resource: resource.clone(),
+        from_owner: OwnerId("node-a".into()),
+        to_owner: OwnerId("node-c".into()),
+        fencing_token: lease.fencing_token,
+        ttl: Duration::seconds(30),
+        now,
+        handoff_id: "ho-race-2".into(),
+    });
+    let (first, second) = tokio::join!(first, second);
+    assert_ne!(first.is_ok(), second.is_ok());
+}
+
+#[tokio::test]
 async fn blob_transfer_port_keeps_artifacts_out_of_band() {
     let blobs = InMemoryBlobTransfer::new();
     let descriptor = blobs
@@ -190,6 +234,8 @@ async fn signed_remote_job_and_signals_cross_runtimes_without_shared_db() {
     bus.ensure_runtime("rt-b").unwrap();
 
     let key = b"federation-shared-secret";
+    bus.register_verification_key("key-1", key.to_vec())
+        .unwrap();
     let payload = BlobDescriptor::from_bytes(br#"{"task":"echo"}"#);
     let mut envelope = RemoteJobEnvelope {
         schema_version: REMOTE_JOB_ENVELOPE_SCHEMA_VERSION_V1,
@@ -225,8 +271,12 @@ async fn signed_remote_job_and_signals_cross_runtimes_without_shared_db() {
         .submit_remote_job(envelope.clone())
         .await
         .unwrap();
+    delivery_to_b
+        .submit_remote_job(envelope.clone())
+        .await
+        .unwrap();
 
-    let signal = FederatedSignalEnvelope {
+    let mut signal = FederatedSignalEnvelope {
         schema_version: FEDERATED_SIGNAL_SCHEMA_VERSION_V1,
         signal_id: "sig-1".into(),
         signal_type: "ApprovalGranted".into(),
@@ -237,11 +287,19 @@ async fn signed_remote_job_and_signals_cross_runtimes_without_shared_db() {
         causation_id: "env-1".into(),
         correlation_id: "corr-fed".into(),
         occurred_at: Utc::now(),
-        signature: envelope.signature.clone(),
+        signature: EnvelopeSignature {
+            algorithm: EnvelopeSignature::HMAC_SHA256.into(),
+            key_id: String::new(),
+            signature_hex: String::new(),
+        },
     };
+    sign_federated_signal(&mut signal, "key-1", key).unwrap();
+    let mut tampered_signal = signal.clone();
+    tampered_signal.signal_type = "Tampered".into();
+    assert!(delivery_to_b.deliver_signal(tampered_signal).await.is_err());
     delivery_to_b.deliver_signal(signal.clone()).await.unwrap();
 
-    let result = FederatedTerminalResult {
+    let mut result = FederatedTerminalResult {
         schema_version: FEDERATED_TERMINAL_RESULT_SCHEMA_VERSION_V1,
         result_id: "res-1".into(),
         envelope_id: envelope.envelope_id.clone(),
@@ -258,8 +316,21 @@ async fn signed_remote_job_and_signals_cross_runtimes_without_shared_db() {
         correlation_id: envelope.correlation_id.clone(),
         causation_id: envelope.causation_id.clone(),
         occurred_at: Utc::now(),
-        signature: envelope.signature.clone(),
+        signature: EnvelopeSignature {
+            algorithm: EnvelopeSignature::HMAC_SHA256.into(),
+            key_id: String::new(),
+            signature_hex: String::new(),
+        },
     };
+    sign_federated_terminal_result(&mut result, "key-1", key).unwrap();
+    let mut tampered_result = result.clone();
+    tampered_result.succeeded = false;
+    assert!(
+        delivery_to_b
+            .deliver_terminal_result(tampered_result)
+            .await
+            .is_err()
+    );
     delivery_to_b
         .deliver_terminal_result(result.clone())
         .await
@@ -277,5 +348,205 @@ async fn signed_remote_job_and_signals_cross_runtimes_without_shared_db() {
 
     let ingress_a = bus.ingress_port("rt-a");
     ingress_a.accept_signal(signal).await.unwrap();
-    assert_eq!(bus.inbox("rt-a").unwrap().signals.len(), 2);
+    assert_eq!(bus.inbox("rt-a").unwrap().signals.len(), 1);
+}
+
+struct GenericCapabilityHandler;
+
+#[async_trait]
+impl JobHandler for GenericCapabilityHandler {
+    fn job_type(&self) -> &'static str {
+        "generic.capability"
+    }
+
+    async fn execute(
+        &self,
+        _job: &stasis::domain::runtime::job::Job,
+    ) -> stasis::domain::errors::Result<JobExecutionOutcome> {
+        Ok(JobExecutionOutcome::Success {
+            output_provenance: Some(ProvenanceRef::uri("artifact://generic-output")),
+            execution_id: Some("generic-execution".into()),
+            diagnostics: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn runtime_sdk_processes_capability_matched_job_without_sttp() {
+    let runtime = RuntimeSdk::in_memory().await.unwrap();
+    runtime.register_handler(GenericCapabilityHandler).unwrap();
+    let now = Utc::now();
+    runtime
+        .enqueue(NewJob {
+            id: "job-generic".into(),
+            queue: "generic".into(),
+            job_type: "generic.capability".into(),
+            payload_ref: "payload://generic".into(),
+            priority: 10,
+            max_attempts: 1,
+            idempotency_key: "idem-generic".into(),
+            correlation_id: "corr-generic".into(),
+            causation_id: "cause-generic".into(),
+            trace_id: "trace-generic".into(),
+            input_provenance: None,
+            placement: PlacementConstraints::unrestricted().require_capability("gpu"),
+            scheduled_at: now,
+            backoff_policy: BackoffPolicy::default(),
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        runtime
+            .process_once_with_capabilities(
+                "generic",
+                "cpu-worker",
+                &WorkerCapabilities::any().with_capability("cpu"),
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        runtime
+            .process_once_with_capabilities(
+                "generic",
+                "gpu-worker",
+                &WorkerCapabilities::any().with_capability("gpu"),
+            )
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("job-generic")
+    );
+
+    let RuntimeComposition::InMemory(inner) = runtime.runtime() else {
+        unreachable!();
+    };
+    let job = inner.job_store.get("job-generic").await.unwrap().unwrap();
+    assert_eq!(job.input_provenance, None);
+    assert_eq!(
+        job.output_provenance,
+        Some(ProvenanceRef::uri("artifact://generic-output"))
+    );
+    assert!(job.sttp_output_node_id().is_none());
+
+    let attempts = inner.list_job_attempts("job-generic").await.unwrap();
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].output_provenance, job.output_provenance);
+}
+
+#[tokio::test]
+async fn surreal_runtime_round_trips_generic_provenance_and_placement() {
+    let runtime = RuntimeSdk::surreal_mem("federated-contract", "generic-provenance")
+        .await
+        .unwrap();
+    runtime.register_handler(GenericCapabilityHandler).unwrap();
+    runtime
+        .enqueue(NewJob {
+            id: "job-surreal-generic".into(),
+            queue: "generic".into(),
+            job_type: "generic.capability".into(),
+            payload_ref: "payload://surreal-generic".into(),
+            priority: 10,
+            max_attempts: 1,
+            idempotency_key: "idem-surreal-generic".into(),
+            correlation_id: "corr-surreal-generic".into(),
+            causation_id: "cause-surreal-generic".into(),
+            trace_id: "trace-surreal-generic".into(),
+            input_provenance: Some(ProvenanceRef::uri("artifact://generic-input")),
+            placement: PlacementConstraints::unrestricted().require_capability("gpu"),
+            scheduled_at: Utc::now(),
+            backoff_policy: BackoffPolicy::default(),
+        })
+        .await
+        .unwrap();
+
+    runtime
+        .process_once_with_capabilities(
+            "generic",
+            "gpu-worker",
+            &WorkerCapabilities::any().with_capability("gpu"),
+        )
+        .await
+        .unwrap()
+        .expect("matching worker should process the generic job");
+
+    let RuntimeComposition::Surreal(inner) = runtime.runtime() else {
+        unreachable!();
+    };
+    let job = inner
+        .job_store
+        .get("job-surreal-generic")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        job.input_provenance,
+        Some(ProvenanceRef::uri("artifact://generic-input"))
+    );
+    assert_eq!(
+        job.output_provenance,
+        Some(ProvenanceRef::uri("artifact://generic-output"))
+    );
+
+    let attempts = inner
+        .list_job_attempts("job-surreal-generic")
+        .await
+        .unwrap();
+    assert_eq!(attempts[0].output_provenance, job.output_provenance);
+
+    let events = inner
+        .list_lineage_events("job-surreal-generic")
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event.input_provenance, job.input_provenance);
+    assert_eq!(events[0].event.output_provenance, job.output_provenance);
+}
+
+#[tokio::test]
+async fn federated_ingress_rejects_tampered_and_expired_envelopes() {
+    let bus = InMemoryFederatedBus::new();
+    bus.ensure_runtime("rt-b").unwrap();
+    let key = b"federation-shared-secret";
+    bus.register_verification_key("key-1", key.to_vec())
+        .unwrap();
+
+    let mut envelope = RemoteJobEnvelope {
+        schema_version: REMOTE_JOB_ENVELOPE_SCHEMA_VERSION_V1,
+        envelope_id: "env-reject".into(),
+        job_type: "federated.echo".into(),
+        payload: BlobDescriptor::from_bytes(b"payload"),
+        idempotency_key: "idem-reject".into(),
+        correlation_id: "corr-reject".into(),
+        causation_id: "cause-reject".into(),
+        deadline: Utc::now() + Duration::minutes(1),
+        origin_authority: OriginAuthority {
+            runtime_id: "rt-a".into(),
+            authority_id: "auth-a".into(),
+            realm: None,
+        },
+        terminal_delivery: TerminalDeliveryEndpoint {
+            endpoint_id: "ep-a".into(),
+            protocol: "memory-bus".into(),
+            address: "rt-a://terminal".into(),
+        },
+        placement: PlacementConstraints::unrestricted(),
+        signature: EnvelopeSignature {
+            algorithm: EnvelopeSignature::HMAC_SHA256.into(),
+            key_id: String::new(),
+            signature_hex: String::new(),
+        },
+    };
+    sign_remote_job_envelope(&mut envelope, "key-1", key).unwrap();
+
+    let ingress = bus.ingress_port("rt-b");
+    let mut tampered = envelope.clone();
+    tampered.job_type = "federated.tampered".into();
+    assert!(ingress.accept_remote_job(tampered).await.is_err());
+
+    envelope.deadline = Utc::now() - Duration::seconds(1);
+    sign_remote_job_envelope(&mut envelope, "key-1", key).unwrap();
+    assert!(ingress.accept_remote_job(envelope).await.is_err());
 }

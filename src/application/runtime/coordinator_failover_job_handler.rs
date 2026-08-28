@@ -233,7 +233,9 @@ impl JobHandler for CoordinatorFailoverJobHandler {
         .to_string();
 
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: "sttp:out:stasis:cluster:coordinator_failover".to_string(),
+            output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:out:stasis:cluster:coordinator_failover",
+            )),
             execution_id: None,
             diagnostics: Some(diagnostics),
         })
@@ -267,7 +269,9 @@ mod tests {
             correlation_id: "corr-failover".to_string(),
             causation_id: "cause-failover".to_string(),
             trace_id: "trace-failover".to_string(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:cluster:failover".to_string())),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:cluster:failover",
+            )),
             output_provenance: None,
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             lease_owner: None,

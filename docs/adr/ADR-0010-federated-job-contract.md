@@ -47,11 +47,11 @@ Stasis adopts a **runtime-neutral federated job contract**:
 
 ### 2) Signed remote job envelope
 
-`RemoteJobEnvelope` (schema v1) carries job type, content-addressed payload descriptor, idempotency key, correlation/causation, deadline, origin authority, terminal-delivery endpoint, placement requirements, and an HMAC-SHA256 signature over canonical bytes.
+`RemoteJobEnvelope` (schema v1) carries job type, content-addressed payload descriptor, idempotency key, correlation/causation, deadline, origin authority, terminal-delivery endpoint, placement requirements, and an HMAC-SHA256 signature over canonical bytes. Signal and terminal-result envelopes use the same canonical signing contract.
 
 ### 3) Placement-aware leasing
 
-`PlacementConstraints` (capabilities, platform, architecture, region, optional target node) are stored on each job. `JobStore::lease_due` takes `WorkerCapabilities` and matches atomically during lease acquisition.
+`PlacementConstraints` (capabilities, platform, architecture, region, optional target node) are stored on each job. `JobStore::lease_due` takes `WorkerCapabilities` and matches atomically during lease acquisition. `RuntimeSdk::process_once_with_capabilities` carries worker declarations through the public facade.
 
 ### 4) Fenced ownership handoff
 
@@ -63,7 +63,7 @@ Stasis adopts a **runtime-neutral federated job contract**:
 
 ### 6) Cross-runtime delivery without shared DB
 
-`FederatedDeliveryPort` / `FederatedIngressPort` exchange signed remote jobs, signals, and terminal results between independent runtime inboxes (in-memory bus for tests; network adapters later).
+`FederatedDeliveryPort` / `FederatedIngressPort` exchange signed remote jobs, signals, and terminal results between independent runtime inboxes (in-memory bus for tests; network adapters later). The reference bus resolves registered keys by `key_id`, verifies before acceptance, rejects expired jobs, and deduplicates replayed identities.
 
 ## Non-Goals
 
@@ -92,3 +92,4 @@ Stasis adopts a **runtime-neutral federated job contract**:
 2. Blob bytes never become required inline job fields.
 3. Handoff commit must re-check generation before transfer.
 4. Envelope signature verification is mandatory before accepting remote work.
+5. Successful generic jobs must not fabricate STTP lineage; output provenance is optional and scheme-neutral.

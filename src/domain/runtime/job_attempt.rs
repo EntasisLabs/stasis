@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
 
+use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JobAttemptOutcome {
     Succeeded,
@@ -19,10 +21,16 @@ pub struct JobAttempt {
     pub finished_at: DateTime<Utc>,
     pub outcome: JobAttemptOutcome,
     pub error_message: Option<String>,
-    pub sttp_output_node_id: Option<String>,
+    pub output_provenance: Option<ProvenanceRef>,
     pub execution_id: Option<String>,
     pub guardrail_code: Option<String>,
     pub policy_reason: Option<String>,
     pub duration_ms: Option<u64>,
     pub diagnostics: Option<String>,
+}
+
+impl JobAttempt {
+    pub fn sttp_output_node_id(&self) -> Option<String> {
+        SttpProvenanceAdapter::from_optional(self.output_provenance.as_ref())
+    }
 }

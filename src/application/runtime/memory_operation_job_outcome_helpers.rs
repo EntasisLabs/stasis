@@ -49,7 +49,9 @@ pub fn operation_success(
     }
 
     JobExecutionOutcome::Success {
-        sttp_output_node_id: format!("sttp:{sttp_kind}:{job_id}"),
+        output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+            format!("sttp:{sttp_kind}:{job_id}"),
+        )),
         execution_id: None,
         diagnostics: Some(diagnostics.to_string()),
     }

@@ -1,11 +1,12 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::{engine::any::Any, Surreal};
+use surrealdb::{Surreal, engine::any::Any};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
+use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
 use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
 
 #[derive(Clone)]
@@ -38,6 +39,8 @@ struct JobAttemptRecord {
     outcome: String,
     error_message: Option<String>,
     sttp_output_node_id: Option<String>,
+    #[serde(default)]
+    output_provenance_json: Option<String>,
     execution_id: Option<String>,
     guardrail_code: Option<String>,
     policy_reason: Option<String>,
@@ -61,7 +64,13 @@ impl From<JobAttempt> for JobAttemptRecord {
                 JobAttemptOutcome::Deferred => "deferred".to_string(),
             },
             error_message: value.error_message,
-            sttp_output_node_id: value.sttp_output_node_id,
+            sttp_output_node_id: SttpProvenanceAdapter::from_optional(
+                value.output_provenance.as_ref(),
+            ),
+            output_provenance_json: value
+                .output_provenance
+                .as_ref()
+                .and_then(|provenance| serde_json::to_string(provenance).ok()),
             execution_id: value.execution_id,
             guardrail_code: value.guardrail_code,
             policy_reason: value.policy_reason,
@@ -96,7 +105,16 @@ impl TryFrom<JobAttemptRecord> for JobAttempt {
             finished_at: value.finished_at,
             outcome,
             error_message: value.error_message,
-            sttp_output_node_id: value.sttp_output_node_id,
+            output_provenance: value
+                .output_provenance_json
+                .as_deref()
+                .and_then(|json| serde_json::from_str::<ProvenanceRef>(json).ok())
+                .or_else(|| {
+                    value
+                        .sttp_output_node_id
+                        .as_deref()
+                        .and_then(SttpProvenanceAdapter::from_compat_string)
+                }),
             execution_id: value.execution_id,
             guardrail_code: value.guardrail_code,
             policy_reason: value.policy_reason,

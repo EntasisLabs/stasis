@@ -835,7 +835,9 @@ mod tests {
             _job: &crate::domain::runtime::job::Job,
         ) -> Result<JobExecutionOutcome> {
             Ok(JobExecutionOutcome::Success {
-                sttp_output_node_id: "sttp:out:test".to_string(),
+                output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                    "sttp:out:test",
+                )),
                 execution_id: Some("exec:test".to_string()),
                 diagnostics: None,
             })
@@ -916,7 +918,9 @@ mod tests {
             correlation_id: "corr-builder-routing".to_string(),
             causation_id: "cause-builder-routing".to_string(),
             trace_id: "trace-builder-routing".to_string(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:test".to_string())),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:test",
+            )),
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy::default(),

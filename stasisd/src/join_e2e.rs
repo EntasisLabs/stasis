@@ -6,12 +6,13 @@ mod tests {
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use async_trait::async_trait;
     use chrono::{Duration, Utc};
     use serde_json::json;
     use stasis::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
     use stasis::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
     use stasis::domain::agent::envelope::{
-        AgentEnvelope, AgentEnvelopeKind, AGENT_ENVELOPE_SCHEMA_VERSION_V1,
+        AGENT_ENVELOPE_SCHEMA_VERSION_V1, AgentEnvelope, AgentEnvelopeKind,
     };
     use stasis::domain::errors::Result;
     use stasis::domain::runtime::job::{Job, JobState};
@@ -25,12 +26,11 @@ mod tests {
     use stasis::ports::outbound::runtime::job_store::JobStore;
     use stasis::prelude::RuntimeBackend;
     use stasis::sdk::runtime_sdk::RuntimeSdk;
-    use async_trait::async_trait;
 
     use crate::config::load_desired_state;
     use crate::host::reconcile_from_path;
     use crate::provenance::managed_endpoint_id;
-    use crate::tick::{tick_once, TickOptions};
+    use crate::tick::{TickOptions, tick_once};
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         let nanos = SystemTime::now()
@@ -52,7 +52,9 @@ mod tests {
 
         async fn execute(&self, job: &Job) -> Result<JobExecutionOutcome> {
             Ok(JobExecutionOutcome::Success {
-                sttp_output_node_id: format!("sttp:local:{}", job.id),
+                output_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                    format!("sttp:local:{}", job.id),
+                )),
                 execution_id: None,
                 diagnostics: Some(r#"{"provider":"fake-local","status":"success"}"#.into()),
             })
@@ -128,9 +130,11 @@ payload = { agent_id = "external-reviewer", session_id = "sess-join", turn_id = 
         let report = reconcile_from_path(&runtime, &dir, true, Some(endpoint_store.clone()))
             .await
             .unwrap();
-        assert!(report
-            .endpoint_created
-            .contains(&managed_endpoint_id("fake-external")));
+        assert!(
+            report
+                .endpoint_created
+                .contains(&managed_endpoint_id("fake-external"))
+        );
         assert_eq!(report.created.len(), 2);
 
         // Force both schedules due.
@@ -185,7 +189,11 @@ payload = { agent_id = "external-reviewer", session_id = "sess-join", turn_id = 
         let RuntimeComposition::InMemory(rt) = runtime.runtime() else {
             panic!("expected in-memory");
         };
-        let jobs = rt.job_store.list_by_state(JobState::Enqueued).await.unwrap();
+        let jobs = rt
+            .job_store
+            .list_by_state(JobState::Enqueued)
+            .await
+            .unwrap();
         for mut job in jobs {
             if job.job_type.contains("waitable") {
                 job.scheduled_at = Utc::now() - Duration::seconds(1);

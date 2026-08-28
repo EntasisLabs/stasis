@@ -98,7 +98,9 @@ mod tests {
 
         async fn execute(&self, job: &Job) -> stasis::domain::errors::Result<JobExecutionOutcome> {
             Ok(JobExecutionOutcome::Success {
-                sttp_output_node_id: format!("sttp:fake:{}", job.id),
+                output_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                    format!("sttp:fake:{}", job.id),
+                )),
                 execution_id: None,
                 diagnostics: Some(r#"{"provider":"fake-prompt","status":"success"}"#.into()),
             })

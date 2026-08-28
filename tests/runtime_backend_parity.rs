@@ -140,7 +140,9 @@ impl JobHandler for AlwaysSuccessHandler {
 
     async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: "sttp:out:success".to_string(),
+            output_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:out:success",
+            )),
             execution_id: None,
             diagnostics: None,
         })
@@ -157,7 +159,9 @@ impl JobHandler for ParentSuccessHandler {
 
     async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: "sttp:out:parent".to_string(),
+            output_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:out:parent",
+            )),
             execution_id: None,
             diagnostics: None,
         })
@@ -174,7 +178,9 @@ impl JobHandler for ChildSuccessHandler {
 
     async fn execute(&self, _job: &Job) -> Result<JobExecutionOutcome> {
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: "sttp:out:child".to_string(),
+            output_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:out:child",
+            )),
             execution_id: None,
             diagnostics: None,
         })
@@ -235,7 +241,9 @@ impl JobHandler for FatalThenSuccessHandler {
         }
 
         Ok(JobExecutionOutcome::Success {
-            sttp_output_node_id: "sttp:out:replayed".to_string(),
+            output_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:out:replayed",
+            )),
             execution_id: None,
             diagnostics: None,
         })
@@ -878,7 +886,9 @@ fn build_new_job(job_type: &str, now: chrono::DateTime<Utc>) -> NewJob {
         correlation_id: "corr-1".to_string(),
         causation_id: "cause-1".to_string(),
         trace_id: "trace-1".to_string(),
-        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1".to_string())),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+            "sttp:in:1",
+        )),
         placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now,
         backoff_policy: BackoffPolicy {
@@ -6317,7 +6327,7 @@ async fn surreal_runtime_replays_dead_letter_and_retries_outbox_publish() {
         JobAttemptOutcome::Succeeded
     );
     assert!(replay_report.attempts[0].error_message.is_some());
-    assert!(replay_report.attempts[1].sttp_output_node_id.is_some());
+    assert!(replay_report.attempts[1].sttp_output_node_id().is_some());
 
     let lineage = runtime
         .list_lineage_events("job-test.fatal_then_success")
@@ -6417,8 +6427,12 @@ async fn surreal_job_leasing_allows_only_one_winner_under_contention() {
     let caps_a = stasis::domain::runtime::placement::WorkerCapabilities::any();
     let caps_b = stasis::domain::runtime::placement::WorkerCapabilities::any();
     let (a, b) = tokio::join!(
-        runtime.job_store.lease_due("default", "worker-a", now, 30, &caps_a),
-        runtime.job_store.lease_due("default", "worker-b", now, 30, &caps_b)
+        runtime
+            .job_store
+            .lease_due("default", "worker-a", now, 30, &caps_a),
+        runtime
+            .job_store
+            .lease_due("default", "worker-b", now, 30, &caps_b)
     );
 
     let leased_a = a.expect("lease call a should succeed");
@@ -6451,7 +6465,13 @@ async fn surreal_job_lease_expiry_allows_recovery_by_another_worker() {
 
     let first = runtime
         .job_store
-        .lease_due("default", "worker-1", now, 1, &stasis::domain::runtime::placement::WorkerCapabilities::any())
+        .lease_due(
+            "default",
+            "worker-1",
+            now,
+            1,
+            &stasis::domain::runtime::placement::WorkerCapabilities::any(),
+        )
         .await
         .expect("first lease should succeed")
         .expect("first lease should acquire job");
@@ -6459,7 +6479,13 @@ async fn surreal_job_lease_expiry_allows_recovery_by_another_worker() {
 
     let during_lease = runtime
         .job_store
-        .lease_due("default", "worker-2", now, 1, &stasis::domain::runtime::placement::WorkerCapabilities::any())
+        .lease_due(
+            "default",
+            "worker-2",
+            now,
+            1,
+            &stasis::domain::runtime::placement::WorkerCapabilities::any(),
+        )
         .await
         .expect("second lease call should succeed");
     assert!(during_lease.is_none());
@@ -6475,7 +6501,13 @@ async fn surreal_job_lease_expiry_allows_recovery_by_another_worker() {
     let after_backoff = later + Duration::seconds(2);
     let recovered = runtime
         .job_store
-        .lease_due("default", "worker-2", after_backoff, 30, &stasis::domain::runtime::placement::WorkerCapabilities::any())
+        .lease_due(
+            "default",
+            "worker-2",
+            after_backoff,
+            30,
+            &stasis::domain::runtime::placement::WorkerCapabilities::any(),
+        )
         .await
         .expect("recovery lease should succeed")
         .expect("recovery lease should acquire job");
@@ -6513,7 +6545,9 @@ async fn in_memory_event_driven_continuation_job_executes_end_to_end() {
             correlation_id: "corr-parent-1".to_string(),
             causation_id: "cause-parent-1".to_string(),
             trace_id: "trace-parent-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:parent".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:parent",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -6557,7 +6591,9 @@ async fn in_memory_event_driven_continuation_job_executes_end_to_end() {
             correlation_id: "corr-parent-1".to_string(),
             causation_id: parent_job_id,
             trace_id: "trace-parent-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(parent_output)),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                parent_output,
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now + Duration::seconds(1),
             backoff_policy: BackoffPolicy {
@@ -6619,7 +6655,9 @@ query Hello {
             correlation_id: "corr-grapheme-1".to_string(),
             causation_id: "cause-grapheme-1".to_string(),
             trace_id: "trace-grapheme-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:1".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:grapheme:1",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -6728,7 +6766,9 @@ async fn in_memory_grapheme_healthcheck_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-healthcheck-1".to_string(),
             causation_id: "cause-grapheme-healthcheck-1".to_string(),
             trace_id: "trace-grapheme-healthcheck-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:healthcheck:1".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:grapheme:healthcheck:1",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -6791,7 +6831,9 @@ async fn surreal_grapheme_healthcheck_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-healthcheck-surreal-1".to_string(),
             causation_id: "cause-grapheme-healthcheck-surreal-1".to_string(),
             trace_id: "trace-grapheme-healthcheck-surreal-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:healthcheck:surreal:1".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:grapheme:healthcheck:surreal:1",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -6846,7 +6888,9 @@ async fn in_memory_grapheme_echo_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-echo-1".to_string(),
             causation_id: "cause-grapheme-echo-1".to_string(),
             trace_id: "trace-grapheme-echo-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:echo:1".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:grapheme:echo:1",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -6903,7 +6947,9 @@ async fn surreal_grapheme_echo_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-echo-surreal-1".to_string(),
             causation_id: "cause-grapheme-echo-surreal-1".to_string(),
             trace_id: "trace-grapheme-echo-surreal-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:echo:surreal:1".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:grapheme:echo:surreal:1",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -6952,7 +6998,9 @@ async fn in_memory_grapheme_echo_rejects_invalid_payload_schema() {
             correlation_id: "corr-grapheme-echo-invalid-1".to_string(),
             causation_id: "cause-grapheme-echo-invalid-1".to_string(),
             trace_id: "trace-grapheme-echo-invalid-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:echo:invalid:1".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:grapheme:echo:invalid:1",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -7017,7 +7065,7 @@ async fn in_memory_grapheme_textops_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-textops-1".to_string(),
             causation_id: "cause-grapheme-textops-1".to_string(),
             trace_id: "trace-grapheme-textops-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:textops:1".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:textops:1")),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -7073,7 +7121,7 @@ async fn surreal_grapheme_textops_workflow_executes_successfully() {
             correlation_id: "corr-grapheme-textops-surreal-1".to_string(),
             causation_id: "cause-grapheme-textops-surreal-1".to_string(),
             trace_id: "trace-grapheme-textops-surreal-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:textops:surreal:1".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:textops:surreal:1")),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -7121,7 +7169,9 @@ async fn in_memory_grapheme_textops_rejects_invalid_payload_schema() {
             correlation_id: "corr-grapheme-textops-invalid-1".to_string(),
             causation_id: "cause-grapheme-textops-invalid-1".to_string(),
             trace_id: "trace-grapheme-textops-invalid-1".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:textops:invalid:1".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:grapheme:textops:invalid:1",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -7246,7 +7296,9 @@ query Run {
             correlation_id: "corr-grapheme-policy-failure".to_string(),
             causation_id: "cause-grapheme-policy-failure".to_string(),
             trace_id: "trace-grapheme-policy-failure".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:policy:1".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:grapheme:policy:1",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -7481,7 +7533,9 @@ query Hello {
             correlation_id: "corr-grapheme-lineage-success".to_string(),
             causation_id: "cause-grapheme-lineage-success".to_string(),
             trace_id: "trace-grapheme-lineage-success".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:lineage:success".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:grapheme:lineage:success",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
@@ -7660,7 +7714,9 @@ query Run {
             correlation_id: "corr-grapheme-lineage-guardrail".to_string(),
             causation_id: "cause-grapheme-lineage-guardrail".to_string(),
             trace_id: "trace-grapheme-lineage-guardrail".to_string(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:grapheme:lineage:guardrail".to_string())),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:grapheme:lineage:guardrail",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: BackoffPolicy {
