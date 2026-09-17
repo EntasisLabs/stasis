@@ -955,8 +955,10 @@ mod tests {
             .await
             .expect("runtime should build");
 
-        let RuntimeComposition::InMemory(rt) = runtime else {
-            panic!("expected in-memory runtime composition");
+        let rt = match runtime {
+            RuntimeComposition::InMemory(rt) => rt,
+            #[cfg(feature = "surreal-native")]
+            RuntimeComposition::Surreal(_) => panic!("expected in-memory runtime composition"),
         };
 
         let now = Utc::now();

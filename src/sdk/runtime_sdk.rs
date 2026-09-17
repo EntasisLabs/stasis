@@ -472,10 +472,14 @@ impl RuntimeSdk {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "surreal-native")]
     use std::env;
+    #[cfg(feature = "surreal-native")]
     use std::fs;
+    #[cfg(feature = "surreal-native")]
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[cfg(feature = "surreal-native")]
     use crate::application::runtime::runtime_factory::RuntimeComposition;
 
     use super::RuntimeSdk;

@@ -628,8 +628,10 @@ mod tests {
             Some("job-wait-rt".into())
         );
 
-        let RuntimeComposition::InMemory(rt) = runtime.runtime() else {
-            panic!("expected in-memory");
+        let rt = match runtime.runtime() {
+            RuntimeComposition::InMemory(rt) => rt,
+            #[cfg(feature = "surreal-native")]
+            RuntimeComposition::Surreal(_) => panic!("expected in-memory"),
         };
         let mut parked = rt.job_store.get("job-wait-rt").await.unwrap().unwrap();
         assert_eq!(parked.state, JobState::Enqueued);
