@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Crates.io publish runbook ([RELEASE.md](RELEASE.md)) and `scripts/publish-crates.sh` (dry-run by default).
+
+### Changed
+
+- `stasis-rs` / `stasis-rs-macros` declare `rust-version = "1.85"` (edition 2024). docs.rs metadata pins the native docs graph.
+
 ## [0.11.0] - 2026-09-17
 
 ### Added

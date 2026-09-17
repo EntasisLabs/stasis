@@ -1,6 +1,8 @@
 # stasis-rs-macros
 
-Procedural macros for the Stasis framework.
+Procedural macros for the Stasis framework ([`stasis-rs`](https://crates.io/crates/stasis-rs)).
+
+Licensed under MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`).
 
 ## Provided Macro
 
