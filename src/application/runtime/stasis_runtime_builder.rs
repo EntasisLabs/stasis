@@ -225,7 +225,7 @@ impl StasisRuntimeBuilder {
             include_tool_loop_handler: cfg!(feature = "llm-genai"),
             include_agent_handlers: true,
             include_memory_operation_handlers: true,
-            include_orchestration_pattern_handlers: cfg!(feature = "llm-genai"),
+            include_orchestration_pattern_handlers: true,
             include_cluster_control_handlers: true,
             extra_handlers: Vec::new(),
             runtime_telemetry_metrics: None,
