@@ -12,6 +12,7 @@
   - src/application/composition/surreal_backend_config.rs
   - Cargo.toml
   - tests/wasm_kernel_smoke.rs
+  - src/infrastructure/llm/openai_http_gateway.rs
 
 ## Purpose
 
@@ -118,6 +119,7 @@ On that profile:
 - Do not enable `native` / `dashboard` / `surreal-native` / `llm-genai` / `grapheme` for wasm32 — the crate `compile_error`s if `native` is on.
 - `--no-default-features` on native hosts is the same slim kernel (intentional).
 - In-memory `StasisSdk` + `RuntimeSdk` run under the W2 Node `wasm-bindgen-test` harness (`tests/wasm_kernel_smoke.rs`). Wall time uses `web-time` / chrono `wasmbind`.
+- Opt-in `llm-openai-http` adds `OpenAiHttpGateway`: OpenAI Chat Completions over `reqwest`/`fetch`. Set `STASIS_OPENAI_API_KEY` (or `OPENAI_API_KEY` / `STASIS_LLM_API_KEY`) and optionally `STASIS_LLM_BASE_URL` for Groq/OpenRouter/Ollama `/v1`. Browser hosts should pass the key into `OpenAiHttpGateway::new` (no process env) and often need a same-origin proxy because of CORS.
 
 See [ADR-0009](https://github.com/EntasisLabs/stasis/blob/main/docs/adr/ADR-0009-wasm-target-profile.md).
 

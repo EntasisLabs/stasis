@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 use crate::domain::errors::Result;
 use crate::ports::outbound::llm_gateway::LlmGateway;
 
@@ -16,7 +14,8 @@ impl MockLlmGateway {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl LlmGateway for MockLlmGateway {
     async fn complete(&self, _prompt: &str) -> Result<String> {
         Ok(self.completion.clone())

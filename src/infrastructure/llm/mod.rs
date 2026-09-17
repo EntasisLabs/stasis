@@ -5,3 +5,5 @@ pub mod genai_gateway;
 #[cfg(feature = "llm-genai")]
 pub mod mock_chat_client;
 pub mod mock_gateway;
+#[cfg(feature = "llm-openai-http")]
+pub mod openai_http_gateway;
