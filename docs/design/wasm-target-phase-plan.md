@@ -17,8 +17,10 @@
   - stasisd/Cargo.toml
   - docs/adr/ADR-0009-wasm-target-profile.md
   - .github/workflows/wasm.yml
+  - tests/wasm_kernel_smoke.rs
+  - src/infrastructure/runtime/portable_time.rs
 
-Status: **Active Epic — Phase W1 complete (compile gate green)**  
+Status: **Active Epic — Phase W2 complete (in-memory runtime smoke green)**  
 Date: 2026-09-17  
 Owner: Stasis Core  
 ADR: [ADR-0009-wasm-target-profile.md](../adr/ADR-0009-wasm-target-profile.md)
@@ -235,6 +237,8 @@ Acceptance:
 - Automated WASM test proves register/invoke and one job completion.
 - Job diagnostics/lineage fields unchanged vs native in-memory.
 
+**Status (2026-09-17):** Delivered. `web-time` clocks on wasm32; `tests/wasm_kernel_smoke.rs` runs on native and Node via `wasm-bindgen-test`. CI job `wasm-smoke` in `.github/workflows/wasm.yml`.
+
 ### Phase W3 — Network adapters (opt-in)
 
 **Goal:** Talk to the outside world without native TLS/filesystem.
@@ -330,7 +334,7 @@ Do not run the full native `cargo test --workspace` on WASM. Most `#[tokio::test
 
 ## 10. Immediate next step
 
-Ship **Phase W2** as a dedicated PR: WASM harness smoke for `StasisSdk` register/invoke and one in-memory job completion. Do not start `stasis-wasm` bindings or `rfkafka_wasi` in that PR.
+Ship **Phase W3** as a dedicated PR: opt-in `http-wasm` (fetch webhook / cluster forwarder) and optional remote `surreal-ws` on wasm32. Keep `SurrealKv` native-only. Do not start `stasis-wasm` bindings or `rfkafka_wasi` in that PR.
 
 ## 11. Workstream map
 

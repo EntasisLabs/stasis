@@ -33,6 +33,7 @@ pub mod kafka_wasm_transport_publisher;
 pub mod noop_cluster_command_forwarder;
 pub mod noop_cluster_control_event_sink;
 pub mod noop_runtime_metrics;
+pub mod portable_time;
 #[cfg(feature = "transport-rabbitmq")]
 pub mod rabbitmq_lapin_transport_publisher;
 #[cfg(feature = "surreal-native")]

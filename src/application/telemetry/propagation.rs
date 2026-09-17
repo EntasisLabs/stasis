@@ -75,10 +75,7 @@ pub fn generate_w3c_trace_id() -> String {
 
     static TRACE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0) as u64;
+    let nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) as u64;
     let counter = TRACE_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{:016x}{:016x}", nanos, counter)
 }
@@ -120,10 +117,8 @@ mod tests {
 
     #[test]
     fn parse_traceparent_extracts_trace_context() {
-        let context = parse_traceparent(
-            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        )
-        .expect("traceparent should parse");
+        let context = parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+            .expect("traceparent should parse");
 
         assert_eq!(context.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736");
         assert_eq!(context.span_id, "00f067aa0ba902b7");
@@ -168,7 +163,9 @@ mod tests {
             correlation_id: "corr".to_string(),
             causation_id: "cause".to_string(),
             trace_id: "legacy-trace".to_string(),
-            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in")),
+            input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in",
+            )),
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: chrono::Utc::now(),
             backoff_policy: crate::domain::runtime::job::BackoffPolicy::default(),

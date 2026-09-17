@@ -66,19 +66,15 @@ impl OperationTelemetry {
         self.metrics.incr_counter(MEMORY_RECALL_TOTAL, 1);
     }
 
-    pub fn record_recall_success(&self, started: Instant) {
-        self.metrics.observe_duration_ms(
-            MEMORY_RECALL_DURATION_MS,
-            started.elapsed().as_millis() as u64,
-        );
+    pub fn record_recall_success(&self, duration_ms: u64) {
+        self.metrics
+            .observe_duration_ms(MEMORY_RECALL_DURATION_MS, duration_ms);
     }
 
-    pub fn record_recall_error(&self, started: Instant) {
+    pub fn record_recall_error(&self, duration_ms: u64) {
         self.metrics.incr_counter(MEMORY_RECALL_ERRORS_TOTAL, 1);
-        self.metrics.observe_duration_ms(
-            MEMORY_RECALL_DURATION_MS,
-            started.elapsed().as_millis() as u64,
-        );
+        self.metrics
+            .observe_duration_ms(MEMORY_RECALL_DURATION_MS, duration_ms);
     }
 
     pub fn record_store_started(&self) {

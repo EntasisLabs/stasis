@@ -21,6 +21,37 @@ jobs:
       - name: Check stasis-rs WASM kernel
         run: cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features
 
+  wasm-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install matching wasm-bindgen-cli
+        run: |
+          version=$(awk '/name = "wasm-bindgen"$/{getline; if ($1=="version") {gsub(/"/, "", $3); print $3; exit}}' Cargo.lock)
+          echo "wasm-bindgen crate version: $version"
+          cargo install wasm-bindgen-cli --locked --version "$version"
+
+      - name: Native in-memory smoke
+        run: cargo test -p stasis-rs --test wasm_kernel_smoke
+
+      - name: WASM in-memory smoke
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+          WASM_BINDGEN_TEST_ONLY_NODE: "1"
+        run: cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke
+
   native-check:
     runs-on: ubuntu-latest
     steps:

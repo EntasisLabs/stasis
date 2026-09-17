@@ -127,8 +127,13 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 getrandom = { version = "0.2", features = ["js"] }
 chrono = { version = "0.4", features = ["serde", "wasmbind"] }
+web-time = "1"
+wasm-bindgen = "0.2"
 
 [build-dependencies]
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

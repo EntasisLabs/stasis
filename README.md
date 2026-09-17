@@ -103,6 +103,7 @@ Default features enable the native host bundle (`native`: dashboard, Surreal, ge
 | Native (default) | `cargo check --workspace` | Dashboard, SurrealKV/WS/mem, genai, Grapheme host, `stasisd` |
 | Slim kernel | `cargo check -p stasis-rs --no-default-features` | In-memory runtime, ports, `StasisSdk` / `RuntimeSdk` without native process hosts |
 | WASM guest | `cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features` | Same slim kernel on `wasm32-unknown-unknown` |
+| WASM smoke | `cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke` | In-memory `StasisSdk` register/invoke + one typed job completion |
 
 WASM does **not** include `stasisd`, the Axum dashboard, SurrealKV, genai's native TLS client, or the Grapheme host engine. Inject `LlmGateway` / chat clients and use `RuntimeBackend::InMemory`. See [ADR-0009](docs/adr/ADR-0009-wasm-target-profile.md) and [the WASM phase plan](docs/design/wasm-target-phase-plan.md).
 
