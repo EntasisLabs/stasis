@@ -1,10 +1,14 @@
-use std::path::{Path, PathBuf};
+#[cfg(feature = "env-fs")]
+use std::path::Path;
+use std::path::PathBuf;
 
 use crate::application::config::secrets::{
-    ChainedSecretsSource, FileSecretsSource, OsEnvSource, default_secrets_dir, install_resolver,
-    resolve,
+    ChainedSecretsSource, OsEnvSource, install_resolver, resolve,
 };
+#[cfg(feature = "env-fs")]
+use crate::application::config::secrets::{FileSecretsSource, default_secrets_dir};
 
+#[cfg(feature = "env-fs")]
 const DEFAULT_DOTENV_FILE: &str = ".env";
 
 /// Bootstrap or lookup failure for environment configuration.
@@ -66,8 +70,10 @@ pub fn bootstrap() -> Result<EnvBootstrapReport, EnvError> {
 }
 
 pub fn bootstrap_with(options: EnvBootstrapOptions) -> Result<EnvBootstrapReport, EnvError> {
+    #[cfg_attr(not(feature = "env-fs"), allow(unused_mut))]
     let mut report = EnvBootstrapReport::default();
 
+    #[cfg(feature = "env-fs")]
     if !options.skip_dotenv {
         let dotenv_path = options
             .dotenv_path
@@ -90,26 +96,35 @@ pub fn bootstrap_with(options: EnvBootstrapOptions) -> Result<EnvBootstrapReport
         }
     }
 
-    let secrets_dir = if options.skip_secrets_dir {
-        None
-    } else {
-        options.secrets_dir.or_else(default_secrets_dir)
-    };
+    #[cfg(feature = "env-fs")]
+    {
+        let secrets_dir = if options.skip_secrets_dir {
+            None
+        } else {
+            options.secrets_dir.or_else(default_secrets_dir)
+        };
 
-    let file_source = secrets_dir
-        .as_ref()
-        .map(FileSecretsSource::from_dir)
-        .unwrap_or_default();
-    if let Some(dir) = secrets_dir {
-        report.secrets_dir_loaded = !file_source.is_empty() || dir.is_dir();
-        report.secrets_dir = Some(dir);
-        report.secrets_keys_loaded = file_source.len();
+        let file_source = secrets_dir
+            .as_ref()
+            .map(FileSecretsSource::from_dir)
+            .unwrap_or_default();
+        if let Some(dir) = secrets_dir {
+            report.secrets_dir_loaded = !file_source.is_empty() || dir.is_dir();
+            report.secrets_dir = Some(dir);
+            report.secrets_keys_loaded = file_source.len();
+        }
+
+        let resolver = ChainedSecretsSource::new()
+            .with_source(OsEnvSource)
+            .with_source(file_source);
+        install_resolver(resolver);
     }
 
-    let resolver = ChainedSecretsSource::new()
-        .with_source(OsEnvSource)
-        .with_source(file_source);
-    install_resolver(resolver);
+    #[cfg(not(feature = "env-fs"))]
+    {
+        let _ = options;
+        install_resolver(ChainedSecretsSource::new().with_source(OsEnvSource));
+    }
 
     Ok(report)
 }
@@ -142,6 +157,7 @@ pub fn truthy(key: &str) -> bool {
 }
 
 /// Loads a dotenv file without installing the global resolver.
+#[cfg(feature = "env-fs")]
 pub fn load_dotenv_from(path: impl AsRef<Path>) -> Result<(), EnvError> {
     dotenvy::from_path(path.as_ref()).map_err(|err| {
         EnvError::bootstrap(format!(
@@ -151,7 +167,7 @@ pub fn load_dotenv_from(path: impl AsRef<Path>) -> Result<(), EnvError> {
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "env-fs"))]
 mod tests {
     use super::*;
     use std::fs;
@@ -195,7 +211,10 @@ mod tests {
         .expect("bootstrap should succeed");
 
         assert!(report.dotenv_loaded);
-        assert_eq!(non_empty("STASIS_BOOTSTRAP_TEST"), Some("from-dotenv".to_string()));
+        assert_eq!(
+            non_empty("STASIS_BOOTSTRAP_TEST"),
+            Some("from-dotenv".to_string())
+        );
         assert_eq!(
             non_empty("STASIS_BOOTSTRAP_EXISTING"),
             Some("from-os".to_string())
@@ -217,7 +236,10 @@ mod tests {
         }
 
         let err = required(key).expect_err("missing key should fail");
-        assert_eq!(err.to_string(), format!("missing required environment variable: {key}"));
+        assert_eq!(
+            err.to_string(),
+            format!("missing required environment variable: {key}")
+        );
     }
 
     #[test]

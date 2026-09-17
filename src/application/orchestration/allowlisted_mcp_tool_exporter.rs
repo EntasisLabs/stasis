@@ -20,7 +20,10 @@ pub struct AllowlistedLocalMcpExporter {
 }
 
 impl AllowlistedLocalMcpExporter {
-    pub fn new(registry: Arc<dyn ToolRegistry>, allowlist: impl IntoIterator<Item = String>) -> Self {
+    pub fn new(
+        registry: Arc<dyn ToolRegistry>,
+        allowlist: impl IntoIterator<Item = String>,
+    ) -> Self {
         Self {
             registry,
             allowlist: allowlist.into_iter().collect(),
@@ -42,10 +45,18 @@ impl McpToolExporter for AllowlistedLocalMcpExporter {
         let tools = self.registry.list_tools().await?;
         Ok(tools
             .into_iter()
-            .filter(|tool| self.allowlist.contains(tool.name.as_ref()))
+            .filter(|tool| {
+                self.allowlist.contains(
+                    crate::application::orchestration::tool_registry::tool_advertised_name(tool),
+                )
+            })
             .map(|tool| McpToolDescriptor {
-                name: tool.name.as_ref().to_string(),
-                description: tool.description.as_ref().map(|d| d.to_string()),
+                name: crate::application::orchestration::tool_registry::tool_advertised_name(&tool)
+                    .to_string(),
+                description: crate::application::orchestration::tool_registry::tool_description(
+                    &tool,
+                )
+                .map(str::to_string),
                 input_schema: tool.schema.clone(),
             })
             .collect())
@@ -115,11 +126,7 @@ mod tests {
             let depth = crate::application::orchestration::mcp_recursion::current_remaining_depth()
                 .unwrap_or(0);
             self.provider
-                .invoke(
-                    "remote_bounce",
-                    input,
-                    McpInvocationContext::new(depth),
-                )
+                .invoke("remote_bounce", input, McpInvocationContext::new(depth))
                 .await
         }
     }
@@ -150,9 +157,7 @@ mod tests {
                 .map_err(|_| StasisError::PortFailure("exporter lock poisoned".into()))?
                 .clone()
                 .ok_or_else(|| StasisError::PortFailure("exporter not wired".into()))?;
-            exporter
-                .invoke_exported("bounce", input, context)
-                .await
+            exporter.invoke_exported("bounce", input, context).await
         }
     }
 
@@ -177,10 +182,7 @@ mod tests {
     async fn exports_and_invokes_local_tool() {
         let local = InMemoryToolRegistry::default();
         local.register_tool(EchoTool).unwrap();
-        let exporter = AllowlistedLocalMcpExporter::new(
-            Arc::new(local),
-            vec!["echo_upper".into()],
-        );
+        let exporter = AllowlistedLocalMcpExporter::new(Arc::new(local), vec!["echo_upper".into()]);
         let exported = exporter.exported_tools().await.unwrap();
         assert_eq!(exported.len(), 1);
         assert_eq!(exported[0].name, "echo_upper");
@@ -218,11 +220,7 @@ mod tests {
         *provider.exporter.lock().unwrap() = Some(exporter.clone());
 
         let err = exporter
-            .invoke_exported(
-                "bounce",
-                json!({}),
-                McpInvocationContext::new(2),
-            )
+            .invoke_exported("bounce", json!({}), McpInvocationContext::new(2))
             .await
             .unwrap_err();
         assert!(

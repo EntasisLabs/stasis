@@ -2,7 +2,13 @@
 //! primitives, and memory integration adapters.
 //! Use the [prelude] module for a batteries-included public API surface.
 
+#[cfg(all(target_arch = "wasm32", feature = "native"))]
+compile_error!(
+    "the `native` feature (default) is not supported on wasm32; build with `--no-default-features`"
+);
+
 pub mod application;
+#[cfg(feature = "dashboard")]
 pub mod dashboard;
 pub mod domain;
 pub mod infrastructure;
@@ -89,8 +95,11 @@ pub mod runtime_prelude_ext {
     pub use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
     pub use crate::infrastructure::runtime::in_memory_federated_bus::InMemoryFederatedBus;
     pub use crate::infrastructure::runtime::in_memory_ownership_handoff_store::InMemoryOwnershipHandoffStore;
+    #[cfg(feature = "surreal-native")]
     pub use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
+    #[cfg(feature = "surreal-native")]
     pub use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
+    #[cfg(feature = "surreal-native")]
     pub use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
     pub use crate::ports::outbound::runtime::blob_transfer::BlobTransferPort;
     pub use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
@@ -138,6 +147,8 @@ pub mod sdk_prelude {
     };
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, NewJob};
+    #[cfg(feature = "llm-genai")]
+    pub use crate::infrastructure::llm::mock_chat_client::MockAiChatClient;
     pub use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
     pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
     pub use crate::sdk::runtime_sdk::{RuntimeSdk, StasisRuntime};
@@ -150,7 +161,10 @@ pub mod sdk_prelude_ext {
     pub use crate::application::runtime::runtime_factory::RuntimeComposition;
     pub use crate::domain::runtime::job::JobState;
     pub use crate::domain::runtime::recurring::RecurringDefinition;
+    #[cfg(feature = "llm-genai")]
     pub use crate::infrastructure::llm::genai_gateway::GenaiLlmGateway;
+    #[cfg(feature = "llm-genai")]
+    pub use crate::infrastructure::llm::mock_chat_client::MockAiChatClient;
     pub use crate::sdk::control_plane_sdk::ControlPlaneSdk;
     pub use crate::sdk::runtime_sdk::RuntimeStatsSnapshot;
 }
@@ -164,9 +178,11 @@ pub mod prelude {
 
 /// Environment and secrets configuration helpers.
 pub mod config_prelude {
+    #[cfg(feature = "env-fs")]
+    pub use crate::application::config::env::load_dotenv_from;
     pub use crate::application::config::env::{
         EnvBootstrapOptions, EnvBootstrapReport, EnvError, bootstrap, bootstrap_with,
-        first_non_empty, load_dotenv_from, non_empty, required, truthy, with_default,
+        first_non_empty, non_empty, required, truthy, with_default,
     };
     pub use crate::application::config::secrets::{
         ChainedSecretsSource, FileSecretsSource, OsEnvSource, SecretsSource, default_secrets_dir,

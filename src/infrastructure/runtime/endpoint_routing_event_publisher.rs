@@ -6,7 +6,9 @@ use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::delivery_endpoint::DeliveryEndpoint;
 use crate::domain::runtime::outbox::OutboxEvent;
 use crate::infrastructure::runtime::endpoint_routing_policy::AllowAllEndpointRoutingPolicy;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::infrastructure::runtime::http_webhook_event_publisher::HttpWebhookTransportPublisher;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::infrastructure::runtime::tcp_socket_transport_publisher::TcpSocketTransportPublisher;
 use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;
 use crate::ports::outbound::runtime::endpoint_delivery_status_store::EndpointDeliveryStatusStore;
@@ -46,10 +48,12 @@ impl EndpointRoutingEventPublisher {
         self
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_http_webhook_transport(self) -> Self {
         self.with_transport(HttpWebhookTransportPublisher::new())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_tcp_socket_transport(self) -> Self {
         self.with_transport(TcpSocketTransportPublisher)
     }
@@ -257,8 +261,12 @@ mod tests {
                 correlation_id: "corr-1".to_string(),
                 causation_id: "cause-1".to_string(),
                 trace_id: "trace-1".to_string(),
-                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1")),
-                output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp("sttp:out:1")),
+                input_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                    "sttp:in:1",
+                )),
+                output_provenance: Some(crate::domain::runtime::provenance::ProvenanceRef::sttp(
+                    "sttp:out:1",
+                )),
                 execution_id: None,
                 input_memory_query_id: None,
                 input_memory_query_fingerprint: None,

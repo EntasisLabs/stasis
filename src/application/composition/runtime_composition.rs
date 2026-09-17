@@ -1,32 +1,46 @@
 use std::sync::Arc;
 
-use surrealdb::engine::any::Any;
-use surrealdb::opt::auth::Root;
+#[cfg(feature = "surreal-native")]
 use surrealdb::Surreal;
+#[cfg(feature = "surreal-native")]
+use surrealdb::engine::any::Any;
+#[cfg(feature = "surreal-native")]
+use surrealdb::opt::auth::Root;
 
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
+#[cfg(feature = "surreal-native")]
 use crate::application::runtime::surreal_runtime::SurrealRuntime;
-use crate::domain::errors::{Result, StasisError};
+use crate::domain::errors::Result;
+#[cfg(feature = "surreal-native")]
+use crate::domain::errors::StasisError;
 use crate::infrastructure::agent::in_memory_turn_wait_store::InMemoryTurnWaitStore;
 use crate::infrastructure::agent::json_agent_message_codec::JsonAgentMessageCodec;
+#[cfg(feature = "llm-genai")]
 use crate::infrastructure::llm::genai_chat_client::GenaiChatClient;
 use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
 use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
 use crate::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
 use crate::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
+#[cfg(feature = "surreal-native")]
 use crate::infrastructure::memory::surreal_identity_memory_store::SurrealIdentityMemoryStore;
 use crate::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
+#[cfg(feature = "grapheme")]
 use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
 use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
 use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
 use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
 use crate::infrastructure::runtime::in_memory_thread_store::InMemoryThreadStore;
+#[cfg(feature = "surreal-native")]
 use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
+#[cfg(feature = "surreal-native")]
 use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
+#[cfg(feature = "surreal-native")]
 use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
+#[cfg(feature = "surreal-native")]
 use crate::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
 use crate::ports::outbound::agent::message_codec::AgentMessageCodec;
 use crate::ports::outbound::agent::turn_wait_store::TurnWaitStore;
+#[cfg(feature = "llm-genai")]
 use crate::ports::outbound::ai_chat_client::AiChatClient;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
@@ -39,22 +53,26 @@ use crate::ports::outbound::runtime::endpoint_transport_publisher::EndpointTrans
 use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
 use crate::ports::outbound::runtime::runtime_tracing::RuntimeTracing;
 use crate::ports::outbound::runtime::thread_store::ThreadStore;
+#[cfg(feature = "grapheme")]
 use crate::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 
 #[derive(Clone, Debug)]
 pub enum RuntimeBackend {
     InMemory,
+    #[cfg(feature = "surreal-native")]
     SurrealMem {
         namespace: String,
         database: String,
         auth: Option<SurrealAuth>,
     },
+    #[cfg(feature = "surreal-native")]
     SurrealWs {
         endpoint: String,
         namespace: String,
         database: String,
         auth: Option<SurrealAuth>,
     },
+    #[cfg(feature = "surreal-native")]
     SurrealKv {
         path: String,
         namespace: String,
@@ -66,6 +84,7 @@ pub enum RuntimeBackend {
 pub use crate::application::composition::surreal_backend_config::SurrealAuth;
 
 impl RuntimeBackend {
+    #[cfg(feature = "surreal-native")]
     pub fn surreal_mem(namespace: impl Into<String>, database: impl Into<String>) -> Self {
         Self::SurrealMem {
             namespace: namespace.into(),
@@ -74,6 +93,7 @@ impl RuntimeBackend {
         }
     }
 
+    #[cfg(feature = "surreal-native")]
     pub fn surreal_ws(
         endpoint: impl Into<String>,
         namespace: impl Into<String>,
@@ -87,6 +107,7 @@ impl RuntimeBackend {
         }
     }
 
+    #[cfg(feature = "surreal-native")]
     pub fn surreal_kv(
         path: impl Into<String>,
         namespace: impl Into<String>,
@@ -102,10 +123,13 @@ impl RuntimeBackend {
 
     pub fn with_surreal_auth(mut self, auth: SurrealAuth) -> Self {
         match &mut self {
+            #[cfg(feature = "surreal-native")]
             Self::SurrealMem { auth: slot, .. }
             | Self::SurrealWs { auth: slot, .. }
             | Self::SurrealKv { auth: slot, .. } => *slot = Some(auth),
-            Self::InMemory => {}
+            Self::InMemory => {
+                let _ = auth;
+            }
         }
         self
     }
@@ -118,6 +142,7 @@ impl RuntimeBackend {
 )]
 pub enum RuntimeComposition {
     InMemory(InMemoryRuntime),
+    #[cfg(feature = "surreal-native")]
     Surreal(SurrealRuntime),
 }
 
@@ -129,6 +154,7 @@ impl RuntimeComposition {
     ) {
         match self {
             Self::InMemory(runtime) => runtime.replace_telemetry(metrics, tracing),
+            #[cfg(feature = "surreal-native")]
             Self::Surreal(runtime) => runtime.replace_telemetry(metrics, tracing),
         }
     }
@@ -137,6 +163,7 @@ impl RuntimeComposition {
 pub struct RuntimeFactory;
 
 impl RuntimeFactory {
+    #[cfg(feature = "surreal-native")]
     async fn connect_surreal_any(
         endpoint: &str,
         namespace: String,
@@ -144,9 +171,9 @@ impl RuntimeFactory {
         auth: Option<SurrealAuth>,
     ) -> Result<RuntimeComposition> {
         let db = Surreal::<Any>::init();
-        db.connect(endpoint)
-            .await
-            .map_err(|e| StasisError::PortFailure(format!("connect surreal db ({endpoint}): {e}")))?;
+        db.connect(endpoint).await.map_err(|e| {
+            StasisError::PortFailure(format!("connect surreal db ({endpoint}): {e}"))
+        })?;
 
         if let Some(auth) = auth {
             db.signin(Root {
@@ -169,17 +196,20 @@ impl RuntimeFactory {
     pub async fn build(config: RuntimeBackend) -> Result<RuntimeComposition> {
         match config {
             RuntimeBackend::InMemory => Ok(RuntimeComposition::InMemory(InMemoryRuntime::new())),
+            #[cfg(feature = "surreal-native")]
             RuntimeBackend::SurrealMem {
                 namespace,
                 database,
                 auth,
             } => Self::connect_surreal_any("mem://", namespace, database, auth).await,
+            #[cfg(feature = "surreal-native")]
             RuntimeBackend::SurrealWs {
                 endpoint,
                 namespace,
                 database,
                 auth,
             } => Self::connect_surreal_any(&endpoint, namespace, database, auth).await,
+            #[cfg(feature = "surreal-native")]
             RuntimeBackend::SurrealKv {
                 path,
                 namespace,
@@ -196,10 +226,12 @@ impl RuntimeFactory {
         }
     }
 
+    #[cfg(feature = "surreal-native")]
     pub fn from_db(db: Surreal<Any>) -> RuntimeComposition {
         RuntimeComposition::Surreal(SurrealRuntime::new(db))
     }
 
+    #[cfg(feature = "llm-genai")]
     pub fn default_chat_client() -> Arc<dyn AiChatClient> {
         Arc::new(GenaiChatClient::from_env())
     }
@@ -212,6 +244,7 @@ impl RuntimeFactory {
         Arc::new(JsonAgentMessageCodec::v1())
     }
 
+    #[cfg(feature = "grapheme")]
     pub fn default_workflow_engine() -> Arc<dyn WorkflowEngine> {
         Arc::new(GraphemeSdkWorkflowEngine::new())
     }
@@ -260,6 +293,7 @@ impl RuntimeFactory {
 
         match runtime {
             RuntimeComposition::InMemory(_) => Arc::new(InMemoryThreadStore::default()),
+            #[cfg(feature = "surreal-native")]
             RuntimeComposition::Surreal(rt) => Arc::new(SurrealThreadStore::new(rt.job_store.db())),
         }
     }
@@ -274,6 +308,7 @@ impl RuntimeFactory {
 
         match runtime {
             RuntimeComposition::InMemory(_) => Arc::new(InMemoryClusterNodeStore::default()),
+            #[cfg(feature = "surreal-native")]
             RuntimeComposition::Surreal(rt) => {
                 Arc::new(SurrealClusterNodeStore::new(rt.job_store.db()))
             }
@@ -290,6 +325,7 @@ impl RuntimeFactory {
 
         match runtime {
             RuntimeComposition::InMemory(_) => Arc::new(InMemoryDeliveryEndpointStore::default()),
+            #[cfg(feature = "surreal-native")]
             RuntimeComposition::Surreal(rt) => {
                 Arc::new(SurrealDeliveryEndpointStore::new(rt.job_store.db()))
             }
@@ -308,6 +344,7 @@ impl RuntimeFactory {
             RuntimeComposition::InMemory(_) => {
                 Arc::new(InMemoryEndpointDeliveryStatusStore::default())
             }
+            #[cfg(feature = "surreal-native")]
             RuntimeComposition::Surreal(rt) => {
                 Arc::new(SurrealEndpointDeliveryStatusStore::new(rt.job_store.db()))
             }
@@ -324,9 +361,12 @@ impl RuntimeFactory {
             EndpointRoutingEventPublisher::new(endpoint_store).fail_on_unsupported_protocol(false);
 
         if transports.is_empty() {
-            routing_publisher = routing_publisher
-                .with_http_webhook_transport()
-                .with_tcp_socket_transport();
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                routing_publisher = routing_publisher
+                    .with_http_webhook_transport()
+                    .with_tcp_socket_transport();
+            }
         } else {
             for transport in transports {
                 routing_publisher = routing_publisher.with_transport_arc(transport.clone());

@@ -94,6 +94,20 @@ Runtime examples are available in [examples](examples).
 
 **Package note:** the crates.io package is `stasis-rs` while Rust imports use `stasis`.
 
+### Feature flags and WASM profile
+
+Default features enable the native host bundle (`native`: dashboard, Surreal, genai, Grapheme host, dotenv/file secrets). That is the same graph `cargo add stasis-rs` always pulled when `default = []` was a no-op.
+
+| Profile | Command | What you get |
+| --- | --- | --- |
+| Native (default) | `cargo check --workspace` | Dashboard, SurrealKV/WS/mem, genai, Grapheme host, `stasisd` |
+| Slim kernel | `cargo check -p stasis-rs --no-default-features` | In-memory runtime, ports, `StasisSdk` / `RuntimeSdk` without native process hosts |
+| WASM guest | `cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features` | Same slim kernel on `wasm32-unknown-unknown` |
+
+WASM does **not** include `stasisd`, the Axum dashboard, SurrealKV, genai's native TLS client, or the Grapheme host engine. Inject `LlmGateway` / chat clients and use `RuntimeBackend::InMemory`. See [ADR-0009](docs/adr/ADR-0009-wasm-target-profile.md) and [the WASM phase plan](docs/design/wasm-target-phase-plan.md).
+
+This is **Stasis *is* Wasm** (the kernel as a guest). Grapheme Stage B (Stasis *hosts* Wasm artifacts) is a separate track.
+
 ### Tool Macro (Signature-Driven)
 
 `StasisTool` can be generated from a typed async function using `#[stasis_tool(...)]`:

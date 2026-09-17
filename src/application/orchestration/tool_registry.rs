@@ -2,10 +2,62 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use genai::chat::Tool;
+#[cfg(feature = "llm-genai")]
+pub use genai::chat::Tool;
 use serde_json::Value;
 
 use crate::domain::errors::{Result, StasisError};
+
+#[cfg(not(feature = "llm-genai"))]
+#[derive(Clone, Debug)]
+pub struct Tool {
+    pub name: String,
+    pub description: Option<String>,
+    pub schema: Option<Value>,
+}
+
+#[cfg(not(feature = "llm-genai"))]
+impl Tool {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: None,
+            schema: None,
+        }
+    }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    pub fn with_schema(mut self, schema: Value) -> Self {
+        self.schema = Some(schema);
+        self
+    }
+}
+
+pub(crate) fn tool_advertised_name(tool: &Tool) -> &str {
+    #[cfg(feature = "llm-genai")]
+    {
+        tool.name.as_ref()
+    }
+    #[cfg(not(feature = "llm-genai"))]
+    {
+        tool.name.as_str()
+    }
+}
+
+pub(crate) fn tool_description(tool: &Tool) -> Option<&str> {
+    #[cfg(feature = "llm-genai")]
+    {
+        tool.description.as_deref()
+    }
+    #[cfg(not(feature = "llm-genai"))]
+    {
+        tool.description.as_deref()
+    }
+}
 
 #[async_trait]
 pub trait StasisTool: Send + Sync {

@@ -5,11 +5,12 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Operator
 - Stability: Stable
-- Last Verified: 2026-06-04
+- Last Verified: 2026-09-17
 - Verified Against:
   - src/application/config/env.rs
   - src/application/config/secrets.rs
   - src/application/composition/surreal_backend_config.rs
+  - Cargo.toml
 
 ## Purpose
 
@@ -99,6 +100,23 @@ See `.env.example` for a full local template. Frequently used keys:
 Surreal helpers in `surreal_backend_config` (`resolve_surreal_namespace_from_env`, `resolve_surreal_auth_from_env`, …) use the same resolver when `bootstrap()` has run.
 
 For provider namespaces, reasoning effort keywords, and Groq migration notes, see [LLM Providers](./llm-providers.md).
+
+## WASM profile
+
+The kernel compiles to `wasm32-unknown-unknown` without default features:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features
+```
+
+On that profile:
+
+- `bootstrap()` still installs an OS-env resolver; it does **not** load `.env` or `STASIS_SECRETS_DIR` (those need the `env-fs` feature).
+- Do not enable `native` / `dashboard` / `surreal-native` / `llm-genai` / `grapheme` for wasm32 — the crate `compile_error`s if `native` is on.
+- `--no-default-features` on native hosts is the same slim kernel (intentional).
+
+See [ADR-0009](https://github.com/EntasisLabs/stasis/blob/main/docs/adr/ADR-0009-wasm-target-profile.md).
 
 ## Safety notes
 

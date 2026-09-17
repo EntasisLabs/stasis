@@ -24,6 +24,8 @@ Document the Grapheme Workflow plane in Stasis — a policy-governed scripted wo
 
 Grapheme jobs are one of the three capability planes in Stasis (alongside the orchestration core and Locus memory). They execute compiled Grapheme-language scripts inside a sandboxed engine with enforced policy limits. This document does not cover AI prompt handlers or Locus memory handlers.
 
+This is **Story A** from ADR-0009: Stasis *hosts* Grapheme Wasm/Stage B artifacts inside a native worker. Compiling the Stasis kernel itself to `wasm32-unknown-unknown` (**Story B**) keeps the Grapheme host behind the `grapheme` feature and off the WASM guest until a later slice.
+
 ## Invariants
 
 1. Every Grapheme job inherits durable retry, dead-letter, and lineage semantics from the Stasis runtime.
