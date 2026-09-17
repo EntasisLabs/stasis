@@ -1,6 +1,8 @@
 pub mod agent;
 pub mod agent_repository;
+#[cfg(feature = "llm-genai")]
 pub mod ai_chat_client;
+#[cfg(feature = "llm-genai")]
 pub mod ai_chat_response_cache;
 pub mod ai_chat_tool_interceptor;
 pub mod llm_gateway;

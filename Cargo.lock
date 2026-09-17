@@ -8565,6 +8565,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "genai 0.6.5",
+ "getrandom 0.2.17",
  "grapheme-compiler",
  "grapheme-lsp",
  "grapheme-sdk",

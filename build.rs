@@ -3,6 +3,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
+    let targeting_wasm = std::env::var("CARGO_CFG_TARGET_ARCH")
+        .map(|arch| arch == "wasm32")
+        .unwrap_or(false);
+    let dashboard_enabled = std::env::var("CARGO_FEATURE_DASHBOARD").is_ok();
+
+    if targeting_wasm || !dashboard_enabled {
+        return;
+    }
+
     let input_path = "dashboard_assets/styles/input.css";
     let out_path = "dashboard_assets/static/dashboard.css";
     let tailwind_bin = PathBuf::from("node_modules/.bin/tailwindcss");

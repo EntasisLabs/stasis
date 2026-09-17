@@ -7,20 +7,30 @@ use crate::application::orchestration::mcp_bridged_tool_registry::McpBridgedTool
 use crate::application::orchestration::tool_registry::{
     InMemoryToolRegistry, StasisTool, ToolRegistry,
 };
+#[cfg(feature = "llm-genai")]
 use crate::application::runtime::agent_session_job_handler::AgentSessionJobHandler;
+#[cfg(feature = "llm-genai")]
 use crate::application::runtime::agent_turn_job_handler::AgentTurnJobHandler;
 use crate::application::runtime::agent_turn_waitable_job_handler::AgentTurnWaitableJobHandler;
+#[cfg(feature = "llm-genai")]
 use crate::application::runtime::chat_client_middleware::ChatClientMiddleware;
+#[cfg(feature = "llm-genai")]
 use crate::application::runtime::concurrent_pattern_job_handler::ConcurrentPatternJobHandler;
 use crate::application::runtime::coordinator_failover_job_handler::CoordinatorFailoverJobHandler;
+#[cfg(feature = "llm-genai")]
 use crate::application::runtime::default_chat_middlewares::{
     CacheChatMiddleware, LoggingChatMiddleware, TelemetryChatMiddleware,
     ToolCallInterceptionChatMiddleware,
 };
+#[cfg(feature = "grapheme")]
 use crate::application::runtime::grapheme_echo_job_handler::GraphemeEchoJobHandler;
+#[cfg(feature = "grapheme")]
 use crate::application::runtime::grapheme_healthcheck_job_handler::GraphemeHealthcheckJobHandler;
+#[cfg(feature = "grapheme")]
 use crate::application::runtime::grapheme_job_handler::GraphemeJobHandler;
+#[cfg(feature = "grapheme")]
 use crate::application::runtime::grapheme_textops_job_handler::GraphemeTextOpsJobHandler;
+#[cfg(feature = "llm-genai")]
 use crate::application::runtime::handoff_pattern_job_handler::HandoffPatternJobHandler;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::memory_aggregate_job_handler::MemoryAggregateJobHandler;
@@ -31,13 +41,17 @@ use crate::application::runtime::memory_recall_job_handler::MemoryRecallJobHandl
 use crate::application::runtime::memory_rollup_job_handler::MemoryRollupJobHandler;
 use crate::application::runtime::memory_schema_job_handler::MemorySchemaJobHandler;
 use crate::application::runtime::memory_transform_job_handler::MemoryTransformJobHandler;
+#[cfg(feature = "llm-genai")]
 use crate::application::runtime::orchestrator_pattern_job_handler::OrchestratorPatternJobHandler;
+#[cfg(feature = "llm-genai")]
 use crate::application::runtime::prompt_chat_job_handler::PromptChatJobHandler;
 use crate::application::runtime::queue_ownership_rebalance_job_handler::QueueOwnershipRebalanceJobHandler;
 use crate::application::runtime::runtime_factory::{
     RuntimeBackend, RuntimeComposition, RuntimeFactory,
 };
+#[cfg(feature = "llm-genai")]
 use crate::application::runtime::sequential_pattern_job_handler::SequentialPatternJobHandler;
+#[cfg(feature = "llm-genai")]
 use crate::application::runtime::tool_loop_job_handler::ToolLoopJobHandler;
 use crate::application::telemetry::operation::OperationTelemetry;
 use crate::domain::errors::Result;
@@ -47,8 +61,11 @@ use crate::ports::outbound::agent::mcp_tool_provider::McpToolProvider;
 use crate::ports::outbound::agent::message_codec::AgentMessageCodec;
 use crate::ports::outbound::agent::transport::AgentTransport;
 use crate::ports::outbound::agent::turn_wait_store::TurnWaitStore;
+#[cfg(feature = "llm-genai")]
 use crate::ports::outbound::ai_chat_client::AiChatClient;
+#[cfg(feature = "llm-genai")]
 use crate::ports::outbound::ai_chat_response_cache::AiChatResponseCache;
+#[cfg(feature = "llm-genai")]
 use crate::ports::outbound::ai_chat_tool_interceptor::AiChatToolInterceptor;
 use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
@@ -99,7 +116,9 @@ impl JobHandler for DelegatingJobHandler {
 #[derive(Clone)]
 pub struct StasisRuntimeBuilder {
     backend: RuntimeBackend,
+    #[cfg(feature = "llm-genai")]
     chat_client: Option<Arc<dyn AiChatClient>>,
+    #[cfg(feature = "llm-genai")]
     chat_middlewares: Vec<Arc<dyn ChatClientMiddleware>>,
     memory_context_reader: Option<Arc<dyn MemoryContextReader>>,
     memory_context_writer: Option<Arc<dyn MemoryContextWriter>>,
@@ -131,6 +150,7 @@ pub struct StasisRuntimeBuilder {
     extra_handlers: Vec<Arc<dyn JobHandler>>,
     runtime_telemetry_metrics: Option<Arc<dyn RuntimeMetrics>>,
     runtime_telemetry_tracing: Option<Arc<dyn RuntimeTracing>>,
+    #[cfg(feature = "llm-genai")]
     explicit_telemetry_chat_middleware: bool,
 }
 
@@ -176,7 +196,9 @@ impl StasisRuntimeBuilder {
     pub fn new(backend: RuntimeBackend) -> Self {
         Self {
             backend,
+            #[cfg(feature = "llm-genai")]
             chat_client: None,
+            #[cfg(feature = "llm-genai")]
             chat_middlewares: Vec::new(),
             memory_context_reader: None,
             memory_context_writer: None,
@@ -198,9 +220,9 @@ impl StasisRuntimeBuilder {
             agent_message_codec: None,
             agent_event_ingress: None,
             agent_transport: None,
-            include_grapheme_handlers: true,
-            include_prompt_handler: true,
-            include_tool_loop_handler: true,
+            include_grapheme_handlers: cfg!(feature = "grapheme"),
+            include_prompt_handler: cfg!(feature = "llm-genai"),
+            include_tool_loop_handler: cfg!(feature = "llm-genai"),
             include_agent_handlers: true,
             include_memory_operation_handlers: true,
             include_orchestration_pattern_handlers: true,
@@ -208,12 +230,15 @@ impl StasisRuntimeBuilder {
             extra_handlers: Vec::new(),
             runtime_telemetry_metrics: None,
             runtime_telemetry_tracing: None,
+            #[cfg(feature = "llm-genai")]
             explicit_telemetry_chat_middleware: false,
         }
     }
 
+    #[cfg(feature = "llm-genai")]
     define_arc_option_setter!(with_chat_client, chat_client, dyn AiChatClient);
 
+    #[cfg(feature = "llm-genai")]
     pub fn with_chat_middleware<M: ChatClientMiddleware + 'static>(
         mut self,
         middleware: M,
@@ -222,15 +247,18 @@ impl StasisRuntimeBuilder {
         self
     }
 
+    #[cfg(feature = "llm-genai")]
     pub fn with_chat_middleware_arc(mut self, middleware: Arc<dyn ChatClientMiddleware>) -> Self {
         self.chat_middlewares.push(middleware);
         self
     }
 
+    #[cfg(feature = "llm-genai")]
     pub fn with_logging_chat_middleware(self) -> Self {
         self.with_chat_middleware(LoggingChatMiddleware)
     }
 
+    #[cfg(feature = "llm-genai")]
     pub fn with_telemetry_chat_middleware(mut self, metrics: Arc<dyn RuntimeMetrics>) -> Self {
         self.explicit_telemetry_chat_middleware = true;
         self.with_chat_middleware(TelemetryChatMiddleware::new(metrics))
@@ -258,10 +286,12 @@ impl StasisRuntimeBuilder {
         ))
     }
 
+    #[cfg(feature = "llm-genai")]
     pub fn with_cache_chat_middleware(self, cache: Arc<dyn AiChatResponseCache>) -> Self {
         self.with_chat_middleware(CacheChatMiddleware::new(cache))
     }
 
+    #[cfg(feature = "llm-genai")]
     pub fn with_tool_call_interception_chat_middleware(
         self,
         interceptor: Arc<dyn AiChatToolInterceptor>,
@@ -413,8 +443,10 @@ impl StasisRuntimeBuilder {
     }
 
     /// Build the runtime plus MCP bridge handles for the composition root.
+    #[cfg_attr(not(feature = "llm-genai"), allow(unused_variables))]
     pub async fn build_with_handles(self) -> Result<(RuntimeComposition, McpBridgeHandles)> {
         let mut runtime = RuntimeFactory::build(self.backend).await?;
+        #[cfg(feature = "llm-genai")]
         let mut chat_middlewares = self.chat_middlewares;
 
         if let (Some(metrics), Some(tracing)) = (
@@ -422,6 +454,7 @@ impl StasisRuntimeBuilder {
             self.runtime_telemetry_tracing.clone(),
         ) {
             runtime.replace_telemetry(metrics.clone(), tracing.clone());
+            #[cfg(feature = "llm-genai")]
             if !self.explicit_telemetry_chat_middleware {
                 chat_middlewares.push(Arc::new(
                     TelemetryChatMiddleware::new(metrics.clone()).with_tracing(tracing),
@@ -429,11 +462,15 @@ impl StasisRuntimeBuilder {
             }
         }
 
+        #[cfg(feature = "grapheme")]
         let workflow_engine = RuntimeFactory::default_workflow_engine();
-        let chat_client = self
-            .chat_client
-            .unwrap_or_else(RuntimeFactory::default_chat_client);
-        let chat_client = Self::compose_chat_client(chat_client, &chat_middlewares);
+        #[cfg(feature = "llm-genai")]
+        let chat_client = {
+            let chat_client = self
+                .chat_client
+                .unwrap_or_else(RuntimeFactory::default_chat_client);
+            Self::compose_chat_client(chat_client, &chat_middlewares)
+        };
         let (memory_context_reader, memory_context_writer, memory_operations) =
             RuntimeFactory::ensure_locus_memory_adapters(
                 self.enable_locus_memory,
@@ -514,6 +551,7 @@ impl StasisRuntimeBuilder {
                     rt.register_event_publisher(routing_publisher)?;
                 }
 
+                #[cfg(feature = "grapheme")]
                 if self.include_grapheme_handlers {
                     rt.register_handler(
                         GraphemeJobHandler::new(workflow_engine.clone())
@@ -526,6 +564,7 @@ impl StasisRuntimeBuilder {
                     rt.register_handler(GraphemeTextOpsJobHandler::new(workflow_engine.clone()))?;
                 }
 
+                #[cfg(feature = "llm-genai")]
                 if self.include_prompt_handler {
                     rt.register_handler(PromptChatJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
@@ -535,6 +574,7 @@ impl StasisRuntimeBuilder {
                     ))?;
                 }
 
+                #[cfg(feature = "llm-genai")]
                 if self.include_tool_loop_handler {
                     rt.register_handler(ToolLoopJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
@@ -546,20 +586,23 @@ impl StasisRuntimeBuilder {
                 }
 
                 if self.include_agent_handlers {
-                    rt.register_handler(AgentTurnJobHandler::new_with_memory_and_identity(
-                        chat_client.clone(),
-                        tool_registry.clone(),
-                        memory_context_reader.clone(),
-                        memory_context_writer.clone(),
-                        identity_memory_store.clone(),
-                    ))?;
-                    rt.register_handler(AgentSessionJobHandler::new_with_memory_and_identity(
-                        chat_client.clone(),
-                        tool_registry.clone(),
-                        memory_context_reader.clone(),
-                        memory_context_writer.clone(),
-                        identity_memory_store.clone(),
-                    ))?;
+                    #[cfg(feature = "llm-genai")]
+                    {
+                        rt.register_handler(AgentTurnJobHandler::new_with_memory_and_identity(
+                            chat_client.clone(),
+                            tool_registry.clone(),
+                            memory_context_reader.clone(),
+                            memory_context_writer.clone(),
+                            identity_memory_store.clone(),
+                        ))?;
+                        rt.register_handler(AgentSessionJobHandler::new_with_memory_and_identity(
+                            chat_client.clone(),
+                            tool_registry.clone(),
+                            memory_context_reader.clone(),
+                            memory_context_writer.clone(),
+                            identity_memory_store.clone(),
+                        ))?;
+                    }
                     // Phase 2A/4: wait store is process-local even on Surreal backends unless injected.
                     let mut waitable = AgentTurnWaitableJobHandler::new(
                         turn_wait_store.clone(),
@@ -591,6 +634,7 @@ impl StasisRuntimeBuilder {
                     }
                 }
 
+                #[cfg(feature = "llm-genai")]
                 if self.include_orchestration_pattern_handlers {
                     rt.register_handler(
                         ConcurrentPatternJobHandler::new_with_thread_store_and_memory(
@@ -627,6 +671,7 @@ impl StasisRuntimeBuilder {
                     })?;
                 }
             }
+            #[cfg(feature = "surreal-native")]
             RuntimeComposition::Surreal(rt) => {
                 let thread_store =
                     RuntimeFactory::resolve_thread_store(&runtime, default_thread_store.clone());
@@ -655,6 +700,7 @@ impl StasisRuntimeBuilder {
                     rt.register_event_publisher(routing_publisher)?;
                 }
 
+                #[cfg(feature = "grapheme")]
                 if self.include_grapheme_handlers {
                     rt.register_handler(
                         GraphemeJobHandler::new(workflow_engine.clone())
@@ -667,6 +713,7 @@ impl StasisRuntimeBuilder {
                     rt.register_handler(GraphemeTextOpsJobHandler::new(workflow_engine.clone()))?;
                 }
 
+                #[cfg(feature = "llm-genai")]
                 if self.include_prompt_handler {
                     rt.register_handler(PromptChatJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
@@ -676,6 +723,7 @@ impl StasisRuntimeBuilder {
                     ))?;
                 }
 
+                #[cfg(feature = "llm-genai")]
                 if self.include_tool_loop_handler {
                     rt.register_handler(ToolLoopJobHandler::new_with_memory_and_identity(
                         chat_client.clone(),
@@ -687,20 +735,23 @@ impl StasisRuntimeBuilder {
                 }
 
                 if self.include_agent_handlers {
-                    rt.register_handler(AgentTurnJobHandler::new_with_memory_and_identity(
-                        chat_client.clone(),
-                        tool_registry.clone(),
-                        memory_context_reader.clone(),
-                        memory_context_writer.clone(),
-                        identity_memory_store.clone(),
-                    ))?;
-                    rt.register_handler(AgentSessionJobHandler::new_with_memory_and_identity(
-                        chat_client.clone(),
-                        tool_registry.clone(),
-                        memory_context_reader.clone(),
-                        memory_context_writer.clone(),
-                        identity_memory_store.clone(),
-                    ))?;
+                    #[cfg(feature = "llm-genai")]
+                    {
+                        rt.register_handler(AgentTurnJobHandler::new_with_memory_and_identity(
+                            chat_client.clone(),
+                            tool_registry.clone(),
+                            memory_context_reader.clone(),
+                            memory_context_writer.clone(),
+                            identity_memory_store.clone(),
+                        ))?;
+                        rt.register_handler(AgentSessionJobHandler::new_with_memory_and_identity(
+                            chat_client.clone(),
+                            tool_registry.clone(),
+                            memory_context_reader.clone(),
+                            memory_context_writer.clone(),
+                            identity_memory_store.clone(),
+                        ))?;
+                    }
                     // Phase 2A/4: wait store is process-local even on Surreal backends unless injected.
                     let mut waitable = AgentTurnWaitableJobHandler::new(
                         turn_wait_store.clone(),
@@ -732,6 +783,7 @@ impl StasisRuntimeBuilder {
                     }
                 }
 
+                #[cfg(feature = "llm-genai")]
                 if self.include_orchestration_pattern_handlers {
                     rt.register_handler(
                         ConcurrentPatternJobHandler::new_with_thread_store_and_memory(
@@ -788,6 +840,7 @@ impl StasisRuntimeBuilder {
         Ok(crate::sdk::runtime_sdk::RuntimeSdk::new(composition))
     }
 
+    #[cfg(feature = "llm-genai")]
     fn compose_chat_client(
         chat_client: Arc<dyn AiChatClient>,
         middlewares: &[Arc<dyn ChatClientMiddleware>],
@@ -902,8 +955,10 @@ mod tests {
             .await
             .expect("runtime should build");
 
-        let RuntimeComposition::InMemory(rt) = runtime else {
-            panic!("expected in-memory runtime composition");
+        let rt = match runtime {
+            RuntimeComposition::InMemory(rt) => rt,
+            #[cfg(feature = "surreal-native")]
+            RuntimeComposition::Surreal(_) => panic!("expected in-memory runtime composition"),
         };
 
         let now = Utc::now();

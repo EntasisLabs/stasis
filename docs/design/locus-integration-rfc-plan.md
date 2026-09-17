@@ -13,6 +13,7 @@ Execution update (2026-06-23):
 - **0.7.1** bumps Locus to **0.4.2 / locus-sdk 0.2.2** for semantic `null` handling in parser and SurrealDB storage.
 - **0.9.3** bumps Locus to **0.5.0 / locus-sdk 0.3.0** for WASM compilation support and feature-gated Surreal/HTTP providers.
 - **0.9.4** bumps Locus to **0.5.1 / locus-sdk 0.3.1** for `SttpDocumentBuilder` canonical STTP composition.
+- Stasis WASM guest profile (story B) is tracked in [wasm-target-phase-plan.md](wasm-target-phase-plan.md) / ADR-0009; this RFC remains Locus memory-plane delivery.
 - `LocusMemoryStore` bundles node store + semantic index; ingest and find/recall/evict/transform paths wire `with_semantic_index()`.
 - Memory operation workflows now include `find`, `evict`, and `graph` in addition to recall, aggregate, transform, rollup, and schema.
 

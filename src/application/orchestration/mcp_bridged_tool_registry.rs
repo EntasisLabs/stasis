@@ -2,13 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use genai::chat::Tool;
 use serde_json::Value;
 
 use crate::application::orchestration::mcp_recursion::{
     current_remaining_depth, scope_remaining_depth,
 };
-use crate::application::orchestration::tool_registry::{InMemoryToolRegistry, ToolRegistry};
+use crate::application::orchestration::tool_registry::{InMemoryToolRegistry, Tool, ToolRegistry};
 use crate::domain::agent::mcp::{McpInvocationContext, McpToolDescriptor};
 use crate::domain::errors::{Result, StasisError};
 use crate::ports::outbound::agent::mcp_tool_provider::McpToolProvider;
@@ -32,7 +31,10 @@ impl McpBridgedToolRegistry {
         let local_tools = local.list_tools().await?;
         let mut local_names = local_tools
             .iter()
-            .map(|tool| tool.name.as_ref().to_string())
+            .map(|tool| {
+                crate::application::orchestration::tool_registry::tool_advertised_name(tool)
+                    .to_string()
+            })
             .collect::<std::collections::HashSet<_>>();
 
         let mut provider_index = HashMap::new();
@@ -76,15 +78,16 @@ impl McpBridgedToolRegistry {
     }
 
     async fn invoke_provider(&self, tool_name: &str, input: Value) -> Result<Value> {
-        let provider_idx = self.provider_index.get(tool_name).copied().ok_or_else(|| {
-            StasisError::PortFailure(format!("tool not registered: {tool_name}"))
-        })?;
+        let provider_idx =
+            self.provider_index.get(tool_name).copied().ok_or_else(|| {
+                StasisError::PortFailure(format!("tool not registered: {tool_name}"))
+            })?;
         let provider = self.providers.get(provider_idx).ok_or_else(|| {
             StasisError::PortFailure(format!("mcp provider missing for tool '{tool_name}'"))
         })?;
 
-        let remaining = current_remaining_depth()
-            .unwrap_or(McpInvocationContext::DEFAULT_MAX_DEPTH);
+        let remaining =
+            current_remaining_depth().unwrap_or(McpInvocationContext::DEFAULT_MAX_DEPTH);
         if remaining == 0 {
             return Err(StasisError::PortFailure(
                 "policy violation: mcp recursion budget exhausted".into(),
@@ -181,7 +184,13 @@ mod tests {
             .await
             .unwrap();
         let tools = registry.list_tools().await.unwrap();
-        let names: Vec<_> = tools.iter().map(|t| t.name.as_ref().to_string()).collect();
+        let names: Vec<_> = tools
+            .iter()
+            .map(|t| {
+                crate::application::orchestration::tool_registry::tool_advertised_name(t)
+                    .to_string()
+            })
+            .collect();
         assert!(names.contains(&"local_echo".to_string()));
         assert!(names.contains(&"remote_search".to_string()));
 

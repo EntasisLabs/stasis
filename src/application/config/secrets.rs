@@ -28,8 +28,16 @@ pub struct FileSecretsSource {
 
 impl FileSecretsSource {
     pub fn from_dir(dir: impl AsRef<Path>) -> Self {
-        Self {
-            secrets: load_secret_files(dir.as_ref()),
+        #[cfg(feature = "env-fs")]
+        {
+            Self {
+                secrets: load_secret_files(dir.as_ref()),
+            }
+        }
+        #[cfg(not(feature = "env-fs"))]
+        {
+            let _ = dir;
+            Self::default()
         }
     }
 
@@ -74,9 +82,7 @@ impl ChainedSecretsSource {
 
 impl SecretsSource for ChainedSecretsSource {
     fn lookup(&self, key: &str) -> Option<String> {
-        self.sources
-            .iter()
-            .find_map(|source| source.lookup(key))
+        self.sources.iter().find_map(|source| source.lookup(key))
     }
 }
 
@@ -93,6 +99,7 @@ pub(crate) fn resolve(key: &str) -> Option<String> {
         .or_else(|| OsEnvSource.lookup(key))
 }
 
+#[cfg(feature = "env-fs")]
 fn load_secret_files(dir: &Path) -> HashMap<String, String> {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -128,12 +135,10 @@ fn load_secret_files(dir: &Path) -> HashMap<String, String> {
 }
 
 pub fn default_secrets_dir() -> Option<PathBuf> {
-    OsEnvSource
-        .lookup("STASIS_SECRETS_DIR")
-        .map(PathBuf::from)
+    OsEnvSource.lookup("STASIS_SECRETS_DIR").map(PathBuf::from)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "env-fs"))]
 mod tests {
     use super::*;
     use std::fs;
@@ -167,8 +172,7 @@ mod tests {
     fn chained_source_uses_first_match() {
         let dir = temp_secrets_dir();
         fs::create_dir_all(&dir).expect("temp secrets dir should be created");
-        fs::write(dir.join("STASIS_CHAINED"), "from-file")
-            .expect("secret file should be written");
+        fs::write(dir.join("STASIS_CHAINED"), "from-file").expect("secret file should be written");
 
         let chain = ChainedSecretsSource::new()
             .with_source(OsEnvSource)
@@ -182,7 +186,10 @@ mod tests {
             std::env::remove_var("STASIS_CHAINED");
         }
 
-        assert_eq!(chain.lookup("STASIS_CHAINED"), Some("from-file".to_string()));
+        assert_eq!(
+            chain.lookup("STASIS_CHAINED"),
+            Some("from-file".to_string())
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **WASM kernel profile (ADR-0009, Accepted).** `stasis-rs` compiles to `wasm32-unknown-unknown` with `--no-default-features`. Native process hosts stay on a `native` default-feature bundle (`dashboard`, `surreal-native`, `llm-genai`, `grapheme`, `env-fs`). CI gate: `.github/workflows/wasm.yml`. See [docs/design/wasm-target-phase-plan.md](docs/design/wasm-target-phase-plan.md).
+
+### Changed
+
+- **Default features now mean something.** `default = ["native"]`. `--no-default-features` is a slim in-memory kernel (no dashboard, genai client, Grapheme host, SurrealKV, or dotenv/file secrets). Existing `cargo add stasis-rs` consumers keep today's native graph.
+
 ## [0.10.0] - 2026-08-28
 
 ### Added
