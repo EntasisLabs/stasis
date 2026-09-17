@@ -16,15 +16,27 @@ elif [[ -n "${1:-}" ]]; then
 	exit 2
 fi
 
+CARGO=(cargo)
+
+rustc_minor() {
+	local ver
+	ver="$("$@" --version 2>/dev/null | awk '{print $2}')"
+	echo "${ver:-0}" | cut -d. -f2
+}
+
 if ! command -v cargo >/dev/null; then
 	echo "cargo not found on PATH" >&2
 	exit 1
 fi
 
-rustc_minor="$(rustc --version | awk '{print $2}' | cut -d. -f2)"
-if [[ "${rustc_minor:-0}" -lt 85 ]]; then
-	echo "Rust 1.85+ is required (edition 2024). Current: $(rustc --version)" >&2
-	exit 1
+if [[ "$(rustc_minor rustc)" -lt 85 ]]; then
+	if command -v rustup >/dev/null && [[ "$(rustc_minor rustup run stable rustc)" -ge 85 ]]; then
+		echo "default rustc is < 1.85; using rustup run stable"
+		CARGO=(rustup run stable cargo)
+	else
+		echo "Rust 1.85+ is required (edition 2024). Current: $(rustc --version 2>/dev/null || echo missing)" >&2
+		exit 1
+	fi
 fi
 
 publish_crate() {
@@ -33,8 +45,8 @@ publish_crate() {
 	if [[ "$MODE" == "dry-run" ]]; then
 		extra+=(--dry-run)
 	fi
-	echo "==> cargo publish -p ${pkg} ${extra[*]:-}"
-	cargo publish -p "$pkg" "${extra[@]}"
+	echo "==> ${CARGO[*]} publish -p ${pkg} ${extra[*]:-}"
+	"${CARGO[@]}" publish -p "$pkg" "${extra[@]}"
 }
 
 if [[ "$MODE" == "execute" && "${CONFIRM_PUBLISH:-}" != "yes" ]]; then

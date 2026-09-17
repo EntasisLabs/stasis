@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Crates.io publish runbook ([RELEASE.md](RELEASE.md)) and `scripts/publish-crates.sh` (dry-run by default).
+- Crates.io publish runbook ([RELEASE.md](RELEASE.md)) and `scripts/publish-crates.sh` (dry-run by default; uses `rustup run stable` when the default toolchain is older than 1.85).
 
 ### Changed
 
