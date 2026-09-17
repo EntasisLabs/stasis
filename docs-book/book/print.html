@@ -37,11 +37,23 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc.js"></script>
     </head>
     <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
     <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
@@ -82,10 +94,13 @@
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            sidebar_toggle.checked = sidebar === 'visible';
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
@@ -119,7 +134,7 @@
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -136,7 +151,12 @@
 
                 <div id="search-wrapper" class="hidden">
                     <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </form>
                     <div id="searchresults-outer" class="searchresults-outer hidden">
                         <div id="searchresults-header" class="searchresults-header"></div>
@@ -162,8 +182,8 @@
 <li>Document Type: Book Overview</li>
 <li>Audience: Engineer, Architect, Operator</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-28</li>
-<li>Verified Against: Stasis 0.10.0 release</li>
+<li>Last Verified: 2026-09-17</li>
+<li>Verified Against: Stasis 0.11.0 release</li>
 </ul>
 <p>Stasis is an agentic framework SDK with a durable job orchestration runtime.</p>
 <p>If you are new to Stasis, start with <a href="./getting-started.html">Getting Started</a> before diving into architecture details.</p>
@@ -183,7 +203,7 @@
 <li>Review Extension Points for integration contracts and ADRs for rationale.</li>
 </ol>
 <h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
-<p>This book documents the Stasis 0.10.x runtime architecture and operational semantics. Reference pages marked <strong>Stable</strong> are verified against the current release train. It does not define production deployment topology beyond the cookbook recipes.</p>
+<p>This book documents the Stasis 0.11.x runtime architecture and operational semantics. Reference pages marked <strong>Stable</strong> are verified against the current release train. It does not define production deployment topology beyond the cookbook recipes.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
 <h2 id="document-metadata-1"><a class="header" href="#document-metadata-1">Document Metadata</a></h2>
 <ul>
@@ -604,7 +624,7 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-28</li>
+<li>Last Verified: 2026-09-17</li>
 <li>Verified Against:
 <ul>
 <li>src/application/runtime/in_memory_runtime.rs</li>
@@ -618,7 +638,8 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <li>src/domain/runtime/thread.rs</li>
 <li>tests/runtime_backend_parity.rs</li>
 <li>tests/federated_job_contract.rs</li>
-<li>Stasis 0.10.0</li>
+<li>tests/wasm_kernel_smoke.rs</li>
+<li>Stasis 0.11.0</li>
 </ul>
 </li>
 </ul>
@@ -718,7 +739,7 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <li>finished_at: datetime</li>
 <li>outcome: enum(succeeded|retryable_failure|fatal_failure)</li>
 <li>error_message: string | null</li>
-<li>sttp_output_node_id: string | null</li>
+<li>output_provenance: object | null</li>
 <li>execution_id: string | null</li>
 <li>guardrail_code: string | null</li>
 <li>policy_reason: string | null</li>
@@ -764,8 +785,8 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <li>correlation_id</li>
 <li>causation_id</li>
 <li>trace_id</li>
-<li>sttp_input_node_id</li>
-<li>sttp_output_node_id</li>
+<li>input_provenance</li>
+<li>output_provenance</li>
 <li>execution_id</li>
 <li>input_memory_query_id</li>
 <li>input_memory_query_fingerprint</li>
@@ -796,9 +817,10 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <h3 id="lease-acquisition"><a class="header" href="#lease-acquisition">Lease Acquisition</a></h3>
 <ol>
 <li>Select due enqueued job where scheduled_at &lt;= now, lease_expires_at is null or expired, and <code>placement</code> matches the worker capabilities.</li>
-<li>Attempt compare-and-set update to assign lease_owner and lease_expires_at.</li>
+<li>Attempt compare-and-set update to assign lease_owner and lease_expires_at while the selected placement representation remains unchanged.</li>
 <li>Proceed only when update affects one record.</li>
 </ol>
+<p>Workers declare capabilities through <code>RuntimeSdk::process_once_with_capabilities</code>. The compatibility <code>process_once</code> path has no capabilities and leases only unrestricted jobs.</p>
 <h3 id="worker-execution"><a class="header" href="#worker-execution">Worker Execution</a></h3>
 <ol>
 <li>Move leased job to running.</li>
@@ -807,10 +829,13 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <li>On success:</li>
 </ol>
 <ul>
-<li>persist result reference sttp_output_node_id</li>
+<li>persist optional runtime-neutral <code>output_provenance</code></li>
 <li>mark succeeded</li>
-<li>write outbox events</li>
+<li>write outbox events
+<ul>
 <li>include standardized diagnostics for orchestration/policy outcomes when applicable</li>
+</ul>
+</li>
 </ul>
 <ol start="5">
 <li>On failure:</li>
@@ -2307,7 +2332,7 @@ impl ChatClientMiddleware for MyMiddleware {
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-28</li>
+<li>Last Verified: 2026-09-17</li>
 <li>Verified Against:
 <ul>
 <li>src/application/runtime/grapheme_job_handler.rs</li>
@@ -2317,7 +2342,7 @@ impl ChatClientMiddleware for MyMiddleware {
 <li>src/infrastructure/runtime/grapheme_sdk_workflow_engine.rs</li>
 <li>src/ports/outbound/runtime/workflow_engine.rs</li>
 <li>src/application/runtime/stasis_runtime_builder.rs</li>
-<li>Stasis 0.10.0 / Grapheme 0.7.1</li>
+<li>Stasis 0.11.0 / Grapheme 0.7.1</li>
 </ul>
 </li>
 </ul>
@@ -2325,6 +2350,7 @@ impl ChatClientMiddleware for MyMiddleware {
 <p>Document the Grapheme Workflow plane in Stasis — a policy-governed scripted workflow execution layer backed by <code>grapheme-sdk</code>. Covers the four registered job handlers, source resolution semantics, guardrail policy, diagnostics contracts, and tracing behavior.</p>
 <h2 id="scope-3"><a class="header" href="#scope-3">Scope</a></h2>
 <p>Grapheme jobs are one of the three capability planes in Stasis (alongside the orchestration core and Locus memory). They execute compiled Grapheme-language scripts inside a sandboxed engine with enforced policy limits. This document does not cover AI prompt handlers or Locus memory handlers.</p>
+<p>This is <strong>Story A</strong> from ADR-0009: Stasis <em>hosts</em> Grapheme Wasm/Stage B artifacts inside a native worker. Compiling the Stasis kernel itself to <code>wasm32-unknown-unknown</code> (<strong>Story B</strong>) keeps the Grapheme host behind the <code>grapheme</code> feature and off the WASM guest until a later slice.</p>
 <h2 id="invariants-6"><a class="header" href="#invariants-6">Invariants</a></h2>
 <ol>
 <li>Every Grapheme job inherits durable retry, dead-letter, and lineage semantics from the Stasis runtime.</li>
@@ -2411,7 +2437,7 @@ import data from "grapheme/data"  // requires Stasis `grapheme-full` feature at 
 </code></pre>
 <h3 id="cargo-feature-grapheme-full"><a class="header" href="#cargo-feature-grapheme-full">Cargo feature: <code>grapheme-full</code></a></h3>
 <p>By default, Stasis links Grapheme <strong>0.7.1</strong> with the lean host stdlib profile (<code>core</code>, <code>http</code>, <code>web</code>, <code>json</code>, <code>sql</code>, …) and omits Stage B / AOT container deps from the default build. Enable the optional <strong><code>grapheme-full</code></strong> feature on <code>stasis-rs</code> to compile in extended modules (<code>data</code>, <code>pdf</code>, <code>image</code>, <code>plot</code>, <code>media</code>) plus Stage B:</p>
-<pre><code class="language-toml">stasis-rs = { version = "0.10.0", features = ["grapheme-full"] }
+<pre><code class="language-toml">stasis-rs = { version = "0.11.0", features = ["grapheme-full"] }
 </code></pre>
 <p>Grapheme 0.7.1 also ships a <code>slim</code> SDK profile (core/json only) for iOS/Wasm embedders. Stasis job handlers use the host profile for workflow execution. Enable <code>dashboard-lsp</code> when you need <code>grapheme-lsp</code> in the dashboard build.</p>
 <h3 id="execution-model"><a class="header" href="#execution-model">Execution model</a></h3>
@@ -3531,12 +3557,17 @@ async fn main() -&gt; stasis::domain::errors::Result&lt;()&gt; {
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Operator</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-06-04</li>
+<li>Last Verified: 2026-09-17</li>
 <li>Verified Against:
 <ul>
 <li>src/application/config/env.rs</li>
 <li>src/application/config/secrets.rs</li>
 <li>src/application/composition/surreal_backend_config.rs</li>
+<li>Cargo.toml</li>
+<li>tests/wasm_kernel_smoke.rs</li>
+<li>src/infrastructure/llm/openai_http_gateway.rs</li>
+<li>src/infrastructure/memory/locus_node_store_factory.rs</li>
+<li>stasis-wasm/src/lib.rs</li>
 </ul>
 </li>
 </ul>
@@ -3605,6 +3636,25 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </div>
 <p>Surreal helpers in <code>surreal_backend_config</code> (<code>resolve_surreal_namespace_from_env</code>, <code>resolve_surreal_auth_from_env</code>, …) use the same resolver when <code>bootstrap()</code> has run.</p>
 <p>For provider namespaces, reasoning effort keywords, and Groq migration notes, see <a href="./llm-providers.html">LLM Providers</a>.</p>
+<h2 id="wasm-profile"><a class="header" href="#wasm-profile">WASM profile</a></h2>
+<p>The kernel compiles to <code>wasm32-unknown-unknown</code> without default features:</p>
+<pre><code class="language-bash">rustup target add wasm32-unknown-unknown
+cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features
+cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke
+</code></pre>
+<p>On that profile:</p>
+<ul>
+<li><code>bootstrap()</code> still installs an OS-env resolver; it does <strong>not</strong> load <code>.env</code> or <code>STASIS_SECRETS_DIR</code> (those need the <code>env-fs</code> feature).</li>
+<li>Do not enable <code>native</code> / <code>dashboard</code> / <code>surreal-native</code> / <code>llm-genai</code> / <code>grapheme</code> for wasm32 — the crate <code>compile_error</code>s if <code>native</code> is on.</li>
+<li><code>--no-default-features</code> on native hosts is the same slim kernel (intentional).</li>
+<li>In-memory <code>StasisSdk</code> + <code>RuntimeSdk</code> run under the W2 Node <code>wasm-bindgen-test</code> harness (<code>tests/wasm_kernel_smoke.rs</code>). Wall time uses <code>web-time</code> / chrono <code>wasmbind</code>. Locus store/recall jobs are covered by the same harness.</li>
+<li>Opt-in <code>llm-openai-http</code> adds <code>OpenAiHttpGateway</code>: OpenAI Chat Completions over <code>reqwest</code>/<code>fetch</code>. Set <code>STASIS_OPENAI_API_KEY</code> (or <code>OPENAI_API_KEY</code> / <code>STASIS_LLM_API_KEY</code>) and optionally <code>STASIS_LLM_BASE_URL</code> for Groq/OpenRouter/Ollama <code>/v1</code>. Browser hosts should pass the key into <code>OpenAiHttpGateway::new</code> (no process env) and often need a same-origin proxy because of CORS.</li>
+<li>Opt-in <code>http-wasm</code> compiles webhook and cluster HTTP forwarders (<code>fetch</code>). Native webhook/TCP paths stay on the default native graph.</li>
+<li>Opt-in <code>surreal-ws</code> compiles remote <code>wss://</code> / <code>ws://</code> job adapters. <code>surreal-native</code> / SurrealKV <code>compile_error</code> on wasm32.</li>
+<li>Opt-in <code>locus-persist</code> wires <code>locus-surreal-adapter</code> (<code>indxdb://</code>, <code>mem://</code>, <code>wss://</code>). Stasis does not reimplement STTP; <code>locus-wasm</code> remains the browser persistence implementation.</li>
+<li>Optional workspace crate <code>stasis-wasm</code> exposes <code>wasm-bindgen</code> <code>StasisWasmClient</code> (in-memory register/invoke + ping job).</li>
+</ul>
+<p>See <a href="https://github.com/EntasisLabs/stasis/blob/main/docs/adr/ADR-0009-wasm-target-profile.md">ADR-0009</a> and the <a href="./cookbook/embed-stasis-browser-host.html">browser embed cookbook</a>.</p>
 <h2 id="safety-notes"><a class="header" href="#safety-notes">Safety notes</a></h2>
 <ul>
 <li><code>.env</code> is gitignored — never commit secrets.</li>
@@ -3826,6 +3876,8 @@ pub trait AiChatClient: Send + Sync {
 <div class="table-wrapper"><table><thead><tr><th>Type</th><th>Description</th></tr></thead><tbody>
 <tr><td><code>GenaiChatClient</code></td><td>Production client backed by <code>genai</code>. Uses <code>from_env()</code> for model selection via environment variables</td></tr>
 <tr><td><code>MockLlmGateway</code></td><td>Test stub with configurable canned responses</td></tr>
+<tr><td><code>OpenAiHttpGateway</code></td><td>OpenAI Chat Completions HTTP (<code>llm-openai-http</code>). WASM-safe (<code>fetch</code>); also works natively without <code>genai</code></td></tr>
+<tr><td><code>HttpWebhookEventPublisher</code> / <code>HttpClusterCommandForwarder</code></td><td>HTTP outbox + cluster forward (<code>http-wasm</code> on wasm32; always on native)</td></tr>
 </tbody></table>
 </div>
 <p><strong>Wiring:</strong></p>
@@ -4867,7 +4919,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <li>Document Type: Cookbook Index</li>
 <li>Audience: Engineer, Operator</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-06-04</li>
+<li>Last Verified: 2026-09-17</li>
 <li>Verified Against: docs-book/src/cookbook/</li>
 </ul>
 <h2 id="purpose-21"><a class="header" href="#purpose-21">Purpose</a></h2>
@@ -4885,6 +4937,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <li>Use Workflow Builder Starting Object to standardize deterministic graph runs.</li>
 <li>Apply Identity Memory Change Control for governed relationship updates.</li>
 <li>Use Memory Maintenance and Rollups for long-term memory hygiene.</li>
+<li>Use Embed Stasis in a Browser Host for the slim WASM kernel (<code>--no-default-features</code>).</li>
 </ol>
 <h2 id="recipe-index"><a class="header" href="#recipe-index">Recipe Index</a></h2>
 <ol>
@@ -4893,6 +4946,7 @@ fn app(service: Arc&lt;RuntimeDashboardQueryService&gt;) -&gt; Router {
 <li><a href="./cookbook/workflow-builder-starting-object.html">Workflow Builder Starting Object</a></li>
 <li><a href="./cookbook/identity-memory-change-control.html">Identity Memory Change Control</a> — governed relationship updates, contacts, preferences, and context modes</li>
 <li><a href="./cookbook/memory-maintenance-rollups.html">Memory Maintenance and Rollups</a></li>
+<li><a href="./cookbook/embed-stasis-browser-host.html">Embed Stasis in a Browser Host</a></li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="platform-builder-mixed-local--external-participants"><a class="header" href="#platform-builder-mixed-local--external-participants">Platform Builder: Mixed Local + External Participants</a></h1>
 <h2 id="document-metadata-26"><a class="header" href="#document-metadata-26">Document Metadata</a></h2>
@@ -6052,8 +6106,113 @@ println!(
 <li>Persist transform failure lists for follow-up remediation.</li>
 <li>Use scoped operations for large multi-tenant deployments.</li>
 </ol>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="embed-stasis-in-a-browser-host"><a class="header" href="#embed-stasis-in-a-browser-host">Embed Stasis in a Browser Host</a></h1>
 <h2 id="document-metadata-32"><a class="header" href="#document-metadata-32">Document Metadata</a></h2>
+<ul>
+<li>Document Type: Cookbook Recipe</li>
+<li>Audience: Engineer</li>
+<li>Stability: Evolving</li>
+<li>Last Verified: 2026-09-17</li>
+<li>Verified Against:
+<ul>
+<li>Cargo.toml</li>
+<li>tests/wasm_kernel_smoke.rs</li>
+<li>src/infrastructure/llm/openai_http_gateway.rs</li>
+<li>src/infrastructure/memory/locus_node_store_factory.rs</li>
+<li>stasis-wasm/src/lib.rs</li>
+<li>docs/adr/ADR-0009-wasm-target-profile.md</li>
+</ul>
+</li>
+</ul>
+<h2 id="outcome-6"><a class="header" href="#outcome-6">Outcome</a></h2>
+<p>Embed the Stasis <strong>kernel</strong> in a browser or wasm-bindgen host: in-memory jobs, injected LLM, and Locus memory — without the dashboard, <code>stasisd</code>, or SurrealKV.</p>
+<p>This is <strong>Story B</strong> (Stasis <em>is</em> Wasm). Grapheme Stage B (Stasis <em>hosts</em> Wasm artifacts) is a separate track.</p>
+<h2 id="recipe-4"><a class="header" href="#recipe-4">Recipe</a></h2>
+<h3 id="1-depend-on-the-slim-profile"><a class="header" href="#1-depend-on-the-slim-profile">1. Depend on the slim profile</a></h3>
+<pre><code class="language-toml">stasis-rs = { version = "0.11", default-features = false }
+# optional:
+# features = ["llm-openai-http"]   # fetch → OpenAI-spec /v1/chat/completions
+# features = ["http-wasm"]         # webhook / cluster forwarder
+# features = ["surreal-ws"]        # remote wss:// job runtime
+# features = ["locus-persist"]     # indxdb:// or wss:// Locus stores
+</code></pre>
+<pre><code class="language-bash">rustup target add wasm32-unknown-unknown
+cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features
+</code></pre>
+<p>Do not enable <code>native</code> on wasm32 — the crate <code>compile_error</code>s.</p>
+<h3 id="2-in-memory-runtime--mock-or-http-llm"><a class="header" href="#2-in-memory-runtime--mock-or-http-llm">2. In-memory runtime + mock or HTTP LLM</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::sdk_prelude::{
+    InMemoryAgentRepository, InvokeAgentRequest, RegisterAgentRequest, RuntimeBackend,
+    RuntimeSdk, StasisSdk,
+};
+use stasis::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
+use stasis::infrastructure::llm::mock_gateway::MockLlmGateway;
+
+async fn boot() -&gt; stasis::domain::errors::Result&lt;()&gt; {
+    let sdk = StasisSdk::new(
+        InMemoryAgentRepository::default(),
+        MockLlmGateway::new("browser mock"),
+    );
+    sdk.register_agent(RegisterAgentRequest {
+        id: "planner".into(),
+        name: "Planner".into(),
+        system_prompt: "Break work into steps".into(),
+    })
+    .await?;
+
+    let _runtime = RuntimeSdk::from_builder(
+        StasisRuntimeBuilder::new(RuntimeBackend::InMemory).with_locus_memory(),
+    )
+    .await?;
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>For a real model, enable <code>llm-openai-http</code> and pass the key from the host (browsers have no process env). CORS usually requires a same-origin <code>/v1</code> proxy.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use stasis::sdk_prelude_ext::OpenAiHttpGateway;
+
+let llm = OpenAiHttpGateway::new(api_key_from_host, "gpt-4o-mini")
+    .with_base_url("/v1"); // same-origin proxy
+<span class="boring">}</span></code></pre></pre>
+<h3 id="3-optional-js-bindings-stasis-wasm"><a class="header" href="#3-optional-js-bindings-stasis-wasm">3. Optional JS bindings (<code>stasis-wasm</code>)</a></h3>
+<pre><code class="language-js">import init, { version, StasisWasmClient } from "stasis-wasm";
+
+await init();
+const client = await StasisWasmClient.create();
+await client.register_agent("planner", "Planner", "Break work into steps");
+const text = await client.invoke_agent("planner", "Plan a kickoff");
+const jobId = await client.enqueue_ping(1);
+await client.process_once("default", "browser-worker");
+</code></pre>
+<p><code>stasis-wasm</code> is workspace-optional and not published to crates.io yet. Build with <code>wasm-pack</code> / <code>wasm-bindgen</code> against <code>wasm32-unknown-unknown</code>.</p>
+<h3 id="4-memory-persistence-stays-in-locus"><a class="header" href="#4-memory-persistence-stays-in-locus">4. Memory persistence stays in Locus</a></h3>
+<p>Default WASM memory is <code>LocusMemoryStore::in_memory()</code>. For IndexedDB or remote Surreal, enable <code>locus-persist</code> and call <code>LocusNodeStoreFactory::from_surreal_endpoint</code>:</p>
+<div class="table-wrapper"><table><thead><tr><th>Endpoint</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>indxdb://stasis</code></td><td>Browser IndexedDB via <code>locus-surreal-adapter</code></td></tr>
+<tr><td><code>mem://</code></td><td>Embedded Surreal mem engine</td></tr>
+<tr><td><code>wss://…</code></td><td>Remote Surreal WebSocket</td></tr>
+</tbody></table>
+</div>
+<p>Do not reimplement STTP in the host. <code>locus-wasm</code> remains the browser persistence implementation; Stasis only wires adapters.</p>
+<p>Job durability on wasm uses <code>--features surreal-ws</code> and <code>RuntimeSdk::surreal_ws("wss://…", ns, db)</code> — never <code>surrealkv://</code>.</p>
+<h3 id="5-what-not-to-compile"><a class="header" href="#5-what-not-to-compile">5. What not to compile</a></h3>
+<ul>
+<li><code>stasisd</code>, Axum dashboard, <code>surreal-native</code> / SurrealKV</li>
+<li><code>llm-genai</code> (native TLS <code>genai</code> client)</li>
+<li>Grapheme host (<code>grapheme</code> / <code>grapheme-full</code>)</li>
+<li>OTEL gRPC exporters, <code>rfkafka_wasi</code> (placeholder only)</li>
+</ul>
+<h2 id="verify"><a class="header" href="#verify">Verify</a></h2>
+<pre><code class="language-bash">cargo test -p stasis-rs --test wasm_kernel_smoke
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+WASM_BINDGEN_TEST_ONLY_NODE=1 \
+cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="surrealdb-schema-specification"><a class="header" href="#surrealdb-schema-specification">SurrealDB Schema Specification</a></h1>
+<h2 id="document-metadata-33"><a class="header" href="#document-metadata-33">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
@@ -6373,20 +6532,22 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
 <li>Event payload versioning and schema evolution process.</li>
 </ol>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="architecture-decision-records"><a class="header" href="#architecture-decision-records">Architecture Decision Records</a></h1>
-<h2 id="document-metadata-33"><a class="header" href="#document-metadata-33">Document Metadata</a></h2>
+<h2 id="document-metadata-34"><a class="header" href="#document-metadata-34">Document Metadata</a></h2>
 <ul>
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-28</li>
+<li>Last Verified: 2026-09-17</li>
 <li>Verified Against:
 <ul>
 <li>docs/adr/README.md</li>
 <li>docs/adr/ADR-0007-agent-platform-runtime-contracts.md</li>
 <li>docs/adr/ADR-0008-stasisd-declarative-engine.md</li>
+<li>docs/adr/ADR-0009-wasm-target-profile.md</li>
 <li>docs/adr/ADR-0010-federated-job-contract.md</li>
 <li>docs/design/agent-platform-runtime-contracts-plan.md</li>
 <li>docs/design/stasisd-declarative-engine-plan.md</li>
+<li>docs/design/wasm-target-phase-plan.md</li>
 <li>docs/design/federated-job-contract.md</li>
 <li>docs-book/src/adr.md</li>
 </ul>
@@ -6404,6 +6565,7 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
 <tr><td>ADR-0006</td><td>OpenTelemetry First-Class Observability</td><td>Accepted</td><td>2026-06-04</td></tr>
 <tr><td>ADR-0007</td><td>Agent Platform Runtime Contracts</td><td>Accepted</td><td>2026-07-22</td></tr>
 <tr><td>ADR-0008</td><td><code>stasisd</code> Declarative Engine</td><td>Accepted</td><td>2026-07-22</td></tr>
+<tr><td>ADR-0009</td><td>WASM Target Profile</td><td>Accepted</td><td>2026-08-24</td></tr>
 <tr><td>ADR-0010</td><td>Runtime-Neutral Federated Job Contract</td><td>Accepted</td><td>2026-08-28</td></tr>
 </tbody></table>
 </div>
@@ -6423,6 +6585,9 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
   A3 --&gt; A7
   A4 --&gt; A8[ADR-0008 stasisd Declarative Engine]
   A7 --&gt; A8
+  A1 --&gt; A9[ADR-0009 WASM Target Profile]
+  A2 --&gt; A9
+  A7 --&gt; A9
   A1 --&gt; A10[ADR-0010 Federated Job Contract]
   A3 --&gt; A10
   A7 --&gt; A10
@@ -6440,6 +6605,20 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
 </li>
 <li>Plan: <a href="../../docs/design/federated-job-contract.html">Federated Job Contract</a></li>
 <li>Full ADR: <a href="../../docs/adr/ADR-0010-federated-job-contract.html">ADR-0010</a></li>
+</ul>
+<h2 id="adr-0009-wasm-target-profile"><a class="header" href="#adr-0009-wasm-target-profile">ADR-0009 WASM Target Profile</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Locus 0.5 and Grapheme 0.7 can target WASM, but <code>stasis-rs</code> was a native-only crate graph (Axum, SurrealKV, genai, <code>rt-multi-thread</code>) with no <code>wasm32</code> cfg or CI gate.</li>
+<li>Decision: Compile the Stasis <em>kernel</em> to <code>wasm32-unknown-unknown</code> behind <code>--no-default-features</code>; keep <code>stasisd</code>, dashboard, SurrealKV, and native transports on a <code>native</code> default feature bundle.</li>
+<li>Consequences:
+<ul>
+<li>Positive: browser/edge hosts can embed the same job/memory/tool contracts; Locus WASM work becomes consumable.</li>
+<li>Tradeoff: optional-dependency and cfg churn; Grapheme host and dashboard stay native-first.</li>
+</ul>
+</li>
+<li>Plan: <a href="../../docs/design/wasm-target-phase-plan.html">WASM target phase plan</a></li>
+<li>Full ADR: <a href="../../docs/adr/ADR-0009-wasm-target-profile.html">ADR-0009</a></li>
 </ul>
 <h2 id="adr-0001-durable-job-runtime-on-surrealdb"><a class="header" href="#adr-0001-durable-job-runtime-on-surrealdb">ADR-0001 Durable Job Runtime on SurrealDB</a></h2>
 <ul>
@@ -6586,6 +6765,7 @@ DEFINE FIELD updated_at ON TABLE identity_contact TYPE datetime;
             window.setTimeout(window.print, 100);
         });
         </script>
+
 
     </div>
     </body>

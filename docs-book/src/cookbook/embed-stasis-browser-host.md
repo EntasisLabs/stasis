@@ -25,7 +25,7 @@ This is **Story B** (Stasis *is* Wasm). Grapheme Stage B (Stasis *hosts* Wasm ar
 ### 1. Depend on the slim profile
 
 ```toml
-stasis-rs = { version = "0.10", default-features = false }
+stasis-rs = { version = "0.11", default-features = false }
 # optional:
 # features = ["llm-openai-http"]   # fetch → OpenAI-spec /v1/chat/completions
 # features = ["http-wasm"]         # webhook / cluster forwarder

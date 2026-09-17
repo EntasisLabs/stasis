@@ -36,11 +36,23 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc.js"></script>
     </head>
     <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
     <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
@@ -81,10 +93,13 @@
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            sidebar_toggle.checked = sidebar === 'visible';
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
@@ -118,7 +133,7 @@
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -135,7 +150,12 @@
 
                 <div id="search-wrapper" class="hidden">
                     <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </form>
                     <div id="searchresults-outer" class="searchresults-outer hidden">
                         <div id="searchresults-header" class="searchresults-header"></div>
@@ -161,7 +181,7 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-28</li>
+<li>Last Verified: 2026-09-17</li>
 <li>Verified Against:
 <ul>
 <li>src/application/runtime/grapheme_job_handler.rs</li>
@@ -171,7 +191,7 @@
 <li>src/infrastructure/runtime/grapheme_sdk_workflow_engine.rs</li>
 <li>src/ports/outbound/runtime/workflow_engine.rs</li>
 <li>src/application/runtime/stasis_runtime_builder.rs</li>
-<li>Stasis 0.10.0 / Grapheme 0.7.1</li>
+<li>Stasis 0.11.0 / Grapheme 0.7.1</li>
 </ul>
 </li>
 </ul>
@@ -179,6 +199,7 @@
 <p>Document the Grapheme Workflow plane in Stasis — a policy-governed scripted workflow execution layer backed by <code>grapheme-sdk</code>. Covers the four registered job handlers, source resolution semantics, guardrail policy, diagnostics contracts, and tracing behavior.</p>
 <h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
 <p>Grapheme jobs are one of the three capability planes in Stasis (alongside the orchestration core and Locus memory). They execute compiled Grapheme-language scripts inside a sandboxed engine with enforced policy limits. This document does not cover AI prompt handlers or Locus memory handlers.</p>
+<p>This is <strong>Story A</strong> from ADR-0009: Stasis <em>hosts</em> Grapheme Wasm/Stage B artifacts inside a native worker. Compiling the Stasis kernel itself to <code>wasm32-unknown-unknown</code> (<strong>Story B</strong>) keeps the Grapheme host behind the <code>grapheme</code> feature and off the WASM guest until a later slice.</p>
 <h2 id="invariants"><a class="header" href="#invariants">Invariants</a></h2>
 <ol>
 <li>Every Grapheme job inherits durable retry, dead-letter, and lineage semantics from the Stasis runtime.</li>
@@ -265,7 +286,7 @@ import data from "grapheme/data"  // requires Stasis `grapheme-full` feature at 
 </code></pre>
 <h3 id="cargo-feature-grapheme-full"><a class="header" href="#cargo-feature-grapheme-full">Cargo feature: <code>grapheme-full</code></a></h3>
 <p>By default, Stasis links Grapheme <strong>0.7.1</strong> with the lean host stdlib profile (<code>core</code>, <code>http</code>, <code>web</code>, <code>json</code>, <code>sql</code>, …) and omits Stage B / AOT container deps from the default build. Enable the optional <strong><code>grapheme-full</code></strong> feature on <code>stasis-rs</code> to compile in extended modules (<code>data</code>, <code>pdf</code>, <code>image</code>, <code>plot</code>, <code>media</code>) plus Stage B:</p>
-<pre><code class="language-toml">stasis-rs = { version = "0.10.0", features = ["grapheme-full"] }
+<pre><code class="language-toml">stasis-rs = { version = "0.11.0", features = ["grapheme-full"] }
 </code></pre>
 <p>Grapheme 0.7.1 also ships a <code>slim</code> SDK profile (core/json only) for iOS/Wasm embedders. Stasis job handlers use the host profile for workflow execution. Enable <code>dashboard-lsp</code> when you need <code>grapheme-lsp</code> in the dashboard build.</p>
 <h3 id="execution-model"><a class="header" href="#execution-model">Execution model</a></h3>
@@ -535,6 +556,7 @@ let handler = GraphemeEchoJobHandler::new(engine);
         <!-- Custom JS scripts -->
         <script src="mermaid.min.js"></script>
         <script src="mermaid-init.js"></script>
+
 
 
     </div>

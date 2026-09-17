@@ -5,7 +5,7 @@
 - Document Type: Cookbook Index
 - Audience: Engineer, Operator
 - Stability: Stable
-- Last Verified: 2026-06-04
+- Last Verified: 2026-09-17
 - Verified Against: docs-book/src/cookbook/
 
 ## Purpose
@@ -25,6 +25,7 @@ Each recipe is:
 3. Use Workflow Builder Starting Object to standardize deterministic graph runs.
 4. Apply Identity Memory Change Control for governed relationship updates.
 5. Use Memory Maintenance and Rollups for long-term memory hygiene.
+6. Use Embed Stasis in a Browser Host for the slim WASM kernel (`--no-default-features`).
 
 ## Recipe Index
 

@@ -36,11 +36,23 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc.js"></script>
     </head>
     <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
     <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
@@ -81,10 +93,13 @@
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            sidebar_toggle.checked = sidebar === 'visible';
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
@@ -118,7 +133,7 @@
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -135,7 +150,12 @@
 
                 <div id="search-wrapper" class="hidden">
                     <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </form>
                     <div id="searchresults-outer" class="searchresults-outer hidden">
                         <div id="searchresults-header" class="searchresults-header"></div>
@@ -161,12 +181,17 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Operator</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-06-04</li>
+<li>Last Verified: 2026-09-17</li>
 <li>Verified Against:
 <ul>
 <li>src/application/config/env.rs</li>
 <li>src/application/config/secrets.rs</li>
 <li>src/application/composition/surreal_backend_config.rs</li>
+<li>Cargo.toml</li>
+<li>tests/wasm_kernel_smoke.rs</li>
+<li>src/infrastructure/llm/openai_http_gateway.rs</li>
+<li>src/infrastructure/memory/locus_node_store_factory.rs</li>
+<li>stasis-wasm/src/lib.rs</li>
 </ul>
 </li>
 </ul>
@@ -235,6 +260,25 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 </div>
 <p>Surreal helpers in <code>surreal_backend_config</code> (<code>resolve_surreal_namespace_from_env</code>, <code>resolve_surreal_auth_from_env</code>, …) use the same resolver when <code>bootstrap()</code> has run.</p>
 <p>For provider namespaces, reasoning effort keywords, and Groq migration notes, see <a href="./llm-providers.html">LLM Providers</a>.</p>
+<h2 id="wasm-profile"><a class="header" href="#wasm-profile">WASM profile</a></h2>
+<p>The kernel compiles to <code>wasm32-unknown-unknown</code> without default features:</p>
+<pre><code class="language-bash">rustup target add wasm32-unknown-unknown
+cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features
+cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke
+</code></pre>
+<p>On that profile:</p>
+<ul>
+<li><code>bootstrap()</code> still installs an OS-env resolver; it does <strong>not</strong> load <code>.env</code> or <code>STASIS_SECRETS_DIR</code> (those need the <code>env-fs</code> feature).</li>
+<li>Do not enable <code>native</code> / <code>dashboard</code> / <code>surreal-native</code> / <code>llm-genai</code> / <code>grapheme</code> for wasm32 — the crate <code>compile_error</code>s if <code>native</code> is on.</li>
+<li><code>--no-default-features</code> on native hosts is the same slim kernel (intentional).</li>
+<li>In-memory <code>StasisSdk</code> + <code>RuntimeSdk</code> run under the W2 Node <code>wasm-bindgen-test</code> harness (<code>tests/wasm_kernel_smoke.rs</code>). Wall time uses <code>web-time</code> / chrono <code>wasmbind</code>. Locus store/recall jobs are covered by the same harness.</li>
+<li>Opt-in <code>llm-openai-http</code> adds <code>OpenAiHttpGateway</code>: OpenAI Chat Completions over <code>reqwest</code>/<code>fetch</code>. Set <code>STASIS_OPENAI_API_KEY</code> (or <code>OPENAI_API_KEY</code> / <code>STASIS_LLM_API_KEY</code>) and optionally <code>STASIS_LLM_BASE_URL</code> for Groq/OpenRouter/Ollama <code>/v1</code>. Browser hosts should pass the key into <code>OpenAiHttpGateway::new</code> (no process env) and often need a same-origin proxy because of CORS.</li>
+<li>Opt-in <code>http-wasm</code> compiles webhook and cluster HTTP forwarders (<code>fetch</code>). Native webhook/TCP paths stay on the default native graph.</li>
+<li>Opt-in <code>surreal-ws</code> compiles remote <code>wss://</code> / <code>ws://</code> job adapters. <code>surreal-native</code> / SurrealKV <code>compile_error</code> on wasm32.</li>
+<li>Opt-in <code>locus-persist</code> wires <code>locus-surreal-adapter</code> (<code>indxdb://</code>, <code>mem://</code>, <code>wss://</code>). Stasis does not reimplement STTP; <code>locus-wasm</code> remains the browser persistence implementation.</li>
+<li>Optional workspace crate <code>stasis-wasm</code> exposes <code>wasm-bindgen</code> <code>StasisWasmClient</code> (in-memory register/invoke + ping job).</li>
+</ul>
+<p>See <a href="https://github.com/EntasisLabs/stasis/blob/main/docs/adr/ADR-0009-wasm-target-profile.md">ADR-0009</a> and the <a href="./cookbook/embed-stasis-browser-host.html">browser embed cookbook</a>.</p>
 <h2 id="safety-notes"><a class="header" href="#safety-notes">Safety notes</a></h2>
 <ul>
 <li><code>.env</code> is gitignored — never commit secrets.</li>
@@ -291,6 +335,7 @@ fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
         <!-- Custom JS scripts -->
         <script src="mermaid.min.js"></script>
         <script src="mermaid-init.js"></script>
+
 
 
     </div>

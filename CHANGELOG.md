@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-17
+
 ### Added
 
 - **WASM kernel profile (ADR-0009, Accepted).** `stasis-rs` compiles to `wasm32-unknown-unknown` with `--no-default-features`. Native process hosts stay on a `native` default-feature bundle (`dashboard`, `surreal-native`, `llm-genai`, `grapheme`, `env-fs`). CI gate: `.github/workflows/wasm.yml`. See [docs/design/wasm-target-phase-plan.md](docs/design/wasm-target-phase-plan.md).
@@ -20,6 +22,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Default features now mean something.** `default = ["native"]`. `--no-default-features` is a slim in-memory kernel (no dashboard, genai client, Grapheme host, SurrealKV, or dotenv/file secrets). Existing `cargo add stasis-rs` consumers keep today's native graph.
+
+### Migration
+
+```toml
+# Native process hosts (same graph as 0.10.0 `cargo add stasis-rs`)
+stasis-rs = "0.11"
+
+# Slim WASM / embed kernel
+stasis-rs = { version = "0.11", default-features = false }
+# optional:
+# features = ["llm-openai-http", "http-wasm", "surreal-ws", "locus-persist"]
+```
+
+On 0.10.0, `--no-default-features` still pulled most native crates (they were unconditional). On 0.11.0 it is a true slim kernel — enable `native` or specific opt-ins. Do not enable `native` / `dashboard` / `surreal-native` / `llm-genai` / `grapheme` on `wasm32-unknown-unknown`.
+
+### Notes
+
+- `stasis-wasm` remains workspace-optional (`publish = false`); browser hosts can depend on `stasis-rs` `--no-default-features` until bindings are published.
+- Medousa (or a fixture browser host) adoption is an external consumer step.
+- Cookbook: [embed Stasis in a browser host](docs-book/src/cookbook/embed-stasis-browser-host.md).
 
 ## [0.10.0] - 2026-08-28
 

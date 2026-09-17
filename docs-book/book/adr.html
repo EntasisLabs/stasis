@@ -36,11 +36,23 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc.js"></script>
     </head>
     <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
     <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
@@ -81,10 +93,13 @@
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            sidebar_toggle.checked = sidebar === 'visible';
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
@@ -118,7 +133,7 @@
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -135,7 +150,12 @@
 
                 <div id="search-wrapper" class="hidden">
                     <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </form>
                     <div id="searchresults-outer" class="searchresults-outer hidden">
                         <div id="searchresults-header" class="searchresults-header"></div>
@@ -161,15 +181,17 @@
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-28</li>
+<li>Last Verified: 2026-09-17</li>
 <li>Verified Against:
 <ul>
 <li>docs/adr/README.md</li>
 <li>docs/adr/ADR-0007-agent-platform-runtime-contracts.md</li>
 <li>docs/adr/ADR-0008-stasisd-declarative-engine.md</li>
+<li>docs/adr/ADR-0009-wasm-target-profile.md</li>
 <li>docs/adr/ADR-0010-federated-job-contract.md</li>
 <li>docs/design/agent-platform-runtime-contracts-plan.md</li>
 <li>docs/design/stasisd-declarative-engine-plan.md</li>
+<li>docs/design/wasm-target-phase-plan.md</li>
 <li>docs/design/federated-job-contract.md</li>
 <li>docs-book/src/adr.md</li>
 </ul>
@@ -187,6 +209,7 @@
 <tr><td>ADR-0006</td><td>OpenTelemetry First-Class Observability</td><td>Accepted</td><td>2026-06-04</td></tr>
 <tr><td>ADR-0007</td><td>Agent Platform Runtime Contracts</td><td>Accepted</td><td>2026-07-22</td></tr>
 <tr><td>ADR-0008</td><td><code>stasisd</code> Declarative Engine</td><td>Accepted</td><td>2026-07-22</td></tr>
+<tr><td>ADR-0009</td><td>WASM Target Profile</td><td>Accepted</td><td>2026-08-24</td></tr>
 <tr><td>ADR-0010</td><td>Runtime-Neutral Federated Job Contract</td><td>Accepted</td><td>2026-08-28</td></tr>
 </tbody></table>
 </div>
@@ -206,6 +229,9 @@
   A3 --&gt; A7
   A4 --&gt; A8[ADR-0008 stasisd Declarative Engine]
   A7 --&gt; A8
+  A1 --&gt; A9[ADR-0009 WASM Target Profile]
+  A2 --&gt; A9
+  A7 --&gt; A9
   A1 --&gt; A10[ADR-0010 Federated Job Contract]
   A3 --&gt; A10
   A7 --&gt; A10
@@ -223,6 +249,20 @@
 </li>
 <li>Plan: <a href="../../docs/design/federated-job-contract.html">Federated Job Contract</a></li>
 <li>Full ADR: <a href="../../docs/adr/ADR-0010-federated-job-contract.html">ADR-0010</a></li>
+</ul>
+<h2 id="adr-0009-wasm-target-profile"><a class="header" href="#adr-0009-wasm-target-profile">ADR-0009 WASM Target Profile</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Locus 0.5 and Grapheme 0.7 can target WASM, but <code>stasis-rs</code> was a native-only crate graph (Axum, SurrealKV, genai, <code>rt-multi-thread</code>) with no <code>wasm32</code> cfg or CI gate.</li>
+<li>Decision: Compile the Stasis <em>kernel</em> to <code>wasm32-unknown-unknown</code> behind <code>--no-default-features</code>; keep <code>stasisd</code>, dashboard, SurrealKV, and native transports on a <code>native</code> default feature bundle.</li>
+<li>Consequences:
+<ul>
+<li>Positive: browser/edge hosts can embed the same job/memory/tool contracts; Locus WASM work becomes consumable.</li>
+<li>Tradeoff: optional-dependency and cfg churn; Grapheme host and dashboard stay native-first.</li>
+</ul>
+</li>
+<li>Plan: <a href="../../docs/design/wasm-target-phase-plan.html">WASM target phase plan</a></li>
+<li>Full ADR: <a href="../../docs/adr/ADR-0009-wasm-target-profile.html">ADR-0009</a></li>
 </ul>
 <h2 id="adr-0001-durable-job-runtime-on-surrealdb"><a class="header" href="#adr-0001-durable-job-runtime-on-surrealdb">ADR-0001 Durable Job Runtime on SurrealDB</a></h2>
 <ul>
@@ -369,6 +409,7 @@
         <!-- Custom JS scripts -->
         <script src="mermaid.min.js"></script>
         <script src="mermaid-init.js"></script>
+
 
 
     </div>
