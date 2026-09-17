@@ -41,7 +41,7 @@ Requires `wasm32-unknown-unknown` and `wasm-bindgen-cli` matching `Cargo.lock`.
 cd stasis-wasm
 npm run build   # pkg/ (bundler) + pkg-node/ (Node)
 npm test
-npm pack --dry-run
+npm run pack:dry
 ```
 
 Browser hosts inject LLM keys themselves (`OpenAiHttpGateway` lives on `stasis-rs` feature `llm-openai-http`, not in this bindings crate). Durable memory stays in Locus (`locus-wasm` / `locus-surreal-adapter`); this client uses in-memory Locus via the kernel.

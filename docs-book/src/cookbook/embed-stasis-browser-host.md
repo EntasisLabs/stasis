@@ -88,6 +88,7 @@ The bindings crate is also an npm package (not on the registry yet). From the re
 cd stasis-wasm
 npm run build   # needs wasm32-unknown-unknown + wasm-bindgen-cli
 npm test
+npm run pack:dry
 ```
 
 Bundler hosts (Vite / webpack) import the ESM `pkg/` build:

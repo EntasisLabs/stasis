@@ -74,7 +74,7 @@ jobs:
         run: npm --prefix stasis-wasm test
 
       - name: npm pack dry-run
-        run: npm --prefix stasis-wasm pack --dry-run
+        run: npm --prefix stasis-wasm run pack:dry
 
   native-check:
     runs-on: ubuntu-latest
