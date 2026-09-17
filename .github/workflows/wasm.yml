@@ -21,6 +21,9 @@ jobs:
       - name: Check stasis-rs WASM kernel
         run: cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features
 
+      - name: Check stasis-rs WASM OpenAI HTTP gateway
+        run: cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features llm-openai-http
+
   wasm-smoke:
     runs-on: ubuntu-latest
     steps:

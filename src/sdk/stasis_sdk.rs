@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 use crate::application::dto::{InvokeAgentRequest, InvokeAgentResponse, RegisterAgentRequest};
 use crate::application::use_cases::invoke_agent::InvokeAgent;
 use crate::application::use_cases::register_agent::RegisterAgent;
@@ -43,7 +41,8 @@ where
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl<R, L> AgentCommands for StasisSdk<R, L>
 where
     R: AgentRepository + Clone + Send + Sync,

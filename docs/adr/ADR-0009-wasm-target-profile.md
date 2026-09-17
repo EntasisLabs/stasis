@@ -16,6 +16,7 @@
   - docs/design/locus-integration-rfc-plan.md
   - .github/workflows/wasm.yml
   - tests/wasm_kernel_smoke.rs
+  - src/infrastructure/llm/openai_http_gateway.rs
   - src/infrastructure/runtime/portable_time.rs
 
 ## Status
