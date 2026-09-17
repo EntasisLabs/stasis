@@ -1,15 +1,15 @@
+use async_trait::async_trait;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
-use std::time::Instant;
 
-use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::Serialize;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::cluster_node::{ClusterForwardCommand, ClusterForwardOutcome};
+use crate::infrastructure::runtime::portable_time::Instant;
 use crate::ports::outbound::runtime::cluster_command_forwarder::ClusterCommandForwarder;
 use crate::ports::outbound::runtime::cluster_forward_outcome_store::ClusterForwardOutcomeStore;
 use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
@@ -240,9 +240,9 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                 request = request.bearer_auth(token);
             }
 
-            let send_result = request.send().await;
+            let send_result = super::wasm_http::send_collecting(request).await;
             match send_result {
-                Ok(response) if response.status().is_success() => {
+                Ok((status, _)) if status.is_success() => {
                     if let Some(metrics) = &self.metrics {
                         metrics.incr_counter(CLUSTER_FORWARD_SUCCESSES_TOTAL, 1);
                         metrics.observe_duration_ms(
@@ -254,7 +254,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                     self.record_outcome(&command, true, attempt, None).await;
                     return Ok(true);
                 }
-                Ok(response) if Self::should_retry_status(response.status()) => {
+                Ok((status, _)) if Self::should_retry_status(status) => {
                     if attempt == self.max_attempts {
                         if let Some(metrics) = &self.metrics {
                             metrics.incr_counter(CLUSTER_FORWARD_FAILURES_TOTAL, 1);
@@ -265,7 +265,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                         }
                         let err_msg = format!(
                             "cluster forward failed after retries with status={} region={} command={}",
-                            response.status(),
+                            status,
                             command.target_region,
                             command.command_name
                         );
@@ -278,7 +278,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                         metrics.incr_counter(CLUSTER_FORWARD_RETRIES_TOTAL, 1);
                     }
                 }
-                Ok(response) => {
+                Ok((status, _)) => {
                     if let Some(metrics) = &self.metrics {
                         metrics.incr_counter(CLUSTER_FORWARD_REJECTED_TOTAL, 1);
                         metrics.incr_counter(CLUSTER_FORWARD_FAILURES_TOTAL, 1);
@@ -289,7 +289,7 @@ impl ClusterCommandForwarder for HttpClusterCommandForwarder {
                     }
                     let err_msg = format!(
                         "cluster forward rejected with status={} region={} command={}",
-                        response.status(),
+                        status,
                         command.target_region,
                         command.command_name
                     );
@@ -336,7 +336,9 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
+    #[cfg(not(target_arch = "wasm32"))]
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    #[cfg(not(target_arch = "wasm32"))]
     use tokio::net::TcpListener;
 
     use chrono::Utc;
@@ -352,6 +354,7 @@ mod tests {
         CLUSTER_FORWARD_RETRIES_TOTAL, CLUSTER_FORWARD_SUCCESSES_TOTAL,
     };
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn start_sequence_server(status_codes: Vec<u16>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -434,6 +437,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn retries_on_retryable_status_then_succeeds() {
         let endpoint_url = start_sequence_server(vec![500, 200]).await;
@@ -486,6 +490,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn deduplicates_repeated_correlation_id_within_ttl() {
         let endpoint_url = start_sequence_server(vec![200]).await;

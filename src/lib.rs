@@ -7,6 +7,11 @@ compile_error!(
     "the `native` feature (default) is not supported on wasm32; build with `--no-default-features`"
 );
 
+#[cfg(all(target_arch = "wasm32", feature = "surreal-native"))]
+compile_error!(
+    "`surreal-native` is not supported on wasm32; use `--features surreal-ws` for remote `wss://`"
+);
+
 pub mod application;
 #[cfg(feature = "dashboard")]
 pub mod dashboard;
@@ -89,17 +94,23 @@ pub mod runtime_prelude_ext {
     };
     pub use crate::infrastructure::runtime::composite_control_plane_store::CompositeControlPlaneStore;
     pub use crate::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
+    #[cfg(any(not(target_arch = "wasm32"), feature = "http-wasm"))]
+    pub use crate::infrastructure::runtime::http_cluster_command_forwarder::HttpClusterCommandForwarder;
+    #[cfg(any(not(target_arch = "wasm32"), feature = "http-wasm"))]
+    pub use crate::infrastructure::runtime::http_webhook_event_publisher::{
+        HttpWebhookEventPublisher, HttpWebhookTransportPublisher,
+    };
     pub use crate::infrastructure::runtime::in_memory_blob_transfer::InMemoryBlobTransfer;
     pub use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
     pub use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
     pub use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
     pub use crate::infrastructure::runtime::in_memory_federated_bus::InMemoryFederatedBus;
     pub use crate::infrastructure::runtime::in_memory_ownership_handoff_store::InMemoryOwnershipHandoffStore;
-    #[cfg(feature = "surreal-native")]
+    #[cfg(feature = "surreal")]
     pub use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNodeStore;
-    #[cfg(feature = "surreal-native")]
+    #[cfg(feature = "surreal")]
     pub use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
-    #[cfg(feature = "surreal-native")]
+    #[cfg(feature = "surreal")]
     pub use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
     pub use crate::ports::outbound::runtime::blob_transfer::BlobTransferPort;
     pub use crate::ports::outbound::runtime::delivery_endpoint_store::DeliveryEndpointStore;

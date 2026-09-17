@@ -19,8 +19,9 @@
   - .github/workflows/wasm.yml
   - tests/wasm_kernel_smoke.rs
   - src/infrastructure/runtime/portable_time.rs
+  - stasis-wasm/src/lib.rs
 
-Status: **Active Epic — Phase W2 complete (in-memory runtime smoke green)**  
+Status: **Active Epic — Phases W1–W5 delivered (W6 docs in-tree; Medousa adoption external)**  
 Date: 2026-09-17  
 Owner: Stasis Core  
 ADR: [ADR-0009-wasm-target-profile.md](../adr/ADR-0009-wasm-target-profile.md)
@@ -62,7 +63,7 @@ Browser / edge / WASI host
 | Story | What it means | Status at 0.9.3 |
 | --- | --- | --- |
 | **A. Stasis hosts Wasm** | Grapheme Stage B / Wasix artifacts run *inside* a Stasis worker | Native host path exists (`grapheme-sdk` `host`; Stage B opt-in upstream). Not a WASM *guest*. |
-| **B. Stasis *is* Wasm** | `stasis-rs` compiles to `wasm32-unknown-unknown` (and later WASI) | **Not started.** Locus/Grapheme prep only. |
+| **B. Stasis *is* Wasm** | `stasis-rs` compiles to `wasm32-unknown-unknown` (and later WASI) | **W1–W5 in-tree.** Remaining: Medousa/fixture host adoption. |
 
 This epic is **story B**. Story A stays on the Grapheme handler track and must not block story B.
 
@@ -256,6 +257,8 @@ Acceptance:
 - Feature-gated `cargo check` for `http-wasm` and `surreal-ws` on `wasm32-unknown-unknown`.
 - Native HTTP webhook + SurrealWS paths unchanged.
 
+**Status (2026-09-17):** Delivered. `http-wasm` compiles webhook + cluster forwarder (`fetch`); `surreal-ws` compiles remote `wss://` job adapters with `SurrealKv` still native-only. CI feature-matrix checks in `.github/workflows/wasm.yml`.
+
 ### Phase W4 — Memory plane on WASM
 
 **Goal:** Use the Locus 0.5 work for real, not just a version bump.
@@ -270,6 +273,8 @@ Acceptance:
 
 - Memory recall/store job paths run on in-memory Locus under the WASM harness.
 - Docs state that `locus-wasm` crates remain the browser persistence implementation; Stasis does not reimplement STTP.
+
+**Status (2026-09-17):** Delivered. `tests/wasm_kernel_smoke.rs` stores an STTP node then completes `workflow.stasis.memory.recall`. Feature `locus-persist` wires `LocusNodeStoreFactory::from_surreal_endpoint` through `locus-surreal-adapter` (`indxdb://` / `mem://` / `wss://`).
 
 ### Phase W5 — Browser bindings (optional)
 
@@ -286,6 +291,8 @@ Acceptance:
 - JS/TS can init an in-memory runtime and complete a mock agent turn.
 - Bindings crate is workspace-optional (`publish` decision separate).
 
+**Status (2026-09-17):** Delivered as workspace crate `stasis-wasm` (`publish = false`): `version()`, `StasisWasmClient::create()`, register/invoke, ping enqueue/process.
+
 ### Phase W6 — Docs + consumer migration
 
 **Goal:** Official lane describes the profile; Medousa can adopt.
@@ -301,6 +308,8 @@ Acceptance:
 
 - Official docs do not claim dashboard/`stasisd`/SurrealKV work on WASM.
 - Medousa (or a fixture host) depends on the slim profile without forking Stasis.
+
+**Status (2026-09-17):** In-tree docs delivered (README feature table, environment page, [embed-stasis-browser-host](../../docs-book/src/cookbook/embed-stasis-browser-host.md) cookbook). Medousa adoption remains an external consumer step.
 
 ## 7. Out of scope for the epic
 
@@ -336,16 +345,16 @@ Do not run the full native `cargo test --workspace` on WASM. Most `#[tokio::test
 
 ## 10. Immediate next step
 
-Ship **Phase W3** as a dedicated PR: opt-in `http-wasm` (fetch webhook / cluster forwarder) and optional remote `surreal-ws` on wasm32. Keep `SurrealKv` native-only. Do not start `stasis-wasm` bindings or `rfkafka_wasi` in that PR.
+Medousa (or a fixture browser host) should depend on `stasis-rs` `--no-default-features` plus the opt-in WASM features it needs (`llm-openai-http`, `http-wasm`, `surreal-ws`, `locus-persist`) or on `stasis-wasm` bindings. Do not bind `rfkafka_wasi` or compile the dashboard into the guest.
 
 ## 11. Workstream map
 
 | Track | Outcome | Starts |
 | --- | --- | --- |
-| **K — Kernel graph** | Optional native crates + wasm32 check | W1 |
-| **R — Runtime smoke** | In-memory SDK/jobs on a WASM harness | W2 |
-| **N — Network** | fetch HTTP + remote Surreal WS | W3 |
-| **M — Memory** | Locus in-memory, then indxdb/WS | W4 |
-| **B — Bindings** | optional `stasis-wasm` | W5 (after K+R) |
+| **K — Kernel graph** | Optional native crates + wasm32 check | W1 (done) |
+| **R — Runtime smoke** | In-memory SDK/jobs on a WASM harness | W2 (done) |
+| **N — Network** | fetch HTTP + remote Surreal WS | W3 (done) |
+| **M — Memory** | Locus in-memory, then indxdb/WS | W4 (done) |
+| **B — Bindings** | optional `stasis-wasm` | W5 (done) |
 
 K is on the critical path. N/M can overlap after W2. B waits on K+R.

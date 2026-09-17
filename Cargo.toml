@@ -43,7 +43,7 @@ path = "src/bin/stasis_dashboard.rs"
 required-features = ["dashboard"]
 
 [workspace]
-members = [".", "stasis-macros", "stasisd"]
+members = [".", "stasis-macros", "stasisd", "stasis-wasm"]
 resolver = "2"
 
 [features]
@@ -68,11 +68,26 @@ dashboard = [
 ]
 dashboard-embedded = ["dashboard"]
 dashboard-lsp = ["dashboard", "grapheme", "dep:grapheme-lsp"]
-surreal-native = ["dep:surrealdb", "dep:surrealdb-types"]
+# Shared Surreal adapters (job/outbox/identity stores). Engine features opt in below.
+surreal = ["dep:surrealdb", "dep:surrealdb-types"]
+# Native engines: filesystem KV + mem + WS + TLS. Not supported on wasm32.
+surreal-native = [
+	"surreal",
+	"surrealdb/kv-surrealkv",
+	"surrealdb/rustls",
+	"surrealdb/kv-mem",
+	"surrealdb/protocol-ws",
+]
+# Remote WebSocket only (`wss://` / `ws://`). WASM-safe engine subset.
+surreal-ws = ["surreal", "surrealdb/protocol-ws"]
 llm-genai = ["dep:genai", "genai/rustls-tls"]
 # Enables OpenAI-spec chat completions (`OpenAiHttpGateway`). Pulls wasm `reqwest`
 # (fetch); native already has reqwest for webhooks.
 llm-openai-http = ["reqwest"]
+# Webhook + cluster HTTP forwarder on wasm32 (`reqwest`/`fetch`). Native always has reqwest.
+http-wasm = ["reqwest"]
+# Locus IndexedDB / remote WS memory adapters (`locus-surreal-adapter`).
+locus-persist = ["dep:locus-surreal-adapter"]
 grapheme = ["dep:grapheme-sdk", "dep:grapheme-compiler"]
 grapheme-full = [
 	"grapheme",
@@ -119,12 +134,14 @@ stasis-macros = { package = "stasis-rs-macros", version = "0.1.0", path = "stasi
 opentelemetry = { version = "0.29", optional = true }
 opentelemetry_sdk = { version = "0.29", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic", "metrics"], optional = true }
-surrealdb = { version = "3", default-features = false, features = ["kv-surrealkv", "rustls", "kv-mem", "protocol-ws"], optional = true }
+surrealdb = { version = "3", default-features = false, optional = true }
 surrealdb-types = { version = "3", optional = true }
+locus-surreal-adapter = { version = "0.1.1", optional = true, default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+locus-surreal-adapter = { version = "0.1.1", optional = true, default-features = false, features = ["native"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
@@ -132,7 +149,9 @@ getrandom = { version = "0.2", features = ["js"] }
 chrono = { version = "0.4", features = ["serde", "wasmbind"] }
 web-time = "1"
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json"], optional = true }
+locus-surreal-adapter = { version = "0.1.1", optional = true, default-features = false, features = ["wasm"] }
 
 [build-dependencies]
 

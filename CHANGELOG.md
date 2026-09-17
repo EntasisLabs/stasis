@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **WASM kernel profile (ADR-0009, Accepted).** `stasis-rs` compiles to `wasm32-unknown-unknown` with `--no-default-features`. Native process hosts stay on a `native` default-feature bundle (`dashboard`, `surreal-native`, `llm-genai`, `grapheme`, `env-fs`). CI gate: `.github/workflows/wasm.yml`. See [docs/design/wasm-target-phase-plan.md](docs/design/wasm-target-phase-plan.md).
 - **WASM in-memory runtime smoke (W2).** `tests/wasm_kernel_smoke.rs` proves `StasisSdk` register/invoke with `MockLlmGateway` and one typed `RuntimeSdk` job completion on native and `wasm32-unknown-unknown` (Node `wasm-bindgen-test` harness). Wall/monotonic clocks on wasm use `web-time` so `SystemTime`/`Instant` do not panic.
 - **OpenAI-compatible HTTP LLM gateway (`llm-openai-http`).** `OpenAiHttpGateway` implements `LlmGateway` against the OpenAI Chat Completions spec (`POST /v1/chat/completions`) using `reqwest` (`fetch` on wasm32, rustls on native). Works with OpenAI, Groq, OpenRouter, Ollama `/v1`, and other compatible servers without `genai`.
+- **WASM HTTP adapters (`http-wasm`).** Webhook publisher and cluster command forwarder compile on `wasm32-unknown-unknown` via `reqwest`/`fetch`. Native HTTP paths are unchanged.
+- **WASM remote Surreal (`surreal-ws`).** Job/outbox/identity adapters compile with `protocol-ws` only (`wss://` / `ws://`). `SurrealKv` / `surreal-native` stay off wasm32.
+- **WASM Locus memory plane.** In-memory store + recall jobs run under the WASM harness. Opt-in `locus-persist` wires `locus-surreal-adapter` for `indxdb://`, `mem://`, and remote `wss://` (Stasis does not reimplement STTP).
+- **`stasis-wasm` bindings crate (W5).** Optional workspace `cdylib` with `version()`, `StasisWasmClient::create()`, register/invoke, and ping enqueue/process. Not published yet.
 
 ### Changed
 

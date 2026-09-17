@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::time::Instant;
 
 use chrono::{DateTime, Duration, Utc};
 use surrealdb::Surreal;
@@ -41,6 +40,7 @@ use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey,
 use crate::domain::runtime::typed_contract::{StasisEvent, StasisJob};
 use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
 use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
+use crate::infrastructure::runtime::portable_time::Instant;
 use crate::infrastructure::runtime::surreal_durable_wait_store::SurrealDurableWaitStore;
 use crate::infrastructure::runtime::surreal_job_attempt_store::SurrealJobAttemptStore;
 use crate::infrastructure::runtime::surreal_job_store::SurrealJobStore;

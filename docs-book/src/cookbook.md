@@ -33,3 +33,4 @@ Each recipe is:
 3. [Workflow Builder Starting Object](./cookbook/workflow-builder-starting-object.md)
 4. [Identity Memory Change Control](./cookbook/identity-memory-change-control.md) — governed relationship updates, contacts, preferences, and context modes
 5. [Memory Maintenance and Rollups](./cookbook/memory-maintenance-rollups.md)
+6. [Embed Stasis in a Browser Host](./cookbook/embed-stasis-browser-host.md)

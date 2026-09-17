@@ -110,7 +110,7 @@ async fn runtime_sdk_completes_typed_in_memory_job() {
 
     let rt = match runtime.runtime() {
         RuntimeComposition::InMemory(rt) => rt,
-        #[cfg(feature = "surreal-native")]
+        #[cfg(feature = "surreal")]
         RuntimeComposition::Surreal(_) => panic!("expected in-memory runtime"),
     };
     let job = rt
@@ -172,4 +172,129 @@ async fn runtime_sdk_completes_typed_in_memory_job() {
     assert_eq!(stats.succeeded_jobs, 1);
     assert_eq!(stats.enqueued_jobs, 0);
     assert_eq!(stats.dead_letter_jobs, 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn locus_memory_store_then_recall_job() {
+    use std::sync::Arc;
+
+    use stasis::application::orchestration::runtime_job_payloads::{
+        MemoryPolicyPayload, MemoryRecallJobPayload,
+    };
+    use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
+    use stasis::application::runtime::memory_persistence_helpers::{
+        SttpPromptNodeFormat, render_prompt_response_sttp_node,
+    };
+    use stasis::infrastructure::memory::locus_context_reader::LocusContextReader;
+    use stasis::infrastructure::memory::locus_context_writer::LocusContextWriter;
+    use stasis::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
+    use stasis::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
+    use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
+    use stasis::ports::outbound::memory::memory_models::MemoryStoreRequest;
+
+    let session_id = "corr-wasm-memory";
+    let memory = LocusNodeStoreFactory::in_memory()
+        .await
+        .expect("in-memory locus store should initialize");
+    let writer = LocusContextWriter::new(memory.clone());
+    let raw_node = render_prompt_response_sttp_node(
+        session_id,
+        "what did we decide?",
+        "ship the wasm kernel profile",
+        SttpPromptNodeFormat::TaggedSchema,
+    );
+    let stored = writer
+        .store_context(&MemoryStoreRequest {
+            session_id: session_id.to_string(),
+            raw_node,
+        })
+        .await
+        .expect("locus store should accept STTP node");
+    assert!(stored.valid);
+
+    let runtime = RuntimeSdk::from_builder(
+        StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
+            .with_memory_context_reader(Arc::new(LocusContextReader::new(memory.clone())))
+            .with_memory_context_writer(Arc::new(writer))
+            .with_memory_operations(Arc::new(LocusMemoryOperations::new(memory, None)))
+            .without_prompt_handler()
+            .without_tool_loop_handler()
+            .without_agent_handlers()
+            .without_grapheme_handlers()
+            .without_orchestration_pattern_handlers()
+            .without_cluster_control_handlers(),
+    )
+    .await
+    .expect("memory runtime should build");
+
+    let recall_job = RuntimeWorkflowJobBuilder::for_memory_recall(
+        "job-wasm-memory-recall",
+        &MemoryRecallJobPayload {
+            memory_policy: Some(MemoryPolicyPayload {
+                tenant_id: None,
+                session_ids: Some(vec![session_id.to_string()]),
+                tiers: None,
+                from_utc: None,
+                to_utc: None,
+                limit: None,
+                alpha: None,
+                beta: None,
+                gamma: None,
+                fallback_policy: None,
+                strictness: None,
+                query_text: Some("wasm kernel".into()),
+                include_explain: None,
+                store_mode: None,
+                filter: Default::default(),
+            }),
+        },
+    )
+    .expect("recall payload should encode")
+    .with_queue("wasm-memory")
+    .with_correlation_id(session_id)
+    .with_idempotency_key("idem-wasm-memory-recall")
+    .build();
+
+    runtime
+        .enqueue(recall_job)
+        .await
+        .expect("memory recall job should enqueue");
+
+    let processed = runtime
+        .process_once("wasm-memory", "wasm-memory-worker")
+        .await
+        .expect("process_once should succeed");
+    assert_eq!(processed.as_deref(), Some("job-wasm-memory-recall"));
+
+    let rt = match runtime.runtime() {
+        RuntimeComposition::InMemory(rt) => rt,
+        #[cfg(feature = "surreal")]
+        RuntimeComposition::Surreal(_) => panic!("expected in-memory runtime"),
+    };
+    let job = rt
+        .job_store
+        .get("job-wasm-memory-recall")
+        .await
+        .expect("job store get")
+        .expect("recall job should exist");
+    assert_eq!(job.state, JobState::Succeeded);
+
+    let attempts = rt
+        .list_job_attempts("job-wasm-memory-recall")
+        .await
+        .expect("attempts should list");
+    assert_eq!(attempts.len(), 1);
+    let diagnostics = attempts[0]
+        .diagnostics
+        .as_deref()
+        .expect("recall writes diagnostics JSON");
+    assert!(
+        diagnostics.contains("\"status\":\"success\""),
+        "recall diagnostics should succeed, got {diagnostics}"
+    );
+    assert!(
+        diagnostics.contains("\"retrieved\":1") || diagnostics.contains("\"retrieved\": 1"),
+        "recall should retrieve the stored node, got {diagnostics}"
+    );
 }

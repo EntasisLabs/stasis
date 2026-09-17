@@ -103,10 +103,14 @@ Default features enable the native host bundle (`native`: dashboard, Surreal, ge
 | Native (default) | `cargo check --workspace` | Dashboard, SurrealKV/WS/mem, genai, Grapheme host, `stasisd` |
 | Slim kernel | `cargo check -p stasis-rs --no-default-features` | In-memory runtime, ports, `StasisSdk` / `RuntimeSdk` without native process hosts |
 | WASM guest | `cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features` | Same slim kernel on `wasm32-unknown-unknown` |
-| WASM smoke | `cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke` | In-memory `StasisSdk` register/invoke + one typed job completion |
+| WASM smoke | `cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke` | In-memory `StasisSdk` register/invoke, one typed job, and Locus store/recall |
 | WASM + OpenAI HTTP | `cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features llm-openai-http` | Same slim kernel plus `OpenAiHttpGateway` (`fetch` → OpenAI-spec `/v1/chat/completions`) |
+| WASM HTTP adapters | `cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features http-wasm` | Webhook + cluster forwarder over `fetch` |
+| WASM Surreal WS | `cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features surreal-ws` | Remote `wss://` job runtime (no SurrealKV) |
+| WASM Locus persist | `cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features locus-persist` | IndexedDB / remote WS memory via `locus-surreal-adapter` |
+| WASM bindings | `cargo check -p stasis-wasm --target wasm32-unknown-unknown` | `wasm-bindgen` in-memory client (`stasis-wasm`) |
 
-WASM does **not** include `stasisd`, the Axum dashboard, SurrealKV, genai's native TLS client, or the Grapheme host engine. Inject `LlmGateway` (`MockLlmGateway` or `OpenAiHttpGateway`) and use `RuntimeBackend::InMemory`. See [ADR-0009](docs/adr/ADR-0009-wasm-target-profile.md) and [the WASM phase plan](docs/design/wasm-target-phase-plan.md).
+WASM does **not** include `stasisd`, the Axum dashboard, SurrealKV, genai's native TLS client, or the Grapheme host engine. Inject `LlmGateway` (`MockLlmGateway` or `OpenAiHttpGateway`) and use `RuntimeBackend::InMemory` (or `RuntimeSdk::surreal_ws` with `--features surreal-ws`). See [ADR-0009](docs/adr/ADR-0009-wasm-target-profile.md) and [the WASM phase plan](docs/design/wasm-target-phase-plan.md). Browser cookbook: [embed Stasis in a browser host](docs-book/src/cookbook/embed-stasis-browser-host.md).
 
 This is **Stasis *is* Wasm** (the kernel as a guest). Grapheme Stage B (Stasis *hosts* Wasm artifacts) is a separate track.
 
