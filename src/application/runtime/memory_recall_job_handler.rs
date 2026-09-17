@@ -1,7 +1,7 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use serde_json::json;
 
 use crate::application::orchestration::runtime_job_payloads::{
@@ -54,7 +54,13 @@ impl JobHandler for MemoryRecallJobHandler {
     }
 
     async fn execute(&self, job: &Job) -> Result<JobExecutionOutcome> {
-        let recall_started = Instant::now();
+        let recall_started = Utc::now();
+        let elapsed_ms = || {
+            Utc::now()
+                .signed_duration_since(recall_started)
+                .num_milliseconds()
+                .max(0) as u64
+        };
         let _recall_span = self.telemetry.as_ref().map(|telemetry| {
             telemetry.record_recall_started();
             telemetry.recall_span(&job.correlation_id)
@@ -83,7 +89,7 @@ impl JobHandler for MemoryRecallJobHandler {
         match self.reader.recall(&recall_request).await {
             Ok(response) => {
                 if let Some(telemetry) = &self.telemetry {
-                    telemetry.record_recall_success(recall_started);
+                    telemetry.record_recall_success(elapsed_ms());
                 }
                 Ok(JobExecutionOutcome::Success {
                     output_provenance: Some(
@@ -111,7 +117,7 @@ impl JobHandler for MemoryRecallJobHandler {
             }
             Err(err) => {
                 if let Some(telemetry) = &self.telemetry {
-                    telemetry.record_recall_error(recall_started);
+                    telemetry.record_recall_error(elapsed_ms());
                 }
                 Ok(JobExecutionOutcome::FatalFailure {
                     message: err.to_string(),

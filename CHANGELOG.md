@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **WASM kernel profile (ADR-0009, Accepted).** `stasis-rs` compiles to `wasm32-unknown-unknown` with `--no-default-features`. Native process hosts stay on a `native` default-feature bundle (`dashboard`, `surreal-native`, `llm-genai`, `grapheme`, `env-fs`). CI gate: `.github/workflows/wasm.yml`. See [docs/design/wasm-target-phase-plan.md](docs/design/wasm-target-phase-plan.md).
+- **WASM in-memory runtime smoke (W2).** `tests/wasm_kernel_smoke.rs` proves `StasisSdk` register/invoke with `MockLlmGateway` and one typed `RuntimeSdk` job completion on native and `wasm32-unknown-unknown` (Node `wasm-bindgen-test` harness). Wall/monotonic clocks on wasm use `web-time` so `SystemTime`/`Instant` do not panic.
+- **OpenAI-compatible HTTP LLM gateway (`llm-openai-http`).** `OpenAiHttpGateway` implements `LlmGateway` against the OpenAI Chat Completions spec (`POST /v1/chat/completions`) using `reqwest` (`fetch` on wasm32, rustls on native). Works with OpenAI, Groq, OpenRouter, Ollama `/v1`, and other compatible servers without `genai`.
 
 ### Changed
 

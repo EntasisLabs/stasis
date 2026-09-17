@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::time::Instant;
+
+use crate::infrastructure::runtime::portable_time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
