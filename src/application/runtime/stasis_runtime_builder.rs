@@ -671,7 +671,7 @@ impl StasisRuntimeBuilder {
                     })?;
                 }
             }
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {
                 let thread_store =
                     RuntimeFactory::resolve_thread_store(&runtime, default_thread_store.clone());
@@ -957,7 +957,7 @@ mod tests {
 
         let rt = match runtime {
             RuntimeComposition::InMemory(rt) => rt,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(_) => panic!("expected in-memory runtime composition"),
         };
 

@@ -1,12 +1,11 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::delivery_endpoint::DeliveryEndpoint;
 use crate::domain::runtime::outbox::OutboxEvent;
 use crate::infrastructure::runtime::endpoint_routing_policy::AllowAllEndpointRoutingPolicy;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), feature = "http-wasm"))]
 use crate::infrastructure::runtime::http_webhook_event_publisher::HttpWebhookTransportPublisher;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::infrastructure::runtime::tcp_socket_transport_publisher::TcpSocketTransportPublisher;
@@ -48,7 +47,7 @@ impl EndpointRoutingEventPublisher {
         self
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), feature = "http-wasm"))]
     pub fn with_http_webhook_transport(self) -> Self {
         self.with_transport(HttpWebhookTransportPublisher::new())
     }

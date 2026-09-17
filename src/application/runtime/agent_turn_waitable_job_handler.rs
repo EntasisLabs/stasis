@@ -630,7 +630,7 @@ mod tests {
 
         let rt = match runtime.runtime() {
             RuntimeComposition::InMemory(rt) => rt,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(_) => panic!("expected in-memory"),
         };
         let mut parked = rt.job_store.get("job-wait-rt").await.unwrap().unwrap();

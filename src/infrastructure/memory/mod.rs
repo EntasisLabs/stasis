@@ -6,5 +6,5 @@ pub mod locus_context_writer;
 pub mod locus_memory_mapping;
 pub mod locus_memory_operations;
 pub mod locus_node_store_factory;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_identity_memory_store;

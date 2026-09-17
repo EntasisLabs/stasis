@@ -53,6 +53,7 @@
 - [Workflow Builder Starting Object](./cookbook/workflow-builder-starting-object.md)
 - [Identity Memory Change Control](./cookbook/identity-memory-change-control.md)
 - [Memory Maintenance and Rollups](./cookbook/memory-maintenance-rollups.md)
+- [Embed Stasis in a Browser Host](./cookbook/embed-stasis-browser-host.md)
 
 ## Data Contracts
 

@@ -4,7 +4,7 @@ use crate::application::runtime::in_memory_runtime::JobHandler;
 use crate::application::runtime::job_lifecycle::StaleRecoverReport;
 use crate::application::runtime::runtime_factory::RuntimeBackend;
 use crate::application::runtime::runtime_factory::RuntimeComposition;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 use crate::application::runtime::runtime_factory::SurrealAuth;
 use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
 use crate::application::runtime::typed_job::{JobConsumer, TypedEnqueueBuilder};
@@ -63,7 +63,7 @@ impl RuntimeSdk {
     }
 
     /// Builds a remote websocket surreal runtime facade with default wiring.
-    #[cfg(feature = "surreal-native")]
+    #[cfg(feature = "surreal")]
     pub async fn surreal_ws(
         endpoint: impl Into<String>,
         namespace: impl Into<String>,
@@ -73,7 +73,7 @@ impl RuntimeSdk {
     }
 
     /// Builds a remote websocket surreal runtime facade with optional root credentials.
-    #[cfg(feature = "surreal-native")]
+    #[cfg(feature = "surreal")]
     pub async fn surreal_ws_with_auth(
         endpoint: impl Into<String>,
         namespace: impl Into<String>,
@@ -157,7 +157,7 @@ impl RuntimeSdk {
     pub async fn enqueue(&self, job: NewJob) -> Result<()> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.enqueue(job).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.enqueue(job).await,
         }
     }
@@ -166,7 +166,7 @@ impl RuntimeSdk {
     pub fn enqueue_job<T: StasisJob>(&self, payload: T) -> TypedEnqueueBuilder<T> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.enqueue_job(payload),
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.enqueue_job(payload),
         }
     }
@@ -175,7 +175,7 @@ impl RuntimeSdk {
     pub fn register_handler<H: JobHandler + 'static>(&self, handler: H) -> Result<()> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.register_handler(handler),
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.register_handler(handler),
         }
     }
@@ -188,7 +188,7 @@ impl RuntimeSdk {
     {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.register_consumer(handler),
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.register_consumer(handler),
         }
     }
@@ -197,7 +197,7 @@ impl RuntimeSdk {
     pub async fn cancel(&self, job_id: &str) -> Result<bool> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.cancel(job_id).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.cancel(job_id).await,
         }
     }
@@ -206,7 +206,7 @@ impl RuntimeSdk {
     pub async fn recover_stale(&self) -> Result<StaleRecoverReport> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.recover_stale_now().await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.recover_stale_now().await,
         }
     }
@@ -215,7 +215,7 @@ impl RuntimeSdk {
     pub async fn replay_dead_letter(&self, job_id: &str) -> Result<bool> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.replay_dead_letter_now(job_id).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.replay_dead_letter_now(job_id).await,
         }
     }
@@ -224,7 +224,7 @@ impl RuntimeSdk {
     pub async fn fail(&self, job_id: &str) -> Result<bool> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.fail(job_id).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.fail(job_id).await,
         }
     }
@@ -233,7 +233,7 @@ impl RuntimeSdk {
     pub async fn delete(&self, job_id: &str) -> Result<bool> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.delete(job_id).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.delete(job_id).await,
         }
     }
@@ -246,7 +246,7 @@ impl RuntimeSdk {
     ) -> Result<bool> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.signal(correlation_key, event).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.signal(correlation_key, event).await,
         }
     }
@@ -259,7 +259,7 @@ impl RuntimeSdk {
     ) -> Result<ResourceLease> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.acquire_lease(resource, owner, ttl).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.acquire_lease(resource, owner, ttl).await,
         }
     }
@@ -272,7 +272,7 @@ impl RuntimeSdk {
     ) -> Result<ResourceLease> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.force_acquire_lease(resource, owner, ttl).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.force_acquire_lease(resource, owner, ttl).await,
         }
     }
@@ -288,7 +288,7 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => {
                 rt.renew_lease(resource, owner, fencing_token, ttl).await
             }
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {
                 rt.renew_lease(resource, owner, fencing_token, ttl).await
             }
@@ -305,7 +305,7 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => {
                 rt.release_lease(resource, owner, fencing_token).await
             }
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {
                 rt.release_lease(resource, owner, fencing_token).await
             }
@@ -325,7 +325,7 @@ impl RuntimeSdk {
                 rt.transfer_lease(resource, from, to, fencing_token, ttl)
                     .await
             }
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {
                 rt.transfer_lease(resource, from, to, fencing_token, ttl)
                     .await
@@ -340,7 +340,7 @@ impl RuntimeSdk {
     ) -> Result<bool> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.validate_fence(resource, fencing_token).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.validate_fence(resource, fencing_token).await,
         }
     }
@@ -348,7 +348,7 @@ impl RuntimeSdk {
     pub async fn watch_lease(&self, resource: impl Into<String>) -> Result<Option<ResourceLease>> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.watch_lease(resource).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.watch_lease(resource).await,
         }
     }
@@ -357,7 +357,7 @@ impl RuntimeSdk {
     pub async fn register_recurring(&self, definition: RecurringDefinition) -> Result<()> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.register_recurring(definition).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.register_recurring(definition).await,
         }
     }
@@ -366,7 +366,7 @@ impl RuntimeSdk {
     pub async fn list_recurring(&self) -> Result<Vec<RecurringDefinition>> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.recurring_store.list().await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.recurring_store.list().await,
         }
     }
@@ -375,7 +375,7 @@ impl RuntimeSdk {
     pub async fn save_recurring(&self, definition: RecurringDefinition) -> Result<()> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.recurring_store.save(definition).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.recurring_store.save(definition).await,
         }
     }
@@ -399,7 +399,7 @@ impl RuntimeSdk {
                 rt.process_once_with_capabilities(queue, worker_id, now, worker)
                     .await
             }
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {
                 rt.process_once_with_capabilities(queue, worker_id, now, worker)
                     .await
@@ -412,7 +412,7 @@ impl RuntimeSdk {
         let now = Utc::now();
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.publish_pending_events(limit, now).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.publish_pending_events(limit, now).await,
         }
     }
@@ -421,7 +421,7 @@ impl RuntimeSdk {
     pub async fn materialize_recurring_now(&self, scheduler_id: &str) -> Result<usize> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.materialize_recurring_now(scheduler_id).await,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.materialize_recurring_now(scheduler_id).await,
         }
     }
@@ -443,7 +443,7 @@ impl RuntimeSdk {
     pub async fn job_count_by_state(&self, state: JobState) -> Result<usize> {
         let jobs = match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.job_store.list_by_state(state).await?,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.job_store.list_by_state(state).await?,
         };
         Ok(jobs.len())
@@ -453,7 +453,7 @@ impl RuntimeSdk {
     pub async fn pending_outbox_count(&self, limit: usize) -> Result<usize> {
         let pending = match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.outbox_store.list_pending(limit).await?,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.outbox_store.list_pending(limit).await?,
         };
         Ok(pending.len())
@@ -463,7 +463,7 @@ impl RuntimeSdk {
     pub async fn recurring_count(&self) -> Result<usize> {
         let definitions = match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.recurring_store.list().await?,
-            #[cfg(feature = "surreal-native")]
+            #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.recurring_store.list().await?,
         };
         Ok(definitions.len())
@@ -479,7 +479,7 @@ mod tests {
     #[cfg(feature = "surreal-native")]
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    #[cfg(feature = "surreal-native")]
+    #[cfg(feature = "surreal")]
     use crate::application::runtime::runtime_factory::RuntimeComposition;
 
     use super::RuntimeSdk;
@@ -505,7 +505,7 @@ mod tests {
         assert!(matches!(runtime.runtime(), RuntimeComposition::Surreal(_)));
     }
 
-    #[cfg(feature = "surreal-native")]
+    #[cfg(feature = "surreal")]
     #[tokio::test]
     async fn runtime_sdk_surreal_ws_constructor_rejects_invalid_endpoint() {
         let result = RuntimeSdk::surreal_ws("not-a-valid-endpoint", "stasis", "runtime").await;

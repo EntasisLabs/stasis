@@ -37,14 +37,15 @@ impl HttpWebhookEventPublisher {
             request = request.bearer_auth(token);
         }
 
-        let response = request.send().await.map_err(|e| {
-            StasisError::PortFailure(format!("publish webhook request failed: {e}"))
-        })?;
+        let (status, _) = super::wasm_http::send_collecting(request)
+            .await
+            .map_err(|err| {
+                StasisError::PortFailure(format!("publish webhook request failed: {err}"))
+            })?;
 
-        if !response.status().is_success() {
+        if !status.is_success() {
             return Err(StasisError::PortFailure(format!(
-                "publish webhook returned non-success status: {}",
-                response.status()
+                "publish webhook returned non-success status: {status}"
             )));
         }
 
@@ -181,7 +182,9 @@ impl EventPublisher for HttpWebhookEventPublisher {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    #[cfg(not(target_arch = "wasm32"))]
     use tokio::net::TcpListener;
 
     use chrono::Utc;
@@ -222,6 +225,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn spawn_webhook_server(
         expected_auth: Option<&'static str>,
         success_status: &'static str,
@@ -293,6 +297,7 @@ mod tests {
         assert_eq!(payload.execution_id.as_deref(), Some("exec-1"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn publish_includes_bearer_header_when_configured() {
         let (endpoint_url, server_task) =
@@ -311,6 +316,7 @@ mod tests {
         assert_eq!(auth_header.as_deref(), Some("Bearer test-token"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn publish_fails_closed_when_auth_is_required_but_missing() {
         let (endpoint_url, _server_task) =
@@ -328,6 +334,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn publish_fails_on_non_success_status() {
         let (endpoint_url, _server_task) =
@@ -345,6 +352,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn publish_fails_when_endpoint_is_unreachable() {
         let event = sample_event();

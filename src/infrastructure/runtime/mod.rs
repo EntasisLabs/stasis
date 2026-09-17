@@ -6,10 +6,12 @@ pub mod endpoint_routing_policy;
 pub mod grapheme_sdk_workflow_engine;
 #[cfg(feature = "grapheme")]
 pub mod grapheme_sdk_workflow_reflection;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), feature = "http-wasm"))]
 pub mod http_cluster_command_forwarder;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), feature = "http-wasm"))]
 pub mod http_webhook_event_publisher;
+#[cfg(any(not(target_arch = "wasm32"), feature = "http-wasm"))]
+mod wasm_http;
 #[cfg(feature = "llm-genai")]
 pub mod in_memory_ai_chat_response_cache;
 pub mod in_memory_blob_transfer;
@@ -36,29 +38,29 @@ pub mod noop_runtime_metrics;
 pub mod portable_time;
 #[cfg(feature = "transport-rabbitmq")]
 pub mod rabbitmq_lapin_transport_publisher;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_cluster_forward_outcome_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_cluster_node_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_delivery_endpoint_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_durable_wait_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_endpoint_delivery_status_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_job_attempt_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_job_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_outbox_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_recurring_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_resource_lease_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_thread_store;
-#[cfg(feature = "surreal-native")]
+#[cfg(feature = "surreal")]
 pub mod surreal_workflow_definition_store;
 pub mod system_clock;
 #[cfg(not(target_arch = "wasm32"))]

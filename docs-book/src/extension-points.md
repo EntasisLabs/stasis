@@ -93,6 +93,7 @@ pub trait AiChatClient: Send + Sync {
 | `GenaiChatClient` | Production client backed by `genai`. Uses `from_env()` for model selection via environment variables |
 | `MockLlmGateway` | Test stub with configurable canned responses |
 | `OpenAiHttpGateway` | OpenAI Chat Completions HTTP (`llm-openai-http`). WASM-safe (`fetch`); also works natively without `genai` |
+| `HttpWebhookEventPublisher` / `HttpClusterCommandForwarder` | HTTP outbox + cluster forward (`http-wasm` on wasm32; always on native) |
 
 **Wiring:**
 

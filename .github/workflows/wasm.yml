@@ -24,6 +24,18 @@ jobs:
       - name: Check stasis-rs WASM OpenAI HTTP gateway
         run: cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features llm-openai-http
 
+      - name: Check stasis-rs WASM HTTP adapters
+        run: cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features http-wasm
+
+      - name: Check stasis-rs WASM Surreal WS
+        run: cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features surreal-ws
+
+      - name: Check stasis-rs WASM Locus persist adapters
+        run: cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features locus-persist
+
+      - name: Check stasis-wasm bindings
+        run: cargo check -p stasis-wasm --target wasm32-unknown-unknown
+
   wasm-smoke:
     runs-on: ubuntu-latest
     steps:

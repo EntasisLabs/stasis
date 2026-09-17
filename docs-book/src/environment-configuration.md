@@ -13,6 +13,8 @@
   - Cargo.toml
   - tests/wasm_kernel_smoke.rs
   - src/infrastructure/llm/openai_http_gateway.rs
+  - src/infrastructure/memory/locus_node_store_factory.rs
+  - stasis-wasm/src/lib.rs
 
 ## Purpose
 
@@ -118,10 +120,14 @@ On that profile:
 - `bootstrap()` still installs an OS-env resolver; it does **not** load `.env` or `STASIS_SECRETS_DIR` (those need the `env-fs` feature).
 - Do not enable `native` / `dashboard` / `surreal-native` / `llm-genai` / `grapheme` for wasm32 — the crate `compile_error`s if `native` is on.
 - `--no-default-features` on native hosts is the same slim kernel (intentional).
-- In-memory `StasisSdk` + `RuntimeSdk` run under the W2 Node `wasm-bindgen-test` harness (`tests/wasm_kernel_smoke.rs`). Wall time uses `web-time` / chrono `wasmbind`.
+- In-memory `StasisSdk` + `RuntimeSdk` run under the W2 Node `wasm-bindgen-test` harness (`tests/wasm_kernel_smoke.rs`). Wall time uses `web-time` / chrono `wasmbind`. Locus store/recall jobs are covered by the same harness.
 - Opt-in `llm-openai-http` adds `OpenAiHttpGateway`: OpenAI Chat Completions over `reqwest`/`fetch`. Set `STASIS_OPENAI_API_KEY` (or `OPENAI_API_KEY` / `STASIS_LLM_API_KEY`) and optionally `STASIS_LLM_BASE_URL` for Groq/OpenRouter/Ollama `/v1`. Browser hosts should pass the key into `OpenAiHttpGateway::new` (no process env) and often need a same-origin proxy because of CORS.
+- Opt-in `http-wasm` compiles webhook and cluster HTTP forwarders (`fetch`). Native webhook/TCP paths stay on the default native graph.
+- Opt-in `surreal-ws` compiles remote `wss://` / `ws://` job adapters. `surreal-native` / SurrealKV `compile_error` on wasm32.
+- Opt-in `locus-persist` wires `locus-surreal-adapter` (`indxdb://`, `mem://`, `wss://`). Stasis does not reimplement STTP; `locus-wasm` remains the browser persistence implementation.
+- Optional workspace crate `stasis-wasm` exposes `wasm-bindgen` `StasisWasmClient` (in-memory register/invoke + ping job).
 
-See [ADR-0009](https://github.com/EntasisLabs/stasis/blob/main/docs/adr/ADR-0009-wasm-target-profile.md).
+See [ADR-0009](https://github.com/EntasisLabs/stasis/blob/main/docs/adr/ADR-0009-wasm-target-profile.md) and the [browser embed cookbook](./cookbook/embed-stasis-browser-host.md).
 
 ## Safety notes
 
