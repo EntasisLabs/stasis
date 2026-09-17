@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, SRE, Architect
 - Stability: Stable
-- Last Verified: 2026-08-28
+- Last Verified: 2026-09-17
 - Verified Against:
 	- src/application/runtime/in_memory_runtime.rs
 	- src/application/runtime/surreal_runtime.rs
@@ -18,7 +18,8 @@
 	- src/domain/runtime/thread.rs
 	- tests/runtime_backend_parity.rs
 	- tests/federated_job_contract.rs
-	- Stasis 0.10.0
+	- tests/wasm_kernel_smoke.rs
+	- Stasis 0.11.0
 
 ## Scope
 

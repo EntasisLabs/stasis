@@ -36,11 +36,23 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc.js"></script>
     </head>
     <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
     <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
@@ -81,10 +93,13 @@
                 sidebar = sidebar || 'visible';
             } else {
                 sidebar = 'hidden';
+                sidebar_toggle.checked = false;
             }
-            sidebar_toggle.checked = sidebar === 'visible';
-            html.classList.remove('sidebar-visible');
-            html.classList.add("sidebar-" + sidebar);
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
@@ -118,7 +133,7 @@
                             <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
                         </ul>
-                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
                             <i class="fa fa-search"></i>
                         </button>
                     </div>
@@ -135,7 +150,12 @@
 
                 <div id="search-wrapper" class="hidden">
                     <form id="searchbar-outer" class="searchbar-outer">
-                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </form>
                     <div id="searchresults-outer" class="searchresults-outer hidden">
                         <div id="searchresults-header" class="searchresults-header"></div>
@@ -161,7 +181,7 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, SRE, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-28</li>
+<li>Last Verified: 2026-09-17</li>
 <li>Verified Against:
 <ul>
 <li>src/application/runtime/in_memory_runtime.rs</li>
@@ -175,7 +195,8 @@
 <li>src/domain/runtime/thread.rs</li>
 <li>tests/runtime_backend_parity.rs</li>
 <li>tests/federated_job_contract.rs</li>
-<li>Stasis 0.10.0</li>
+<li>tests/wasm_kernel_smoke.rs</li>
+<li>Stasis 0.11.0</li>
 </ul>
 </li>
 </ul>
@@ -275,7 +296,7 @@
 <li>finished_at: datetime</li>
 <li>outcome: enum(succeeded|retryable_failure|fatal_failure)</li>
 <li>error_message: string | null</li>
-<li>sttp_output_node_id: string | null</li>
+<li>output_provenance: object | null</li>
 <li>execution_id: string | null</li>
 <li>guardrail_code: string | null</li>
 <li>policy_reason: string | null</li>
@@ -321,8 +342,8 @@
 <li>correlation_id</li>
 <li>causation_id</li>
 <li>trace_id</li>
-<li>sttp_input_node_id</li>
-<li>sttp_output_node_id</li>
+<li>input_provenance</li>
+<li>output_provenance</li>
 <li>execution_id</li>
 <li>input_memory_query_id</li>
 <li>input_memory_query_fingerprint</li>
@@ -353,9 +374,10 @@
 <h3 id="lease-acquisition"><a class="header" href="#lease-acquisition">Lease Acquisition</a></h3>
 <ol>
 <li>Select due enqueued job where scheduled_at &lt;= now, lease_expires_at is null or expired, and <code>placement</code> matches the worker capabilities.</li>
-<li>Attempt compare-and-set update to assign lease_owner and lease_expires_at.</li>
+<li>Attempt compare-and-set update to assign lease_owner and lease_expires_at while the selected placement representation remains unchanged.</li>
 <li>Proceed only when update affects one record.</li>
 </ol>
+<p>Workers declare capabilities through <code>RuntimeSdk::process_once_with_capabilities</code>. The compatibility <code>process_once</code> path has no capabilities and leases only unrestricted jobs.</p>
 <h3 id="worker-execution"><a class="header" href="#worker-execution">Worker Execution</a></h3>
 <ol>
 <li>Move leased job to running.</li>
@@ -364,10 +386,13 @@
 <li>On success:</li>
 </ol>
 <ul>
-<li>persist result reference sttp_output_node_id</li>
+<li>persist optional runtime-neutral <code>output_provenance</code></li>
 <li>mark succeeded</li>
-<li>write outbox events</li>
+<li>write outbox events
+<ul>
 <li>include standardized diagnostics for orchestration/policy outcomes when applicable</li>
+</ul>
+</li>
 </ul>
 <ol start="5">
 <li>On failure:</li>
@@ -534,6 +559,7 @@ Dedicated memory operation handlers support recall, find, graph, aggregate, tran
         <!-- Custom JS scripts -->
         <script src="mermaid.min.js"></script>
         <script src="mermaid-init.js"></script>
+
 
 
     </div>
