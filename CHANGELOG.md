@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **WASM remote Surreal (`surreal-ws`).** Job/outbox/identity adapters compile with `protocol-ws` only (`wss://` / `ws://`). `SurrealKv` / `surreal-native` stay off wasm32.
 - **WASM Locus memory plane.** In-memory store + recall jobs run under the WASM harness. Opt-in `locus-persist` wires `locus-surreal-adapter` for `indxdb://`, `mem://`, and remote `wss://` (Stasis does not reimplement STTP).
 - **`stasis-wasm` bindings crate (W5).** Optional workspace `cdylib` with `version()`, `StasisWasmClient::create()`, register/invoke, and ping enqueue/process. Not published yet.
+- **`stasis-wasm` npm package.** `wasm-bindgen` artifacts for bundlers (`pkg/`) and Node (`pkg-node/`), with TypeScript types and a Node smoke test. Still `"private": true` (not on the npm registry).
 
 ### Changed
 
