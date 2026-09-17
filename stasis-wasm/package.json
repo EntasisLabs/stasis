@@ -1,0 +1,53 @@
+{
+  "name": "stasis-wasm",
+  "version": "0.10.0",
+  "private": true,
+  "description": "In-memory Stasis kernel for Node and bundlers (wasm-bindgen)",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EntasisLabs/stasis.git",
+    "directory": "stasis-wasm"
+  },
+  "homepage": "https://github.com/EntasisLabs/stasis/tree/main/stasis-wasm",
+  "bugs": {
+    "url": "https://github.com/EntasisLabs/stasis/issues"
+  },
+  "keywords": [
+    "stasis",
+    "wasm",
+    "agent",
+    "orchestration"
+  ],
+  "files": [
+    "pkg",
+    "pkg-node",
+    "README.md"
+  ],
+  "sideEffects": [
+    "./pkg/stasis_wasm.js",
+    "./pkg-node/stasis_wasm.js"
+  ],
+  "types": "./pkg/stasis_wasm.d.ts",
+  "main": "./pkg-node/stasis_wasm.js",
+  "module": "./pkg/stasis_wasm.js",
+  "browser": "./pkg/stasis_wasm.js",
+  "exports": {
+    ".": {
+      "types": "./pkg/stasis_wasm.d.ts",
+      "node": {
+        "types": "./pkg-node/stasis_wasm.d.ts",
+        "require": "./pkg-node/stasis_wasm.js",
+        "default": "./pkg-node/stasis_wasm.js"
+      },
+      "import": "./pkg/stasis_wasm.js",
+      "default": "./pkg/stasis_wasm.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "bash scripts/build-npm.sh",
+    "test": "node --test test/node-smoke.cjs",
+    "pack:dry": "npm pack --dry-run"
+  }
+}

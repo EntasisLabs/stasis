@@ -12,6 +12,7 @@
   - src/infrastructure/llm/openai_http_gateway.rs
   - src/infrastructure/memory/locus_node_store_factory.rs
   - stasis-wasm/src/lib.rs
+  - stasis-wasm/package.json
   - docs/adr/ADR-0009-wasm-target-profile.md
 
 ## Outcome
@@ -79,7 +80,18 @@ let llm = OpenAiHttpGateway::new(api_key_from_host, "gpt-4o-mini")
     .with_base_url("/v1"); // same-origin proxy
 ```
 
-### 3. Optional JS bindings (`stasis-wasm`)
+### 3. Optional JS/TS package (`stasis-wasm`)
+
+The bindings crate is also an npm package (not on the registry yet). From the repo:
+
+```bash
+cd stasis-wasm
+npm run build   # needs wasm32-unknown-unknown + wasm-bindgen-cli
+npm test
+npm run pack:dry
+```
+
+Bundler hosts (Vite / webpack) import the ESM `pkg/` build:
 
 ```js
 import init, { version, StasisWasmClient } from "stasis-wasm";
@@ -92,7 +104,9 @@ const jobId = await client.enqueue_ping(1);
 await client.process_once("default", "browser-worker");
 ```
 
-`stasis-wasm` is workspace-optional and not published to crates.io yet. Build with `wasm-pack` / `wasm-bindgen` against `wasm32-unknown-unknown`.
+Node loads the CommonJS `pkg-node/` build (`require("stasis-wasm")`) — `init()` is not required.
+
+`stasis-wasm` is workspace-optional, unpublished on crates.io, and `"private": true` on npm. Point a local app at the built package with `npm install ../path/to/stasis-wasm` after `npm run build`.
 
 ### 4. Memory persistence stays in Locus
 

@@ -67,6 +67,15 @@ jobs:
           WASM_BINDGEN_TEST_ONLY_NODE: "1"
         run: cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke
 
+      - name: Build stasis-wasm npm package
+        run: npm --prefix stasis-wasm run build
+
+      - name: Node npm package smoke
+        run: npm --prefix stasis-wasm test
+
+      - name: npm pack dry-run
+        run: npm --prefix stasis-wasm run pack:dry
+
   native-check:
     runs-on: ubuntu-latest
     steps:
