@@ -122,3 +122,17 @@ npm deprecate stasis-wasm@0.11.0 "reason"
 - Actual `npm publish` (this repo only dry-runs)
 - `wasm32-unknown-unknown` target and `wasm-bindgen-cli` matching `Cargo.lock` (0.2.121 as of this writing)
 
+## npm dry-run results (2026-09-18)
+
+Run on this branch with `./scripts/publish-npm.sh`. No npm token was used. `npm publish --dry-run` printed `+ stasis-wasm@0.11.0` and warned that a real publish requires login.
+
+| Check | Result |
+| --- | --- |
+| `wasm-bindgen` 0.2.121 + `wasm32-unknown-unknown` | OK |
+| Node smoke (`version()` == `package.json` `0.11.0`, register/invoke/ping) | pass |
+| Tarball | `stasis-wasm-0.11.0.tgz`, 13 files, ~1.0 MB packed / 3.8 MB unpacked |
+| Contents | `LICENSE-*`, `README.md`, `package.json`, `pkg/` (bundler), `pkg-node/` (Node) |
+| `CONFIRM_PUBLISH` guard | `--execute` without the env var refused |
+
+`pkg/` and `pkg-node/` remain gitignored. Rebuild on the machine that publishes.
+
