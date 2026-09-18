@@ -4,7 +4,15 @@ Optional `wasm-bindgen` bindings for the Stasis in-memory kernel (ADR-0009 phase
 
 This crate wraps `stasis-rs --no-default-features`. It does **not** compile the dashboard, `stasisd`, SurrealKV, or the Grapheme host.
 
-The npm package is **not published** yet (`"private": true`). After `npm run build`, Node and bundlers can load it from this directory (`npm pack` / `npm install ./stasis-wasm`).
+The npm package name is `stasis-wasm` (version `0.11.0`). The Rust crate of the same name stays unpublished (`publish = false` on crates.io).
+
+After the first publish:
+
+```bash
+npm install stasis-wasm
+```
+
+From this checkout (after `npm run build`): `npm install ./stasis-wasm`. Owner publish steps: [RELEASE.md](../RELEASE.md#npm-stasis-wasm).
 
 ## Node
 
@@ -42,6 +50,9 @@ cd stasis-wasm
 npm run build   # pkg/ (bundler) + pkg-node/ (Node)
 npm test
 npm run pack:dry
+# from repo root, after npm login:
+# ./scripts/publish-npm.sh          # dry-run
+# CONFIRM_PUBLISH=yes ./scripts/publish-npm.sh --execute
 ```
 
 Browser hosts inject LLM keys themselves (`OpenAiHttpGateway` lives on `stasis-rs` feature `llm-openai-http`, not in this bindings crate). Durable memory stays in Locus (`locus-wasm` / `locus-surreal-adapter`); this client uses in-memory Locus via the kernel.

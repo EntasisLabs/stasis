@@ -1,7 +1,6 @@
 {
   "name": "stasis-wasm",
-  "version": "0.10.0",
-  "private": true,
+  "version": "0.11.0",
   "description": "In-memory Stasis kernel for Node and bundlers (wasm-bindgen)",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -22,8 +21,13 @@
   "files": [
     "pkg",
     "pkg-node",
-    "README.md"
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": [
     "./pkg/stasis_wasm.js",
     "./pkg-node/stasis_wasm.js"
@@ -48,6 +52,9 @@
   "scripts": {
     "build": "bash scripts/build-npm.sh",
     "test": "node --test test/node-smoke.cjs",
-    "pack:dry": "npm pack --dry-run"
+    "prepack": "bash scripts/ensure-npm-artifacts.sh",
+    "prepublishOnly": "bash scripts/ensure-npm-artifacts.sh && npm test",
+    "pack:dry": "npm pack --dry-run",
+    "publish:dry": "npm publish --access public --dry-run"
   }
 }

@@ -125,7 +125,7 @@ On that profile:
 - Opt-in `http-wasm` compiles webhook and cluster HTTP forwarders (`fetch`). Native webhook/TCP paths stay on the default native graph.
 - Opt-in `surreal-ws` compiles remote `wss://` / `ws://` job adapters. `surreal-native` / SurrealKV `compile_error` on wasm32.
 - Opt-in `locus-persist` wires `locus-surreal-adapter` (`indxdb://`, `mem://`, `wss://`). Stasis does not reimplement STTP; `locus-wasm` remains the browser persistence implementation.
-- Optional workspace crate `stasis-wasm` exposes `wasm-bindgen` `StasisWasmClient` (in-memory register/invoke + ping job). `npm --prefix stasis-wasm run build` produces a private npm package (`pkg/` bundler + `pkg-node/` Node).
+- Optional workspace crate `stasis-wasm` exposes `wasm-bindgen` `StasisWasmClient` (in-memory register/invoke + ping job). `npm --prefix stasis-wasm run build` produces the npm package (`pkg/` bundler + `pkg-node/` Node). Publish with `./scripts/publish-npm.sh`.
 
 See [ADR-0009](https://github.com/EntasisLabs/stasis/blob/main/docs/adr/ADR-0009-wasm-target-profile.md) and the [browser embed cookbook](./cookbook/embed-stasis-browser-host.md).
 
