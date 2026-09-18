@@ -16,7 +16,7 @@ test("stasis-wasm npm package register/invoke/ping on Node", async () => {
   const { version, StasisWasmClient } = require(pkgNode);
   const crateVersion = version();
   assert.equal(typeof crateVersion, "string");
-  assert.match(crateVersion, /^\d+\.\d+\.\d+/);
+  assert.equal(crateVersion, require("../package.json").version);
 
   const client = await StasisWasmClient.create();
   await client.register_agent("planner", "Planner", "Break work into steps");

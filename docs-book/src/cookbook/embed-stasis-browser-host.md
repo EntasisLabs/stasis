@@ -82,7 +82,7 @@ let llm = OpenAiHttpGateway::new(api_key_from_host, "gpt-4o-mini")
 
 ### 3. Optional JS/TS package (`stasis-wasm`)
 
-The bindings crate is also an npm package (not on the registry yet). From the repo:
+The bindings crate is also an npm package named `stasis-wasm`. From the repo:
 
 ```bash
 cd stasis-wasm
@@ -91,7 +91,7 @@ npm test
 npm run pack:dry
 ```
 
-Bundler hosts (Vite / webpack) import the ESM `pkg/` build:
+After it is on the registry: `npm install stasis-wasm`. Bundler hosts (Vite / webpack) import the ESM `pkg/` build:
 
 ```js
 import init, { version, StasisWasmClient } from "stasis-wasm";
@@ -106,7 +106,7 @@ await client.process_once("default", "browser-worker");
 
 Node loads the CommonJS `pkg-node/` build (`require("stasis-wasm")`) — `init()` is not required.
 
-`stasis-wasm` is workspace-optional, unpublished on crates.io, and `"private": true` on npm. Point a local app at the built package with `npm install ../path/to/stasis-wasm` after `npm run build`.
+`stasis-wasm` is workspace-optional and unpublished on crates.io (`publish = false`). The npm package name is `stasis-wasm@0.11.0` (public, unscoped). Point a local app at a checkout with `npm install ../path/to/stasis-wasm` after `npm run build`. Owner publish: [RELEASE.md](https://github.com/EntasisLabs/stasis/blob/main/RELEASE.md#npm-stasis-wasm).
 
 ### 4. Memory persistence stays in Locus
 

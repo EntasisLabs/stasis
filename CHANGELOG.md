@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Crates.io publish runbook ([RELEASE.md](RELEASE.md)) and `scripts/publish-crates.sh` (dry-run by default; uses `rustup run stable` when the default toolchain is older than 1.85).
+- npm publish runbook for `stasis-wasm` 0.11.0 (`scripts/publish-npm.sh`; package is no longer `"private": true`).
 
 ### Changed
 

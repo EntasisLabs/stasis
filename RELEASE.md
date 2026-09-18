@@ -9,7 +9,7 @@ This workspace already publishes under the `stasis-rs*` names because [`stasis`]
 | `stasis-rs-macros` | 0.1.0 | **0.1.0 already published** | Do **not** republish unless the macros crate is bumped |
 | `stasis-rs` | 0.11.0 | latest **0.10.0** | Publish **0.11.0** |
 | `stasisd` | 0.1.0 | not published | `publish = false` (workspace binary only) |
-| `stasis-wasm` | 0.10.0 | not published | `publish = false` (npm packaging is separate and still private) |
+| `stasis-wasm` | 0.11.0 | not published on **crates.io** (`publish = false`) | **npm** package `stasis-wasm@0.11.0` is ready to upload (see [npm](#npm-stasis-wasm)) |
 
 Owner of both crates.io packages: [`theelevators`](https://github.com/theelevators) (Tom Vazquez). Publishing requires that account (or a new owner) plus a crates.io API token and 2FA.
 
@@ -53,7 +53,8 @@ cargo yank --vers 0.11.0 stasis-rs
 - **2FA** on the crates.io owner account (`theelevators`).
 - **Do not republish `stasis-rs-macros` 0.1.0** — crates.io rejects duplicate versions. Yank is not a rename.
 - **Do not publish as `stasis`** — that name is owned by another project. Keep `stasis-rs`.
-- **`stasisd` / `stasis-wasm`** stay unpublished until `publish = false` is removed and versions/metadata are decided.
+- **`stasisd`** stays unpublished on crates.io until `publish = false` is removed.
+- **`stasis-wasm`** is published to **npm**, not crates.io. See [npm](#npm-stasis-wasm).
 - **No GitHub Actions publish workflow** is configured. Adding one later needs a repository secret (`CARGO_REGISTRY_TOKEN`) or crates.io [trusted publishing](https://crates.io/docs/trusted-publishing).
 - Root junk (`showtest.md`, `*.gr` scratch files) is already omitted by the `stasis-rs` `include` list; do not add those paths.
 
@@ -75,4 +76,49 @@ Run on a clean tree of this branch with `rustup run stable cargo publish --dry-r
 | `stasis-rs-macros` 0.1.0 | **dry-run OK** | Warns `crate stasis-rs-macros@0.1.0 already exists on crates.io index`. Packaged 20 files, 39.3KiB (11.0KiB compressed). Verify compile 4.5s. **Do not upload.** |
 | `stasis-rs` 0.11.0 | **dry-run OK** | Packaged 326 files, 3.7MiB (588.7KiB compressed). Verify compile 6m 14s from the tarball. `build.rs` fell back to prebuilt `dashboard.css` (no local Tailwind). Upload aborted (`--dry-run`). |
 
-Scratch files (`showtest.md`, `*.gr`) were not in the tarball. `stasisd` and `stasis-wasm` were not packaged (`publish = false`).
+Scratch files (`showtest.md`, `*.gr`) were not in the tarball. `stasisd` was not packaged (`publish = false`). `stasis-wasm` is an npm package, not a crates.io crate.
+
+## npm (`stasis-wasm`)
+
+The registry name `stasis-wasm` is free. The Rust crate stays `publish = false`. npm version is **0.11.0** (aligned with `stasis-wasm` / `stasis-rs` Cargo.toml).
+
+`pkg/` and `pkg-node/` are gitignored; they are produced on the machine that publishes. `prepack` / `prepublishOnly` build them if missing, then run the Node smoke test.
+
+### Commands (token required for the real upload)
+
+Create a granular npm token (or log in interactively) at <https://www.npmjs.com/settings/~/tokens>. 2FA must be enabled. Do not paste tokens into chat, git, or CI logs.
+
+```bash
+# 1. Auth (once per machine)
+npm login
+
+# 2. Dry-run from the repo root (no token needed for pack; publish --dry-run may ask you to be logged in)
+./scripts/publish-npm.sh
+
+# Equivalent manual:
+cd stasis-wasm
+npm run build
+npm test
+npm publish --access public --dry-run
+
+# 3. Real upload (only after dry-run is green)
+CONFIRM_PUBLISH=yes ./scripts/publish-npm.sh --execute
+# or: cd stasis-wasm && npm publish --access public
+```
+
+`publishConfig.access` is `public`, so an unscoped first publish does not become a 402/private-package error.
+
+To unpublish within 72 hours (npm policy; prefer deprecate for anything already downloaded):
+
+```bash
+npm unpublish stasis-wasm@0.11.0
+npm deprecate stasis-wasm@0.11.0 "reason"
+```
+
+### Blockers that require you
+
+- **npm login** on the account that should own `stasis-wasm`
+- **2FA** on that npm account
+- Actual `npm publish` (this repo only dry-runs)
+- `wasm32-unknown-unknown` target and `wasm-bindgen-cli` matching `Cargo.lock` (0.2.121 as of this writing)
+

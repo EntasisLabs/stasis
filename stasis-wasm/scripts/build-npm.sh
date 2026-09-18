@@ -6,6 +6,24 @@ crate_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="$(cd "$crate_root/.." && pwd)"
 cd "$repo_root"
 
+CARGO=(cargo)
+
+rustc_minor() {
+	local ver
+	ver="$("$@" --version 2>/dev/null | awk '{print $2}')"
+	echo "${ver:-0}" | cut -d. -f2
+}
+
+if [[ "$(rustc_minor rustc)" -lt 85 ]]; then
+	if command -v rustup >/dev/null && [[ "$(rustc_minor rustup run stable rustc)" -ge 85 ]]; then
+		echo "default rustc is < 1.85; using rustup run stable"
+		CARGO=(rustup run stable cargo)
+	else
+		echo "Rust 1.85+ is required (edition 2024). Current: $(rustc --version 2>/dev/null || echo missing)" >&2
+		exit 1
+	fi
+fi
+
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
   version="$(awk '/name = "wasm-bindgen"$/{getline; if ($1=="version") {gsub(/"/, "", $3); print $3; exit}}' Cargo.lock)"
   echo "wasm-bindgen CLI is required (lockfile version: ${version:-unknown})" >&2
@@ -13,7 +31,14 @@ if ! command -v wasm-bindgen >/dev/null 2>&1; then
   exit 1
 fi
 
-cargo build -p stasis-wasm --target wasm32-unknown-unknown --release
+if command -v rustup >/dev/null; then
+	rustup target add wasm32-unknown-unknown >/dev/null
+	if [[ "${CARGO[*]}" == "rustup run stable cargo" ]]; then
+		rustup target add wasm32-unknown-unknown --toolchain stable >/dev/null
+	fi
+fi
+
+"${CARGO[@]}" build -p stasis-wasm --target wasm32-unknown-unknown --release
 
 wasm_bin="target/wasm32-unknown-unknown/release/stasis_wasm.wasm"
 if [[ ! -f "$wasm_bin" ]]; then
