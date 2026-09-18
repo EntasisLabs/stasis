@@ -2,6 +2,7 @@
 name = "stasis-rs"
 version = "0.11.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Durable AI orchestration framework with runtime jobs, lineage, and memory integration"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -14,6 +15,7 @@ include = [
 	"/Cargo.toml",
 	"/CHANGELOG.md",
 	"/README.md",
+	"/RELEASE.md",
 	"/LICENSE-MIT",
 	"/LICENSE-APACHE",
 	"/build.rs",
@@ -33,6 +35,11 @@ include = [
 	"/examples/**",
 	"/tests/**",
 ]
+
+[package.metadata.docs.rs]
+all-features = false
+features = ["native"]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [lib]
 name = "stasis"

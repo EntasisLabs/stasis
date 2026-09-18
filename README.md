@@ -1,6 +1,10 @@
 
 # Stasis
 
+[![Crates.io](https://img.shields.io/crates/v/stasis-rs.svg)](https://crates.io/crates/stasis-rs)
+[![Documentation](https://docs.rs/stasis-rs/badge.svg)](https://docs.rs/stasis-rs)
+[![License](https://img.shields.io/crates/l/stasis-rs.svg)](LICENSE-MIT)
+
 <div align="center">
     
 <img width="416" height="388" alt="image" src="https://github.com/user-attachments/assets/fd3f91cd-e248-4f8d-9b1e-14a648c99af6" />
@@ -21,6 +25,21 @@ Unlike prompt orchestration frameworks focused primarily on request/response com
 - scheduling and retries
 - typed tool contracts
 - distributed runtime control
+
+## Install
+
+The crates.io package is [`stasis-rs`](https://crates.io/crates/stasis-rs). Rust imports still use `stasis` (`use stasis::...`). The crate name `stasis` is a different project.
+
+```toml
+[dependencies]
+stasis-rs = "0.11"
+```
+
+```bash
+cargo add stasis-rs
+```
+
+Requires **Rust 1.85+** (edition 2024). Default features enable the native host bundle. Slim/WASM builds use `default-features = false`. Publish checklist: [RELEASE.md](RELEASE.md).
 
 ## Quick Start
 
@@ -91,8 +110,6 @@ Provider-specific overrides are supported:
 - `STASIS_OLLAMA_API_KEY`
 
 Runtime examples are available in [examples](examples).
-
-**Package note:** the crates.io package is `stasis-rs` while Rust imports use `stasis`.
 
 ### Feature flags and WASM profile
 
