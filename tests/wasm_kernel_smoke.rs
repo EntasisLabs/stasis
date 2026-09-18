@@ -7,7 +7,6 @@
 //! WASM CI:
 //! `cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke`
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use stasis::application::dto::{InvokeAgentRequest, RegisterAgentRequest};
@@ -38,7 +37,8 @@ impl StasisJob for NoopPing {
 
 struct NoopPingConsumer;
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobConsumer<NoopPing> for NoopPingConsumer {
     async fn consume(&self, job: NoopPing, _ctx: JobContext) -> JobResult<NoopPing> {
         Ok(job)

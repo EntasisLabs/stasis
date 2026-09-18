@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::{Value, json};
 
@@ -212,7 +211,8 @@ impl ConcurrentPatternJobHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobHandler for ConcurrentPatternJobHandler {
     fn job_type(&self) -> &'static str {
         "workflow.stasis.orchestration.concurrent"

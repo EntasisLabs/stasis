@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::application::orchestration::prompt_pipeline::PromptExecutionPipeline;
@@ -117,7 +116,8 @@ impl ToolLoopJobHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobHandler for ToolLoopJobHandler {
     fn job_type(&self) -> &'static str {
         "workflow.stasis.tool_loop"

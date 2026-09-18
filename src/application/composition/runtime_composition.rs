@@ -17,6 +17,8 @@ use crate::infrastructure::agent::in_memory_turn_wait_store::InMemoryTurnWaitSto
 use crate::infrastructure::agent::json_agent_message_codec::JsonAgentMessageCodec;
 #[cfg(feature = "llm-genai")]
 use crate::infrastructure::llm::genai_chat_client::GenaiChatClient;
+#[cfg(all(feature = "llm-chat", not(feature = "llm-genai")))]
+use crate::infrastructure::llm::mock_chat_client::MockAiChatClient;
 use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
 use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
 use crate::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
@@ -24,8 +26,13 @@ use crate::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFacto
 #[cfg(feature = "surreal")]
 use crate::infrastructure::memory::surreal_identity_memory_store::SurrealIdentityMemoryStore;
 use crate::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
-#[cfg(feature = "grapheme")]
+#[cfg(all(feature = "grapheme", feature = "grapheme-host", not(target_arch = "wasm32")))]
 use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
+#[cfg(all(
+    feature = "grapheme",
+    any(target_arch = "wasm32", not(feature = "grapheme-host"))
+))]
+use crate::infrastructure::runtime::grapheme_wasm_workflow_engine::GraphemeWasmWorkflowEngine;
 use crate::infrastructure::runtime::in_memory_cluster_node_store::InMemoryClusterNodeStore;
 use crate::infrastructure::runtime::in_memory_delivery_endpoint_store::InMemoryDeliveryEndpointStore;
 use crate::infrastructure::runtime::in_memory_endpoint_delivery_status_store::InMemoryEndpointDeliveryStatusStore;
@@ -40,7 +47,7 @@ use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::Surr
 use crate::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
 use crate::ports::outbound::agent::message_codec::AgentMessageCodec;
 use crate::ports::outbound::agent::turn_wait_store::TurnWaitStore;
-#[cfg(feature = "llm-genai")]
+#[cfg(feature = "llm-chat")]
 use crate::ports::outbound::ai_chat_client::AiChatClient;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
@@ -248,6 +255,11 @@ impl RuntimeFactory {
         Arc::new(GenaiChatClient::from_env())
     }
 
+    #[cfg(all(feature = "llm-chat", not(feature = "llm-genai")))]
+    pub fn default_chat_client() -> Arc<dyn AiChatClient> {
+        Arc::new(MockAiChatClient::new("stasis mock completion"))
+    }
+
     pub fn default_turn_wait_store() -> Arc<dyn TurnWaitStore> {
         Arc::new(InMemoryTurnWaitStore::new())
     }
@@ -256,9 +268,17 @@ impl RuntimeFactory {
         Arc::new(JsonAgentMessageCodec::v1())
     }
 
-    #[cfg(feature = "grapheme")]
+    #[cfg(all(feature = "grapheme", feature = "grapheme-host", not(target_arch = "wasm32")))]
     pub fn default_workflow_engine() -> Arc<dyn WorkflowEngine> {
         Arc::new(GraphemeSdkWorkflowEngine::new())
+    }
+
+    #[cfg(all(
+        feature = "grapheme",
+        any(target_arch = "wasm32", not(feature = "grapheme-host"))
+    ))]
+    pub fn default_workflow_engine() -> Arc<dyn WorkflowEngine> {
+        Arc::new(GraphemeWasmWorkflowEngine::new())
     }
 
     pub async fn ensure_locus_memory_adapters(

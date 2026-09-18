@@ -59,7 +59,7 @@ native = [
 	"dashboard",
 	"surreal-native",
 	"llm-genai",
-	"grapheme",
+	"grapheme-host",
 	"env-fs",
 	"locus-sdk/genai-provider",
 	"locus-sdk/http-providers",
@@ -69,7 +69,7 @@ dashboard = [
 	"dep:askama",
 	"dep:askama_axum",
 	"dep:rust-embed",
-	"grapheme",
+	"grapheme-host",
 	"surreal-native",
 	"env-fs",
 ]
@@ -87,17 +87,25 @@ surreal-native = [
 ]
 # Remote WebSocket only (`wss://` / `ws://`). WASM-safe engine subset.
 surreal-ws = ["surreal", "surrealdb/protocol-ws"]
-llm-genai = ["dep:genai", "genai/rustls-tls"]
-# Enables OpenAI-spec chat completions (`OpenAiHttpGateway`). Pulls wasm `reqwest`
-# (fetch); native already has reqwest for webhooks.
-llm-openai-http = ["reqwest"]
+# Portable chat/tool-loop handlers (`AiChatClient`, prompt + tool-loop jobs).
+# Enabled by `llm-genai` (native) or `llm-openai-http` (WASM / slim HTTP).
+llm-chat = []
+llm-genai = ["dep:genai", "genai/rustls-tls", "llm-chat"]
+# Enables OpenAI-spec chat completions (`OpenAiHttpGateway`) and, without
+# `llm-genai`, a WASM-safe `OpenAiHttpChatClient` for tool-loop jobs.
+# Pulls wasm `reqwest` (fetch); native already has reqwest for webhooks.
+llm-openai-http = ["reqwest", "llm-chat"]
 # Webhook + cluster HTTP forwarder on wasm32 (`reqwest`/`fetch`). Native always has reqwest.
 http-wasm = ["reqwest"]
 # Locus IndexedDB / remote WS memory adapters (`locus-surreal-adapter`).
 locus-persist = ["dep:locus-surreal-adapter"]
-grapheme = ["dep:grapheme-sdk", "dep:grapheme-compiler"]
+# Workflow handlers + engine. Native process hosts should also enable `grapheme-host`
+# (`grapheme-sdk` host). WASM / slim guests use published `grapheme-wasm` 0.7.1
+# (in-process compile + execute; wasm-safe stdlib core/json/csv/yaml/html).
+grapheme = ["dep:grapheme-sdk", "dep:grapheme-compiler", "dep:grapheme-wasm"]
+grapheme-host = ["grapheme", "grapheme-sdk/host"]
 grapheme-full = [
-	"grapheme",
+	"grapheme-host",
 	"grapheme-sdk/full",
 	"grapheme-compiler/full",
 ]
@@ -130,8 +138,9 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 cron = "0.12"
-grapheme-sdk = { version = "0.7.1", default-features = false, features = ["host"], optional = true }
+grapheme-sdk = { version = "0.7.1", default-features = false, optional = true }
 grapheme-compiler = { version = "0.7.1", default-features = false, optional = true }
+grapheme-wasm = { version = "0.7.1", optional = true }
 grapheme-lsp = { version = "0.7.1", optional = true, default-features = false }
 futures-util = "0.3"
 lapin = { version = "2", optional = true }
@@ -167,3 +176,8 @@ tower = { version = "0.5", features = ["util"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
+
+# grapheme-runtime 0.7.1 panics on std::time::Instant::now() on
+# wasm32-unknown-unknown. Drop this patch when upstream uses a wasm-safe clock.
+[patch.crates-io]
+grapheme-runtime = { path = "vendor/grapheme-runtime" }

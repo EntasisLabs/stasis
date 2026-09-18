@@ -468,6 +468,51 @@ impl RuntimeSdk {
         };
         Ok(definitions.len())
     }
+
+    /// Loads a job by id from the backing job store.
+    pub async fn get_job(&self, job_id: &str) -> Result<Option<crate::domain::runtime::job::Job>> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.job_store.get(job_id).await,
+            #[cfg(feature = "surreal")]
+            RuntimeComposition::Surreal(rt) => rt.job_store.get(job_id).await,
+        }
+    }
+
+    /// Attempt history for a job (diagnostics, outcomes, execution ids).
+    pub async fn list_job_attempts(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<crate::domain::runtime::job_attempt::JobAttempt>> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.list_job_attempts(job_id).await,
+            #[cfg(feature = "surreal")]
+            RuntimeComposition::Surreal(rt) => rt.list_job_attempts(job_id).await,
+        }
+    }
+
+    /// Outbox lineage events for a job.
+    pub async fn list_lineage_events(
+        &self,
+        job_id: &str,
+    ) -> Result<Vec<crate::domain::runtime::outbox::OutboxEvent>> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.list_lineage_events(job_id).await,
+            #[cfg(feature = "surreal")]
+            RuntimeComposition::Surreal(rt) => rt.list_lineage_events(job_id).await,
+        }
+    }
+
+    /// Combined attempt + lineage snapshot used by replay / "run again" UIs.
+    pub async fn get_replay_report(
+        &self,
+        job_id: &str,
+    ) -> Result<crate::application::runtime::replay_report::ReplayReport> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.get_replay_report(job_id).await,
+            #[cfg(feature = "surreal")]
+            RuntimeComposition::Surreal(rt) => rt.get_replay_report(job_id).await,
+        }
+    }
 }
 
 #[cfg(test)]

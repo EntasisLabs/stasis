@@ -5,12 +5,13 @@
 - Document Type: Cookbook Recipe
 - Audience: Engineer
 - Stability: Evolving
-- Last Verified: 2026-09-17
+- Last Verified: 2026-09-18
 - Verified Against:
   - Cargo.toml
   - tests/wasm_kernel_smoke.rs
   - src/infrastructure/llm/openai_http_gateway.rs
   - src/infrastructure/memory/locus_node_store_factory.rs
+  - src/infrastructure/runtime/grapheme_wasm_workflow_engine.rs
   - stasis-wasm/src/lib.rs
   - stasis-wasm/package.json
   - docs/adr/ADR-0009-wasm-target-profile.md
@@ -19,7 +20,7 @@
 
 Embed the Stasis **kernel** in a browser or wasm-bindgen host: in-memory jobs, injected LLM, and Locus memory — without the dashboard, `stasisd`, or SurrealKV.
 
-This is **Story B** (Stasis *is* Wasm). Grapheme Stage B (Stasis *hosts* Wasm artifacts) is a separate track.
+This is **Story B** (Stasis *is* Wasm). Grapheme Stage B (Stasis *hosts* Wasm artifacts) remains native (`grapheme-host`). The WASM guest runs workflows through published `grapheme-wasm` 0.7.1.
 
 ## Recipe
 
@@ -29,6 +30,7 @@ This is **Story B** (Stasis *is* Wasm). Grapheme Stage B (Stasis *hosts* Wasm ar
 stasis-rs = { version = "0.11", default-features = false }
 # optional:
 # features = ["llm-openai-http"]   # fetch → OpenAI-spec /v1/chat/completions
+# features = ["grapheme"]          # handlers + grapheme-wasm 0.7.1 in-guest engine
 # features = ["http-wasm"]         # webhook / cluster forwarder
 # features = ["surreal-ws"]        # remote wss:// job runtime
 # features = ["locus-persist"]     # indxdb:// or wss:// Locus stores
@@ -97,16 +99,30 @@ After it is on the registry: `npm install stasis-wasm`. Bundler hosts (Vite / we
 import init, { version, StasisWasmClient } from "stasis-wasm";
 
 await init();
+// Mock path (CI / no key):
 const client = await StasisWasmClient.create();
+// Real OpenAI-spec path — browsers need a same-origin /v1 CORS proxy:
+// const client = await StasisWasmClient.create({
+//   apiKey: userSuppliedKey,
+//   model: "gpt-4o-mini",
+//   baseUrl: "/v1",
+// });
+console.log(JSON.parse(client.capabilities()));
 await client.register_agent("planner", "Planner", "Break work into steps");
 const text = await client.invoke_agent("planner", "Plan a kickoff");
-const jobId = await client.enqueue_ping(1);
-await client.process_once("default", "browser-worker");
+await client.store_memory("demo", "kickoff is Tuesday");
+await client.enqueue_grapheme_echo("g1", "hello from grapheme");
+await client.enqueue_tool_loop("t1", "echo this", "echo", JSON.stringify({ ok: true }), "demo");
+await client.process_available("default", "browser-worker");
+const replay = JSON.parse(await client.resume_from_history("t1"));
+// replay.llm_called === false
 ```
 
 Node loads the CommonJS `pkg-node/` build (`require("stasis-wasm")`) — `init()` is not required.
 
-`stasis-wasm` is workspace-optional and unpublished on crates.io (`publish = false`). The npm package name is `stasis-wasm@0.11.0` (public, unscoped). Point a local app at a checkout with `npm install ../path/to/stasis-wasm` after `npm run build`. Owner publish: [RELEASE.md](https://github.com/EntasisLabs/stasis/blob/main/RELEASE.md#npm-stasis-wasm).
+`stasis-wasm` is workspace-optional and unpublished on crates.io (`publish = false`). The npm package name is `stasis-wasm@0.12.0` (public, unscoped). Point a local app at a checkout with `npm install ../path/to/stasis-wasm` after `npm run build`. Owner publish: [RELEASE.md](https://github.com/EntasisLabs/stasis/blob/main/RELEASE.md#npm-stasis-wasm).
+
+See [stasis-wasm/README.md](https://github.com/EntasisLabs/stasis/blob/main/stasis-wasm/README.md) for Grapheme gaps (`grapheme:file:`, host-only `http`/`sql`, no preemptive timeout).
 
 ### 4. Memory persistence stays in Locus
 
@@ -126,7 +142,7 @@ Job durability on wasm uses `--features surreal-ws` and `RuntimeSdk::surreal_ws(
 
 - `stasisd`, Axum dashboard, `surreal-native` / SurrealKV
 - `llm-genai` (native TLS `genai` client)
-- Grapheme host (`grapheme` / `grapheme-full`)
+- Grapheme **host** (`grapheme-host` / `grapheme-full` / `grapheme-sdk/host`) — the guest uses `grapheme` + `grapheme-wasm` instead
 - OTEL gRPC exporters, `rfkafka_wasi` (placeholder only)
 
 ## Verify
@@ -136,4 +152,7 @@ cargo test -p stasis-rs --test wasm_kernel_smoke
 CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
 WASM_BINDGEN_TEST_ONLY_NODE=1 \
 cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke
+
+cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features llm-openai-http,grapheme
+cd stasis-wasm && npm run build && npm test
 ```

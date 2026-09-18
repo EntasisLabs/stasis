@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use serde_json::json;
 
@@ -107,7 +106,8 @@ impl AgentTurnWaitableJobHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobHandler for AgentTurnWaitableJobHandler {
     fn job_type(&self) -> &'static str {
         "workflow.stasis.agent_turn.waitable"
@@ -299,6 +299,7 @@ impl JobHandler for AgentTurnWaitableJobHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use crate::domain::runtime::job::{BackoffPolicy, Job, JobState};
     use crate::infrastructure::agent::in_memory_agent_event_ingress::InMemoryAgentEventIngress;
     use crate::infrastructure::agent::in_memory_turn_wait_store::InMemoryTurnWaitStore;

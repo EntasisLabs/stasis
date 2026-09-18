@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
-use genai::chat::{ChatMessage, ChatRequest, ChatResponse};
 use tokio::sync::mpsc;
+#[cfg(feature = "llm-genai")]
+use genai::chat::{ChatMessage, ChatRequest, ChatResponse};
+#[cfg(all(feature = "llm-chat", not(feature = "llm-genai")))]
+use crate::ports::outbound::portable_chat::{ChatMessage, ChatRequest, ChatResponse};
 
 use crate::application::runtime::chat_options_resolver::chat_options_for_context;
 use crate::domain::errors::{Result, StasisError};

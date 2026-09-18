@@ -5,7 +5,7 @@ pub mod agent_turn_job_handler;
 pub mod agent_turn_waitable_job_handler;
 #[cfg(feature = "llm-genai")]
 pub mod chat_client_middleware;
-#[cfg(feature = "llm-genai")]
+#[cfg(feature = "llm-chat")]
 pub mod chat_options_resolver;
 #[cfg(feature = "llm-genai")]
 pub mod concurrent_pattern_job_handler;
@@ -42,14 +42,14 @@ pub mod memory_schema_job_handler;
 pub mod memory_transform_job_handler;
 #[cfg(feature = "llm-genai")]
 pub mod orchestrator_pattern_job_handler;
-#[cfg(feature = "llm-genai")]
+#[cfg(feature = "llm-chat")]
 pub mod prompt_chat_job_handler;
 pub mod queue_ownership_rebalance_job_handler;
 pub mod replay_report;
 pub mod retention;
 pub mod runtime_diagnostics_helpers;
 pub mod runtime_factory;
-#[cfg(feature = "llm-genai")]
+#[cfg(feature = "llm-chat")]
 pub mod runtime_handler_execution_context;
 pub mod runtime_job_dx;
 pub mod runtime_job_identity_context;
@@ -58,6 +58,6 @@ pub mod sequential_pattern_job_handler;
 pub mod stasis_runtime_builder;
 #[cfg(feature = "surreal")]
 pub mod surreal_runtime;
-#[cfg(feature = "llm-genai")]
+#[cfg(feature = "llm-chat")]
 pub mod tool_loop_job_handler;
 pub mod typed_job;

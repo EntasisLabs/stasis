@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::json;
 
@@ -148,7 +147,8 @@ impl HandoffPatternJobHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobHandler for HandoffPatternJobHandler {
     fn job_type(&self) -> &'static str {
         "workflow.stasis.orchestration.handoff"

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 
 use crate::application::runtime::grapheme_job_handler::GraphemeJobHandler;
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
@@ -31,7 +30,8 @@ impl GraphemeHealthcheckJobHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobHandler for GraphemeHealthcheckJobHandler {
     fn job_type(&self) -> &'static str {
         "workflow.grapheme.healthcheck"

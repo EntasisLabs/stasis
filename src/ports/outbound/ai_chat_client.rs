@@ -1,8 +1,10 @@
-use async_trait::async_trait;
+#[cfg(feature = "llm-genai")]
 use genai::chat::{ChatOptions, ChatRequest, ChatResponse};
 use tokio::sync::mpsc;
 
 use crate::domain::errors::{Result, StasisError};
+#[cfg(all(feature = "llm-chat", not(feature = "llm-genai")))]
+use crate::ports::outbound::portable_chat::{ChatOptions, ChatRequest, ChatResponse};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamDelta {
@@ -16,7 +18,8 @@ pub async fn send_stream_delta(tx: &mpsc::Sender<StreamDelta>, delta: StreamDelt
     tx.send(delta).await.map_err(|_| StasisError::StreamClosed)
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 pub trait AiChatClient: Send + Sync {
     async fn complete(
         &self,

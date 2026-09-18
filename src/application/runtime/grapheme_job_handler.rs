@@ -1,8 +1,5 @@
-use std::fs;
 use std::sync::Arc;
-use std::time::Instant;
 
-use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_json::json;
@@ -12,6 +9,7 @@ use crate::application::telemetry::operation::OperationTelemetry;
 use crate::domain::errors::Result;
 use crate::domain::errors::StasisError;
 use crate::domain::runtime::job::Job;
+use crate::infrastructure::runtime::portable_time::Instant;
 use crate::ports::outbound::runtime::workflow_engine::WorkflowEngine;
 
 const INLINE_PREFIX: &str = "grapheme:inline:";
@@ -45,14 +43,25 @@ impl GraphemeJobHandler {
 
     fn resolve_payload(payload_ref: &str) -> Result<(String, Option<Value>)> {
         if let Some(path) = payload_ref.strip_prefix(FILE_PREFIX) {
-            return fs::read_to_string(path)
-                .map(|source| (source, None))
-                .map_err(|e| {
-                    crate::domain::errors::StasisError::PortFailure(format!(
-                        "read grapheme source file '{}': {}",
-                        path, e
-                    ))
-                });
+            #[cfg(target_arch = "wasm32")]
+            {
+                let _ = path;
+                return Err(StasisError::PortFailure(
+                    "grapheme:file: payloads are not supported on wasm32; use grapheme:inline: or JSON source"
+                        .to_string(),
+                ));
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                return std::fs::read_to_string(path)
+                    .map(|source| (source, None))
+                    .map_err(|e| {
+                        crate::domain::errors::StasisError::PortFailure(format!(
+                            "read grapheme source file '{}': {}",
+                            path, e
+                        ))
+                    });
+            }
         }
 
         if let Some(inline) = payload_ref.strip_prefix(INLINE_PREFIX) {
@@ -144,7 +153,8 @@ impl GraphemeJobHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobHandler for GraphemeJobHandler {
     fn job_type(&self) -> &'static str {
         "workflow.grapheme.run"
@@ -209,6 +219,7 @@ impl JobHandler for GraphemeJobHandler {
 mod tests {
     use std::sync::Mutex;
 
+    use async_trait::async_trait;
     use chrono::Utc;
 
     use super::*;

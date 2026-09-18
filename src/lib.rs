@@ -158,7 +158,7 @@ pub mod sdk_prelude {
     };
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, NewJob};
-    #[cfg(feature = "llm-genai")]
+    #[cfg(feature = "llm-chat")]
     pub use crate::infrastructure::llm::mock_chat_client::MockAiChatClient;
     pub use crate::infrastructure::llm::mock_gateway::MockLlmGateway;
     pub use crate::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
@@ -176,7 +176,9 @@ pub mod sdk_prelude_ext {
     pub use crate::infrastructure::llm::genai_gateway::GenaiLlmGateway;
     #[cfg(feature = "llm-openai-http")]
     pub use crate::infrastructure::llm::openai_http_gateway::OpenAiHttpGateway;
-    #[cfg(feature = "llm-genai")]
+    #[cfg(all(feature = "llm-openai-http", not(feature = "llm-genai")))]
+    pub use crate::infrastructure::llm::openai_http_chat_client::OpenAiHttpChatClient;
+    #[cfg(feature = "llm-chat")]
     pub use crate::infrastructure::llm::mock_chat_client::MockAiChatClient;
     pub use crate::sdk::control_plane_sdk::ControlPlaneSdk;
     pub use crate::sdk::runtime_sdk::RuntimeStatsSnapshot;

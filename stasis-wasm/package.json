@@ -1,7 +1,7 @@
 {
   "name": "stasis-wasm",
-  "version": "0.11.0",
-  "description": "In-memory Stasis kernel for Node and bundlers (wasm-bindgen)",
+  "version": "0.12.0",
+  "description": "In-memory Stasis kernel for Node and bundlers (wasm-bindgen): OpenAI, tools/Grapheme, Locus memory, job replay",
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
@@ -16,7 +16,9 @@
     "stasis",
     "wasm",
     "agent",
-    "orchestration"
+    "orchestration",
+    "grapheme",
+    "openai"
   ],
   "files": [
     "pkg",

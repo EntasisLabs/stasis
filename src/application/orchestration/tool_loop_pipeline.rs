@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
-use genai::chat::{ChatMessage, ChatRequest, ToolResponse};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
+#[cfg(feature = "llm-genai")]
+use genai::chat::{ChatMessage, ChatRequest, ToolResponse};
+#[cfg(all(feature = "llm-chat", not(feature = "llm-genai")))]
+use crate::ports::outbound::portable_chat::{ChatMessage, ChatRequest, ChatTool, ToolResponse};
 
 use crate::application::orchestration::prompt_pipeline::{
     PromptExecutionContext, PromptExecutionPipeline, PromptExecutionRequest,
@@ -182,7 +185,7 @@ impl ToolLoopPipeline {
                 sanitize_tool_name_for_model(shared_inputs.selected_tool_name());
             let selected_prefix = format!("{selected_sanitized}_");
             tools.retain(|tool| {
-                let tool_name = tool.name.as_ref();
+                let tool_name = crate::application::orchestration::tool_registry::tool_advertised_name(tool);
                 tool_name == shared_inputs.selected_tool_name()
                     || tool_name == selected_sanitized
                     || tool_name.starts_with(&selected_prefix)
@@ -196,7 +199,19 @@ impl ToolLoopPipeline {
         if !tools.is_empty() {
             for _ in 0..max_tool_rounds {
                 rounds_executed += 1;
+                #[cfg(feature = "llm-genai")]
                 let chat_request = ChatRequest::new(messages.clone()).with_tools(tools.clone());
+                #[cfg(not(feature = "llm-genai"))]
+                let chat_request = ChatRequest::new(messages.clone()).with_tools(
+                    tools
+                        .iter()
+                        .map(|tool| ChatTool {
+                            name: tool.name.clone(),
+                            description: tool.description.clone(),
+                            schema: tool.schema.clone(),
+                        })
+                        .collect(),
+                );
                 let completion = match chunk_tx {
                     Some(tx) => {
                         self.prompt_pipeline
