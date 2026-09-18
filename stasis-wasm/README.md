@@ -106,6 +106,8 @@ const client = await StasisWasmClient.create({
 - `execution_timeout` is not preemptively enforced (no `spawn_blocking` / worker threads)
 - `max_steps` / `max_call_depth` use `grapheme-wasm` `RuntimeOptions` defaults
 
+The workspace patches `grapheme-runtime` 0.7.1 to use `web-time::Instant` on wasm32 (`std::time::Instant::now` panics on `wasm32-unknown-unknown`). Drop `vendor/grapheme-runtime` when upstream ships a wasm-safe clock.
+
 ## Build
 
 Requires `wasm32-unknown-unknown` and `wasm-bindgen-cli` matching `Cargo.lock`.

@@ -176,3 +176,8 @@ tower = { version = "0.5", features = ["util"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
+
+# grapheme-runtime 0.7.1 panics on std::time::Instant::now() on
+# wasm32-unknown-unknown. Drop this patch when upstream uses a wasm-safe clock.
+[patch.crates-io]
+grapheme-runtime = { path = "vendor/grapheme-runtime" }

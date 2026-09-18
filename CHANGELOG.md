@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **`stasis-wasm` 0.12.0 agent loop.** Browser/Node hosts can run a real in-memory loop: `StasisWasmClient.create({ apiKey, model?, baseUrl? })` via `OpenAiHttpGateway` (mock `create()` kept for CI), tool-loop + Grapheme handlers, Locus in-memory memory + identity, and kernel job-store replay (`job_history` / `resume_from_history` does not re-call the LLM on succeeded jobs).
-- **WASM Grapheme guest (`grapheme` without `grapheme-host`).** Published `grapheme-wasm` 0.7.1 compiles and executes workflows in-process (stdlib `core`/`json`/`csv`/`yaml`/`html`). Native process hosts keep `grapheme-host` (`grapheme-sdk` host). Honest gaps: no `grapheme:file:`, host-only ops (`http`/`sql`/…) fail in-guest, no preemptive timeout.
+- **WASM Grapheme guest (`grapheme` without `grapheme-host`).** Published `grapheme-wasm` 0.7.1 compiles and executes workflows in-process (stdlib `core`/`json`/`csv`/`yaml`/`html`). Native process hosts keep `grapheme-host` (`grapheme-sdk` host). Honest gaps: no `grapheme:file:`, host-only ops (`http`/`sql`/…) fail in-guest, no preemptive timeout. Workspace `[patch.crates-io]` swaps `grapheme-runtime` `Instant` to `web-time` on wasm32 (`std::time::Instant::now` panics on `wasm32-unknown-unknown`).
 - Portable `llm-chat` path: prompt + tool-loop handlers run with `llm-openai-http` (no `genai`) using `OpenAiHttpChatClient`.
 - Crates.io publish runbook ([RELEASE.md](RELEASE.md)) and `scripts/publish-crates.sh` (dry-run by default; uses `rustup run stable` when the default toolchain is older than 1.85).
 - npm publish runbook for `stasis-wasm` (`scripts/publish-npm.sh`; package is no longer `"private": true`).

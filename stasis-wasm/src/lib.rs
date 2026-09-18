@@ -263,8 +263,8 @@ impl StasisWasmClient {
             "graphemeGaps": [
                 "grapheme:file: payloads (no filesystem)",
                 "host-only ops (http, sql, pdf, image, …) fail in-guest",
-                "execution_timeout is not preemptively enforced (no spawn_blocking / worker threads)",
-                "max_steps / max_call_depth use grapheme-wasm RuntimeOptions defaults"
+            "execution_timeout is not preemptively enforced (no spawn_blocking / worker threads)",
+            "max_steps / max_call_depth use grapheme-wasm RuntimeOptions defaults"
             ],
             "memory": "locus-in-memory",
             "identity": "in-memory",

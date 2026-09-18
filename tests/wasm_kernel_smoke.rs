@@ -7,7 +7,6 @@
 //! WASM CI:
 //! `cargo test -p stasis-rs --target wasm32-unknown-unknown --no-default-features --test wasm_kernel_smoke`
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use stasis::application::dto::{InvokeAgentRequest, RegisterAgentRequest};
