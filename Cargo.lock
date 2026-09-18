@@ -3302,6 +3302,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "grapheme-wasm"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f9ff8c6f1cac9b7f68c3fee0e5707ca64e6a11d40774784668f2f455be9c70e"
+dependencies = [
+ "grapheme-artifact",
+ "grapheme-compiler",
+ "grapheme-runtime",
+ "grapheme-stdlib",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8664,6 +8678,7 @@ dependencies = [
  "grapheme-compiler",
  "grapheme-lsp",
  "grapheme-sdk",
+ "grapheme-wasm",
  "hex",
  "lapin",
  "locus-core-rs",
@@ -8707,9 +8722,10 @@ dependencies = [
 
 [[package]]
 name = "stasis-wasm"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "console_error_panic_hook",
  "getrandom 0.2.17",
  "js-sys",

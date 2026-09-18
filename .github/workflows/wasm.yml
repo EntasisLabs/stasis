@@ -24,6 +24,9 @@ jobs:
       - name: Check stasis-rs WASM OpenAI HTTP gateway
         run: cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features llm-openai-http
 
+      - name: Check stasis-rs WASM OpenAI HTTP + Grapheme guest
+        run: cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features llm-openai-http,grapheme
+
       - name: Check stasis-rs WASM HTTP adapters
         run: cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features http-wasm
 

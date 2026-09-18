@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::runtime::placement::PlacementConstraints;
 use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum JobState {
     Enqueued,
     Leased,

@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
@@ -78,7 +77,8 @@ impl QueueOwnershipRebalanceJobHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobHandler for QueueOwnershipRebalanceJobHandler {
     fn job_type(&self) -> &'static str {
         "workflow.stasis.cluster.queue_ownership_rebalance"

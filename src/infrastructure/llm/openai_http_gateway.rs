@@ -129,6 +129,14 @@ impl<T: OpenAiHttpTransport> OpenAiHttpGateway<T> {
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
+
+    /// POST a Chat Completions JSON body (used by [`super::openai_http_chat_client`]).
+    pub async fn post_chat_completions(&self, body: Value) -> Result<Value> {
+        let url = chat_completions_url(&self.base_url);
+        self.transport
+            .post_json(&url, &self.api_key, body)
+            .await
+    }
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
@@ -146,7 +154,7 @@ fn normalize_base_url(raw: String) -> String {
     raw.trim().trim_end_matches('/').to_string()
 }
 
-fn chat_completions_url(base_url: &str) -> String {
+pub(crate) fn chat_completions_url(base_url: &str) -> String {
     let base = normalize_base_url(base_url.to_string());
     if base.ends_with("/chat/completions") {
         base
@@ -189,7 +197,7 @@ fn completion_text_from_response(response: &Value, model: &str) -> Result<String
     Ok(text)
 }
 
-fn message_content_text(content: &Value) -> Option<String> {
+pub(crate) fn message_content_text(content: &Value) -> Option<String> {
     match content {
         Value::String(text) => {
             let trimmed = text.trim();
@@ -224,7 +232,7 @@ fn message_content_text(content: &Value) -> Option<String> {
     }
 }
 
-fn api_error_message(body: &Value) -> Option<String> {
+pub(crate) fn api_error_message(body: &Value) -> Option<String> {
     let error = body.get("error")?;
     if let Some(message) = error.get("message").and_then(Value::as_str) {
         let kind = error.get("type").and_then(Value::as_str).unwrap_or("error");

@@ -9,7 +9,7 @@ This workspace already publishes under the `stasis-rs*` names because [`stasis`]
 | `stasis-rs-macros` | 0.1.0 | **0.1.0 already published** | Do **not** republish unless the macros crate is bumped |
 | `stasis-rs` | 0.11.0 | latest **0.10.0** | Publish **0.11.0** |
 | `stasisd` | 0.1.0 | not published | `publish = false` (workspace binary only) |
-| `stasis-wasm` | 0.11.0 | not published on **crates.io** (`publish = false`) | **npm** package `stasis-wasm@0.11.0` is ready to upload (see [npm](#npm-stasis-wasm)) |
+| `stasis-wasm` | 0.12.0 | not published on **crates.io** (`publish = false`) | **npm** package `stasis-wasm@0.12.0` is ready to upload (see [npm](#npm-stasis-wasm)) |
 
 Owner of both crates.io packages: [`theelevators`](https://github.com/theelevators) (Tom Vazquez). Publishing requires that account (or a new owner) plus a crates.io API token and 2FA.
 
@@ -80,7 +80,7 @@ Scratch files (`showtest.md`, `*.gr`) were not in the tarball. `stasisd` was not
 
 ## npm (`stasis-wasm`)
 
-The registry name `stasis-wasm` is free. The Rust crate stays `publish = false`. npm version is **0.11.0** (aligned with `stasis-wasm` / `stasis-rs` Cargo.toml).
+The registry name `stasis-wasm` is free. The Rust crate stays `publish = false`. npm version is **0.12.0** (`stasis-wasm/Cargo.toml` + `package.json`; kernel crate remains `stasis-rs` 0.11.0).
 
 `pkg/` and `pkg-node/` are gitignored; they are produced on the machine that publishes. `prepack` / `prepublishOnly` build them if missing, then run the Node smoke test.
 
@@ -111,8 +111,8 @@ CONFIRM_PUBLISH=yes ./scripts/publish-npm.sh --execute
 To unpublish within 72 hours (npm policy; prefer deprecate for anything already downloaded):
 
 ```bash
-npm unpublish stasis-wasm@0.11.0
-npm deprecate stasis-wasm@0.11.0 "reason"
+npm unpublish stasis-wasm@0.12.0
+npm deprecate stasis-wasm@0.12.0 "reason"
 ```
 
 ### Blockers that require you

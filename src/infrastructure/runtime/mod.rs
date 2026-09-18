@@ -2,10 +2,17 @@ pub mod atomic_id_generator;
 pub mod composite_control_plane_store;
 pub mod endpoint_routing_event_publisher;
 pub mod endpoint_routing_policy;
-#[cfg(feature = "grapheme")]
+#[cfg(all(feature = "grapheme", feature = "grapheme-host", not(target_arch = "wasm32")))]
 pub mod grapheme_sdk_workflow_engine;
-#[cfg(feature = "grapheme")]
+#[cfg(all(feature = "grapheme", feature = "grapheme-host", not(target_arch = "wasm32")))]
 pub mod grapheme_sdk_workflow_reflection;
+#[cfg(feature = "grapheme")]
+pub mod grapheme_run_tool;
+#[cfg(all(
+	feature = "grapheme",
+	any(target_arch = "wasm32", not(feature = "grapheme-host"))
+))]
+pub mod grapheme_wasm_workflow_engine;
 #[cfg(any(not(target_arch = "wasm32"), feature = "http-wasm"))]
 pub mod http_cluster_command_forwarder;
 #[cfg(any(not(target_arch = "wasm32"), feature = "http-wasm"))]

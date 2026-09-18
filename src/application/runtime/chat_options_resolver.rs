@@ -1,12 +1,40 @@
+#[cfg(feature = "llm-genai")]
 use genai::chat::{ChatOptions, ReasoningEffort};
+#[cfg(all(feature = "llm-chat", not(feature = "llm-genai")))]
+use crate::ports::outbound::portable_chat::ChatOptions;
 
 use crate::application::orchestration::prompt_pipeline::PromptExecutionContext;
 
-pub fn parse_reasoning_effort_keyword(raw: &str) -> Result<ReasoningEffort, String> {
+const REASONING_KEYWORDS: &[&str] = &[
+    "none", "minimal", "low", "medium", "high", "xhigh", "max",
+];
+
+fn validate_reasoning_effort_keyword(raw: &str) -> Result<(), String> {
     let raw = raw.trim();
     if raw.is_empty() {
         return Err("reasoning_effort must be non-empty when provided".to_string());
     }
+
+    if let Some(budget) = raw.strip_prefix("budget:") {
+        budget.trim().parse::<u32>().map_err(|_| {
+            format!("invalid reasoning_effort budget value in '{raw}'")
+        })?;
+        return Ok(());
+    }
+
+    if REASONING_KEYWORDS.contains(&raw) {
+        return Ok(());
+    }
+
+    Err(format!(
+        "invalid reasoning_effort '{raw}'; expected none, minimal, low, medium, high, xhigh, max, or budget:N"
+    ))
+}
+
+#[cfg(feature = "llm-genai")]
+pub fn parse_reasoning_effort_keyword(raw: &str) -> Result<ReasoningEffort, String> {
+    validate_reasoning_effort_keyword(raw)?;
+    let raw = raw.trim();
 
     if let Some(budget) = raw.strip_prefix("budget:") {
         let budget = budget.trim().parse::<u32>().map_err(|_| {
@@ -22,9 +50,14 @@ pub fn parse_reasoning_effort_keyword(raw: &str) -> Result<ReasoningEffort, Stri
     })
 }
 
+#[cfg(not(feature = "llm-genai"))]
+pub fn parse_reasoning_effort_keyword(raw: &str) -> Result<(), String> {
+    validate_reasoning_effort_keyword(raw)
+}
+
 pub fn validate_reasoning_effort(value: Option<&str>) -> Result<(), String> {
     if let Some(value) = value {
-        parse_reasoning_effort_keyword(value)?;
+        validate_reasoning_effort_keyword(value)?;
     }
     Ok(())
 }
@@ -46,10 +79,22 @@ pub fn chat_options_for_context(context: &PromptExecutionContext) -> Result<Opti
         return Ok(None);
     };
 
-    let effort = parse_reasoning_effort_keyword(raw)?;
-    Ok(Some(ChatOptions::default().with_reasoning_effort(effort)))
+    #[cfg(feature = "llm-genai")]
+    {
+        let effort = parse_reasoning_effort_keyword(raw)?;
+        return Ok(Some(ChatOptions::default().with_reasoning_effort(effort)));
+    }
+
+    #[cfg(not(feature = "llm-genai"))]
+    {
+        validate_reasoning_effort_keyword(raw)?;
+        return Ok(Some(ChatOptions {
+            reasoning_effort: Some(raw.to_string()),
+        }));
+    }
 }
 
+#[cfg(feature = "llm-genai")]
 pub fn apply_model_reasoning_suffix(model_target: &str, options: ChatOptions) -> ChatOptions {
     if options.reasoning_effort.is_some() {
         return options;
@@ -68,23 +113,21 @@ mod tests {
 
     #[test]
     fn parse_reasoning_effort_keywords() {
-        match parse_reasoning_effort_keyword("high").unwrap() {
-            ReasoningEffort::High => {}
-            other => panic!("expected High, got {other:?}"),
-        }
-        match parse_reasoning_effort_keyword("xhigh").unwrap() {
-            ReasoningEffort::XHigh => {}
-            other => panic!("expected XHigh, got {other:?}"),
-        }
-        match parse_reasoning_effort_keyword("budget:8192").unwrap() {
-            ReasoningEffort::Budget(8192) => {}
-            other => panic!("expected Budget(8192), got {other:?}"),
+        validate_reasoning_effort_keyword("high").unwrap();
+        validate_reasoning_effort_keyword("xhigh").unwrap();
+        validate_reasoning_effort_keyword("budget:8192").unwrap();
+        #[cfg(feature = "llm-genai")]
+        {
+            match parse_reasoning_effort_keyword("high").unwrap() {
+                ReasoningEffort::High => {}
+                other => panic!("expected High, got {other:?}"),
+            }
         }
     }
 
     #[test]
     fn parse_rejects_unknown_reasoning_effort() {
-        assert!(parse_reasoning_effort_keyword("fast-reasoning").is_err());
+        assert!(validate_reasoning_effort_keyword("fast-reasoning").is_err());
     }
 
     #[test]
@@ -104,9 +147,12 @@ mod tests {
         let options = chat_options_for_context(&context)
             .expect("should parse")
             .expect("should produce options");
+        #[cfg(feature = "llm-genai")]
         match options.reasoning_effort.as_ref() {
             Some(ReasoningEffort::Medium) => {}
             other => panic!("expected Medium, got {other:?}"),
         }
+        #[cfg(not(feature = "llm-genai"))]
+        assert_eq!(options.reasoning_effort.as_deref(), Some("medium"));
     }
 }

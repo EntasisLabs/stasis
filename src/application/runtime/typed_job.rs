@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
@@ -28,7 +27,8 @@ impl<T, H> TypedJobHandler<T, H> {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 pub trait JobConsumer<T: StasisJob>: Send + Sync {
     async fn consume(&self, job: T, ctx: JobContext) -> JobResult<T::Output>;
     async fn on_lifecycle(&self, job: &Job, event: &JobLifecycleEvent) -> Result<()> {
@@ -37,7 +37,8 @@ pub trait JobConsumer<T: StasisJob>: Send + Sync {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl<T, H> JobHandler for TypedJobHandler<T, H>
 where
     T: StasisJob,

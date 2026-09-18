@@ -61,7 +61,7 @@ pub struct MemoryFilterPayload {
     pub links_to_ref: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryPolicyPayload {
     pub tenant_id: Option<String>,

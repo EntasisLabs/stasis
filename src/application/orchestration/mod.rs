@@ -10,12 +10,12 @@ pub mod mcp_bridged_tool_registry;
 pub mod mcp_recursion;
 #[cfg(feature = "llm-genai")]
 pub mod orchestrator_pattern_pipeline;
-#[cfg(feature = "llm-genai")]
+#[cfg(feature = "llm-chat")]
 pub mod prompt_pipeline;
 pub mod runtime_job_payloads;
 pub mod runtime_workflow_job_builder;
 #[cfg(feature = "llm-genai")]
 pub mod sequential_pattern_pipeline;
-#[cfg(feature = "llm-genai")]
+#[cfg(feature = "llm-chat")]
 pub mod tool_loop_pipeline;
 pub mod tool_registry;

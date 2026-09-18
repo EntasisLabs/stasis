@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::application::orchestration::agent_session_pipeline::{
@@ -140,7 +139,8 @@ impl AgentSessionJobHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobHandler for AgentSessionJobHandler {
     fn job_type(&self) -> &'static str {
         "workflow.stasis.agent_session"
