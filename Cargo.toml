@@ -50,7 +50,7 @@ path = "src/bin/stasis_dashboard.rs"
 required-features = ["dashboard"]
 
 [workspace]
-members = [".", "stasis-macros", "stasisd", "stasis-wasm"]
+members = [".", "stasis-macros", "stasisd", "stasis-wasm", "stasis-demo-host"]
 resolver = "2"
 
 [features]
