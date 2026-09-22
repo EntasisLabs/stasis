@@ -40,6 +40,9 @@ pub mod runtime_prelude {
         InMemoryRuntime, JobExecutionOutcome, JobHandler,
     };
     pub use crate::application::runtime::job_context::{JobConsumeError, JobContext, JobResult};
+    pub use crate::application::runtime::job_continuation::{
+        ContinuationBuilder, ContinuationReceipt,
+    };
     pub use crate::application::runtime::job_lifecycle::{JobLifecycleEvent, StaleRecoverReport};
     pub use crate::application::runtime::runtime_factory::{
         RuntimeBackend, RuntimeComposition, RuntimeFactory, SurrealAuth,
@@ -50,6 +53,7 @@ pub mod runtime_prelude {
     };
     pub use crate::domain::errors::{Result, StasisError};
     pub use crate::domain::runtime::job::{BackoffPolicy, JobState, NewJob};
+    pub use crate::domain::runtime::job_continuation::ContinuationTrigger;
     pub use crate::domain::runtime::placement::{PlacementConstraints, WorkerCapabilities};
     pub use crate::domain::runtime::provenance::{
         ProvenanceRef, ProvenanceScheme, SttpProvenanceAdapter,
@@ -58,7 +62,9 @@ pub mod runtime_prelude {
     pub use crate::domain::runtime::resource_lease::{
         FencingToken, OwnerId, ResourceKey, ResourceLease,
     };
-    pub use crate::domain::runtime::typed_contract::{RetryPolicy, StasisEvent, StasisJob};
+    pub use crate::domain::runtime::typed_contract::{
+        JobDeclaration, RetryPolicy, StasisEvent, StasisJob,
+    };
 }
 
 /// Extended runtime imports including orchestration payloads, endpoint routing, and store adapters.

@@ -166,15 +166,16 @@ impl<T: StasisJob> TypedEnqueueBuilder<T> {
         id_generator: Arc<dyn IdGenerator>,
         job_store: Arc<dyn JobStore>,
     ) -> Self {
+        let declared = T::declaration();
         Self {
             payload,
-            queue: "default".into(),
-            priority: 100,
-            retry: RetryPolicy::default(),
+            queue: declared.queue,
+            priority: declared.priority,
+            retry: declared.retry,
             idempotency_key: None,
             correlation_id: None,
             input_provenance: None,
-            placement: crate::domain::runtime::placement::PlacementConstraints::default(),
+            placement: declared.placement,
             scheduled_at: None,
             clock,
             id_generator,

@@ -5,17 +5,19 @@
 - Document Type: Architecture Standard
 - Audience: Engineer, Security, Architect
 - Stability: Stable
-- Last Verified: 2026-09-17
+- Last Verified: 2026-09-22
 - Verified Against:
   - docs/adr/README.md
   - docs/adr/ADR-0007-agent-platform-runtime-contracts.md
   - docs/adr/ADR-0008-stasisd-declarative-engine.md
   - docs/adr/ADR-0009-wasm-target-profile.md
   - docs/adr/ADR-0010-federated-job-contract.md
+  - docs/adr/ADR-0011-typed-job-framework.md
   - docs/design/agent-platform-runtime-contracts-plan.md
   - docs/design/stasisd-declarative-engine-plan.md
   - docs/design/wasm-target-phase-plan.md
   - docs/design/federated-job-contract.md
+  - docs/design/typed-job-framework.md
   - docs-book/src/adr.md
 
 ## Purpose
@@ -36,6 +38,7 @@ Track major architectural decisions with rationale, alternatives, and consequenc
 | ADR-0008 | `stasisd` Declarative Engine | Accepted | 2026-07-22 |
 | ADR-0009 | WASM Target Profile | Accepted | 2026-08-24 |
 | ADR-0010 | Runtime-Neutral Federated Job Contract | Accepted | 2026-08-28 |
+| ADR-0011 | Typed Job Framework | Accepted | 2026-09-22 |
 
 ## Decision Dependency Diagram
 
@@ -61,7 +64,20 @@ flowchart TD
   A1 --> A10[ADR-0010 Federated Job Contract]
   A3 --> A10
   A7 --> A10
+  A1 --> A11[ADR-0011 Typed Job Framework]
+  A10 --> A11
 ```
+
+## ADR-0011 Typed Job Framework
+
+- Status: Accepted
+- Context: The durable kernel and 0.9.0 typed payloads still make callers repeat queue/retry on every enqueue, and they have no Hangfire-style continuation. A job should be declared once and run by the framework.
+- Decision: `StasisJob::declaration` supplies queue, priority, retry, and placement. `continue_with` stores a durable parent→child edge and inserts the child only when the parent succeeds, fails, is canceled, or hits any terminal state.
+- Consequences:
+  - Positive: declaration defaults and durable continuations sit on the existing lease/retry/outbox kernel.
+  - Tradeoff: in-job enqueue follows the child declaration, not the parent queue. Typed cron, batches, and concurrency caps stay follow-on work.
+- Plan: [Typed Job Framework](../../docs/design/typed-job-framework.md)
+- Full ADR: [ADR-0011](../../docs/adr/ADR-0011-typed-job-framework.md)
 
 ## ADR-0010 Runtime-Neutral Federated Job Contract
 

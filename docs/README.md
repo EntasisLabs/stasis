@@ -8,6 +8,7 @@
 - SurrealDB schema: [architecture/surrealdb-schema.md](architecture/surrealdb-schema.md)
 - Stasis framework RFC: [design/stasis-framework-rfc.md](design/stasis-framework-rfc.md)
 - ADRs: [adr/README.md](adr/README.md)
+- Typed job framework (ADR-0011): [design/typed-job-framework.md](design/typed-job-framework.md)
 
 ## Documentation Program
 

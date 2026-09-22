@@ -181,7 +181,7 @@
 <li>Document Type: Architecture Standard</li>
 <li>Audience: Engineer, Security, Architect</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-09-17</li>
+<li>Last Verified: 2026-09-22</li>
 <li>Verified Against:
 <ul>
 <li>docs/adr/README.md</li>
@@ -189,10 +189,12 @@
 <li>docs/adr/ADR-0008-stasisd-declarative-engine.md</li>
 <li>docs/adr/ADR-0009-wasm-target-profile.md</li>
 <li>docs/adr/ADR-0010-federated-job-contract.md</li>
+<li>docs/adr/ADR-0011-typed-job-framework.md</li>
 <li>docs/design/agent-platform-runtime-contracts-plan.md</li>
 <li>docs/design/stasisd-declarative-engine-plan.md</li>
 <li>docs/design/wasm-target-phase-plan.md</li>
 <li>docs/design/federated-job-contract.md</li>
+<li>docs/design/typed-job-framework.md</li>
 <li>docs-book/src/adr.md</li>
 </ul>
 </li>
@@ -211,6 +213,7 @@
 <tr><td>ADR-0008</td><td><code>stasisd</code> Declarative Engine</td><td>Accepted</td><td>2026-07-22</td></tr>
 <tr><td>ADR-0009</td><td>WASM Target Profile</td><td>Accepted</td><td>2026-08-24</td></tr>
 <tr><td>ADR-0010</td><td>Runtime-Neutral Federated Job Contract</td><td>Accepted</td><td>2026-08-28</td></tr>
+<tr><td>ADR-0011</td><td>Typed Job Framework</td><td>Accepted</td><td>2026-09-22</td></tr>
 </tbody></table>
 </div>
 <h2 id="decision-dependency-diagram"><a class="header" href="#decision-dependency-diagram">Decision Dependency Diagram</a></h2>
@@ -235,7 +238,23 @@
   A1 --&gt; A10[ADR-0010 Federated Job Contract]
   A3 --&gt; A10
   A7 --&gt; A10
+  A1 --&gt; A11[ADR-0011 Typed Job Framework]
+  A10 --&gt; A11
 </pre>
+<h2 id="adr-0011-typed-job-framework"><a class="header" href="#adr-0011-typed-job-framework">ADR-0011 Typed Job Framework</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: The durable kernel and 0.9.0 typed payloads still make callers repeat queue/retry on every enqueue, and they have no Hangfire-style continuation. A job should be declared once and run by the framework.</li>
+<li>Decision: <code>StasisJob::declaration</code> supplies queue, priority, retry, and placement. <code>continue_with</code> stores a durable parent→child edge and inserts the child only when the parent succeeds, fails, is canceled, or hits any terminal state.</li>
+<li>Consequences:
+<ul>
+<li>Positive: declaration defaults and durable continuations sit on the existing lease/retry/outbox kernel.</li>
+<li>Tradeoff: in-job enqueue follows the child declaration, not the parent queue. Typed cron, batches, and concurrency caps stay follow-on work.</li>
+</ul>
+</li>
+<li>Plan: <a href="../../docs/design/typed-job-framework.html">Typed Job Framework</a></li>
+<li>Full ADR: <a href="../../docs/adr/ADR-0011-typed-job-framework.html">ADR-0011</a></li>
+</ul>
 <h2 id="adr-0010-runtime-neutral-federated-job-contract"><a class="header" href="#adr-0010-runtime-neutral-federated-job-contract">ADR-0010 Runtime-Neutral Federated Job Contract</a></h2>
 <ul>
 <li>Status: Accepted</li>
