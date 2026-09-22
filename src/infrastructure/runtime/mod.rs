@@ -30,6 +30,7 @@ pub mod in_memory_delivery_endpoint_store;
 pub mod in_memory_durable_wait_store;
 pub mod in_memory_endpoint_delivery_status_store;
 pub mod in_memory_federated_bus;
+pub mod in_memory_inbound_trigger_store;
 pub mod in_memory_job_continuation_store;
 pub mod in_memory_ownership_handoff_store;
 pub mod in_memory_resource_lease_store;
@@ -56,6 +57,8 @@ pub mod surreal_delivery_endpoint_store;
 pub mod surreal_durable_wait_store;
 #[cfg(feature = "surreal")]
 pub mod surreal_endpoint_delivery_status_store;
+#[cfg(feature = "surreal")]
+pub mod surreal_inbound_trigger_store;
 #[cfg(feature = "surreal")]
 pub mod surreal_job_attempt_store;
 #[cfg(feature = "surreal")]

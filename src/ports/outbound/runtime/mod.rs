@@ -12,6 +12,7 @@ pub mod endpoint_transport_publisher;
 pub mod event_publisher;
 pub mod federated_delivery;
 pub mod id_generator;
+pub mod inbound_trigger_store;
 pub mod job_attempt_store;
 pub mod job_continuation_store;
 pub mod job_store;

@@ -4,6 +4,7 @@ pub mod delivery_endpoint;
 pub mod durable_wait;
 pub mod endpoint_delivery_status;
 pub mod federation;
+pub mod inbound_trigger;
 pub mod job;
 pub mod job_attempt;
 pub mod job_continuation;

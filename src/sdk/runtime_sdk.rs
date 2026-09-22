@@ -10,6 +10,7 @@ use crate::application::runtime::runtime_factory::SurrealAuth;
 use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
 use crate::application::runtime::typed_job::{JobConsumer, TypedEnqueueBuilder};
 use crate::domain::errors::Result;
+use crate::domain::runtime::inbound_trigger::{InboundAccept, InboundProtocol};
 use crate::domain::runtime::job::{JobState, NewJob};
 use crate::domain::runtime::placement::WorkerCapabilities;
 use crate::domain::runtime::recurring::RecurringDefinition;
@@ -171,6 +172,42 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.enqueue_job(payload),
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.enqueue_job(payload),
+        }
+    }
+
+    /// Accepts a canonical inbound document from a webhook, TCP line, Kafka record, or queue delivery.
+    ///
+    /// The listener owns the socket or consumer. Duplicate `idempotency_key` values return the original job.
+    pub async fn accept_inbound_json(
+        &self,
+        protocol: InboundProtocol,
+        body: &[u8],
+    ) -> Result<InboundAccept> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.accept_inbound_json(protocol, body).await,
+            #[cfg(feature = "surreal")]
+            RuntimeComposition::Surreal(rt) => rt.accept_inbound_json(protocol, body).await,
+        }
+    }
+
+    /// Accepts a typed job from an external source. Queue and retry come from [`StasisJob::declaration`].
+    pub async fn accept_inbound_job<T: StasisJob>(
+        &self,
+        protocol: InboundProtocol,
+        idempotency_key: impl Into<String>,
+        payload: T,
+    ) -> Result<InboundAccept> {
+        let idempotency_key = idempotency_key.into();
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => {
+                rt.accept_inbound_job(protocol, idempotency_key, payload)
+                    .await
+            }
+            #[cfg(feature = "surreal")]
+            RuntimeComposition::Surreal(rt) => {
+                rt.accept_inbound_job(protocol, idempotency_key, payload)
+                    .await
+            }
         }
     }
 

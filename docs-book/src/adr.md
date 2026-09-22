@@ -13,11 +13,13 @@
   - docs/adr/ADR-0009-wasm-target-profile.md
   - docs/adr/ADR-0010-federated-job-contract.md
   - docs/adr/ADR-0011-typed-job-framework.md
+  - docs/adr/ADR-0012-inbound-job-triggers.md
   - docs/design/agent-platform-runtime-contracts-plan.md
   - docs/design/stasisd-declarative-engine-plan.md
   - docs/design/wasm-target-phase-plan.md
   - docs/design/federated-job-contract.md
   - docs/design/typed-job-framework.md
+  - docs/design/inbound-job-triggers.md
   - docs-book/src/adr.md
 
 ## Purpose
@@ -39,6 +41,7 @@ Track major architectural decisions with rationale, alternatives, and consequenc
 | ADR-0009 | WASM Target Profile | Accepted | 2026-08-24 |
 | ADR-0010 | Runtime-Neutral Federated Job Contract | Accepted | 2026-08-28 |
 | ADR-0011 | Typed Job Framework | Accepted | 2026-09-22 |
+| ADR-0012 | Inbound Job Triggers | Accepted | 2026-09-22 |
 
 ## Decision Dependency Diagram
 
@@ -66,7 +69,21 @@ flowchart TD
   A7 --> A10
   A1 --> A11[ADR-0011 Typed Job Framework]
   A10 --> A11
+  A1 --> A12[ADR-0012 Inbound Job Triggers]
+  A7 --> A12
+  A11 --> A12
 ```
+
+## ADR-0012 Inbound Job Triggers
+
+- Status: Accepted
+- Context: Outbound webhook, TCP, Kafka, and RabbitMQ publishers push lifecycle events. Agent ingress only completes a parked turn. External sources still cannot start a job through one contract.
+- Decision: `accept_inbound_json` / `accept_inbound_job` enqueue from one canonical document. The listener supplies `InboundProtocol` (`HttpWebhook`, `Tcp`, `Kafka`, `RabbitMq`) and the kernel dedupes on `idempotency_key`. Listeners stay outside the kernel.
+- Consequences:
+  - Positive: webhook, TCP, Kafka, and queue deliveries share enqueue and idempotency.
+  - Tradeoff: hosts still bind the socket or consumer. A crash between receipt and job insert needs a receipt delete before retry.
+- Plan: [Inbound Job Triggers](../../docs/design/inbound-job-triggers.md)
+- Full ADR: [ADR-0012](../../docs/adr/ADR-0012-inbound-job-triggers.md)
 
 ## ADR-0011 Typed Job Framework
 
