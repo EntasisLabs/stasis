@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::application::runtime::job_context::{JobContext, JobContextServices};
+use crate::application::runtime::job_continuation::{ContinuationBuilder, settle_continuations};
 use crate::application::runtime::job_lifecycle::{
     DEFAULT_JOB_LEASE_SECONDS, JobLifecycleEvent, STALE_LEASE_MESSAGE, StaleRecoverReport,
     apply_retryable_failure,
@@ -40,6 +41,7 @@ use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey,
 use crate::domain::runtime::typed_contract::{StasisEvent, StasisJob};
 use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
 use crate::infrastructure::runtime::in_memory_durable_wait_store::InMemoryDurableWaitStore;
+use crate::infrastructure::runtime::in_memory_job_continuation_store::InMemoryJobContinuationStore;
 use crate::infrastructure::runtime::in_memory_resource_lease_store::InMemoryResourceLeaseStore;
 use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
 use crate::infrastructure::runtime::system_clock::SystemClock;
@@ -107,6 +109,7 @@ pub struct InMemoryRuntime {
     pub outbox_store: InMemoryOutboxStore,
     pub job_attempt_store: InMemoryJobAttemptStore,
     pub wait_store: InMemoryDurableWaitStore,
+    pub continuation_store: InMemoryJobContinuationStore,
     pub lease_store: InMemoryResourceLeaseStore,
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
@@ -169,6 +172,7 @@ impl InMemoryRuntime {
             outbox_store: InMemoryOutboxStore::default(),
             job_attempt_store: InMemoryJobAttemptStore::default(),
             wait_store: InMemoryDurableWaitStore::default(),
+            continuation_store: InMemoryJobContinuationStore::default(),
             lease_store: InMemoryResourceLeaseStore::default(),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
@@ -231,11 +235,27 @@ impl InMemoryRuntime {
         )
     }
 
+    pub fn continue_with<C: StasisJob>(
+        &self,
+        parent_job_id: impl Into<String>,
+        child: C,
+    ) -> ContinuationBuilder<C> {
+        ContinuationBuilder::new(
+            parent_job_id.into(),
+            child,
+            self.clock.clone(),
+            self.id_generator.clone(),
+            Arc::new(self.job_store.clone()),
+            Arc::new(self.continuation_store.clone()),
+        )
+    }
+
     pub fn job_context_services(&self) -> JobContextServices {
         JobContextServices {
             job_store: Arc::new(self.job_store.clone()),
             outbox_store: Arc::new(self.outbox_store.clone()),
             wait_store: Arc::new(self.wait_store.clone()),
+            continuation_store: Arc::new(self.continuation_store.clone()),
             clock: self.clock.clone(),
             id_generator: self.id_generator.clone(),
         }
@@ -250,22 +270,39 @@ impl InMemoryRuntime {
     }
 
     async fn emit_lifecycle(&self, job: &Job, event: JobLifecycleEvent) -> Result<()> {
-        let Some(handler) = self.handler_for(&job.job_type)? else {
-            return Ok(());
-        };
-        if let Err(err) = handler.on_lifecycle(job, &event).await {
-            self.metrics
-                .incr_counter(metric_keys::JOB_LIFECYCLE_HOOK_FAILURE_TOTAL, 1);
-            if let Some(mut current) = self.job_store.get(&job.id).await? {
-                let note = format!("lifecycle hook failed: {err}");
-                current.last_error = Some(match current.last_error {
-                    Some(existing) => format!("{existing}; {note}"),
-                    None => note,
-                });
-                self.job_store.save(current).await?;
+        self.emit_lifecycle_with_output(job, event, None).await
+    }
+
+    async fn emit_lifecycle_with_output(
+        &self,
+        job: &Job,
+        event: JobLifecycleEvent,
+        parent_output_json: Option<String>,
+    ) -> Result<()> {
+        if let Some(handler) = self.handler_for(&job.job_type)? {
+            if let Err(err) = handler.on_lifecycle(job, &event).await {
+                self.metrics
+                    .incr_counter(metric_keys::JOB_LIFECYCLE_HOOK_FAILURE_TOTAL, 1);
+                if let Some(mut current) = self.job_store.get(&job.id).await? {
+                    let note = format!("lifecycle hook failed: {err}");
+                    current.last_error = Some(match current.last_error {
+                        Some(existing) => format!("{existing}; {note}"),
+                        None => note,
+                    });
+                    self.job_store.save(current).await?;
+                }
             }
         }
-        Ok(())
+        settle_continuations(
+            &self.continuation_store,
+            &self.job_store,
+            self.clock.as_ref(),
+            self.id_generator.as_ref(),
+            job,
+            &event,
+            parent_output_json,
+        )
+        .await
     }
 
     pub async fn recover_stale_now(&self) -> Result<StaleRecoverReport> {
@@ -867,8 +904,12 @@ impl InMemoryRuntime {
                 job.lease_expires_at = None;
                 job.heartbeat_at = None;
                 self.job_store.save(job.clone()).await?;
-                self.emit_lifecycle(&job, JobLifecycleEvent::Succeeded)
-                    .await?;
+                self.emit_lifecycle_with_output(
+                    &job,
+                    JobLifecycleEvent::Succeeded,
+                    diagnostics.clone(),
+                )
+                .await?;
 
                 self.append_outbox(
                     RuntimeEventType::JobSucceeded,

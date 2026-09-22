@@ -7,6 +7,7 @@ use surrealdb::engine::any::Any;
 
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::job_context::JobContextServices;
+use crate::application::runtime::job_continuation::{ContinuationBuilder, settle_continuations};
 use crate::application::runtime::job_lifecycle::{
     DEFAULT_JOB_LEASE_SECONDS, JobLifecycleEvent, STALE_LEASE_MESSAGE, StaleRecoverReport,
     apply_retryable_failure,
@@ -43,6 +44,7 @@ use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
 use crate::infrastructure::runtime::portable_time::Instant;
 use crate::infrastructure::runtime::surreal_durable_wait_store::SurrealDurableWaitStore;
 use crate::infrastructure::runtime::surreal_job_attempt_store::SurrealJobAttemptStore;
+use crate::infrastructure::runtime::surreal_job_continuation_store::SurrealJobContinuationStore;
 use crate::infrastructure::runtime::surreal_job_store::SurrealJobStore;
 use crate::infrastructure::runtime::surreal_outbox_store::SurrealOutboxStore;
 use crate::infrastructure::runtime::surreal_recurring_store::SurrealRecurringStore;
@@ -67,6 +69,7 @@ pub struct SurrealRuntime {
     pub outbox_store: SurrealOutboxStore,
     pub job_attempt_store: SurrealJobAttemptStore,
     pub wait_store: SurrealDurableWaitStore,
+    pub continuation_store: SurrealJobContinuationStore,
     pub lease_store: SurrealResourceLeaseStore,
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
@@ -132,6 +135,7 @@ impl SurrealRuntime {
             outbox_store: SurrealOutboxStore::new(db.clone()),
             job_attempt_store: SurrealJobAttemptStore::new(db.clone()),
             wait_store: SurrealDurableWaitStore::new(db.clone()),
+            continuation_store: SurrealJobContinuationStore::new(db.clone()),
             lease_store: SurrealResourceLeaseStore::new(db),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
@@ -194,11 +198,27 @@ impl SurrealRuntime {
         )
     }
 
+    pub fn continue_with<C: StasisJob>(
+        &self,
+        parent_job_id: impl Into<String>,
+        child: C,
+    ) -> ContinuationBuilder<C> {
+        ContinuationBuilder::new(
+            parent_job_id.into(),
+            child,
+            self.clock.clone(),
+            self.id_generator.clone(),
+            Arc::new(self.job_store.clone()),
+            Arc::new(self.continuation_store.clone()),
+        )
+    }
+
     pub fn job_context_services(&self) -> JobContextServices {
         JobContextServices {
             job_store: Arc::new(self.job_store.clone()),
             outbox_store: Arc::new(self.outbox_store.clone()),
             wait_store: Arc::new(self.wait_store.clone()),
+            continuation_store: Arc::new(self.continuation_store.clone()),
             clock: self.clock.clone(),
             id_generator: self.id_generator.clone(),
         }
@@ -213,22 +233,39 @@ impl SurrealRuntime {
     }
 
     async fn emit_lifecycle(&self, job: &Job, event: JobLifecycleEvent) -> Result<()> {
-        let Some(handler) = self.handler_for(&job.job_type)? else {
-            return Ok(());
-        };
-        if let Err(err) = handler.on_lifecycle(job, &event).await {
-            self.metrics
-                .incr_counter(metric_keys::JOB_LIFECYCLE_HOOK_FAILURE_TOTAL, 1);
-            if let Some(mut current) = self.job_store.get(&job.id).await? {
-                let note = format!("lifecycle hook failed: {err}");
-                current.last_error = Some(match current.last_error {
-                    Some(existing) => format!("{existing}; {note}"),
-                    None => note,
-                });
-                self.job_store.save(current).await?;
+        self.emit_lifecycle_with_output(job, event, None).await
+    }
+
+    async fn emit_lifecycle_with_output(
+        &self,
+        job: &Job,
+        event: JobLifecycleEvent,
+        parent_output_json: Option<String>,
+    ) -> Result<()> {
+        if let Some(handler) = self.handler_for(&job.job_type)? {
+            if let Err(err) = handler.on_lifecycle(job, &event).await {
+                self.metrics
+                    .incr_counter(metric_keys::JOB_LIFECYCLE_HOOK_FAILURE_TOTAL, 1);
+                if let Some(mut current) = self.job_store.get(&job.id).await? {
+                    let note = format!("lifecycle hook failed: {err}");
+                    current.last_error = Some(match current.last_error {
+                        Some(existing) => format!("{existing}; {note}"),
+                        None => note,
+                    });
+                    self.job_store.save(current).await?;
+                }
             }
         }
-        Ok(())
+        settle_continuations(
+            &self.continuation_store,
+            &self.job_store,
+            self.clock.as_ref(),
+            self.id_generator.as_ref(),
+            job,
+            &event,
+            parent_output_json,
+        )
+        .await
     }
 
     pub async fn recover_stale_now(&self) -> Result<StaleRecoverReport> {
@@ -830,8 +867,12 @@ impl SurrealRuntime {
                 job.lease_expires_at = None;
                 job.heartbeat_at = None;
                 self.job_store.save(job.clone()).await?;
-                self.emit_lifecycle(&job, JobLifecycleEvent::Succeeded)
-                    .await?;
+                self.emit_lifecycle_with_output(
+                    &job,
+                    JobLifecycleEvent::Succeeded,
+                    diagnostics.clone(),
+                )
+                .await?;
 
                 self.append_outbox(
                     RuntimeEventType::JobSucceeded,

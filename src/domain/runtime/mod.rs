@@ -6,6 +6,7 @@ pub mod endpoint_delivery_status;
 pub mod federation;
 pub mod job;
 pub mod job_attempt;
+pub mod job_continuation;
 pub mod outbox;
 pub mod ownership_handoff;
 pub mod placement;

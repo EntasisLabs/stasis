@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tokio::sync::watch;
 
+use crate::application::runtime::job_continuation::ContinuationBuilder;
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::durable_wait::{DurableWaitRecord, DurableWaitStatus};
 use crate::domain::runtime::job::{Job, NewJob};
@@ -17,6 +18,7 @@ use crate::domain::runtime::typed_contract::{StasisEvent, StasisJob, TypedJobEnv
 use crate::ports::outbound::runtime::clock::Clock;
 use crate::ports::outbound::runtime::durable_wait_store::DurableWaitStore;
 use crate::ports::outbound::runtime::id_generator::IdGenerator;
+use crate::ports::outbound::runtime::job_continuation_store::JobContinuationStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 
@@ -59,6 +61,7 @@ pub struct JobContextServices {
     pub job_store: Arc<dyn JobStore>,
     pub outbox_store: Arc<dyn OutboxStore>,
     pub wait_store: Arc<dyn DurableWaitStore>,
+    pub continuation_store: Arc<dyn JobContinuationStore>,
     pub clock: Arc<dyn Clock>,
     pub id_generator: Arc<dyn IdGenerator>,
 }
@@ -151,7 +154,7 @@ impl JobContext {
                     causation_id: self.job_id.clone(),
                     trace_id: self.job.trace_id.clone(),
                     input_provenance: self.job.input_provenance.clone(),
-                output_provenance: None,
+                    output_provenance: None,
                     execution_id: None,
                     input_memory_query_id: None,
                     input_memory_query_fingerprint: None,
@@ -165,6 +168,7 @@ impl JobContext {
     }
 
     pub async fn enqueue<T: StasisJob>(&self, payload: T) -> Result<String> {
+        let declared = T::declaration();
         let envelope = TypedJobEnvelope {
             version: T::VERSION,
             payload,
@@ -178,24 +182,54 @@ impl JobContext {
             .insert(
                 NewJob {
                     id: id.clone(),
-                    queue: self.job.queue.clone(),
+                    queue: declared.queue,
                     job_type: T::NAME.to_string(),
                     payload_ref,
-                    priority: self.job.priority,
-                    max_attempts: self.job.max_attempts,
+                    priority: declared.priority,
+                    max_attempts: declared.retry.max_attempts,
                     idempotency_key: format!("idem-{id}"),
                     correlation_id: self.correlation_id.clone(),
                     causation_id: self.job_id.clone(),
                     trace_id: self.job.trace_id.clone(),
                     input_provenance: self.job.input_provenance.clone(),
-                    placement: crate::domain::runtime::placement::PlacementConstraints::default(),
+                    placement: declared.placement,
                     scheduled_at: now,
-                    backoff_policy: self.job.backoff_policy.clone(),
+                    backoff_policy: declared.retry.backoff,
                 }
                 .into_job(),
             )
             .await?;
         Ok(id)
+    }
+
+    /// Register a child that runs after this job reaches `trigger` (default: succeeded).
+    pub fn continue_with<C: StasisJob>(&self, child: C) -> ContinuationBuilder<C> {
+        ContinuationBuilder::new(
+            self.job_id.clone(),
+            child,
+            self.services.clock.clone(),
+            self.services.id_generator.clone(),
+            self.services.job_store.clone(),
+            self.services.continuation_store.clone(),
+        )
+    }
+
+    pub async fn parent_job_id(&self) -> Result<Option<String>> {
+        Ok(self
+            .services
+            .continuation_store
+            .get_by_child(&self.job_id)
+            .await?
+            .map(|record| record.parent_job_id))
+    }
+
+    pub async fn parent_output_json(&self) -> Result<Option<String>> {
+        Ok(self
+            .services
+            .continuation_store
+            .get_by_child(&self.job_id)
+            .await?
+            .and_then(|record| record.parent_output_json))
     }
 
     pub fn wait_for<E: StasisEvent>(&self) -> WaitRequest<'_, E> {

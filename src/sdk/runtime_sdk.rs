@@ -1,6 +1,7 @@
 use chrono::Utc;
 
 use crate::application::runtime::in_memory_runtime::JobHandler;
+use crate::application::runtime::job_continuation::ContinuationBuilder;
 use crate::application::runtime::job_lifecycle::StaleRecoverReport;
 use crate::application::runtime::runtime_factory::RuntimeBackend;
 use crate::application::runtime::runtime_factory::RuntimeComposition;
@@ -163,11 +164,28 @@ impl RuntimeSdk {
     }
 
     /// Enqueues a typed job payload. Call `.queue(...)`, `.retry(...)`, then `.send().await`.
+    ///
+    /// Queue, priority, retry, and placement start from [`StasisJob::declaration`].
     pub fn enqueue_job<T: StasisJob>(&self, payload: T) -> TypedEnqueueBuilder<T> {
         match &self.runtime {
             RuntimeComposition::InMemory(rt) => rt.enqueue_job(payload),
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.enqueue_job(payload),
+        }
+    }
+
+    /// Registers a child job that is inserted when `parent_job_id` reaches the trigger.
+    ///
+    /// Default trigger is success. If the parent is already terminal, the child is inserted now.
+    pub fn continue_with<C: StasisJob>(
+        &self,
+        parent_job_id: impl Into<String>,
+        child: C,
+    ) -> ContinuationBuilder<C> {
+        match &self.runtime {
+            RuntimeComposition::InMemory(rt) => rt.continue_with(parent_job_id, child),
+            #[cfg(feature = "surreal")]
+            RuntimeComposition::Surreal(rt) => rt.continue_with(parent_job_id, child),
         }
     }
 
