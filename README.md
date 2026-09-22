@@ -32,7 +32,7 @@ The crates.io package is [`stasis-rs`](https://crates.io/crates/stasis-rs). Rust
 
 ```toml
 [dependencies]
-stasis-rs = "0.11"
+stasis-rs = "0.12"
 ```
 
 ```bash

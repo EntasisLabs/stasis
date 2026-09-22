@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-22
+
 ### Added
 
 - **Inbound job triggers (ADR-0012).** `RuntimeSdk::accept_inbound_json` enqueues a durable job from one document delivered by a webhook, TCP line, Kafka record, or RabbitMQ queue. `accept_inbound_job` does the same for a `StasisJob`. Duplicate `idempotency_key` values return the original job. Listeners stay outside the kernel. `AgentEventIngress` still only completes parked agent turns.
