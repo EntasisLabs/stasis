@@ -69,7 +69,12 @@ rustc --version   # need 1.85+ (edition 2024); MSRV is declared as rust-version 
 
 ## Dry-run results (2026-09-22, rustc 1.98.1, 0.12.0)
 
-Pending. Run `./scripts/publish-crates.sh` on this branch after the version bump. No crates.io token is required for `--dry-run`.
+Run on this branch with `./scripts/publish-crates.sh`. No crates.io token was used; uploads were aborted.
+
+| Crate | Result | Notes |
+| --- | --- | --- |
+| `stasis-rs-macros` 0.1.0 | **dry-run OK** | Warns `crate stasis-rs-macros@0.1.0 already exists on crates.io index`. Packaged 20 files, 39.3KiB (11.0KiB compressed). Verify compile 3.3s. **Do not upload.** |
+| `stasis-rs` 0.12.0 | **dry-run OK** | Packaged 344 files, 3.8MiB (611.1KiB compressed). Verify compile 33.6s from the tarball. `build.rs` fell back to prebuilt `dashboard.css` (no local Tailwind). Upload aborted (`--dry-run`). |
 
 ## Dry-run results (2026-09-17, rustc 1.98.1, 0.11.0)
 
