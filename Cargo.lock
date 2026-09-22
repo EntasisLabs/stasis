@@ -5220,9 +5220,9 @@ dependencies = [
 
 [[package]]
 name = "locus-sdk"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00025c5e8fadbb09a74291b5a13b7dcdfd01c94a51f4143e86054bb7a94762f8"
+checksum = "1dda350fe00d3f8e6c17fd8c983d40ae61411f2ac8583e7dc2e4971d873260f0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -13387,7 +13387,7 @@ dependencies = [
  "log",
  "serde",
  "thiserror 2.0.18",
- "windows 0.61.3",
+ "windows 0.62.2",
  "windows-core 0.62.2",
 ]
 

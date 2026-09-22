@@ -103,6 +103,62 @@ async fn locus_context_reader_recall_returns_raw_nodes_after_store() {
 }
 
 #[tokio::test]
+async fn locus_context_reader_recall_ranks_multi_word_query_text() {
+    let session_id = "session-recall-nl";
+    let memory = LocusNodeStoreFactory::in_memory()
+        .await
+        .expect("in-memory node store should initialize");
+    let writer = LocusContextWriter::new(memory.clone());
+    let reader = LocusContextReader::new(memory);
+
+    writer
+        .store_context(&MemoryStoreRequest {
+            session_id: session_id.to_string(),
+            raw_node: render_prompt_response_sttp_node(
+                session_id,
+                "weather check",
+                "unrelated weather forecast",
+                SttpPromptNodeFormat::TaggedSchema,
+            ),
+        })
+        .await
+        .expect("weather node should store");
+    writer
+        .store_context(&MemoryStoreRequest {
+            session_id: session_id.to_string(),
+            raw_node: render_prompt_response_sttp_node(
+                session_id,
+                "billing question",
+                "invoice paid for rust crates",
+                SttpPromptNodeFormat::TaggedSchema,
+            ),
+        })
+        .await
+        .expect("billing node should store");
+
+    let response = reader
+        .recall(&MemoryRecallRequest {
+            scope: MemoryScope {
+                session_ids: Some(vec![session_id.to_string()]),
+                ..Default::default()
+            },
+            query_text: Some("invoice paid crates".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("recall should succeed");
+
+    assert_eq!(response.retrieved, 1);
+    assert_eq!(response.nodes.len(), 1);
+    assert!(
+        response.nodes[0]
+            .raw
+            .contains("invoice paid for rust crates"),
+        "multi-word query_text should return the content-term hit"
+    );
+}
+
+#[tokio::test]
 async fn locus_context_reader_find_returns_raw_nodes_after_store() {
     let session_id = "session-find-raw";
     let memory = LocusNodeStoreFactory::in_memory()
