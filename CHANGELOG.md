@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **locus-sdk 0.4.0.** Pin stays exact (`=0.4.0`). `locus-core-rs` remains **0.5.1**. Multi-word `query_text` on recall/explain now ranks by content-term overlap (context summary, tags, raw text) over the newest 2000 scoped nodes; `strictness` sets how many terms must hit. Single-token `query_text` and `fallback_policy=never` stay on the previous path. `locus-surreal-adapter` is unchanged (0.1.1).
 - **`JobContext::enqueue` uses the child declaration.** Queue, priority, retry, and placement come from `StasisJob::declaration` instead of the parent attempt. Correlation, causation, and trace still follow the parent.
 - `native` / `dashboard` enable `grapheme-host` (`grapheme-sdk` host). Feature `grapheme` alone is the portable handler graph and uses `grapheme-wasm` 0.7.1 on WASM (and on slim native hosts without `grapheme-host`).
 - `stasis-rs` / `stasis-rs-macros` declare `rust-version = "1.85"` (edition 2024). docs.rs metadata pins the native docs graph.

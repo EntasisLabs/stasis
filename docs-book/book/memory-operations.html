@@ -181,7 +181,7 @@
 <li>Document Type: Reference Standard</li>
 <li>Audience: Engineer, Architect, SRE</li>
 <li>Stability: Stable</li>
-<li>Last Verified: 2026-08-25</li>
+<li>Last Verified: 2026-09-22</li>
 <li>Verified Against:
 <ul>
 <li>src/ports/outbound/memory/memory_operations.rs</li>
@@ -312,7 +312,7 @@ pub trait MemoryOperations: Send + Sync {
 <tr><td><code>scope</code></td><td><code>MemoryScope</code></td><td>empty</td><td>Scope filter</td></tr>
 <tr><td><code>filter</code></td><td><code>MemoryFilter</code></td><td>empty</td><td>Predicate filters (including semantic tags)</td></tr>
 <tr><td><code>current_avec</code></td><td><code>Option&lt;MemoryAvecState&gt;</code></td><td><code>None</code></td><td>AVEC state for resonance ranking</td></tr>
-<tr><td><code>query_text</code></td><td><code>Option&lt;String&gt;</code></td><td><code>None</code></td><td>Semantic query string</td></tr>
+<tr><td><code>query_text</code></td><td><code>Option&lt;String&gt;</code></td><td><code>None</code></td><td>Natural-language query. Multi-word questions rank by content-term overlap (locus-sdk 0.4.0); a single token still uses the exact-phrase fallback.</td></tr>
 <tr><td><code>limit</code></td><td><code>usize</code></td><td><code>20</code></td><td>Maximum nodes to retrieve</td></tr>
 <tr><td><code>alpha</code></td><td><code>f32</code></td><td><code>0.7</code></td><td>AVEC resonance weight</td></tr>
 <tr><td><code>beta</code></td><td><code>f32</code></td><td><code>0.3</code></td><td>Semantic similarity weight</td></tr>
@@ -610,7 +610,7 @@ pub trait MemoryOperations: Send + Sync {
 <p>Stasis pins Locus crates to prevent resolution drift:</p>
 <ul>
 <li><code>locus-core-rs = 0.5.1</code></li>
-<li><code>locus-sdk = 0.3.1</code></li>
+<li><code>locus-sdk = 0.4.0</code></li>
 </ul>
 <p>The default <code>.with_locus_memory()</code> bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via <code>.with_memory_context_reader(...)</code>, <code>.with_memory_context_writer(...)</code>, or <code>.with_memory_operations(...)</code>.</p>
 

@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect, SRE
 - Stability: Stable
-- Last Verified: 2026-08-25
+- Last Verified: 2026-09-22
 - Verified Against:
   - src/ports/outbound/memory/memory_operations.rs
   - src/ports/outbound/memory/memory_context_reader.rs
@@ -161,7 +161,7 @@ Retrieves memory nodes matching the provided scope and query parameters. Used in
 | `scope` | `MemoryScope` | empty | Scope filter |
 | `filter` | `MemoryFilter` | empty | Predicate filters (including semantic tags) |
 | `current_avec` | `Option<MemoryAvecState>` | `None` | AVEC state for resonance ranking |
-| `query_text` | `Option<String>` | `None` | Semantic query string |
+| `query_text` | `Option<String>` | `None` | Natural-language query. Multi-word questions rank by content-term overlap (locus-sdk 0.4.0); a single token still uses the exact-phrase fallback. |
 | `limit` | `usize` | `20` | Maximum nodes to retrieve |
 | `alpha` | `f32` | `0.7` | AVEC resonance weight |
 | `beta` | `f32` | `0.3` | Semantic similarity weight |
@@ -528,6 +528,6 @@ Stasis `.with_locus_memory()` syncs the semantic tag index on ingest. Use `has_t
 Stasis pins Locus crates to prevent resolution drift:
 
 - `locus-core-rs = 0.5.1`
-- `locus-sdk = 0.3.1`
+- `locus-sdk = 0.4.0`
 
 The default `.with_locus_memory()` bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via `.with_memory_context_reader(...)`, `.with_memory_context_writer(...)`, or `.with_memory_operations(...)`.
