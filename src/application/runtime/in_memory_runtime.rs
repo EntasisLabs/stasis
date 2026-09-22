@@ -6,6 +6,9 @@ use crate::infrastructure::runtime::portable_time::Instant;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 
+use crate::application::runtime::inbound_trigger::{
+    accept_inbound_trigger, decode_inbound_json, trigger_from_job,
+};
 use crate::application::runtime::job_context::{JobContext, JobContextServices};
 use crate::application::runtime::job_continuation::{ContinuationBuilder, settle_continuations};
 use crate::application::runtime::job_lifecycle::{
@@ -31,6 +34,7 @@ use crate::application::use_cases::investigate_runtime_lineage::{
     InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
 };
 use crate::domain::errors::{Result, StasisError};
+use crate::domain::runtime::inbound_trigger::{InboundAccept, InboundProtocol};
 use crate::domain::runtime::job::{Job, JobState, NewJob};
 use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
 use crate::domain::runtime::outbox::{
@@ -41,6 +45,7 @@ use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey,
 use crate::domain::runtime::typed_contract::{StasisEvent, StasisJob};
 use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
 use crate::infrastructure::runtime::in_memory_durable_wait_store::InMemoryDurableWaitStore;
+use crate::infrastructure::runtime::in_memory_inbound_trigger_store::InMemoryInboundTriggerStore;
 use crate::infrastructure::runtime::in_memory_job_continuation_store::InMemoryJobContinuationStore;
 use crate::infrastructure::runtime::in_memory_resource_lease_store::InMemoryResourceLeaseStore;
 use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
@@ -110,6 +115,7 @@ pub struct InMemoryRuntime {
     pub job_attempt_store: InMemoryJobAttemptStore,
     pub wait_store: InMemoryDurableWaitStore,
     pub continuation_store: InMemoryJobContinuationStore,
+    pub inbound_trigger_store: InMemoryInboundTriggerStore,
     pub lease_store: InMemoryResourceLeaseStore,
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
@@ -173,6 +179,7 @@ impl InMemoryRuntime {
             job_attempt_store: InMemoryJobAttemptStore::default(),
             wait_store: InMemoryDurableWaitStore::default(),
             continuation_store: InMemoryJobContinuationStore::default(),
+            inbound_trigger_store: InMemoryInboundTriggerStore::default(),
             lease_store: InMemoryResourceLeaseStore::default(),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
@@ -224,6 +231,39 @@ impl InMemoryRuntime {
         H: JobConsumer<T> + 'static,
     {
         self.register_handler(TypedJobHandler::<T, H>::new(handler))
+    }
+
+    pub async fn accept_inbound_json(
+        &self,
+        protocol: InboundProtocol,
+        body: &[u8],
+    ) -> Result<InboundAccept> {
+        let trigger = decode_inbound_json(protocol, body)?;
+        self.accept_inbound_trigger(trigger).await
+    }
+
+    pub async fn accept_inbound_job<T: StasisJob>(
+        &self,
+        protocol: InboundProtocol,
+        idempotency_key: impl Into<String>,
+        payload: T,
+    ) -> Result<InboundAccept> {
+        let trigger = trigger_from_job(protocol, idempotency_key, &payload)?;
+        self.accept_inbound_trigger(trigger).await
+    }
+
+    async fn accept_inbound_trigger(
+        &self,
+        trigger: crate::domain::runtime::inbound_trigger::InboundJobTrigger,
+    ) -> Result<InboundAccept> {
+        accept_inbound_trigger(
+            &self.job_store,
+            &self.inbound_trigger_store,
+            self.clock.as_ref(),
+            self.id_generator.as_ref(),
+            trigger,
+        )
+        .await
     }
 
     pub fn enqueue_job<T: StasisJob>(&self, payload: T) -> TypedEnqueueBuilder<T> {

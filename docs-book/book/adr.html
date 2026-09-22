@@ -190,11 +190,13 @@
 <li>docs/adr/ADR-0009-wasm-target-profile.md</li>
 <li>docs/adr/ADR-0010-federated-job-contract.md</li>
 <li>docs/adr/ADR-0011-typed-job-framework.md</li>
+<li>docs/adr/ADR-0012-inbound-job-triggers.md</li>
 <li>docs/design/agent-platform-runtime-contracts-plan.md</li>
 <li>docs/design/stasisd-declarative-engine-plan.md</li>
 <li>docs/design/wasm-target-phase-plan.md</li>
 <li>docs/design/federated-job-contract.md</li>
 <li>docs/design/typed-job-framework.md</li>
+<li>docs/design/inbound-job-triggers.md</li>
 <li>docs-book/src/adr.md</li>
 </ul>
 </li>
@@ -214,6 +216,7 @@
 <tr><td>ADR-0009</td><td>WASM Target Profile</td><td>Accepted</td><td>2026-08-24</td></tr>
 <tr><td>ADR-0010</td><td>Runtime-Neutral Federated Job Contract</td><td>Accepted</td><td>2026-08-28</td></tr>
 <tr><td>ADR-0011</td><td>Typed Job Framework</td><td>Accepted</td><td>2026-09-22</td></tr>
+<tr><td>ADR-0012</td><td>Inbound Job Triggers</td><td>Accepted</td><td>2026-09-22</td></tr>
 </tbody></table>
 </div>
 <h2 id="decision-dependency-diagram"><a class="header" href="#decision-dependency-diagram">Decision Dependency Diagram</a></h2>
@@ -240,7 +243,24 @@
   A7 --&gt; A10
   A1 --&gt; A11[ADR-0011 Typed Job Framework]
   A10 --&gt; A11
+  A1 --&gt; A12[ADR-0012 Inbound Job Triggers]
+  A7 --&gt; A12
+  A11 --&gt; A12
 </pre>
+<h2 id="adr-0012-inbound-job-triggers"><a class="header" href="#adr-0012-inbound-job-triggers">ADR-0012 Inbound Job Triggers</a></h2>
+<ul>
+<li>Status: Accepted</li>
+<li>Context: Outbound webhook, TCP, Kafka, and RabbitMQ publishers push lifecycle events. Agent ingress only completes a parked turn. External sources still cannot start a job through one contract.</li>
+<li>Decision: <code>accept_inbound_json</code> / <code>accept_inbound_job</code> enqueue from one canonical document. The listener supplies <code>InboundProtocol</code> (<code>HttpWebhook</code>, <code>Tcp</code>, <code>Kafka</code>, <code>RabbitMq</code>) and the kernel dedupes on <code>idempotency_key</code>. Listeners stay outside the kernel.</li>
+<li>Consequences:
+<ul>
+<li>Positive: webhook, TCP, Kafka, and queue deliveries share enqueue and idempotency.</li>
+<li>Tradeoff: hosts still bind the socket or consumer. A crash between receipt and job insert needs a receipt delete before retry.</li>
+</ul>
+</li>
+<li>Plan: <a href="../../docs/design/inbound-job-triggers.html">Inbound Job Triggers</a></li>
+<li>Full ADR: <a href="../../docs/adr/ADR-0012-inbound-job-triggers.html">ADR-0012</a></li>
+</ul>
 <h2 id="adr-0011-typed-job-framework"><a class="header" href="#adr-0011-typed-job-framework">ADR-0011 Typed Job Framework</a></h2>
 <ul>
 <li>Status: Accepted</li>

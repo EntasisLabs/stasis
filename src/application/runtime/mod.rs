@@ -25,6 +25,7 @@ pub mod grapheme_textops_job_handler;
 pub mod handoff_pattern_job_handler;
 pub mod identity_context_compiler;
 pub mod in_memory_runtime;
+pub mod inbound_trigger;
 pub mod job_context;
 pub mod job_continuation;
 pub mod job_lifecycle;

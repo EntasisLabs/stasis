@@ -39,6 +39,7 @@ pub mod runtime_prelude {
     pub use crate::application::runtime::in_memory_runtime::{
         InMemoryRuntime, JobExecutionOutcome, JobHandler,
     };
+    pub use crate::application::runtime::inbound_trigger::decode_inbound_json;
     pub use crate::application::runtime::job_context::{JobConsumeError, JobContext, JobResult};
     pub use crate::application::runtime::job_continuation::{
         ContinuationBuilder, ContinuationReceipt,
@@ -52,6 +53,9 @@ pub mod runtime_prelude {
         JobConsumer, TypedEnqueueBuilder, TypedJobHandler,
     };
     pub use crate::domain::errors::{Result, StasisError};
+    pub use crate::domain::runtime::inbound_trigger::{
+        InboundAccept, InboundDisposition, InboundProtocol,
+    };
     pub use crate::domain::runtime::job::{BackoffPolicy, JobState, NewJob};
     pub use crate::domain::runtime::job_continuation::ContinuationTrigger;
     pub use crate::domain::runtime::placement::{PlacementConstraints, WorkerCapabilities};

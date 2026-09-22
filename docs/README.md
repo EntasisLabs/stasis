@@ -9,6 +9,7 @@
 - Stasis framework RFC: [design/stasis-framework-rfc.md](design/stasis-framework-rfc.md)
 - ADRs: [adr/README.md](adr/README.md)
 - Typed job framework (ADR-0011): [design/typed-job-framework.md](design/typed-job-framework.md)
+- Inbound job triggers (ADR-0012): [design/inbound-job-triggers.md](design/inbound-job-triggers.md)
 
 ## Documentation Program
 

@@ -340,6 +340,7 @@ Typical adoption path:
 
 - Durable backend options for queue/thread state (`surreal-ws` / `surreal-kv`), with `in-memory` for local runs.
 - Typed job consumers (`StasisJob` / `JobConsumer` / `JobContext`) with `enqueue_job` builders. `StasisJob::declaration` supplies queue, retry, priority, and placement; `continue_with` runs a child after the parent succeeds, fails, or is canceled. Raw `NewJob` still works.
+- Inbound job triggers (`accept_inbound_json` / `accept_inbound_job`) so a webhook, TCP line, Kafka record, or RabbitMQ delivery can enqueue a job. Duplicate idempotency keys return the original job.
 - Durable `wait_for` / `signal` correlation and cooperative `cancel` for in-flight or deferred jobs.
 - Lifecycle hooks (`JobConsumer::on_lifecycle`) so app statuses such as pending/finishing can roll back on defer, retry, cancel, or dead-letter:
 

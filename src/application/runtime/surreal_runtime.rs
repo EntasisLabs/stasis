@@ -6,6 +6,9 @@ use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 
 use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
+use crate::application::runtime::inbound_trigger::{
+    accept_inbound_trigger, decode_inbound_json, trigger_from_job,
+};
 use crate::application::runtime::job_context::JobContextServices;
 use crate::application::runtime::job_continuation::{ContinuationBuilder, settle_continuations};
 use crate::application::runtime::job_lifecycle::{
@@ -31,6 +34,7 @@ use crate::application::use_cases::investigate_runtime_lineage::{
     InvestigateRuntimeLineage, RuntimeLineageQuery, RuntimeLineageReport,
 };
 use crate::domain::errors::{Result, StasisError};
+use crate::domain::runtime::inbound_trigger::{InboundAccept, InboundProtocol};
 use crate::domain::runtime::job::{Job, JobState, NewJob};
 use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
 use crate::domain::runtime::outbox::{
@@ -43,6 +47,7 @@ use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
 use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
 use crate::infrastructure::runtime::portable_time::Instant;
 use crate::infrastructure::runtime::surreal_durable_wait_store::SurrealDurableWaitStore;
+use crate::infrastructure::runtime::surreal_inbound_trigger_store::SurrealInboundTriggerStore;
 use crate::infrastructure::runtime::surreal_job_attempt_store::SurrealJobAttemptStore;
 use crate::infrastructure::runtime::surreal_job_continuation_store::SurrealJobContinuationStore;
 use crate::infrastructure::runtime::surreal_job_store::SurrealJobStore;
@@ -70,6 +75,7 @@ pub struct SurrealRuntime {
     pub job_attempt_store: SurrealJobAttemptStore,
     pub wait_store: SurrealDurableWaitStore,
     pub continuation_store: SurrealJobContinuationStore,
+    pub inbound_trigger_store: SurrealInboundTriggerStore,
     pub lease_store: SurrealResourceLeaseStore,
     handlers: Arc<RwLock<HashMap<String, Arc<dyn JobHandler>>>>,
     publisher: Arc<RwLock<Option<Arc<dyn EventPublisher>>>>,
@@ -136,6 +142,7 @@ impl SurrealRuntime {
             job_attempt_store: SurrealJobAttemptStore::new(db.clone()),
             wait_store: SurrealDurableWaitStore::new(db.clone()),
             continuation_store: SurrealJobContinuationStore::new(db.clone()),
+            inbound_trigger_store: SurrealInboundTriggerStore::new(db.clone()),
             lease_store: SurrealResourceLeaseStore::new(db),
             handlers: Arc::new(RwLock::new(HashMap::new())),
             publisher: Arc::new(RwLock::new(None)),
@@ -187,6 +194,39 @@ impl SurrealRuntime {
         H: JobConsumer<T> + 'static,
     {
         self.register_handler(TypedJobHandler::<T, H>::new(handler))
+    }
+
+    pub async fn accept_inbound_json(
+        &self,
+        protocol: InboundProtocol,
+        body: &[u8],
+    ) -> Result<InboundAccept> {
+        let trigger = decode_inbound_json(protocol, body)?;
+        self.accept_inbound_trigger(trigger).await
+    }
+
+    pub async fn accept_inbound_job<T: StasisJob>(
+        &self,
+        protocol: InboundProtocol,
+        idempotency_key: impl Into<String>,
+        payload: T,
+    ) -> Result<InboundAccept> {
+        let trigger = trigger_from_job(protocol, idempotency_key, &payload)?;
+        self.accept_inbound_trigger(trigger).await
+    }
+
+    async fn accept_inbound_trigger(
+        &self,
+        trigger: crate::domain::runtime::inbound_trigger::InboundJobTrigger,
+    ) -> Result<InboundAccept> {
+        accept_inbound_trigger(
+            &self.job_store,
+            &self.inbound_trigger_store,
+            self.clock.as_ref(),
+            self.id_generator.as_ref(),
+            trigger,
+        )
+        .await
     }
 
     pub fn enqueue_job<T: StasisJob>(&self, payload: T) -> TypedEnqueueBuilder<T> {
