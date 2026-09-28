@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-
 use crate::application::orchestration::allowlisted_mcp_tool_exporter::AllowlistedLocalMcpExporter;
 use crate::application::orchestration::mcp_bridged_tool_registry::McpBridgedToolRegistry;
 use crate::application::orchestration::tool_registry::{
@@ -37,6 +36,7 @@ use crate::application::runtime::memory_evict_job_handler::MemoryEvictJobHandler
 use crate::application::runtime::memory_find_job_handler::MemoryFindJobHandler;
 use crate::application::runtime::memory_graph_job_handler::MemoryGraphJobHandler;
 use crate::application::runtime::memory_recall_job_handler::MemoryRecallJobHandler;
+use crate::application::runtime::memory_reflex_job_handler::MemoryReflexJobHandler;
 use crate::application::runtime::memory_rollup_job_handler::MemoryRollupJobHandler;
 use crate::application::runtime::memory_schema_job_handler::MemorySchemaJobHandler;
 use crate::application::runtime::memory_transform_job_handler::MemoryTransformJobHandler;
@@ -644,6 +644,7 @@ impl StasisRuntimeBuilder {
                         rt.register_handler(MemoryTransformJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemoryRollupJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemoryEvictJobHandler::new(operations.clone()))?;
+                        rt.register_handler(MemoryReflexJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemorySchemaJobHandler::new(operations))?;
                     }
                 }
@@ -793,6 +794,7 @@ impl StasisRuntimeBuilder {
                         rt.register_handler(MemoryTransformJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemoryRollupJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemoryEvictJobHandler::new(operations.clone()))?;
+                        rt.register_handler(MemoryReflexJobHandler::new(operations.clone()))?;
                         rt.register_handler(MemorySchemaJobHandler::new(operations))?;
                     }
                 }

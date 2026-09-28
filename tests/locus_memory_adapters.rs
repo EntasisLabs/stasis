@@ -9,8 +9,8 @@ use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use stasis::ports::outbound::memory::memory_models::{
     MemoryAggregateRequest, MemoryEvictMode, MemoryEvictRequest, MemoryFilter, MemoryFindRequest,
-    MemoryGraphRequest, MemoryRecallRequest, MemoryRollupRequest, MemoryScope, MemoryStoreRequest,
-    MemoryTransformRequest,
+    MemoryGraphRequest, MemoryRecallRequest, MemoryReflexRequest, MemoryRollupRequest, MemoryScope,
+    MemoryStoreRequest, MemoryTransformRequest,
 };
 use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
 
@@ -228,9 +228,17 @@ async fn locus_memory_operations_schema_aggregate_rollup_work_on_empty_store() {
         .schema()
         .await
         .expect("schema should be available");
+    assert_eq!(schema.schema_version, "locus-sdk.memory.v4");
     assert!(
-        !schema.schema_version.trim().is_empty(),
-        "schema version should be non-empty"
+        schema
+            .reflex_actions
+            .iter()
+            .any(|action| action == "recall"),
+        "schema should expose reflex actions"
+    );
+    assert!(
+        schema.decision_types.iter().any(|kind| kind == "noul"),
+        "schema should expose system 1 decision types"
     );
     assert!(
         !schema.evict_operations.is_empty(),
@@ -468,4 +476,99 @@ async fn locus_graph_returns_topology_after_store() {
 
     assert!(graph.retrieved >= 1);
     assert!(!graph.nodes.is_empty());
+}
+
+#[tokio::test]
+async fn locus_reflex_heuristic_routes_recall_and_ignore() {
+    let memory = LocusNodeStoreFactory::in_memory()
+        .await
+        .expect("in-memory node store should initialize");
+    let operations = LocusMemoryOperations::new(memory, None);
+
+    let recall = operations
+        .reflex(&MemoryReflexRequest {
+            text: "do you remember what we discussed about refunds".to_string(),
+            role: Some("user".to_string()),
+            scope: MemoryScope {
+                session_ids: Some(vec!["session-reflex".to_string()]),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await
+        .expect("heuristic recall reflex");
+    assert_eq!(recall.schema_version, "locus-sdk.memory.v4");
+    assert_eq!(recall.kind, "dispatch");
+    assert_eq!(recall.action, "recall");
+    assert_eq!(recall.topic, "locus.memory.recall");
+    assert_eq!(recall.decider_id, "heuristic");
+    assert_eq!(
+        recall
+            .recall
+            .as_ref()
+            .and_then(|hint| hint.query_text.as_deref()),
+        Some("do you remember what we discussed about refunds")
+    );
+
+    let ignore = operations
+        .reflex(&MemoryReflexRequest {
+            text: "thanks".to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("heuristic ignore reflex");
+    assert_eq!(ignore.kind, "ignore");
+    assert_eq!(ignore.action, "ignore");
+    assert!(ignore.recall.is_none());
+    assert!(ignore.persist.is_none());
+
+    let blank = operations
+        .reflex(&MemoryReflexRequest {
+            text: "  \n".to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("blank stimulus");
+    assert_eq!(blank.kind, "ignore");
+    assert_eq!(blank.gate, "blank_stimulus");
+    assert!(blank.recall.is_none());
+}
+
+#[tokio::test]
+async fn locus_reflex_apply_uses_supplied_system1_response() {
+    let memory = LocusNodeStoreFactory::in_memory()
+        .await
+        .expect("in-memory node store should initialize");
+    let operations = LocusMemoryOperations::new(memory, None);
+    let wire = serde_json::json!({
+        "routing": {"model": "typed-decisions"},
+        "answers": {
+            "action": {"choice": "persist", "confidence": 0.93},
+            "salience": {"score": 2.4, "max": 3.0, "confidence": 0.9},
+            "references_prior": {"noul": 0.1},
+            "should_persist": {"noul": 0.88},
+            "needs_system2": {"noul": 0.05}
+        }
+    });
+
+    let reflex = operations
+        .reflex(&MemoryReflexRequest {
+            text: "please remember that I prefer aisle seats".to_string(),
+            role: Some("user".to_string()),
+            system1_response: Some(wire),
+            ..Default::default()
+        })
+        .await
+        .expect("apply a finished forward pass");
+
+    assert_eq!(reflex.kind, "dispatch");
+    assert_eq!(reflex.action, "persist");
+    assert_eq!(reflex.topic, "locus.memory.persist");
+    assert_eq!(reflex.checkpoint.as_deref(), Some("typed-decisions"));
+    assert_eq!(reflex.decider_id, "wire");
+    assert_eq!(
+        reflex.persist.as_ref().map(|hint| hint.text.as_str()),
+        Some("please remember that I prefer aisle seats")
+    );
+    assert!(reflex.recall.is_none());
 }

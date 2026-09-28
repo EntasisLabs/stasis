@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect, SRE
 - Stability: Stable
-- Last Verified: 2026-09-22
+- Last Verified: 2026-09-26
 - Verified Against:
   - src/ports/outbound/memory/memory_operations.rs
   - src/ports/outbound/memory/memory_context_reader.rs
@@ -20,15 +20,16 @@
   - src/application/runtime/memory_transform_job_handler.rs
   - src/application/runtime/memory_rollup_job_handler.rs
   - src/application/runtime/memory_schema_job_handler.rs
+  - src/application/runtime/memory_reflex_job_handler.rs
   - tests/locus_memory_adapters.rs
 
 ## Purpose
 
-Document the eight Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (`MemoryContextReader`, `MemoryContextWriter`, `MemoryOperations`).
+Document the nine Stasis memory operation workflows, their request/response contracts, default values, diagnostics keys, and the three memory port interfaces (`MemoryContextReader`, `MemoryContextWriter`, `MemoryOperations`).
 
 ## Invariants
 
-1. All eight memory workflow handlers are durable jobs — they inherit retry, dead-letter, and lineage semantics from the runtime.
+1. All nine memory workflow handlers are durable jobs — they inherit retry, dead-letter, and lineage semantics from the runtime.
 2. Memory handlers are only registered when a `MemoryContextReader` or `MemoryOperations` port is provided to the builder. Missing ports cause the handler to be silently skipped at build time.
 3. Invalid payloads produce a `FatalFailure` with `guardrail_code: POLICY_VIOLATION` — they are not retried.
 4. `MemoryTransformRequest` defaults to `dry_run: true`. Callers must explicitly set `dry_run: false` to apply changes.
@@ -68,7 +69,7 @@ pub trait MemoryContextWriter: Send + Sync {
 
 ### MemoryOperations
 
-Used by the memory maintenance workflow handlers for aggregate, transform, rollup, schema, and evict operations.
+Used by the memory maintenance workflow handlers for aggregate, transform, rollup, schema, evict, and reflex operations.
 
 ```rust
 #[async_trait]
@@ -78,6 +79,7 @@ pub trait MemoryOperations: Send + Sync {
     async fn rollup(&self, request: &MemoryRollupRequest) -> Result<MemoryRollupResponse>;
     async fn schema(&self) -> Result<MemorySchemaResponse>;
     async fn evict(&self, request: &MemoryEvictRequest) -> Result<MemoryEvictResponse>;
+    async fn reflex(&self, request: &MemoryReflexRequest) -> Result<MemoryReflexResponse>;
 }
 ```
 
@@ -161,7 +163,7 @@ Retrieves memory nodes matching the provided scope and query parameters. Used in
 | `scope` | `MemoryScope` | empty | Scope filter |
 | `filter` | `MemoryFilter` | empty | Predicate filters (including semantic tags) |
 | `current_avec` | `Option<MemoryAvecState>` | `None` | AVEC state for resonance ranking |
-| `query_text` | `Option<String>` | `None` | Natural-language query. Multi-word questions rank by content-term overlap (locus-sdk 0.4.0); a single token still uses the exact-phrase fallback. |
+| `query_text` | `Option<String>` | `None` | Natural-language query. Multi-word questions rank by content-term overlap; a single token still uses the exact-phrase fallback. |
 | `limit` | `usize` | `20` | Maximum nodes to retrieve |
 | `alpha` | `f32` | `0.7` | AVEC resonance weight |
 | `beta` | `f32` | `0.3` | Semantic similarity weight |
@@ -441,6 +443,8 @@ Returns the current memory schema version and capability descriptor. No payload 
 | `strictness_modes` | `Vec<String>` | Supported strictness mode names |
 | `transform_operations` | `Vec<String>` | Supported transform operation names |
 | `evict_operations` | `Vec<String>` | Supported eviction operation names |
+| `reflex_actions` | `Vec<String>` | Reflex actions (`ignore`, `recall`, `find`, `persist`, `explain`, `aggregate`) |
+| `decision_types` | `Vec<String>` | System 1 question types (`choice`, `score`, `noul`) |
 
 ### Diagnostics keys
 
@@ -451,6 +455,8 @@ Returns the current memory schema version and capability descriptor. No payload 
 | `schema_version` | Schema version string |
 | `transform_operations` | List of supported operations |
 | `evict_operations` | List of supported eviction modes |
+| `reflex_actions` | Reflex action names |
+| `decision_types` | System 1 decision types |
 
 ---
 
@@ -517,6 +523,37 @@ Stasis `.with_locus_memory()` syncs the semantic tag index on ingest. Use `has_t
 
 ---
 
+## Operation 10: Reflex
+
+**Job type:** `workflow.stasis.memory.reflex`  
+**Port:** `MemoryOperations`
+
+Turns one stimulus into a bus envelope. The handler does not recall, find, persist, or explain. Runnable hints are present only when `kind` is `dispatch`. The host publishes `topic` (`locus.memory.recall`, `locus.memory.persist`, `locus.memory.escalate`, and the other `locus.memory.*` names) on its own bus.
+
+The default decider is the offline heuristic. Pass `system1Response` (a Laya / sys1 / Jev `POST /v1/systemone` body) to apply a forward pass the host already ran. On the `native` feature, `system1Endpoint` posts the same catalog to that server. A supplied `system1Response` wins over the endpoint.
+
+### Job payload highlights
+
+| Field | Default | Description |
+|---|---|---|
+| `text` | required | Stimulus text. Blank text returns `kind=ignore`, `gate=blank_stimulus` |
+| `role` | omitted | Optional speaker role copied onto a persist hint |
+| `policy` | locus defaults | `minChoiceConfidence` 0.55, `minSalience` 0.34, `readFloor` / `writeFloor` 0.45, `escalateAt` 0.70, `pageLimit` 8 |
+| `system1Endpoint` | omitted | Laya-compatible base URL. Native feature only |
+| `system1Response` | omitted | Finished `/v1/systemone` body. The decider is not called |
+
+### Response highlights
+
+| Field | Description |
+|---|---|
+| `kind` | `dispatch`, `ignore`, or `escalate` |
+| `action` | Chosen memory action |
+| `topic` | Stable bus topic for the host |
+| `gate` | Why the gate accepted, dropped, or held the choice |
+| `recall` / `find` / `aggregate` / `persist` | Runnable hints when the gate dispatches |
+
+---
+
 ## Non-Goals
 
 - Memory operations do not perform agent execution. They are maintenance and retrieval workflows, not orchestration patterns.
@@ -528,6 +565,7 @@ Stasis `.with_locus_memory()` syncs the semantic tag index on ingest. Use `has_t
 Stasis pins Locus crates to prevent resolution drift:
 
 - `locus-core-rs = 0.5.1`
-- `locus-sdk = 0.4.0`
+- `locus-sdk = 0.5.0`
+- memory schema `locus-sdk.memory.v4`
 
 The default `.with_locus_memory()` bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via `.with_memory_context_reader(...)`, `.with_memory_context_writer(...)`, or `.with_memory_operations(...)`.

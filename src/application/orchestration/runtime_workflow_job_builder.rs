@@ -4,9 +4,9 @@ use crate::application::orchestration::runtime_job_payloads::{
     AgentSessionJobPayload, AgentTurnJobPayload, AgentTurnWaitableJobPayload,
     ConcurrentPatternJobPayload, HandoffPatternJobPayload, MemoryAggregateJobPayload,
     MemoryEvictJobPayload, MemoryFindJobPayload, MemoryGraphJobPayload, MemoryRecallJobPayload,
-    MemoryRollupJobPayload, MemorySchemaJobPayload, MemoryTransformJobPayload,
-    OrchestratorPatternJobPayload, PromptJobPayload, SequentialPatternJobPayload,
-    ToolLoopJobPayload,
+    MemoryReflexJobPayload, MemoryRollupJobPayload, MemorySchemaJobPayload,
+    MemoryTransformJobPayload, OrchestratorPatternJobPayload, PromptJobPayload,
+    SequentialPatternJobPayload, ToolLoopJobPayload,
 };
 use crate::application::telemetry::propagation::{generate_w3c_trace_id, parse_traceparent};
 use crate::domain::errors::Result;
@@ -27,6 +27,7 @@ const JOB_TYPE_MEMORY_TRANSFORM: &str = "workflow.stasis.memory.transform";
 const JOB_TYPE_MEMORY_ROLLUP: &str = "workflow.stasis.memory.rollup";
 const JOB_TYPE_MEMORY_SCHEMA: &str = "workflow.stasis.memory.schema";
 const JOB_TYPE_MEMORY_EVICT: &str = "workflow.stasis.memory.evict";
+const JOB_TYPE_MEMORY_REFLEX: &str = "workflow.stasis.memory.reflex";
 const JOB_TYPE_MEMORY_GRAPH: &str = "workflow.stasis.memory.graph";
 const JOB_TYPE_ORCHESTRATION_SEQUENTIAL: &str = "workflow.stasis.orchestration.sequential";
 const JOB_TYPE_ORCHESTRATION_CONCURRENT: &str = "workflow.stasis.orchestration.concurrent";
@@ -103,6 +104,11 @@ impl RuntimeWorkflowJobBuilder {
         for_memory_evict,
         MemoryEvictJobPayload,
         JOB_TYPE_MEMORY_EVICT
+    );
+    define_payload_builder!(
+        for_memory_reflex,
+        MemoryReflexJobPayload,
+        JOB_TYPE_MEMORY_REFLEX
     );
     define_payload_builder!(
         for_memory_graph,

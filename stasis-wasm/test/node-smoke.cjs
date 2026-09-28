@@ -83,6 +83,17 @@ test("memory store then recall across turns (no LLM)", async () => {
   assert.ok(recalled.retrieved >= 1);
   const blob = JSON.stringify(recalled.snippets);
   assert.match(blob, /Tuesday/);
+
+  const reflex = parseJson(
+    await client.decide_memory_reflex(
+      "session-a",
+      "do you remember what we discussed about the kickoff",
+    ),
+  );
+  assert.equal(reflex.schema_version, "locus-sdk.memory.v4");
+  assert.equal(reflex.kind, "dispatch");
+  assert.equal(reflex.action, "recall");
+  assert.equal(reflex.topic, "locus.memory.recall");
 });
 
 test("identity upsert is visible on later identity_context", async () => {

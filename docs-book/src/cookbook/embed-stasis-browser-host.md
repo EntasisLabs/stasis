@@ -27,7 +27,7 @@ This is **Story B** (Stasis *is* Wasm). Grapheme Stage B (Stasis *hosts* Wasm ar
 ### 1. Depend on the slim profile
 
 ```toml
-stasis-rs = { version = "0.11", default-features = false }
+stasis-rs = { version = "0.13", default-features = false }
 # optional:
 # features = ["llm-openai-http"]   # fetch → OpenAI-spec /v1/chat/completions
 # features = ["grapheme"]          # handlers + grapheme-wasm 0.7.1 in-guest engine
@@ -120,7 +120,7 @@ const replay = JSON.parse(await client.resume_from_history("t1"));
 
 Node loads the CommonJS `pkg-node/` build (`require("stasis-wasm")`) — `init()` is not required.
 
-`stasis-wasm` is workspace-optional and unpublished on crates.io (`publish = false`). The npm package name is `stasis-wasm@0.12.0` (public, unscoped). Point a local app at a checkout with `npm install ../path/to/stasis-wasm` after `npm run build`. Owner publish: [RELEASE.md](https://github.com/EntasisLabs/stasis/blob/main/RELEASE.md#npm-stasis-wasm).
+`stasis-wasm` is workspace-optional and unpublished on crates.io (`publish = false`). The npm package name is `stasis-wasm@0.13.0` (public, unscoped). Point a local app at a checkout with `npm install ../path/to/stasis-wasm` after `npm run build`. Owner publish: [RELEASE.md](https://github.com/EntasisLabs/stasis/blob/main/RELEASE.md#npm-stasis-wasm).
 
 See [stasis-wasm/README.md](https://github.com/EntasisLabs/stasis/blob/main/stasis-wasm/README.md) for Grapheme gaps (`grapheme:file:`, host-only `http`/`sql`, no preemptive timeout).
 

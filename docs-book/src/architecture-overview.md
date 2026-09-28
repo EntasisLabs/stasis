@@ -68,7 +68,7 @@ The runtime is designed for at-least-once job execution with deterministic idemp
 
 ### 3) Locus Plane
 
-- Memory recall/write, find, graph, and advanced memory operations (aggregate, transform, rollup, schema, evict).
+- Memory recall/write, find, graph, reflex, and advanced memory operations (aggregate, transform, rollup, schema, evict).
 - Memory lineage projection into runtime outbox metadata:
   - input query IDs/fingerprint
   - output memory node IDs

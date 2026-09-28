@@ -281,6 +281,104 @@ pub struct MemorySchemaResponse {
     pub strictness_modes: Vec<String>,
     pub transform_operations: Vec<String>,
     pub evict_operations: Vec<String>,
+    pub reflex_actions: Vec<String>,
+    pub decision_types: Vec<String>,
+}
+
+/// Thresholds that turn a System 1 answer into dispatch, ignore, or escalate.
+///
+/// Defaults match `locus-sdk` 0.5.0 `ReflexPolicy`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MemoryReflexPolicy {
+    pub min_choice_confidence: f32,
+    pub min_salience: f32,
+    pub read_floor: f32,
+    pub write_floor: f32,
+    pub escalate_at: f32,
+    pub page_limit: usize,
+}
+
+impl Default for MemoryReflexPolicy {
+    fn default() -> Self {
+        Self {
+            min_choice_confidence: 0.55,
+            min_salience: 0.34,
+            read_floor: 0.45,
+            write_floor: 0.45,
+            escalate_at: 0.70,
+            page_limit: 8,
+        }
+    }
+}
+
+/// Stimulus for the reactive memory reflex. The reflex does not read or write the store.
+#[derive(Clone, Debug, Default)]
+pub struct MemoryReflexRequest {
+    pub text: String,
+    pub role: Option<String>,
+    pub scope: MemoryScope,
+    pub metadata: serde_json::Map<String, Value>,
+    pub policy: Option<MemoryReflexPolicy>,
+    /// Laya / sys1 / Jev base URL. Used only when `system1_response` is absent.
+    pub system1_endpoint: Option<String>,
+    pub system1_model: Option<String>,
+    pub system1_api_key: Option<String>,
+    /// Precomputed `POST /v1/systemone` body. When set, the decider is not called.
+    pub system1_response: Option<Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemoryReflexPropositions {
+    pub references_prior: f32,
+    pub should_persist: f32,
+    pub needs_system2: f32,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemoryReflexRecallHint {
+    pub query_text: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemoryReflexFindHint {
+    pub text_contains: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemoryReflexAggregateHint {
+    pub max_groups: usize,
+    pub max_nodes: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemoryReflexPersistHint {
+    pub text: String,
+    pub role: Option<String>,
+}
+
+/// Bus envelope a host can publish. Runnable hints are present only when `kind` is `dispatch`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct MemoryReflexResponse {
+    pub schema_version: String,
+    pub stimulus_id: String,
+    pub kind: String,
+    pub action: String,
+    pub topic: String,
+    pub salience: f32,
+    pub salience_label: String,
+    pub salience_confidence: f32,
+    pub confidence: f32,
+    pub propositions: MemoryReflexPropositions,
+    pub gate: String,
+    pub companions: Vec<String>,
+    pub recall: Option<MemoryReflexRecallHint>,
+    pub find: Option<MemoryReflexFindHint>,
+    pub aggregate: Option<MemoryReflexAggregateHint>,
+    pub persist: Option<MemoryReflexPersistHint>,
+    pub decider_id: String,
+    pub checkpoint: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
