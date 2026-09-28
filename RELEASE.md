@@ -67,9 +67,14 @@ rustc --version   # need 1.85+ (edition 2024); MSRV is declared as rust-version 
 
 `cargo publish --dry-run` packages the crate and builds it from the tarball. It does not upload and does not consume a publish token.
 
-## Dry-run results (2026-09-26, 0.13.0)
+## Dry-run results (2026-09-28, rustc 1.98.1, 0.13.0)
 
-Run `./scripts/publish-crates.sh` from a clean tree before upload. No crates.io token is required for the dry-run. `stasis-rs` 0.13.0 depends on `locus-sdk` **0.5.0** and `locus-core-rs` **0.5.1**. Do not upload `stasis-rs-macros` 0.1.0.
+Run on this branch with `./scripts/publish-crates.sh`. No crates.io token was used; uploads were aborted.
+
+| Crate | Result | Notes |
+| --- | --- | --- |
+| `stasis-rs-macros` 0.1.0 | **dry-run OK** | Warns `crate stasis-rs-macros@0.1.0 already exists on crates.io index`. Packaged 20 files, 39.3KiB (11.0KiB compressed). Verify compile 3.2s. **Do not upload.** |
+| `stasis-rs` 0.13.0 | **dry-run OK** | Packaged 345 files, 3.8MiB (615.4KiB compressed). Verify compile 39.1s from the tarball. Depends on `locus-sdk` **0.5.0** and `locus-core-rs` **0.5.1**. `build.rs` fell back to prebuilt `dashboard.css` (no local Tailwind). Upload aborted (`--dry-run`). |
 
 ## Dry-run results (2026-09-22, rustc 1.98.1, 0.12.0)
 
