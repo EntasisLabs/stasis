@@ -137,8 +137,8 @@ pub mod runtime_prelude_ext {
 /// Minimal memory imports for consumers using context store/recall/transform APIs.
 pub mod memory_prelude {
     pub use crate::ports::outbound::memory::memory_models::{
-        MemoryAggregateRequest, MemoryRecallRequest, MemoryRollupRequest, MemoryScope,
-        MemoryStoreRequest, MemoryTransformRequest,
+        MemoryAggregateRequest, MemoryRecallRequest, MemoryReflexRequest, MemoryReflexResponse,
+        MemoryRollupRequest, MemoryScope, MemoryStoreRequest, MemoryTransformRequest,
     };
     pub use crate::ports::outbound::memory::memory_operations::MemoryOperations;
 }
@@ -154,8 +154,8 @@ pub mod memory_prelude_ext {
     pub use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
     pub use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
     pub use crate::ports::outbound::memory::memory_models::{
-        MemoryAggregateRequest, MemoryRecallRequest, MemoryRollupRequest, MemoryScope,
-        MemoryStoreRequest, MemoryTransformRequest,
+        MemoryAggregateRequest, MemoryRecallRequest, MemoryReflexRequest, MemoryReflexResponse,
+        MemoryRollupRequest, MemoryScope, MemoryStoreRequest, MemoryTransformRequest,
     };
     pub use crate::ports::outbound::memory::memory_operations::MemoryOperations;
 }
@@ -184,12 +184,12 @@ pub mod sdk_prelude_ext {
     pub use crate::domain::runtime::recurring::RecurringDefinition;
     #[cfg(feature = "llm-genai")]
     pub use crate::infrastructure::llm::genai_gateway::GenaiLlmGateway;
-    #[cfg(feature = "llm-openai-http")]
-    pub use crate::infrastructure::llm::openai_http_gateway::OpenAiHttpGateway;
-    #[cfg(all(feature = "llm-openai-http", not(feature = "llm-genai")))]
-    pub use crate::infrastructure::llm::openai_http_chat_client::OpenAiHttpChatClient;
     #[cfg(feature = "llm-chat")]
     pub use crate::infrastructure::llm::mock_chat_client::MockAiChatClient;
+    #[cfg(all(feature = "llm-openai-http", not(feature = "llm-genai")))]
+    pub use crate::infrastructure::llm::openai_http_chat_client::OpenAiHttpChatClient;
+    #[cfg(feature = "llm-openai-http")]
+    pub use crate::infrastructure::llm::openai_http_gateway::OpenAiHttpGateway;
     pub use crate::sdk::control_plane_sdk::ControlPlaneSdk;
     pub use crate::sdk::runtime_sdk::RuntimeStatsSnapshot;
 }

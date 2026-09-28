@@ -13,6 +13,7 @@ pub const KNOWN_JOB_TYPES: &[&str] = &[
     "workflow.stasis.memory.rollup",
     "workflow.stasis.memory.schema",
     "workflow.stasis.memory.evict",
+    "workflow.stasis.memory.reflex",
     "workflow.stasis.memory.graph",
     "workflow.stasis.orchestration.sequential",
     "workflow.stasis.orchestration.concurrent",

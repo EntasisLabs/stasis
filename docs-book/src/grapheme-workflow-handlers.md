@@ -14,7 +14,7 @@
   - src/infrastructure/runtime/grapheme_sdk_workflow_engine.rs
   - src/ports/outbound/runtime/workflow_engine.rs
   - src/application/runtime/stasis_runtime_builder.rs
-  - Stasis 0.12.0 / Grapheme 0.7.1
+  - Stasis 0.13.0 / Grapheme 0.7.1
 
 ## Purpose
 
@@ -132,7 +132,7 @@ import data from "grapheme/data"  // requires Stasis `grapheme-full` feature at 
 By default, Stasis links Grapheme **0.7.1** with the lean host stdlib profile (`core`, `http`, `web`, `json`, `sql`, …) and omits Stage B / AOT container deps from the default build. Enable the optional **`grapheme-full`** feature on `stasis-rs` to compile in extended modules (`data`, `pdf`, `image`, `plot`, `media`) plus Stage B:
 
 ```toml
-stasis-rs = { version = "0.12.0", features = ["grapheme-full"] }
+stasis-rs = { version = "0.13.0", features = ["grapheme-full"] }
 ```
 
 Grapheme 0.7.1 also ships a `slim` SDK profile (core/json only) for iOS/Wasm embedders. Stasis job handlers use the host profile for workflow execution. Enable `dashboard-lsp` when you need `grapheme-lsp` in the dashboard build.

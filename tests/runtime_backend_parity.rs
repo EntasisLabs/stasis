@@ -88,9 +88,9 @@ use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use stasis::ports::outbound::memory::memory_models::{
     MemoryAggregateRequest, MemoryAggregateResponse, MemoryFindRequest, MemoryFindResponse,
-    MemoryNode, MemoryRecallRequest, MemoryRecallResponse, MemoryRollupRequest,
-    MemoryRollupResponse, MemorySchemaResponse, MemoryStoreRequest, MemoryStoreResponse,
-    MemoryTransformRequest, MemoryTransformResponse,
+    MemoryNode, MemoryRecallRequest, MemoryRecallResponse, MemoryReflexRequest,
+    MemoryReflexResponse, MemoryRollupRequest, MemoryRollupResponse, MemorySchemaResponse,
+    MemoryStoreRequest, MemoryStoreResponse, MemoryTransformRequest, MemoryTransformResponse,
 };
 use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
 use stasis::ports::outbound::runtime::clock::Clock;
@@ -733,6 +733,24 @@ impl MemoryOperations for MockMemoryOperations {
             strictness_modes: vec!["balanced".to_string()],
             transform_operations: vec!["embed_backfill".to_string()],
             evict_operations: vec!["delete_nodes".to_string()],
+            reflex_actions: vec!["recall".to_string(), "ignore".to_string()],
+            decision_types: vec![
+                "choice".to_string(),
+                "score".to_string(),
+                "noul".to_string(),
+            ],
+        })
+    }
+
+    async fn reflex(&self, _request: &MemoryReflexRequest) -> Result<MemoryReflexResponse> {
+        Ok(MemoryReflexResponse {
+            schema_version: "sttp-v1".to_string(),
+            kind: "ignore".to_string(),
+            action: "ignore".to_string(),
+            topic: "locus.memory.ignore".to_string(),
+            decider_id: "mock".to_string(),
+            gate: "accepted".to_string(),
+            ..MemoryReflexResponse::default()
         })
     }
 

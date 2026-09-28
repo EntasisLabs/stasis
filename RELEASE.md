@@ -4,19 +4,19 @@ This workspace already publishes under the `stasis-rs*` names because [`stasis`]
 
 ## What is published
 
-| Crate | Version in tree | Registry (as of 2026-09-22) | Action |
+| Crate | Version in tree | Registry (as of 2026-09-26) | Action |
 | --- | --- | --- | --- |
 | `stasis-rs-macros` | 0.1.0 | crates.io **0.1.0** | Do **not** republish unless the macros crate is bumped |
-| `stasis-rs` | 0.12.0 | crates.io latest **0.11.0** (2026-09-18) | Publish **0.12.0** |
+| `stasis-rs` | 0.13.0 | crates.io latest **0.12.0** (2026-09-22) | Publish **0.13.0** |
 | `stasisd` | 0.1.0 | not published | `publish = false` (workspace binary only) |
-| `stasis-wasm` | 0.12.0 | crates.io `publish = false`; **npm `stasis-wasm@0.12.0` already uploaded** (2026-09-18) | Skip npm unless you bump to **0.13.0** (0.12.0 tarball was built against kernel 0.11.0) |
+| `stasis-wasm` | 0.13.0 | crates.io `publish = false`; npm `stasis-wasm@0.12.0` is the previous upload | Publish npm **0.13.0** (built against kernel 0.13.0) |
 
 Owner of both crates.io packages: [`theelevators`](https://github.com/theelevators) (Tom Vazquez). Publishing requires that account (or a new owner) plus a crates.io API token and 2FA.
 
 ## Ordered publish sequence
 
-1. **`stasis-rs-macros` 0.1.0** — skip upload. Already on crates.io; source is unchanged. `stasis-rs 0.12.0` still depends on `stasis-rs-macros = "0.1.0"`.
-2. **`stasis-rs` 0.12.0** — this is the release to upload. crates.io already has **0.11.0**; a second 0.11.0 upload will be rejected.
+1. **`stasis-rs-macros` 0.1.0** — skip upload. Already on crates.io; source is unchanged. `stasis-rs 0.13.0` still depends on `stasis-rs-macros = "0.1.0"`.
+2. **`stasis-rs` 0.13.0** — this is the release to upload. crates.io already has **0.12.0**; a second 0.12.0 upload will be rejected.
 
 If macros ever change, bump `stasis-macros/Cargo.toml` first (for example `0.1.1`), publish that version, then point `stasis-rs` at the new macros version and publish `stasis-rs`.
 
@@ -44,7 +44,7 @@ cargo publish -p stasis-rs
 To yank a mistaken upload (does not delete; only hides from new resolvers):
 
 ```bash
-cargo yank --vers 0.12.0 stasis-rs
+cargo yank --vers 0.13.0 stasis-rs
 ```
 
 ## Blockers that require the crate owner
@@ -66,6 +66,15 @@ rustc --version   # need 1.85+ (edition 2024); MSRV is declared as rust-version 
 ```
 
 `cargo publish --dry-run` packages the crate and builds it from the tarball. It does not upload and does not consume a publish token.
+
+## Dry-run results (2026-09-28, rustc 1.98.1, 0.13.0)
+
+Run on this branch with `./scripts/publish-crates.sh`. No crates.io token was used; uploads were aborted.
+
+| Crate | Result | Notes |
+| --- | --- | --- |
+| `stasis-rs-macros` 0.1.0 | **dry-run OK** | Warns `crate stasis-rs-macros@0.1.0 already exists on crates.io index`. Packaged 20 files, 39.3KiB (11.0KiB compressed). Verify compile 3.2s. **Do not upload.** |
+| `stasis-rs` 0.13.0 | **dry-run OK** | Packaged 345 files, 3.8MiB (615.4KiB compressed). Verify compile 39.1s from the tarball. Depends on `locus-sdk` **0.5.0** and `locus-core-rs` **0.5.1**. `build.rs` fell back to prebuilt `dashboard.css` (no local Tailwind). Upload aborted (`--dry-run`). |
 
 ## Dry-run results (2026-09-22, rustc 1.98.1, 0.12.0)
 
@@ -89,7 +98,7 @@ Scratch files (`showtest.md`, `*.gr`) were not in the tarball. `stasisd` was not
 
 ## npm (`stasis-wasm`)
 
-The registry name `stasis-wasm` is taken by this project at **0.12.0**. The Rust crate stays `publish = false`. npm 0.12.0 is already uploaded; the kernel crate for this release is `stasis-rs` **0.12.0**. A new npm tarball needs `stasis-wasm` **0.13.0**.
+The registry name `stasis-wasm` is taken by this project. The Rust crate stays `publish = false`. npm **0.12.0** is already uploaded. This release publishes npm **`stasis-wasm@0.13.0`**, built against kernel `stasis-rs` **0.13.0**.
 
 `pkg/` and `pkg-node/` are gitignored; they are produced on the machine that publishes. `prepack` / `prepublishOnly` build them if missing, then run the Node smoke test.
 

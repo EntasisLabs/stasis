@@ -47,6 +47,8 @@ impl JobHandler for MemorySchemaJobHandler {
                     "schema_version": result.schema_version,
                     "transform_operations": result.transform_operations,
                     "evict_operations": result.evict_operations,
+                    "reflex_actions": result.reflex_actions,
+                    "decision_types": result.decision_types,
                 }),
             )),
             Err(err) => Ok(operation_failure("stasis-memory-schema", err.to_string())),

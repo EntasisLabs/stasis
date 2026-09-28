@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
 - Stability: Stable
-- Last Verified: 2026-06-02
+- Last Verified: 2026-09-26
 - Verified Against:
   - src/application/runtime/stasis_runtime_builder.rs
     - src/application/composition/runtime_composition.rs
@@ -199,7 +199,7 @@ Tools must implement the `StasisTool` trait. Input schema validation (required f
 
 ### Automatic Locus bootstrap
 
-`.with_locus_memory()` bootstraps a shared `LocusMemoryStore` (node store + semantic index) and wires `LocusContextReader`, `LocusContextWriter`, and `LocusMemoryOperations` if none are provided explicitly. When memory operation handlers are enabled, this registers eight workflows: recall, find, graph, aggregate, transform, rollup, schema, and evict.
+`.with_locus_memory()` bootstraps a shared `LocusMemoryStore` (node store + semantic index) and wires `LocusContextReader`, `LocusContextWriter`, and `LocusMemoryOperations` if none are provided explicitly. When memory operation handlers are enabled, this registers nine workflows: recall, find, graph, aggregate, transform, rollup, schema, evict, and reflex.
 
 ```rust
 let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
@@ -254,7 +254,7 @@ All handler groups are included by default. Opt out with `without_*` methods:
 | `.without_prompt_handler()` | `PromptChatJobHandler` |
 | `.without_tool_loop_handler()` | `ToolLoopJobHandler` |
 | `.without_agent_handlers()` | `AgentTurnJobHandler`, `AgentSessionJobHandler` |
-| `.without_memory_operation_handlers()` | `MemoryRecallJobHandler`, `MemoryFindJobHandler`, `MemoryGraphJobHandler`, `MemoryAggregateJobHandler`, `MemoryTransformJobHandler`, `MemoryRollupJobHandler`, `MemorySchemaJobHandler`, `MemoryEvictJobHandler` |
+| `.without_memory_operation_handlers()` | `MemoryRecallJobHandler`, `MemoryFindJobHandler`, `MemoryGraphJobHandler`, `MemoryAggregateJobHandler`, `MemoryTransformJobHandler`, `MemoryRollupJobHandler`, `MemorySchemaJobHandler`, `MemoryEvictJobHandler`, `MemoryReflexJobHandler` |
 | `.without_orchestration_pattern_handlers()` | `SequentialPatternJobHandler`, `ConcurrentPatternJobHandler`, `HandoffPatternJobHandler`, `OrchestratorPatternJobHandler` |
 
 Memory operation handlers are only registered when the corresponding memory ports are wired. Calling `.without_memory_operation_handlers()` is a no-op if memory ports are absent.

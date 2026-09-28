@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use crate::domain::errors::Result;
 use crate::ports::outbound::memory::memory_models::{
     MemoryAggregateRequest, MemoryAggregateResponse, MemoryEvictRequest, MemoryEvictResponse,
-    MemoryRollupRequest, MemoryRollupResponse, MemorySchemaResponse, MemoryTransformRequest,
-    MemoryTransformResponse,
+    MemoryReflexRequest, MemoryReflexResponse, MemoryRollupRequest, MemoryRollupResponse,
+    MemorySchemaResponse, MemoryTransformRequest, MemoryTransformResponse,
 };
 
 #[async_trait]
@@ -18,4 +18,7 @@ pub trait MemoryOperations: Send + Sync {
     async fn schema(&self) -> Result<MemorySchemaResponse>;
 
     async fn evict(&self, request: &MemoryEvictRequest) -> Result<MemoryEvictResponse>;
+
+    /// Gate a stimulus into a memory bus envelope. Does not read or write the store.
+    async fn reflex(&self, request: &MemoryReflexRequest) -> Result<MemoryReflexResponse>;
 }

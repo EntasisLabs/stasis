@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-26
+
+### Added
+
+- **Memory reflex (`workflow.stasis.memory.reflex`).** `MemoryOperations::reflex` turns a stimulus into a bus envelope (`dispatch`, `ignore`, or `escalate`) using locus-sdk `MemoryReflexService`. The default decider is the offline heuristic. A `system1Response` body applies a Laya / sys1 / Jev forward pass the host already ran. On the `native` feature, `system1Endpoint` posts the catalog to that server. The reflex does not read or write the store; runnable recall, find, aggregate, and persist hints are filled only when the gate accepts the decision. `stasis-wasm` exposes `decide_memory_reflex`.
+
+### Changed
+
+- **locus-sdk 0.5.0.** Pin moves from `=0.4.0` to `=0.5.0`. `locus-core-rs` stays **0.5.1**. `locus-surreal-adapter` stays **0.1.1**. Memory schema reported by `workflow.stasis.memory.schema` is **`locus-sdk.memory.v4`**, including `reflex_actions` and `decision_types`. Find, recall, explain, aggregate, transform, and evict contracts are unchanged.
+- `stasis-rs` and npm `stasis-wasm` are **0.13.0**.
+
 ## [0.12.0] - 2026-09-22
 
 ### Added

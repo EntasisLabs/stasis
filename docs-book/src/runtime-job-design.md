@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, SRE, Architect
 - Stability: Stable
-- Last Verified: 2026-09-22
+- Last Verified: 2026-09-26
 - Verified Against:
 	- src/application/runtime/in_memory_runtime.rs
 	- src/application/runtime/surreal_runtime.rs
@@ -19,7 +19,7 @@
 	- tests/runtime_backend_parity.rs
 	- tests/federated_job_contract.rs
 	- tests/wasm_kernel_smoke.rs
-	- Stasis 0.12.0
+	- Stasis 0.13.0
 
 ## Scope
 
@@ -235,7 +235,7 @@ Grapheme handlers execute policy-governed workflow jobs and classify policy fail
 ### Locus Memory Execution
 
 Memory-enabled handlers project memory lineage metadata into runtime outbox events.
-Dedicated memory operation handlers support recall, find, graph, aggregate, transform, rollup, schema, and evict workflows.
+Dedicated memory operation handlers support recall, find, graph, aggregate, transform, rollup, schema, evict, and reflex workflows.
 
 ### Lineage Investigation
 

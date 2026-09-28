@@ -115,6 +115,7 @@ let schema = ops.schema().await?;
 println!("schema_version={}", schema.schema_version);
 println!("transform_ops={:?}", schema.transform_operations);
 println!("evict_ops={:?}", schema.evict_operations);
+println!("reflex_actions={:?}", schema.reflex_actions);
 ```
 
 ### 7. Preview eviction (dry-run)

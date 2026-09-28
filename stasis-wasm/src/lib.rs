@@ -35,13 +35,13 @@ use stasis::domain::runtime::typed_contract::StasisJob;
 use stasis::infrastructure::llm::mock_chat_client::MockAiChatClient;
 use stasis::infrastructure::llm::mock_gateway::MockLlmGateway;
 use stasis::infrastructure::llm::openai_http_gateway::OpenAiHttpGateway;
-use stasis::ports::outbound::ai_chat_client::AiChatClient;
 use stasis::infrastructure::memory::in_memory_identity_memory_store::InMemoryIdentityMemoryStore;
 use stasis::infrastructure::memory::locus_context_reader::LocusContextReader;
 use stasis::infrastructure::memory::locus_context_writer::LocusContextWriter;
 use stasis::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
 use stasis::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
 use stasis::infrastructure::persistence::in_memory_agent_repository::InMemoryAgentRepository;
+use stasis::ports::outbound::ai_chat_client::AiChatClient;
 use stasis::ports::outbound::llm_gateway::LlmGateway;
 use stasis::ports::outbound::memory::identity_memory_models::{
     GetIdentityContextRequest, IdentityContextMode, PersonaEntity, UserEntity,
@@ -50,8 +50,9 @@ use stasis::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use stasis::ports::outbound::memory::memory_models::{
-    MemoryRecallRequest, MemoryScope, MemoryStoreRequest,
+    MemoryRecallRequest, MemoryReflexRequest, MemoryScope, MemoryStoreRequest,
 };
+use stasis::ports::outbound::memory::memory_operations::MemoryOperations;
 use stasis::sdk::runtime_sdk::RuntimeSdk;
 use stasis::sdk::stasis_sdk::StasisSdk;
 
@@ -152,6 +153,7 @@ pub struct StasisWasmClient {
     runtime: RuntimeSdk,
     memory_writer: Arc<LocusContextWriter>,
     memory_reader: Arc<LocusContextReader>,
+    memory_operations: Arc<LocusMemoryOperations>,
     identity: Arc<InMemoryIdentityMemoryStore>,
     llm_kind: LlmKind,
 }
@@ -213,9 +215,7 @@ impl StasisWasmClient {
             })
             .map_err(js_err)?;
 
-        let memory = LocusNodeStoreFactory::in_memory()
-            .await
-            .map_err(js_err)?;
+        let memory = LocusNodeStoreFactory::in_memory().await.map_err(js_err)?;
         let writer = Arc::new(LocusContextWriter::new(memory.clone()));
         let reader = Arc::new(LocusContextReader::new(memory.clone()));
         let operations = Arc::new(LocusMemoryOperations::new(memory, None));
@@ -226,7 +226,7 @@ impl StasisWasmClient {
                 .with_locus_memory()
                 .with_memory_context_reader(reader.clone())
                 .with_memory_context_writer(writer.clone())
-                .with_memory_operations(operations)
+                .with_memory_operations(operations.clone())
                 .with_identity_memory_store(identity.clone())
                 .with_tool(EchoTool)
                 .map_err(js_err)?
@@ -242,6 +242,7 @@ impl StasisWasmClient {
             runtime,
             memory_writer: writer,
             memory_reader: reader,
+            memory_operations: operations,
             identity,
             llm_kind,
         })
@@ -267,6 +268,8 @@ impl StasisWasmClient {
                 "max_steps / max_call_depth use grapheme-wasm RuntimeOptions defaults"
             ],
             "memory": "locus-in-memory",
+            "memorySchema": "locus-sdk.memory.v4",
+            "memoryReflex": "heuristic",
             "identity": "in-memory",
             "replay": "job-store-attempts-and-lineage",
             "corsNote": "Browser calls to api.openai.com need a same-origin /v1 proxy; pass baseUrl"
@@ -359,13 +362,15 @@ impl StasisWasmClient {
         let snippets: Vec<String> = response
             .nodes
             .iter()
-            .filter_map(|node| node.context_summary.clone().or_else(|| {
-                if node.raw.is_empty() {
-                    None
-                } else {
-                    Some(node.raw.clone())
-                }
-            }))
+            .filter_map(|node| {
+                node.context_summary.clone().or_else(|| {
+                    if node.raw.is_empty() {
+                        None
+                    } else {
+                        Some(node.raw.clone())
+                    }
+                })
+            })
             .collect();
         Ok(json!({
             "retrieved": response.retrieved,
@@ -373,6 +378,31 @@ impl StasisWasmClient {
             "snippets": snippets,
         })
         .to_string())
+    }
+
+    /// Gate `text` into a memory reflex envelope with the offline heuristic decider.
+    ///
+    /// Does not read or write the store. `kind` is `dispatch`, `ignore`, or `escalate`.
+    #[wasm_bindgen]
+    pub async fn decide_memory_reflex(
+        &self,
+        session_id: String,
+        text: String,
+    ) -> Result<String, JsValue> {
+        let response = self
+            .memory_operations
+            .reflex(&MemoryReflexRequest {
+                text,
+                role: Some("user".to_string()),
+                scope: MemoryScope {
+                    session_ids: Some(vec![session_id]),
+                    ..MemoryScope::default()
+                },
+                ..MemoryReflexRequest::default()
+            })
+            .await
+            .map_err(js_err)?;
+        serde_json::to_string(&response).map_err(|err| js_err(err.to_string()))
     }
 
     /// Upsert a persona + user so later tool-loop jobs can load identity context.
@@ -484,7 +514,11 @@ impl StasisWasmClient {
 
     /// Enqueue `workflow.grapheme.run` with inline source (no LLM).
     #[wasm_bindgen]
-    pub async fn enqueue_grapheme(&self, job_id: String, source: String) -> Result<String, JsValue> {
+    pub async fn enqueue_grapheme(
+        &self,
+        job_id: String,
+        source: String,
+    ) -> Result<String, JsValue> {
         let now = Utc::now();
         self.runtime
             .enqueue(NewJob {
@@ -701,9 +735,7 @@ impl StasisWasmClient {
     }
 }
 
-fn openai_tool_loop_chat_client(
-    gateway: &OpenAiHttpGateway,
-) -> Arc<dyn AiChatClient> {
+fn openai_tool_loop_chat_client(gateway: &OpenAiHttpGateway) -> Arc<dyn AiChatClient> {
     // Workspace `cargo check` unifies `stasis-rs` features with `llm-genai`, which
     // hides `OpenAiHttpChatClient`. The npm guest is always wasm32, where genai is off.
     #[cfg(target_arch = "wasm32")]

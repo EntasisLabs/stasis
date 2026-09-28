@@ -291,10 +291,7 @@ pub struct ConcurrentPatternJobPayload {
 }
 
 impl ConcurrentBranchJobPayload {
-    pub fn prompt(
-        branch_id: impl Into<String>,
-        user_prompt_template: impl Into<String>,
-    ) -> Self {
+    pub fn prompt(branch_id: impl Into<String>, user_prompt_template: impl Into<String>) -> Self {
         Self {
             branch_id: branch_id.into(),
             user_prompt_template: user_prompt_template.into(),
@@ -559,6 +556,46 @@ impl MemoryEvictJobPayload {
     pub fn to_payload_ref(&self) -> Result<String> {
         serde_json::to_string(self).map_err(|err| {
             StasisError::PortFailure(format!("failed to encode memory-evict payload: {err}"))
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryReflexPolicyPayload {
+    pub min_choice_confidence: Option<f32>,
+    pub min_salience: Option<f32>,
+    pub read_floor: Option<f32>,
+    pub write_floor: Option<f32>,
+    pub escalate_at: Option<f32>,
+    pub page_limit: Option<usize>,
+}
+
+/// Stimulus for `workflow.stasis.memory.reflex`.
+///
+/// The handler returns a bus envelope. It does not recall, find, or persist.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryReflexJobPayload {
+    pub text: String,
+    pub role: Option<String>,
+    pub tenant_id: Option<String>,
+    pub session_ids: Option<Vec<String>>,
+    pub tiers: Option<Vec<String>>,
+    pub from_utc: Option<DateTime<Utc>>,
+    pub to_utc: Option<DateTime<Utc>>,
+    pub metadata: Option<serde_json::Map<String, Value>>,
+    pub policy: Option<MemoryReflexPolicyPayload>,
+    pub system1_endpoint: Option<String>,
+    pub system1_model: Option<String>,
+    pub system1_api_key: Option<String>,
+    pub system1_response: Option<Value>,
+}
+
+impl MemoryReflexJobPayload {
+    pub fn to_payload_ref(&self) -> Result<String> {
+        serde_json::to_string(self).map_err(|err| {
+            StasisError::PortFailure(format!("failed to encode memory-reflex payload: {err}"))
         })
     }
 }
