@@ -4,7 +4,7 @@ Optional `wasm-bindgen` bindings for the Stasis in-memory kernel (ADR-0009).
 
 This crate wraps `stasis-rs --no-default-features` plus `llm-openai-http` and `grapheme`. It does **not** compile the dashboard, `stasisd`, or SurrealKV. Grapheme runs in-guest via published [`grapheme-wasm` 0.7.1](https://crates.io/crates/grapheme-wasm) (stdlib: `core` / `json` / `csv` / `yaml` / `html`).
 
-The npm package name is `stasis-wasm` (version `0.13.0`). The Rust crate of the same name stays unpublished (`publish = false` on crates.io).
+The npm package name is `stasis-wasm` (version `0.14.0`). The Rust crate of the same name stays unpublished (`publish = false` on crates.io).
 
 After publish:
 

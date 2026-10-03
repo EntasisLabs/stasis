@@ -4,12 +4,12 @@ This workspace already publishes under the `stasis-rs*` names because [`stasis`]
 
 ## What is published
 
-| Crate | Version in tree | Registry (as of 2026-09-26) | Action |
+| Crate | Version in tree | Registry (as of 2026-10-03) | Action |
 | --- | --- | --- | --- |
 | `stasis-rs-macros` | 0.1.0 | crates.io **0.1.0** | Do **not** republish unless the macros crate is bumped |
 | `stasis-rs` | 0.13.0 | crates.io latest **0.12.0** (2026-09-22) | Publish **0.13.0** |
 | `stasisd` | 0.1.0 | not published | `publish = false` (workspace binary only) |
-| `stasis-wasm` | 0.13.0 | crates.io `publish = false`; npm `stasis-wasm@0.12.0` is the previous upload | Publish npm **0.13.0** (built against kernel 0.13.0) |
+| `stasis-wasm` | 0.14.0 | crates.io `publish = false`; npm latest **0.12.0** (checked 2026-10-03) | Publish npm **0.14.0** (built against kernel 0.13.0) |
 
 Owner of both crates.io packages: [`theelevators`](https://github.com/theelevators) (Tom Vazquez). Publishing requires that account (or a new owner) plus a crates.io API token and 2FA.
 
@@ -98,7 +98,7 @@ Scratch files (`showtest.md`, `*.gr`) were not in the tarball. `stasisd` was not
 
 ## npm (`stasis-wasm`)
 
-The registry name `stasis-wasm` is taken by this project. The Rust crate stays `publish = false`. npm **0.12.0** is already uploaded. This release publishes npm **`stasis-wasm@0.13.0`**, built against kernel `stasis-rs` **0.13.0**.
+The registry name `stasis-wasm` is taken by this project. The Rust crate stays `publish = false`. npm **0.12.0** is already uploaded. This release publishes npm **`stasis-wasm@0.14.0`**, built against kernel `stasis-rs` **0.13.0**.
 
 `pkg/` and `pkg-node/` are gitignored; they are produced on the machine that publishes. `prepack` / `prepublishOnly` build them if missing, then run the Node smoke test.
 
@@ -129,8 +129,8 @@ CONFIRM_PUBLISH=yes ./scripts/publish-npm.sh --execute
 To unpublish within 72 hours (npm policy; prefer deprecate for anything already downloaded):
 
 ```bash
-npm unpublish stasis-wasm@0.12.0
-npm deprecate stasis-wasm@0.12.0 "reason"
+npm unpublish stasis-wasm@0.14.0
+npm deprecate stasis-wasm@0.14.0 "reason"
 ```
 
 ### Blockers that require you
@@ -138,7 +138,19 @@ npm deprecate stasis-wasm@0.12.0 "reason"
 - **npm login** on the account that should own `stasis-wasm`
 - **2FA** on that npm account
 - Actual `npm publish` (this repo only dry-runs)
-- `wasm32-unknown-unknown` target and `wasm-bindgen-cli` matching `Cargo.lock` (0.2.121 as of this writing)
+- `wasm32-unknown-unknown` target and `wasm-bindgen-cli` matching `Cargo.lock` (0.2.122 as of this writing)
+
+## npm dry-run results (2026-10-03, 0.14.0)
+
+Run on this branch with `./scripts/publish-npm.sh`. No npm token was used. `npm publish --dry-run` completed with `+ stasis-wasm@0.14.0`.
+
+| Check | Result |
+| --- | --- |
+| `wasm-bindgen` 0.2.122 + `wasm32-unknown-unknown` | OK |
+| Node smoke (raw WASM, host callbacks, SDK lifecycle, cancellation/replay, schema adapters) | pass (35 tests) |
+| Tarball | `stasis-wasm-0.14.0.tgz`, 22 files, 4.0 MB packed / 13.7 MB unpacked |
+| Contents | licenses, README, examples, `package.json`, `pkg/`, `pkg-node/`, and browser/Node/CJS `sdk/` exports |
+| Registry availability | npm latest is 0.12.0; 0.14.0 is unpublished as of 2026-10-03 |
 
 ## npm dry-run results (2026-09-18, 0.12.0)
 
@@ -146,7 +158,7 @@ Run on this branch with `./scripts/publish-npm.sh`. No npm token was used. `npm 
 
 | Check | Result |
 | --- | --- |
-| `wasm-bindgen` 0.2.121 + `wasm32-unknown-unknown` | OK |
+| `wasm-bindgen` 0.2.122 + `wasm32-unknown-unknown` | OK |
 | Node smoke (mock, OpenAI construct, memory, identity, tools, Grapheme, replay) | pass (10 tests) |
 | Tarball | `stasis-wasm-0.12.0.tgz`, 13 files, ~3.8 MB packed / 13.1 MB unpacked |
 | Contents | `LICENSE-*`, `README.md`, `package.json`, `pkg/` (bundler), `pkg-node/` (Node) |
