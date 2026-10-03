@@ -1,0 +1,10 @@
+import init, { StasisWasmClient } from "../pkg/stasis_wasm.js";
+import { Stasis, StasisSession, createStasisWith, extension, memoryLifecycleStore, tool, webStorageLifecycleStore } from "./core.mjs";
+
+export { Stasis, StasisSession, extension, memoryLifecycleStore, tool, webStorageLifecycleStore };
+
+export async function createStasis(options = {}) {
+  await init();
+  const client = await StasisWasmClient.create(options.llm);
+  return createStasisWith(client, options);
+}

@@ -294,6 +294,7 @@ impl JobHandler for ToolLoopJobHandler {
             "termination_reason": response.termination_reason,
             "policy_profile": response.metadata.policy_profile,
             "model_hint": response.metadata.model_hint,
+            "output_text": response.text,
             "output_preview": response.text.chars().take(160).collect::<String>(),
             "memory_retrieved_count": diagnostics_bundle.retrieved_count,
             "memory_retrieval_path": diagnostics_bundle.retrieval_path,

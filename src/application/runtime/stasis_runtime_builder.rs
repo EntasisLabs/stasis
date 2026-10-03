@@ -377,6 +377,13 @@ impl StasisRuntimeBuilder {
         Ok(self)
     }
 
+    /// Uses an existing local registry. Clones of the registry remain live after build,
+    /// allowing language bindings to bootstrap host-defined tools dynamically.
+    pub fn with_local_tool_registry(mut self, registry: InMemoryToolRegistry) -> Self {
+        self.tool_registry = registry;
+        self
+    }
+
     /// Inject an MCP tool provider; tools are merged into the runtime tool registry.
     pub fn with_mcp_tool_provider(mut self, provider: Arc<dyn McpToolProvider>) -> Self {
         self.mcp_tool_providers.push(provider);

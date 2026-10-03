@@ -10036,7 +10036,10 @@ dependencies = [
  "async-trait",
  "chrono",
  "console_error_panic_hook",
+ "futures-channel",
+ "futures-util",
  "getrandom 0.2.17",
+ "gloo-timers",
  "js-sys",
  "serde",
  "serde_json",
@@ -10044,6 +10047,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
+ "web-sys",
 ]
 
 [[package]]
