@@ -5,7 +5,7 @@
 - Document Type: Cookbook Recipe
 - Audience: Engineer
 - Stability: Evolving
-- Last Verified: 2026-09-18
+- Last Verified: 2026-10-03
 - Verified Against:
   - Cargo.toml
   - tests/wasm_kernel_smoke.rs
@@ -120,7 +120,92 @@ const replay = JSON.parse(await client.resume_from_history("t1"));
 
 Node loads the CommonJS `pkg-node/` build (`require("stasis-wasm")`) — `init()` is not required.
 
-`stasis-wasm` is workspace-optional and unpublished on crates.io (`publish = false`). The npm package name is `stasis-wasm@0.13.0` (public, unscoped). Point a local app at a checkout with `npm install ../path/to/stasis-wasm` after `npm run build`. Owner publish: [RELEASE.md](https://github.com/EntasisLabs/stasis/blob/main/RELEASE.md#npm-stasis-wasm).
+#### Prefer the high-level SDK for application code
+
+The `stasis-wasm/sdk` entry point removes WASM initialization, positional queue arguments, manual
+JSON conversion, and worker draining from the normal path:
+
+```js
+import { createStasis, tool } from "stasis-wasm/sdk";
+
+const stasis = await createStasis({
+  llm: { apiKey: userSuppliedKey, baseUrl: "/v1" },
+  instructions: "Be concise.",
+  tools: [tool({
+    name: "lookup_status",
+    description: "Read a resource status",
+    parameters: { type: "object", additionalProperties: false },
+    execute: async (_input, { signal }) => fetch("/api/status", { signal }).then(r => r.json()),
+  })],
+});
+
+const { text } = await stasis.session("customer-42").prompt("Check status", {
+  operationId: "request-42",
+});
+```
+
+TypeBox schemas can be passed directly to `parameters`; the SDK infers the callback input from the
+schema's static type. Wrap one with `typeboxSchema(schema, { parse })` to run `Value.Parse` before
+execution. `zodSchema(schema, { toJSONSchema: z.toJSONSchema })` and
+`valibotSchema(schema, { toJsonSchema, parse })` provide the same inference and
+runtime parsing without pinning validator dependencies inside Stasis. `schema(jsonSchema, parse)` is
+the generic adapter. Parser failures become structured callback errors visible to the model loop.
+
+Use `submit()` plus `wait()` to separate acceptance from completion. `stream()` returns an async
+iterable of durable `accepted`, state, and terminal events; `events(operationId, { after })` reconnects
+from the last consumed numeric cursor without resubmitting work. Configure
+`webStorageLifecycleStore(localStorage)` or provide a `LifecycleStore` with `load()` and `save()` to
+persist snapshots in IndexedDB, SQLite, a Durable Object, or an application database. Completed
+results survive replacement of the in-memory WASM client.
+
+`cancel()` transitions the kernel job to `canceled`, and an aborted wait does so by default. Mark
+tools `replay: "safe"` only when executing them again cannot duplicate side effects; unsafe is the
+default and `resume()` enforces it for dead letters. Use `stasis.raw` for lower-level memory,
+Grapheme, and operator APIs.
+
+The lifecycle store preserves event cursors and terminal results, not the in-flight WASM queue or
+active LLM request. A new in-memory guest cannot resurrect unfinished work; true process-crash
+recovery still requires a persistent runtime backend. Cancellation fences the job result but cannot
+preempt synchronous JavaScript callback code.
+
+#### Register browser-host tools
+
+The WASM client supports domain-independent tools backed by JavaScript callbacks:
+
+```js
+client.register_tool(
+  "lookup_status",
+  "Read a resource status",
+  {
+    type: "object",
+    properties: { resourceId: { type: "string" } },
+    required: ["resourceId"],
+    additionalProperties: false,
+  },
+  async ({ resourceId }, { signal }) => {
+    const response = await fetch(`/api/resources/${encodeURIComponent(resourceId)}`, { signal });
+    if (!response.ok) throw new Error(`lookup failed: ${response.status}`);
+    return response.json();
+  },
+);
+```
+
+Register tools after `StasisWasmClient.create()` and before processing tool-loop jobs. The
+runtime advertises the supplied name, description, and schema to the model, validates arguments,
+and awaits the callback. Results use the `stasis.tool-result.v1` envelope: `{ ok: true, result }`
+or `{ ok: false, error: { tool, code, message } }`. Duplicate names are rejected. Unknown names
+remain registry/job errors. Callback throws, rejected promises, `undefined`, and other
+non-JSON/cyclic results become structured errors visible to the agent loop. `invoke_tool()` is
+available for direct dispatch through the same path. Calls have a 30-second default deadline;
+the callback receives `{ tool, timeoutMs, signal }` as its second argument and `signal` is aborted
+when the deadline expires. A timed-out call returns `callback_timeout`, so an unsettled promise
+cannot block a job indefinitely. Use
+`register_tool_with_options(name, description, schema, callback, { timeoutMs })` for a deadline
+between 1ms and 10 minutes, and pass the signal to abort-aware APIs such as `fetch`. Deadline
+timers require the JavaScript event loop; move CPU-heavy synchronous work to a Web Worker.
+Callback registrations live only as long as their client instance.
+
+`stasis-wasm` is workspace-optional and unpublished on crates.io (`publish = false`). The npm package name is `stasis-wasm@0.14.0` (public, unscoped). Point a local app at a checkout with `npm install ../path/to/stasis-wasm` after `npm run build`. Owner publish: [RELEASE.md](https://github.com/EntasisLabs/stasis/blob/main/RELEASE.md#npm-stasis-wasm).
 
 See [stasis-wasm/README.md](https://github.com/EntasisLabs/stasis/blob/main/stasis-wasm/README.md) for Grapheme gaps (`grapheme:file:`, host-only `http`/`sql`, no preemptive timeout).
 

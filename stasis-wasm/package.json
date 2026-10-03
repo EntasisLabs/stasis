@@ -1,6 +1,6 @@
 {
   "name": "stasis-wasm",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "In-memory Stasis kernel for Node and bundlers (wasm-bindgen): OpenAI, tools/Grapheme, Locus memory, job replay",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -23,6 +23,8 @@
   "files": [
     "pkg",
     "pkg-node",
+    "sdk",
+    "examples",
     "README.md",
     "LICENSE-MIT",
     "LICENSE-APACHE"
@@ -49,7 +51,17 @@
       "import": "./pkg/stasis_wasm.js",
       "default": "./pkg/stasis_wasm.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./sdk": {
+      "types": "./sdk/index.d.ts",
+      "browser": "./sdk/browser.mjs",
+      "node": {
+        "import": "./sdk/node.mjs",
+        "require": "./sdk/node.cjs"
+      },
+      "import": "./sdk/browser.mjs",
+      "default": "./sdk/browser.mjs"
+    }
   },
   "scripts": {
     "build": "bash scripts/build-npm.sh",

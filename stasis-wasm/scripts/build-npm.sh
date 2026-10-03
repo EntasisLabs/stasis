@@ -24,10 +24,17 @@ if [[ "$(rustc_minor rustc)" -lt 85 ]]; then
 	fi
 fi
 
+bindgen_version="$(awk '/name = "wasm-bindgen"$/{getline; if ($1=="version") {gsub(/"/, "", $3); print $3; exit}}' Cargo.lock)"
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
-  version="$(awk '/name = "wasm-bindgen"$/{getline; if ($1=="version") {gsub(/"/, "", $3); print $3; exit}}' Cargo.lock)"
-  echo "wasm-bindgen CLI is required (lockfile version: ${version:-unknown})" >&2
-  echo "Install with: cargo install wasm-bindgen-cli --locked --version \"\$version\"" >&2
+  echo "wasm-bindgen CLI is required (lockfile version: ${bindgen_version:-unknown})" >&2
+  printf 'Install with: cargo install wasm-bindgen-cli --locked --version "%s"\n' "$bindgen_version" >&2
+  exit 1
+fi
+
+installed_bindgen_version="$(wasm-bindgen --version | awk '{print $2}')"
+if [[ -z "$bindgen_version" || "$installed_bindgen_version" != "$bindgen_version" ]]; then
+  echo "wasm-bindgen CLI version mismatch: installed $installed_bindgen_version, lockfile ${bindgen_version:-unknown}" >&2
+  printf 'Install the matching CLI with: cargo install wasm-bindgen-cli --locked --version "%s" --force\n' "$bindgen_version" >&2
   exit 1
 fi
 

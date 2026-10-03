@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-03
+
+### Added
+
+- **High-level agent SDK for browser and Node hosts.** `createStasis`, sessions, reconnectable async event streams, lifecycle snapshots, cancellation, idempotent operation IDs, and safe/unsafe replay policy wrap the WASM runtime while preserving access to the raw client.
+- **Schema-native tools.** TypeBox schemas infer callback inputs directly; TypeBox, Zod, Valibot, and generic adapters can parse inputs immediately before execution while Stasis retains JSON Schema validation for the model-facing contract.
+
+### Changed
+
+- npm `stasis-wasm` is **0.14.0** and exports the SDK from `stasis-wasm/sdk` for browser ESM, Node ESM, and Node CommonJS consumers.
+- Host tool callbacks support structured errors, configurable deadlines, abort signals, and runtime-backed job cancellation.
+
 ## [0.13.0] - 2026-09-26
 
 ### Added

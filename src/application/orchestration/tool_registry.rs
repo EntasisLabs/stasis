@@ -80,9 +80,17 @@ pub trait ToolRegistry: Send + Sync {
     async fn invoke_tool(&self, tool_name: &str, input: Value) -> Result<Value>;
 }
 
+#[derive(Clone)]
+struct RegisteredTool {
+    implementation: Arc<dyn StasisTool>,
+    description: Option<String>,
+    input_schema: Option<Value>,
+    errors_as_results: bool,
+}
+
 #[derive(Clone, Default)]
 pub struct InMemoryToolRegistry {
-    tools: Arc<RwLock<HashMap<String, Arc<dyn StasisTool>>>>,
+    tools: Arc<RwLock<HashMap<String, RegisteredTool>>>,
     alias_by_original: Arc<RwLock<HashMap<String, String>>>,
     original_by_alias: Arc<RwLock<HashMap<String, String>>>,
 }
@@ -90,27 +98,73 @@ pub struct InMemoryToolRegistry {
 impl InMemoryToolRegistry {
     pub fn register_tool<T: StasisTool + 'static>(&self, tool: T) -> Result<()> {
         let tool_name = tool.name().to_string();
+        let description = tool.description().map(str::to_string);
+        let input_schema = tool.input_schema();
+        self.register_tool_entry(tool_name, description, input_schema, false, Arc::new(tool))
+    }
+
+    /// Registers a tool with host-owned metadata instead of requiring static Rust strings.
+    ///
+    /// This is primarily useful to language bindings. Existing [`StasisTool`] registration
+    /// remains unchanged. When `errors_as_results` is true, input-schema failures are returned
+    /// as structured tool output so the model can observe and correct malformed arguments.
+    pub fn register_dynamic_tool<T: StasisTool + 'static>(
+        &self,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: Value,
+        errors_as_results: bool,
+        tool: T,
+    ) -> Result<()> {
+        self.register_tool_entry(
+            name.into(),
+            Some(description.into()),
+            Some(input_schema),
+            errors_as_results,
+            Arc::new(tool),
+        )
+    }
+
+    pub fn contains(&self, name: &str) -> Result<bool> {
+        self.tools
+            .read()
+            .map(|tools| tools.contains_key(name))
+            .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))
+    }
+
+    fn register_tool_entry(
+        &self,
+        tool_name: String,
+        description: Option<String>,
+        input_schema: Option<Value>,
+        errors_as_results: bool,
+        implementation: Arc<dyn StasisTool>,
+    ) -> Result<()> {
         let mut tools = self
             .tools
             .write()
             .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))?;
-
         let mut alias_by_original = self
             .alias_by_original
             .write()
             .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))?;
-
         let mut original_by_alias = self
             .original_by_alias
             .write()
             .map_err(|_| StasisError::PortFailure("tool registry lock poisoned".to_string()))?;
 
         let alias = Self::allocate_alias(&tool_name, &original_by_alias);
-
         alias_by_original.insert(tool_name.clone(), alias.clone());
         original_by_alias.insert(alias, tool_name.clone());
-
-        tools.insert(tool_name, Arc::new(tool));
+        tools.insert(
+            tool_name,
+            RegisteredTool {
+                implementation,
+                description,
+                input_schema,
+                errors_as_results,
+            },
+        );
         Ok(())
     }
 
@@ -291,10 +345,10 @@ impl ToolRegistry for InMemoryToolRegistry {
                 .unwrap_or_else(|| original_name.clone());
 
             let mut definition = Tool::new(advertised_name);
-            if let Some(description) = tool.description() {
+            if let Some(description) = tool.description.as_deref() {
                 definition = definition.with_description(description);
             }
-            if let Some(schema) = tool.input_schema() {
+            if let Some(schema) = tool.input_schema.clone() {
                 definition = definition.with_schema(schema);
             }
             definitions.push(definition);
@@ -327,10 +381,108 @@ impl ToolRegistry for InMemoryToolRegistry {
             })?
         };
 
-        if let Some(schema) = tool.input_schema() {
-            Self::validate_input_against_schema(&schema, &input)?;
+        if let Some(schema) = tool.input_schema.as_ref()
+            && let Err(error) = Self::validate_input_against_schema(schema, &input)
+        {
+            if tool.errors_as_results {
+                return Ok(structured_tool_error(
+                    tool_name,
+                    "invalid_arguments",
+                    error.to_string(),
+                ));
+            }
+            return Err(error);
         }
 
-        tool.invoke(input).await
+        tool.implementation.invoke(input).await
+    }
+}
+
+fn structured_tool_error(tool_name: &str, code: &str, message: String) -> Value {
+    serde_json::json!({
+        "ok": false,
+        "error": {
+            "tool": tool_name,
+            "code": code,
+            "message": message,
+        }
+    })
+}
+
+#[cfg(test)]
+mod dynamic_tool_tests {
+    use super::*;
+    use serde_json::json;
+
+    struct TestDynamicTool;
+
+    #[async_trait]
+    impl StasisTool for TestDynamicTool {
+        fn name(&self) -> &'static str {
+            "internal-placeholder"
+        }
+
+        async fn invoke(&self, input: Value) -> Result<Value> {
+            Ok(json!({ "received": input }))
+        }
+    }
+
+    #[tokio::test]
+    async fn dynamic_metadata_is_advertised_and_shared_across_clones() {
+        let registry = InMemoryToolRegistry::default();
+        let runtime_handle = registry.clone();
+        registry
+            .register_dynamic_tool(
+                "host.lookup",
+                "Look up a value",
+                json!({
+                    "type": "object",
+                    "properties": { "query": { "type": "string" } },
+                    "required": ["query"]
+                }),
+                true,
+                TestDynamicTool,
+            )
+            .unwrap();
+
+        let tools = runtime_handle.list_tools().await.unwrap();
+        let definition = tools
+            .iter()
+            .find(|tool| tool_advertised_name(tool) == "host_lookup")
+            .unwrap();
+        assert_eq!(tool_description(definition), Some("Look up a value"));
+
+        let output = runtime_handle
+            .invoke_tool("host.lookup", json!({ "query": "status" }))
+            .await
+            .unwrap();
+        assert_eq!(output["received"]["query"], "status");
+    }
+
+    #[tokio::test]
+    async fn dynamic_validation_errors_can_be_returned_to_the_tool_loop() {
+        let registry = InMemoryToolRegistry::default();
+        registry
+            .register_dynamic_tool(
+                "host.lookup",
+                "Look up a value",
+                json!({
+                    "type": "object",
+                    "properties": { "query": { "type": "string" } },
+                    "required": ["query"],
+                    "additionalProperties": false
+                }),
+                true,
+                TestDynamicTool,
+            )
+            .unwrap();
+
+        let output = registry
+            .invoke_tool("host.lookup", json!({ "unexpected": true }))
+            .await
+            .unwrap();
+        assert_eq!(output["ok"], false);
+        assert_eq!(output["error"]["code"], "invalid_arguments");
+        assert_eq!(output["error"]["tool"], "host.lookup");
     }
 }

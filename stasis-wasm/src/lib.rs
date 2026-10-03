@@ -4,6 +4,9 @@
 //! Grapheme (`grapheme-wasm` 0.7.1), Locus memory + identity, and job-store replay.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(target_arch = "wasm32")]
+use std::{cell::RefCell, collections::HashMap};
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -11,13 +14,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::JsFuture;
+#[cfg(target_arch = "wasm32")]
+use {futures_util::future::Either, gloo_timers::future::TimeoutFuture};
 
 use stasis::application::dto::{InvokeAgentRequest, RegisterAgentRequest};
 use stasis::application::orchestration::runtime_job_payloads::{
     MemoryPolicyPayload, MemoryRecallJobPayload, ToolLoopJobPayload,
 };
 use stasis::application::orchestration::runtime_workflow_job_builder::RuntimeWorkflowJobBuilder;
-use stasis::application::orchestration::tool_registry::StasisTool;
+use stasis::application::orchestration::tool_registry::{
+    InMemoryToolRegistry, StasisTool, ToolRegistry,
+};
 use stasis::application::runtime::job_context::{JobContext, JobResult};
 use stasis::application::runtime::memory_persistence_helpers::{
     SttpPromptNodeFormat, render_prompt_response_sttp_node,
@@ -73,6 +82,36 @@ export interface StasisCreateOptions {
   model?: string;
   baseUrl?: string;
 }
+
+/** Context for one host-tool invocation. Abort-aware APIs should consume `signal`. */
+export interface StasisToolContext {
+  tool: string;
+  timeoutMs: number;
+  signal: AbortSignal;
+}
+
+/** A host tool may return any JSON value, directly or through a Promise. */
+export type StasisToolCallback = (
+  input: unknown,
+  context: StasisToolContext,
+) => unknown | Promise<unknown>;
+
+export interface StasisToolOptions {
+  /** Invocation deadline in milliseconds. Defaults to 30,000; maximum 600,000. */
+  timeoutMs?: number;
+}
+
+export interface StasisToolSuccess<T = unknown> {
+  ok: true;
+  result: T;
+}
+
+export interface StasisToolFailure {
+  ok: false;
+  error: { tool: string; code: string; message: string };
+}
+
+export type StasisToolResult<T = unknown> = StasisToolSuccess<T> | StasisToolFailure;
 "#;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -113,6 +152,164 @@ impl StasisTool for EchoTool {
     }
 }
 
+static NEXT_CALLBACK_SCOPE: AtomicU64 = AtomicU64::new(1);
+const DEFAULT_CALLBACK_TIMEOUT_MS: u32 = 30_000;
+const MAX_CALLBACK_TIMEOUT_MS: u32 = 600_000;
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static HOST_CALLBACKS: RefCell<HashMap<String, js_sys::Function>> = RefCell::new(HashMap::new());
+}
+
+struct HostJsTool {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    callback_key: String,
+    tool_name: String,
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    timeout_ms: u32,
+}
+
+impl HostJsTool {
+    fn failure(&self, code: &str, message: impl Into<String>) -> Value {
+        json!({
+            "ok": false,
+            "error": {
+                "tool": self.tool_name,
+                "code": code,
+                "message": message.into(),
+            }
+        })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[async_trait]
+impl StasisTool for HostJsTool {
+    fn name(&self) -> &'static str {
+        "wasm_host_tool"
+    }
+
+    async fn invoke(&self, input: Value) -> StasisResult<Value> {
+        let receiver = match dispatch_host_callback(
+            &self.callback_key,
+            &self.tool_name,
+            self.timeout_ms,
+            input,
+        ) {
+            Ok(receiver) => receiver,
+            Err(error) => return Ok(error),
+        };
+        Ok(receiver.await.unwrap_or_else(|_| {
+            self.failure("callback_failed", "host callback result channel closed")
+        }))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dispatch_host_callback(
+    callback_key: &str,
+    tool_name: &str,
+    timeout_ms: u32,
+    input: Value,
+) -> Result<futures_channel::oneshot::Receiver<Value>, Value> {
+    let callback = HOST_CALLBACKS.with(|callbacks| callbacks.borrow().get(callback_key).cloned());
+    let Some(callback) = callback else {
+        return Err(host_tool_failure(
+            tool_name,
+            "callback_unavailable",
+            "host callback is no longer registered",
+        ));
+    };
+    let input = value_to_js(&input)
+        .map_err(|message| host_tool_failure(tool_name, "invalid_arguments", message))?;
+    let abort_controller = web_sys::AbortController::new().map_err(|error| {
+        host_tool_failure(tool_name, "callback_failed", js_error_message(&error))
+    })?;
+    let context = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &context,
+        &JsValue::from_str("tool"),
+        &JsValue::from_str(tool_name),
+    )
+    .map_err(|error| host_tool_failure(tool_name, "callback_failed", js_error_message(&error)))?;
+    js_sys::Reflect::set(
+        &context,
+        &JsValue::from_str("timeoutMs"),
+        &JsValue::from_f64(timeout_ms.into()),
+    )
+    .map_err(|error| host_tool_failure(tool_name, "callback_failed", js_error_message(&error)))?;
+    js_sys::Reflect::set(
+        &context,
+        &JsValue::from_str("signal"),
+        abort_controller.signal().as_ref(),
+    )
+    .map_err(|error| host_tool_failure(tool_name, "callback_failed", js_error_message(&error)))?;
+
+    let returned = callback
+        .call2(&JsValue::UNDEFINED, &input, &context)
+        .map_err(|error| {
+            host_tool_failure(tool_name, "callback_failed", js_error_message(&error))
+        })?;
+    let promise = js_sys::Promise::resolve(&returned);
+    let tool_name = tool_name.to_string();
+    let (sender, receiver) = futures_channel::oneshot::channel();
+    wasm_bindgen_futures::spawn_local(async move {
+        let callback = JsFuture::from(promise);
+        let timeout = TimeoutFuture::new(timeout_ms);
+        futures_util::pin_mut!(callback, timeout);
+        let result = match futures_util::future::select(callback, timeout).await {
+            Either::Left((callback_result, _)) => match callback_result {
+                Ok(value) => match js_to_value(&value) {
+                    Ok(result) => json!({ "ok": true, "result": result }),
+                    Err(message) => {
+                        host_tool_failure(&tool_name, "invalid_callback_result", message)
+                    }
+                },
+                Err(error) => {
+                    host_tool_failure(&tool_name, "callback_failed", js_error_message(&error))
+                }
+            },
+            Either::Right(((), _)) => {
+                abort_controller.abort();
+                host_tool_failure(
+                    &tool_name,
+                    "callback_timeout",
+                    format!("host callback exceeded {timeout_ms}ms deadline"),
+                )
+            }
+        };
+        let _ = sender.send(result);
+    });
+    Ok(receiver)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn host_tool_failure(tool_name: &str, code: &str, message: impl Into<String>) -> Value {
+    json!({
+        "ok": false,
+        "error": {
+            "tool": tool_name,
+            "code": code,
+            "message": message.into(),
+        }
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[async_trait]
+impl StasisTool for HostJsTool {
+    fn name(&self) -> &'static str {
+        "wasm_host_tool"
+    }
+
+    async fn invoke(&self, _input: Value) -> StasisResult<Value> {
+        Ok(self.failure(
+            "callback_unavailable",
+            "JavaScript host callbacks require wasm32",
+        ))
+    }
+}
+
 #[derive(Clone)]
 enum WasmLlm {
     Mock(MockLlmGateway),
@@ -140,6 +337,18 @@ struct CreateOptions {
     base_url: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolLoopOptions {
+    tool: String,
+    #[serde(default)]
+    tool_input: Option<Value>,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    system_prompt: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LlmKind {
     Mock,
@@ -155,6 +364,8 @@ pub struct StasisWasmClient {
     memory_reader: Arc<LocusContextReader>,
     memory_operations: Arc<LocusMemoryOperations>,
     identity: Arc<InMemoryIdentityMemoryStore>,
+    tool_registry: InMemoryToolRegistry,
+    callback_scope: String,
     llm_kind: LlmKind,
 }
 
@@ -220,6 +431,13 @@ impl StasisWasmClient {
         let reader = Arc::new(LocusContextReader::new(memory.clone()));
         let operations = Arc::new(LocusMemoryOperations::new(memory, None));
 
+        let tool_registry = InMemoryToolRegistry::default();
+        tool_registry.register_tool(EchoTool).map_err(js_err)?;
+        let callback_scope = format!(
+            "stasis-wasm-{}",
+            NEXT_CALLBACK_SCOPE.fetch_add(1, Ordering::Relaxed)
+        );
+
         let runtime = RuntimeSdk::from_builder(
             StasisRuntimeBuilder::new(RuntimeBackend::InMemory)
                 .with_chat_client(chat)
@@ -228,8 +446,7 @@ impl StasisWasmClient {
                 .with_memory_context_writer(writer.clone())
                 .with_memory_operations(operations.clone())
                 .with_identity_memory_store(identity.clone())
-                .with_tool(EchoTool)
-                .map_err(js_err)?
+                .with_local_tool_registry(tool_registry.clone())
                 .without_orchestration_pattern_handlers()
                 .without_cluster_control_handlers(),
         )
@@ -244,6 +461,8 @@ impl StasisWasmClient {
             memory_reader: reader,
             memory_operations: operations,
             identity,
+            tool_registry,
+            callback_scope,
             llm_kind,
         })
     }
@@ -258,6 +477,11 @@ impl StasisWasmClient {
                 LlmKind::OpenAi => "openai-http",
             },
             "tools": true,
+            "hostToolBootstrap": true,
+            "hostToolResultEnvelope": "stasis.tool-result.v1",
+            "hostToolCallbackTimeoutMs": DEFAULT_CALLBACK_TIMEOUT_MS,
+            "hostToolCallbackTimeoutMaxMs": MAX_CALLBACK_TIMEOUT_MS,
+            "hostToolAbortSignal": true,
             "grapheme": true,
             "graphemeEngine": "grapheme-wasm-0.7.1",
             "graphemeStdlib": ["core", "json", "csv", "yaml", "html"],
@@ -275,6 +499,103 @@ impl StasisWasmClient {
             "corsNote": "Browser calls to api.openai.com need a same-origin /v1 proxy; pass baseUrl"
         })
         .to_string()
+    }
+
+    /// Registers a host-defined tool with the default 30-second deadline.
+    #[wasm_bindgen]
+    pub fn register_tool(
+        &self,
+        name: String,
+        description: String,
+        input_schema: JsValue,
+        callback: js_sys::Function,
+    ) -> Result<(), JsValue> {
+        self.register_tool_inner(name, description, input_schema, callback, None)
+    }
+
+    /// Registers a host-defined tool with invocation options.
+    ///
+    /// The callback receives `(input, context)`, where `context.signal` is aborted at the
+    /// deadline. Outcomes are normalized to the `stasis.tool-result.v1` envelope.
+    #[wasm_bindgen]
+    pub fn register_tool_with_options(
+        &self,
+        name: String,
+        description: String,
+        input_schema: JsValue,
+        callback: js_sys::Function,
+        options: Option<JsValue>,
+    ) -> Result<(), JsValue> {
+        self.register_tool_inner(name, description, input_schema, callback, options)
+    }
+
+    fn register_tool_inner(
+        &self,
+        name: String,
+        description: String,
+        input_schema: JsValue,
+        callback: js_sys::Function,
+        options: Option<JsValue>,
+    ) -> Result<(), JsValue> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(JsValue::from_str("tool name must be non-empty"));
+        }
+        if description.trim().is_empty() {
+            return Err(JsValue::from_str("tool description must be non-empty"));
+        }
+        if self.tool_registry.contains(name).map_err(js_err)? {
+            return Err(JsValue::from_str(&format!(
+                "tool already registered: {name}"
+            )));
+        }
+        let schema = js_to_value(&input_schema).map_err(|message| JsValue::from_str(&message))?;
+        if !schema.is_object() {
+            return Err(JsValue::from_str("tool input schema must be a JSON object"));
+        }
+        let timeout_ms = parse_tool_timeout(options)?;
+
+        let callback_key = format!("{}:{name}", self.callback_scope);
+        #[cfg(target_arch = "wasm32")]
+        HOST_CALLBACKS.with(|callbacks| {
+            callbacks
+                .borrow_mut()
+                .insert(callback_key.clone(), callback);
+        });
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = callback;
+
+        if let Err(error) = self.tool_registry.register_dynamic_tool(
+            name,
+            description,
+            schema,
+            true,
+            HostJsTool {
+                callback_key: callback_key.clone(),
+                tool_name: name.to_string(),
+                timeout_ms,
+            },
+        ) {
+            #[cfg(target_arch = "wasm32")]
+            HOST_CALLBACKS.with(|callbacks| {
+                callbacks.borrow_mut().remove(&callback_key);
+            });
+            return Err(js_err(error));
+        }
+        Ok(())
+    }
+
+    /// Invokes a registered tool without an LLM round trip. This uses the same registry,
+    /// schema validation, callback dispatch, and result envelope as the agent tool loop.
+    #[wasm_bindgen]
+    pub async fn invoke_tool(&self, name: String, arguments: JsValue) -> Result<JsValue, JsValue> {
+        let input = js_to_value(&arguments).map_err(|message| JsValue::from_str(&message))?;
+        let output = self
+            .tool_registry
+            .invoke_tool(name.trim(), input)
+            .await
+            .map_err(js_err)?;
+        value_to_js(&output).map_err(|message| JsValue::from_str(&message))
     }
 
     #[wasm_bindgen]
@@ -470,6 +791,10 @@ impl StasisWasmClient {
     }
 
     /// Enqueue `workflow.stasis.tool_loop`. `tool_input_json` is optional JSON.
+    ///
+    /// This positional method remains the low-level compatibility surface. New JavaScript hosts
+    /// should prefer `enqueue_tool_loop_with_options`, which accepts an object and avoids manual
+    /// JSON serialization.
     #[wasm_bindgen]
     pub async fn enqueue_tool_loop(
         &self,
@@ -485,15 +810,60 @@ impl StasisWasmClient {
             }
             _ => Value::Null,
         };
+        self.enqueue_tool_loop_inner(
+            job_id,
+            user_prompt,
+            tool_name,
+            Some(tool_input),
+            session_id,
+            None,
+        )
+        .await
+    }
+
+    /// Object-based tool-loop enqueue used by the ergonomic JavaScript SDK facade.
+    #[wasm_bindgen]
+    pub async fn enqueue_tool_loop_with_options(
+        &self,
+        job_id: String,
+        user_prompt: String,
+        options: JsValue,
+    ) -> Result<String, JsValue> {
+        let options: ToolLoopOptions = parse_json_value(&options, "tool-loop options")?;
+        if options.tool.trim().is_empty() {
+            return Err(JsValue::from_str(
+                "tool-loop options.tool must be non-empty",
+            ));
+        }
+        self.enqueue_tool_loop_inner(
+            job_id,
+            user_prompt,
+            options.tool,
+            options.tool_input,
+            options.session_id,
+            options.system_prompt,
+        )
+        .await
+    }
+
+    async fn enqueue_tool_loop_inner(
+        &self,
+        job_id: String,
+        user_prompt: String,
+        tool_name: String,
+        tool_input: Option<Value>,
+        session_id: Option<String>,
+        system_prompt: Option<String>,
+    ) -> Result<String, JsValue> {
         let correlation = session_id.clone().unwrap_or_else(|| job_id.clone());
         let payload = ToolLoopJobPayload {
             user_prompt,
-            system_prompt: None,
+            system_prompt,
             policy_profile: None,
             model_hint: None,
             reasoning_effort: None,
             tool_name,
-            tool_input: Some(tool_input),
+            tool_input,
             tool_call_mode: None,
             memory_policy: Some(MemoryPolicyPayload {
                 session_ids: session_id.map(|id| vec![id]),
@@ -630,6 +1000,12 @@ impl StasisWasmClient {
         Ok(json!({ "processed": processed, "count": processed.len() }).to_string())
     }
 
+    /// Cancel a non-terminal job and persist the cancellation lifecycle event.
+    #[wasm_bindgen]
+    pub async fn cancel_job(&self, job_id: String) -> Result<bool, JsValue> {
+        self.runtime.cancel(&job_id).await.map_err(js_err)
+    }
+
     #[wasm_bindgen]
     pub async fn job_state(&self, job_id: String) -> Result<String, JsValue> {
         let job = self
@@ -735,6 +1111,18 @@ impl StasisWasmClient {
     }
 }
 
+impl Drop for StasisWasmClient {
+    fn drop(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        HOST_CALLBACKS.with(|callbacks| {
+            let prefix = format!("{}:", self.callback_scope);
+            callbacks
+                .borrow_mut()
+                .retain(|key, _| !key.starts_with(&prefix));
+        });
+    }
+}
+
 fn openai_tool_loop_chat_client(gateway: &OpenAiHttpGateway) -> Arc<dyn AiChatClient> {
     // Workspace `cargo check` unifies `stasis-rs` features with `llm-genai`, which
     // hides `OpenAiHttpChatClient`. The npm guest is always wasm32, where genai is off.
@@ -750,6 +1138,49 @@ fn openai_tool_loop_chat_client(gateway: &OpenAiHttpGateway) -> Arc<dyn AiChatCl
             MockAiChatClient::new("stasis-wasm native-host placeholder").with_first_tool_call(),
         )
     }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ToolOptions {
+    #[serde(default, alias = "timeout_ms", rename = "timeoutMs")]
+    timeout_ms: Option<u32>,
+}
+
+fn parse_tool_timeout(options: Option<JsValue>) -> Result<u32, JsValue> {
+    let Some(options) = options else {
+        return Ok(DEFAULT_CALLBACK_TIMEOUT_MS);
+    };
+    if options.is_null() || options.is_undefined() {
+        return Ok(DEFAULT_CALLBACK_TIMEOUT_MS);
+    }
+    let raw = js_sys::JSON::stringify(&options)
+        .map_err(|error| JsValue::from_str(&js_error_message(&error)))?
+        .as_string()
+        .ok_or_else(|| JsValue::from_str("tool options must be a JSON object"))?;
+    let parsed: ToolOptions = serde_json::from_str(&raw)
+        .map_err(|error| JsValue::from_str(&format!("invalid tool options: {error}")))?;
+    let timeout_ms = parsed.timeout_ms.unwrap_or(DEFAULT_CALLBACK_TIMEOUT_MS);
+    if timeout_ms == 0 || timeout_ms > MAX_CALLBACK_TIMEOUT_MS {
+        return Err(JsValue::from_str(&format!(
+            "timeoutMs must be between 1 and {MAX_CALLBACK_TIMEOUT_MS}"
+        )));
+    }
+    Ok(timeout_ms)
+}
+
+fn parse_json_value<T: for<'de> Deserialize<'de>>(
+    value: &JsValue,
+    label: &str,
+) -> Result<T, JsValue> {
+    if value.is_null() || value.is_undefined() {
+        return Err(JsValue::from_str(&format!("{label} must be an object")));
+    }
+    let raw = js_sys::JSON::stringify(value)
+        .map_err(|error| JsValue::from_str(&js_error_message(&error)))?
+        .as_string()
+        .ok_or_else(|| JsValue::from_str(&format!("{label} must be a JSON object")))?;
+    serde_json::from_str(&raw)
+        .map_err(|error| JsValue::from_str(&format!("invalid {label}: {error}")))
 }
 
 fn parse_create_options(config: Option<JsValue>) -> Result<CreateOptions, JsValue> {
@@ -771,6 +1202,42 @@ fn parse_create_options(config: Option<JsValue>) -> Result<CreateOptions, JsValu
         return Ok(CreateOptions::default());
     }
     serde_json::from_str(&raw).map_err(js_err)
+}
+
+fn js_to_value(value: &JsValue) -> Result<Value, String> {
+    if value.is_undefined() {
+        return Err("value must be JSON-serializable; received undefined".to_string());
+    }
+    let raw = js_sys::JSON::stringify(value)
+        .map_err(|error| {
+            format!(
+                "value must be JSON-serializable: {}",
+                js_error_message(&error)
+            )
+        })?
+        .as_string()
+        .ok_or_else(|| "value must be JSON-serializable".to_string())?;
+    serde_json::from_str(&raw).map_err(|error| format!("invalid JSON value: {error}"))
+}
+
+fn value_to_js(value: &Value) -> Result<JsValue, String> {
+    js_sys::JSON::parse(&value.to_string()).map_err(|error| {
+        format!(
+            "failed to convert JSON for JavaScript: {}",
+            js_error_message(&error)
+        )
+    })
+}
+
+fn js_error_message(value: &JsValue) -> String {
+    value
+        .as_string()
+        .or_else(|| {
+            js_sys::Reflect::get(value, &JsValue::from_str("message"))
+                .ok()?
+                .as_string()
+        })
+        .unwrap_or_else(|| "JavaScript callback failed".to_string())
 }
 
 fn job_state_name(state: JobState) -> &'static str {
