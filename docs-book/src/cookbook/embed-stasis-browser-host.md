@@ -144,6 +144,13 @@ const { text } = await stasis.session("customer-42").prompt("Check status", {
 });
 ```
 
+TypeBox schemas can be passed directly to `parameters`; the SDK infers the callback input from the
+schema's static type. Wrap one with `typeboxSchema(schema, { parse })` to run `Value.Parse` before
+execution. `zodSchema(schema, { toJSONSchema: z.toJSONSchema })` and
+`valibotSchema(schema, { toJsonSchema, parse })` provide the same inference and
+runtime parsing without pinning validator dependencies inside Stasis. `schema(jsonSchema, parse)` is
+the generic adapter. Parser failures become structured callback errors visible to the model loop.
+
 Use `submit()` plus `wait()` to separate acceptance from completion. `stream()` returns an async
 iterable of durable `accepted`, state, and terminal events; `events(operationId, { after })` reconnects
 from the last consumed numeric cursor without resubmitting work. Configure

@@ -8,15 +8,40 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export type JsonSchema = Record<string, unknown>;
 
+/** A runtime parser paired with the JSON Schema advertised to the model. */
+export interface SchemaAdapter<TInput = any> {
+  readonly jsonSchema: JsonSchema;
+  readonly parse: (input: unknown) => TInput | Promise<TInput>;
+  /** Type-only marker used for execute() inference. */
+  readonly "~stasis.input"?: TInput;
+}
+
+export type SchemaOutput<TSchema> =
+  TSchema extends SchemaAdapter<infer TInput> ? TInput
+  : TSchema extends { readonly static: infer TInput } ? TInput
+  : TSchema extends { readonly _output: infer TOutput } ? TOutput
+  : TSchema extends { readonly "~standard": { readonly types?: { readonly output: infer TOutput } } } ? TOutput
+  : TSchema extends { readonly "~types"?: { readonly output: infer TOutput } } ? TOutput
+  : any;
+
 export interface ToolDefinition<TInput = any, TResult = JsonValue> {
   name: string;
   description: string;
-  parameters: JsonSchema & { readonly static?: TInput };
+  parameters: (JsonSchema & { readonly static?: TInput }) | SchemaAdapter<TInput>;
   timeoutMs?: number;
   /** Safe tools may be executed again when explicitly resuming a dead-lettered operation. */
   replay?: "safe" | "unsafe";
   execute(input: TInput, context: StasisToolContext): TResult | Promise<TResult>;
 }
+
+export type InferredToolDefinition<TParameters, TResult = JsonValue> =
+  Omit<ToolDefinition<SchemaOutput<TParameters>, TResult>, "parameters" | "execute"> & {
+    parameters: TParameters;
+    execute(
+      input: SchemaOutput<TParameters>,
+      context: StasisToolContext,
+    ): TResult | Promise<TResult>;
+  };
 
 export interface PromptSectionContext {
   input: string;
@@ -139,9 +164,37 @@ export class Stasis {
   resume(operationId: string, options?: PromptOptions): Promise<PromptResult>;
 }
 
-export function tool<TInput = any, TResult = JsonValue>(
-  definition: ToolDefinition<TInput, TResult>,
-): ToolDefinition<TInput, TResult>;
+export function schema<TInput = any>(
+  jsonSchema: JsonSchema,
+  parse?: (input: unknown) => TInput | Promise<TInput>,
+): SchemaAdapter<TInput>;
+export function typeboxSchema<TSchema extends object, TOutput = SchemaOutput<TSchema>>(
+  typebox: TSchema,
+  options?: { parse?: (input: unknown) => TOutput | Promise<TOutput> },
+): SchemaAdapter<TOutput>;
+export function zodSchema<TSchema extends object, TOutput = SchemaOutput<TSchema>>(
+  zod: TSchema,
+  options: {
+    toJSONSchema?: (schema: TSchema) => JsonSchema;
+    jsonSchema?: JsonSchema;
+    parse?: (input: unknown) => TOutput | Promise<TOutput>;
+  },
+): SchemaAdapter<TOutput>;
+export function valibotSchema<TSchema extends object, TOutput = SchemaOutput<TSchema>>(
+  valibot: TSchema,
+  options: {
+    toJsonSchema?: (schema: TSchema) => JsonSchema;
+    toJSONSchema?: (schema: TSchema) => JsonSchema;
+    jsonSchema?: JsonSchema;
+    parse: (input: unknown) => TOutput | Promise<TOutput>;
+  },
+): SchemaAdapter<TOutput>;
+export function tool<
+  TParameters extends object,
+  TResult = JsonValue,
+>(
+  definition: InferredToolDefinition<TParameters, TResult>,
+): ToolDefinition<SchemaOutput<TParameters>, TResult>;
 export function extension(definition: StasisExtension): StasisExtension;
 export function memoryLifecycleStore(): LifecycleStore;
 export function webStorageLifecycleStore(

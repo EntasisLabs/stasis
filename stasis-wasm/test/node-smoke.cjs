@@ -494,6 +494,94 @@ test("tool-loop returns malformed model arguments to the model as tool output", 
   assert.match(blob, /requires_query/);
 });
 
+test("schema adapters advertise JSON Schema and parse before execution", async () => {
+  const { schema, tool, typeboxSchema, valibotSchema, zodSchema } = require("../sdk/core.cjs");
+  const jsonSchema = {
+    type: "object",
+    properties: { count: { type: "number" } },
+    required: ["count"],
+    additionalProperties: false,
+  };
+
+  const generic = tool({
+    name: "generic_schema",
+    description: "generic",
+    parameters: schema(jsonSchema, ({ count }) => ({ count: count + 10 })),
+    execute: ({ count }) => count + 1,
+  });
+  assert.equal(generic.parameters, jsonSchema);
+  assert.equal(await generic.execute({ count: 2 }, {}), 13);
+
+  const typebox = tool({
+    name: "typebox_schema",
+    description: "typebox",
+    parameters: typeboxSchema(jsonSchema, { parse: ({ count }) => ({ count: count * 2 }) }),
+    execute: ({ count }) => count,
+  });
+  assert.equal(await typebox.execute({ count: 3 }, {}), 6);
+
+  const zod = {
+    async parseAsync({ count }) { return { count: count * 2 }; },
+  };
+  const adaptedZod = tool({
+    name: "zod_schema",
+    description: "zod",
+    parameters: zodSchema(zod, { toJSONSchema: () => jsonSchema }),
+    execute: ({ count }) => count,
+  });
+  assert.equal(await adaptedZod.execute({ count: 4 }, {}), 8);
+
+  const valibot = {};
+  const adaptedValibot = tool({
+    name: "valibot_schema",
+    description: "valibot",
+    parameters: valibotSchema(valibot, {
+      toJsonSchema: () => jsonSchema,
+      parse: ({ count }) => ({ count: count + 1 }),
+    }),
+    execute: ({ count }) => count,
+  });
+  assert.equal(await adaptedValibot.execute({ count: 5 }, {}), 6);
+});
+
+test("schema parser failures use the structured callback error path", async () => {
+  const { createStasis, schema, tool } = require("../sdk/node.cjs");
+  let executed = false;
+  const stasis = await createStasis({
+    tools: [tool({
+      name: "strict_schema",
+      description: "Validate strict input",
+      parameters: schema(
+        { type: "object", additionalProperties: false },
+        () => { throw new Error("domain validation failed"); },
+      ),
+      execute() {
+        executed = true;
+        return { unexpected: true };
+      },
+    })],
+  });
+  const result = await stasis.prompt("validate", {
+    operationId: "sdk-schema-error-1",
+    tool: "strict_schema",
+    toolInput: {},
+  });
+  assert.equal(result.status, "done");
+  assert.equal(executed, false);
+  assert.match(JSON.stringify(result.diagnostics), /callback_failed/);
+  assert.match(JSON.stringify(result.diagnostics), /domain validation failed/);
+});
+
+test("schema adapters reject incomplete integrations", () => {
+  const { typeboxSchema, valibotSchema, zodSchema } = require("../sdk/core.cjs");
+  assert.throws(() => typeboxSchema(null), /TypeBox schema/);
+  assert.throws(() => zodSchema({ parse() {} }), /toJSONSchema/);
+  assert.throws(
+    () => valibotSchema({}, { jsonSchema: {} }),
+    /requires \{ parse \}/,
+  );
+});
+
 test("ergonomic SDK prompt hides queue plumbing and returns full result", async () => {
   const { createStasis, Stasis, tool } = require("../sdk/node.cjs");
   let calls = 0;
@@ -570,12 +658,16 @@ test("CommonJS and ESM SDK cores stay behaviorally identical", () => {
   expected = expected
     .replace("export function memoryLifecycleStore", "function memoryLifecycleStore")
     .replace("export function webStorageLifecycleStore", "function webStorageLifecycleStore")
+    .replace("export function schema", "function schema")
+    .replace("export function typeboxSchema", "function typeboxSchema")
+    .replace("export function zodSchema", "function zodSchema")
+    .replace("export function valibotSchema", "function valibotSchema")
     .replace("export function tool", "function tool")
     .replace("export function extension", "function extension")
     .replace("export class StasisSession", "class StasisSession")
     .replace("export class Stasis", "class Stasis")
     .replace("export function createStasisWith", "function createStasisWith");
-  expected += "\nmodule.exports = { Stasis, StasisSession, createStasisWith, extension, memoryLifecycleStore, tool, webStorageLifecycleStore };\n";
+  expected += "\nmodule.exports = { Stasis, StasisSession, createStasisWith, extension, memoryLifecycleStore, schema, tool, typeboxSchema, valibotSchema, webStorageLifecycleStore, zodSchema };\n";
   assert.equal(fs.readFileSync(path.join(sdkDir, "core.cjs"), "utf8"), expected);
 });
 

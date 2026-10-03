@@ -51,6 +51,59 @@ const { text } = await stasis.session("customer-42").prompt(
 );
 ```
 
+### Schema-native tools
+
+TypeBox schemas can be passed directly. Their static type flows into `execute()` with no generic or
+cast, while the same object is advertised to the model as JSON Schema:
+
+```ts
+import { Type } from "@sinclair/typebox";
+import { tool } from "stasis-wasm/sdk";
+
+const Parameters = Type.Object({ resourceId: Type.String() });
+const lookup = tool({
+  name: "lookup_status",
+  description: "Read a resource status",
+  parameters: Parameters,
+  execute({ resourceId }) { // resourceId: string
+    return { resourceId, status: "ready" };
+  },
+});
+```
+
+Use `typeboxSchema()` when the callback should also run through a TypeBox parser such as
+`Value.Parse`. Zod and Valibot adapters convert their schemas to the JSON Schema needed by the
+model and parse again immediately before `execute()`:
+
+```ts
+import { Value } from "@sinclair/typebox/value";
+import { z } from "zod";
+import * as v from "valibot";
+import { toJsonSchema } from "@valibot/to-json-schema";
+import { typeboxSchema, valibotSchema, zodSchema } from "stasis-wasm/sdk";
+
+const strictTypeBox = typeboxSchema(Parameters, {
+  parse: input => Value.Parse(Parameters, input),
+});
+
+const ZodParameters = z.object({ resourceId: z.string() });
+const zodParameters = zodSchema(ZodParameters, {
+  toJSONSchema: z.toJSONSchema,
+});
+
+const ValibotParameters = v.object({ resourceId: v.string() });
+const valibotParameters = valibotSchema(ValibotParameters, {
+  toJsonSchema,
+  parse: input => v.parse(ValibotParameters, input),
+});
+```
+
+The adapters intentionally do not bundle a validator: applications choose their TypeBox, Zod, or
+Valibot version. `schema(jsonSchema, parse)` supports any other validator. Parser failures use the
+existing structured callback-error path, so the tool loop can recover instead of crashing. Stasis
+first checks the advertised JSON Schema subset, then runs the adapter parser; adapters are for
+stricter checks and transformations, not for accepting values that contradict the advertised schema.
+
 For long work, `submit()` returns an idempotent operation receipt and `wait()` joins it later:
 
 ```js

@@ -1,6 +1,7 @@
 let operationSequence = 0;
 const TERMINAL_STATES = new Set(["succeeded", "failed", "dead_letter", "canceled"]);
 const SNAPSHOT_VERSION = 1;
+const SCHEMA_ADAPTER = Symbol.for("stasis.schema-adapter");
 
 function cloneJson(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -46,6 +47,60 @@ function requireObject(value, label) {
   }
 }
 
+function schemaAdapter(jsonSchema, parse) {
+  requireObject(jsonSchema, "JSON schema");
+  if (parse !== undefined && typeof parse !== "function") {
+    throw new TypeError("schema parser must be a function");
+  }
+  return Object.freeze({
+    [SCHEMA_ADAPTER]: true,
+    jsonSchema,
+    parse: parse ?? ((input) => input),
+  });
+}
+
+/** Adapt a JSON Schema and optional parser into typed tool parameters. */
+export function schema(jsonSchema, parse) {
+  return schemaAdapter(jsonSchema, parse);
+}
+
+/** TypeBox schemas are JSON Schema already; a Value.Parse-style parser is optional. */
+export function typeboxSchema(typebox, options = {}) {
+  requireObject(typebox, "TypeBox schema");
+  return schemaAdapter(typebox, options.parse);
+}
+
+/** Adapt Zod without coupling Stasis to a particular Zod release. */
+export function zodSchema(zod, options = {}) {
+  requireObject(zod, "Zod schema");
+  if (typeof zod.parse !== "function" && typeof zod.parseAsync !== "function") {
+    throw new TypeError("Zod schema must implement parse() or parseAsync()");
+  }
+  const convert = options.toJSONSchema ?? zod.toJSONSchema;
+  const jsonSchema = options.jsonSchema ?? (typeof convert === "function" ? convert(zod) : undefined);
+  if (!jsonSchema) {
+    throw new TypeError("zodSchema requires { toJSONSchema } (for example z.toJSONSchema) or { jsonSchema }");
+  }
+  const parse = options.parse ?? ((input) => (
+    typeof zod.parseAsync === "function" ? zod.parseAsync(input) : zod.parse(input)
+  ));
+  return schemaAdapter(jsonSchema, parse);
+}
+
+/** Adapt Valibot without coupling Stasis to a particular Valibot release. */
+export function valibotSchema(valibot, options = {}) {
+  requireObject(valibot, "Valibot schema");
+  const convert = options.toJsonSchema ?? options.toJSONSchema;
+  const jsonSchema = options.jsonSchema ?? (typeof convert === "function" ? convert(valibot) : undefined);
+  if (!jsonSchema) {
+    throw new TypeError("valibotSchema requires { toJsonSchema } or { jsonSchema }");
+  }
+  if (typeof options.parse !== "function") {
+    throw new TypeError("valibotSchema requires { parse } (for example input => v.parse(schema, input))");
+  }
+  return schemaAdapter(jsonSchema, options.parse);
+}
+
 export function tool(definition) {
   requireObject(definition, "tool definition");
   if (typeof definition.name !== "string" || !definition.name.trim()) {
@@ -58,11 +113,24 @@ export function tool(definition) {
   if (typeof definition.execute !== "function") {
     throw new TypeError("tool.execute must be a function");
   }
+  const adapted = definition.parameters[SCHEMA_ADAPTER] === true
+    ? definition.parameters
+    : undefined;
+  const parameters = adapted?.jsonSchema ?? definition.parameters;
+  requireObject(parameters, "tool.parameters JSON schema");
+  const execute = adapted
+    ? (input, context) => {
+        const parsed = adapted.parse(input);
+        return parsed && typeof parsed.then === "function"
+          ? parsed.then((value) => definition.execute(value, context))
+          : definition.execute(parsed, context);
+      }
+    : definition.execute;
   const replay = definition.replay ?? "unsafe";
   if (replay !== "safe" && replay !== "unsafe") {
     throw new TypeError('tool.replay must be "safe" or "unsafe"');
   }
-  return Object.freeze({ ...definition, replay });
+  return Object.freeze({ ...definition, parameters, execute, replay });
 }
 
 export function extension(definition) {
