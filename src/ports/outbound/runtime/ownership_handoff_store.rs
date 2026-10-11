@@ -1,9 +1,9 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::errors::Result;
 use crate::domain::runtime::ownership_handoff::{OwnershipHandoff, OwnershipHandoffReservation};
 use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey, ResourceLease};
+use crate::ports::outbound::runtime::store_bounds::StoreBound;
 
 #[derive(Clone, Debug)]
 pub struct ReserveOwnershipHandoff {
@@ -16,11 +16,11 @@ pub struct ReserveOwnershipHandoff {
     pub handoff_id: String,
 }
 
+crate::async_store! {
 /// Fenced ownership handoff: reserve → transfer generation → commit|abort.
 ///
 /// Prevents two nodes from executing the same resource generation.
-#[async_trait]
-pub trait OwnershipHandoffStore: Send + Sync {
+pub trait OwnershipHandoffStore: StoreBound {
     async fn reserve(
         &self,
         request: ReserveOwnershipHandoff,
@@ -48,4 +48,5 @@ pub trait OwnershipHandoffStore: Send + Sync {
         resource: &ResourceKey,
         now: DateTime<Utc>,
     ) -> Result<Option<OwnershipHandoff>>;
+}
 }

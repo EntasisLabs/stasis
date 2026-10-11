@@ -1,10 +1,9 @@
-use async_trait::async_trait;
-
 use crate::domain::errors::Result;
 use crate::domain::runtime::job_continuation::JobContinuation;
+use crate::ports::outbound::runtime::store_bounds::StoreBound;
 
-#[async_trait]
-pub trait JobContinuationStore: Send + Sync {
+crate::async_store! {
+pub trait JobContinuationStore: StoreBound {
     async fn insert(&self, record: JobContinuation) -> Result<()>;
     async fn get(&self, id: &str) -> Result<Option<JobContinuation>>;
     async fn save(&self, record: JobContinuation) -> Result<()>;
@@ -12,4 +11,5 @@ pub trait JobContinuationStore: Send + Sync {
     /// Atomically move `pending` → `settling` when `claim_token` wins.
     async fn try_claim(&self, id: &str, claim_token: &str) -> Result<bool>;
     async fn get_by_child(&self, child_job_id: &str) -> Result<Option<JobContinuation>>;
+}
 }

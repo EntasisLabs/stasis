@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use async_trait::async_trait;
-
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::inbound_trigger::InboundTriggerReceipt;
 use crate::ports::outbound::runtime::inbound_trigger_store::{InboundTriggerStore, ReceiptInsert};
@@ -16,7 +14,7 @@ fn lock_err() -> StasisError {
     StasisError::PortFailure("inbound trigger store lock poisoned".into())
 }
 
-#[async_trait]
+crate::async_store! {
 impl InboundTriggerStore for InMemoryInboundTriggerStore {
     async fn insert_if_absent(&self, receipt: InboundTriggerReceipt) -> Result<ReceiptInsert> {
         let mut receipts = self.receipts.write().map_err(|_| lock_err())?;
@@ -32,4 +30,5 @@ impl InboundTriggerStore for InMemoryInboundTriggerStore {
         receipts.remove(idempotency_key);
         Ok(())
     }
+}
 }

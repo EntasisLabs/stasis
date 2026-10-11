@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
 - Stability: Stable
-- Last Verified: 2026-06-23
+- Last Verified: 2026-10-11
 - Verified Against:
     - src/ports/inbound/control_plane_commands.rs
   - src/ports/outbound/ai_chat_client.rs
@@ -15,6 +15,8 @@
     - src/ports/outbound/runtime/event_publisher.rs
   - src/ports/outbound/runtime/runtime_metrics.rs
   - src/ports/outbound/runtime/thread_store.rs
+  - src/ports/outbound/runtime/store_bounds.rs
+  - src/application/runtime/store_runtime.rs
   - src/ports/outbound/runtime/workflow_engine.rs
   - src/ports/outbound/memory/memory_context_reader.rs
   - src/ports/outbound/memory/memory_context_writer.rs
@@ -148,6 +150,14 @@ pub trait AiChatToolInterceptor: Send + Sync {
 - `on_tool_calls` is called once per response that contains at least one tool call.
 - The call is synchronous and happens before the tool loop processes the calls.
 - Return value is `()` — this is an observation hook, not a veto.
+
+---
+
+## Runtime store ports
+
+Job orchestration (`StoreRuntime`) calls eight store ports: `JobStore`, `RecurringStore`, `OutboxStore`, `JobAttemptStore`, `DurableWaitStore`, `JobContinuationStore`, `InboundTriggerStore`, and `ResourceLeaseStore`. `OwnershipHandoffStore` follows the same bound because it holds a lease store.
+
+Implementations use `stasis::async_store!` (or the same `cfg_attr` pair). On native the traits require `Send + Sync` and `Send` futures. On `wasm32` those bounds are dropped (`async_trait(?Send)`), so a Durable Object SQLite store can be `!Send` and still plug into `StoreRuntime::from_stores` without a second orchestration engine. In-memory, Surreal, and SQLite adapters are the built-ins. Side stores (threads, cluster, delivery, workflow definitions) are not part of that engine yet and still require `Send + Sync` on every target.
 
 ---
 

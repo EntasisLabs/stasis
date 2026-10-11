@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use async_trait::async_trait;
-
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job_continuation::{ContinuationStatus, JobContinuation};
 use crate::ports::outbound::runtime::job_continuation_store::JobContinuationStore;
@@ -16,7 +14,7 @@ fn lock_err() -> StasisError {
     StasisError::PortFailure("job continuation store lock poisoned".into())
 }
 
-#[async_trait]
+crate::async_store! {
 impl JobContinuationStore for InMemoryJobContinuationStore {
     async fn insert(&self, record: JobContinuation) -> Result<()> {
         let mut records = self.records.write().map_err(|_| lock_err())?;
@@ -79,4 +77,5 @@ impl JobContinuationStore for InMemoryJobContinuationStore {
             .find(|record| record.child_job_id.as_deref() == Some(child_job_id))
             .cloned())
     }
+}
 }

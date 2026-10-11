@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use surrealdb::{Surreal, engine::any::Any};
@@ -87,7 +86,7 @@ impl From<LeaseRow> for ResourceLease {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl ResourceLeaseStore for SurrealResourceLeaseStore {
     async fn get(&self, resource: &ResourceKey) -> Result<Option<ResourceLease>> {
         let mut response = match self
@@ -235,4 +234,5 @@ impl ResourceLeaseStore for SurrealResourceLeaseStore {
             .map(|lease| !lease.is_expired(now) && lease.fencing_token == fencing_token)
             .unwrap_or(false))
     }
+}
 }

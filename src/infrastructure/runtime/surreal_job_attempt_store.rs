@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use surrealdb::{Surreal, engine::any::Any};
@@ -124,7 +123,7 @@ impl TryFrom<JobAttemptRecord> for JobAttempt {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl JobAttemptStore for SurrealJobAttemptStore {
     async fn insert(&self, attempt: JobAttempt) -> Result<()> {
         let record: JobAttemptRecord = attempt.into();
@@ -232,4 +231,5 @@ impl JobAttemptStore for SurrealJobAttemptStore {
 
         Ok(removed)
     }
+}
 }

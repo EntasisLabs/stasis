@@ -10,10 +10,11 @@
     - src/infrastructure/sqlite/schema.rs
     - src/infrastructure/sqlite/session.rs
     - src/application/runtime/sqlite_runtime.rs
+    - src/application/runtime/store_runtime.rs
 
 ## Purpose
 
-Native SQLite is a durable alternative to SurrealDB for single-process Stasis runtimes. The DDL is the reuse boundary for a later Cloudflare Durable Object / wasm SQLite store: `schema.rs` has no rusqlite types.
+Native SQLite is a durable alternative to SurrealDB for single-process Stasis runtimes. `SqliteRuntime` is a `StoreRuntime` alias over the SQLite stores; job orchestration is shared with the in-memory and Surreal backends. The DDL is the reuse boundary for a later Cloudflare Durable Object / wasm SQLite store: `schema.rs` has no rusqlite types. That store would implement the same ports and call `StoreRuntime::from_stores` — the traits already allow a `!Send` implementation on `wasm32`.
 
 ## Selection
 

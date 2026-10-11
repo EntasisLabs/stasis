@@ -28,6 +28,7 @@ pub mod in_memory_runtime;
 pub mod inbound_trigger;
 pub mod job_context;
 pub mod job_continuation;
+pub mod job_handler;
 pub mod job_lifecycle;
 pub mod memory_aggregate_job_handler;
 pub mod memory_evict_job_handler;
@@ -58,9 +59,10 @@ pub mod runtime_job_dx;
 pub mod runtime_job_identity_context;
 #[cfg(feature = "llm-genai")]
 pub mod sequential_pattern_job_handler;
-pub mod stasis_runtime_builder;
 #[cfg(feature = "sqlite")]
 pub mod sqlite_runtime;
+pub mod stasis_runtime_builder;
+pub mod store_runtime;
 #[cfg(feature = "surreal")]
 pub mod surreal_runtime;
 #[cfg(feature = "llm-chat")]

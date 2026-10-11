@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 use crate::domain::errors::Result;
 use crate::domain::runtime::inbound_trigger::InboundTriggerReceipt;
 use crate::ports::outbound::runtime::inbound_trigger_store::{InboundTriggerStore, ReceiptInsert};
@@ -35,7 +33,7 @@ fn map_receipt(row: &rusqlite::Row<'_>) -> rusqlite::Result<InboundTriggerReceip
     })
 }
 
-#[async_trait]
+crate::async_store! {
 impl InboundTriggerStore for SqliteInboundTriggerStore {
     async fn insert_if_absent(&self, receipt: InboundTriggerReceipt) -> Result<ReceiptInsert> {
         let changed = self.session.execute(
@@ -72,4 +70,5 @@ impl InboundTriggerStore for SqliteInboundTriggerStore {
         )?;
         Ok(())
     }
+}
 }

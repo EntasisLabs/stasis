@@ -349,7 +349,7 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::sqlite_file("./stasis.sq
     .await?;
 ```
 
-`RuntimeBackend::sqlite_memory()` uses a private in-process database. The `sqlite` cargo feature is part of `native`. Schema SQL lives in `src/infrastructure/sqlite/schema.rs` so a later Durable Object store can reuse the same DDL.
+`RuntimeBackend::sqlite_memory()` uses a private in-process database. The `sqlite` cargo feature is part of `native`. In-memory, Surreal, and SQLite runtimes share one `StoreRuntime`; each backend only supplies store adapters. Schema SQL lives in `src/infrastructure/sqlite/schema.rs` so a later Durable Object store can reuse the same DDL and the same engine.
 - Typed job consumers (`StasisJob` / `JobConsumer` / `JobContext`) with `enqueue_job` builders. `StasisJob::declaration` supplies queue, retry, priority, and placement; `continue_with` runs a child after the parent succeeds, fails, or is canceled. Raw `NewJob` still works.
 - Inbound job triggers (`accept_inbound_json` / `accept_inbound_job`) so a webhook, TCP line, Kafka record, or RabbitMQ delivery can enqueue a job. Duplicate idempotency keys return the original job.
 - Durable `wait_for` / `signal` correlation and cooperative `cancel` for in-flight or deferred jobs.

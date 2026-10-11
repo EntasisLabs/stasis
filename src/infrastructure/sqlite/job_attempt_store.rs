@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::Result;
@@ -82,7 +81,7 @@ fn map_attempt(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobAttempt> {
     })
 }
 
-#[async_trait]
+crate::async_store! {
 impl JobAttemptStore for SqliteJobAttemptStore {
     async fn insert(&self, attempt: JobAttempt) -> Result<()> {
         let output_json = attempt
@@ -167,4 +166,5 @@ impl JobAttemptStore for SqliteJobAttemptStore {
             [encode_time(cutoff)],
         )
     }
+}
 }

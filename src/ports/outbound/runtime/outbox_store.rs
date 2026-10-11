@@ -1,12 +1,11 @@
-use async_trait::async_trait;
-
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::Result;
 use crate::domain::runtime::outbox::OutboxEvent;
+use crate::ports::outbound::runtime::store_bounds::StoreBound;
 
-#[async_trait]
-pub trait OutboxStore: Send + Sync {
+crate::async_store! {
+pub trait OutboxStore: StoreBound {
     async fn insert(&self, event: OutboxEvent) -> Result<()>;
     async fn save(&self, event: OutboxEvent) -> Result<()>;
     async fn get(&self, event_id: &str) -> Result<Option<OutboxEvent>>;
@@ -16,4 +15,5 @@ pub trait OutboxStore: Send + Sync {
     async fn list_by_thread_prefix(&self, thread_prefix: &str) -> Result<Vec<OutboxEvent>>;
     async fn list_by_execution_id(&self, execution_id: &str) -> Result<Vec<OutboxEvent>>;
     async fn prune_non_pending_before(&self, cutoff: DateTime<Utc>) -> Result<usize>;
+}
 }

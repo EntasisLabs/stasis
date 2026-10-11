@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::Result;
@@ -47,7 +46,10 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecurringDefinition> {
         next_run_at: decode_time(next_run_at).map_err(convert)?,
         last_run_at: last_run_at.map(decode_time).transpose().map_err(convert)?,
         lease_owner: row.get(11)?,
-        lease_expires_at: lease_expires_at.map(decode_time).transpose().map_err(convert)?,
+        lease_expires_at: lease_expires_at
+            .map(decode_time)
+            .transpose()
+            .map_err(convert)?,
     })
 }
 
@@ -90,7 +92,7 @@ impl SqliteRecurringStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl RecurringStore for SqliteRecurringStore {
     async fn insert(&self, definition: RecurringDefinition) -> Result<()> {
         self.save_def(&definition)
@@ -152,4 +154,5 @@ impl RecurringStore for SqliteRecurringStore {
             map_row,
         )
     }
+}
 }

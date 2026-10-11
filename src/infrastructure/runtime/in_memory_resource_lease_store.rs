@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::errors::{Result, StasisError};
@@ -29,7 +28,7 @@ fn live(lease: &ResourceLease, now: DateTime<Utc>) -> Option<&ResourceLease> {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl ResourceLeaseStore for InMemoryResourceLeaseStore {
     async fn get(&self, resource: &ResourceKey) -> Result<Option<ResourceLease>> {
         let leases = self.leases.read().map_err(|_| lock_err())?;
@@ -166,4 +165,5 @@ impl ResourceLeaseStore for InMemoryResourceLeaseStore {
             .map(|lease| !lease.is_expired(now) && lease.fencing_token == fencing_token)
             .unwrap_or(false))
     }
+}
 }

@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::Result;
@@ -209,7 +208,7 @@ impl SqliteOutboxStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl OutboxStore for SqliteOutboxStore {
     async fn insert(&self, event: OutboxEvent) -> Result<()> {
         self.save_event(&event)
@@ -288,4 +287,5 @@ impl OutboxStore for SqliteOutboxStore {
             [encode_time(cutoff)],
         )
     }
+}
 }

@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 use crate::domain::errors::Result;
 use crate::domain::runtime::job_continuation::{
     ChildJobSpec, ContinuationStatus, ContinuationTrigger, JobContinuation,
@@ -86,7 +84,7 @@ impl SqliteJobContinuationStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl JobContinuationStore for SqliteJobContinuationStore {
     async fn insert(&self, record: JobContinuation) -> Result<()> {
         self.save(&record)
@@ -149,6 +147,7 @@ impl JobContinuationStore for SqliteJobContinuationStore {
             map_row,
         )
     }
+}
 }
 
 trait OptionalCompat<T> {
