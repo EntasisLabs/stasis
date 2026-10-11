@@ -47,8 +47,13 @@ function cursorToResponse(cursor) {
 export function createSqlBridge(storage) {
   function exec(sql, paramsJson) {
     const params = JSON.parse(paramsJson).map(decodeParam);
-    const cursor = storage.exec(sql, params);
-    return JSON.stringify(cursorToResponse(cursor));
+    try {
+      const cursor = storage.exec(sql, params);
+      return JSON.stringify(cursorToResponse(cursor));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`${detail} :: ${sql}`);
+    }
   }
 
   function transaction(callback) {
@@ -63,12 +68,28 @@ export function createSqlBridge(storage) {
   return { exec, transaction };
 }
 
+// node:sqlite binds `?1` as the named key "1", not as a positional argument.
+// Durable Object `sql.exec(sql, ...bindings)` binds the same placeholders in order.
+function nodeBindings(sql, params) {
+  if (!/[?]\d+/.test(sql)) return params;
+  const bound = {};
+  for (let index = 0; index < params.length; index += 1) {
+    bound[index + 1] = params[index];
+  }
+  return bound;
+}
+
+function callStatement(statement, method, sql, params) {
+  const bound = nodeBindings(sql, params);
+  return Array.isArray(bound) ? statement[method](...bound) : statement[method](bound);
+}
+
 export function createNodeSqliteStorage(db) {
   return {
     exec(sql, params) {
       const statement = db.prepare(sql);
       if (returnsRows(sql)) {
-        const objects = statement.all(...params);
+        const objects = callStatement(statement, "all", sql, params);
         return {
           rowsWritten: objects.length,
           raw() {
@@ -80,7 +101,7 @@ export function createNodeSqliteStorage(db) {
           },
         };
       }
-      const info = statement.run(...params);
+      const info = callStatement(statement, "run", sql, params);
       return {
         rowsWritten: Number(info.changes ?? 0),
         raw() {

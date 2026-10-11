@@ -90,7 +90,7 @@ curl -s -X POST localhost:8787/jobs \
 
 `POST /workflows` writes a checkpoint without enqueueing a job.
 
-Store logic is tested on native rusqlite (`tests/durable_object_sqlite.rs`) and through the JavaScript bridge against `node:sqlite` (`stasis-wasm/test/durable-sqlite.mjs`), including a kernel reconstructed against the same database.
+Store logic is tested on native rusqlite (`tests/durable_object_sqlite.rs`) and through the JavaScript bridge against `node:sqlite` (`stasis-wasm/test/durable-sqlite.mjs`), including a kernel reconstructed against the same database. `node:sqlite` binds `?1` as the named key `"1"`. The test adapter maps the kernel's numbered placeholders onto that object. Durable Object `sql.exec(sql, ...bindings)` binds the same placeholders in order.
 
 ## Wiring into StoreRuntime
 
