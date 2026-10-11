@@ -13,6 +13,7 @@ pub mod concurrent_tool_branch_memory;
 pub mod coordinator_failover_job_handler;
 #[cfg(feature = "llm-genai")]
 pub mod default_chat_middlewares;
+pub mod execution_commit;
 #[cfg(feature = "grapheme")]
 pub mod grapheme_echo_job_handler;
 #[cfg(feature = "grapheme")]

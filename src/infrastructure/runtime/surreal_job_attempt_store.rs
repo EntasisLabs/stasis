@@ -29,7 +29,7 @@ impl SurrealJobAttemptStore {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
-struct JobAttemptRecord {
+pub(crate) struct JobAttemptRecord {
     attempt_id: String,
     job_id: String,
     attempt_number: u32,

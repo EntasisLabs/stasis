@@ -1,0 +1,12 @@
+# This directory retains maintained reports and Rust regression fixtures only.
+# Keep raw execution evidence and checksum snapshots outside the worktree.
+*.log
+*.sha256
+/target/
+/restart-[0-9]*/
+# Existing disposable reproduction harnesses, not maintained test sources.
+/baseline/
+/current/
+/review-*/stasis-*/
+# Superseded generated report snapshots are preserved in the external archive.
+/review-*/previous-*.md

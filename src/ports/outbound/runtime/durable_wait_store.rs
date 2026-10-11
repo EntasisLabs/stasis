@@ -16,6 +16,17 @@ pub trait DurableWaitStore: Send + Sync {
         signal_type: &str,
         correlation_key: &str,
     ) -> Result<Option<DurableWaitRecord>>;
+    /// Includes retained final waits so duplicate signal identity stays stable.
+    async fn list_by_signal(
+        &self,
+        signal_type: &str,
+        correlation_key: &str,
+    ) -> Result<Vec<DurableWaitRecord>> {
+        let _ = (signal_type, correlation_key);
+        Err(crate::domain::errors::StasisError::PortFailure(
+            "incarnation signal enumeration unsupported".into(),
+        ))
+    }
     async fn list_pending_by_signal(
         &self,
         signal_type: &str,

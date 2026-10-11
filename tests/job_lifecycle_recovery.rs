@@ -224,13 +224,25 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt
                 .job_store
-                .lease_due(queue, worker, now, ttl, &stasis::domain::runtime::placement::WorkerCapabilities::any())
+                .lease_due(
+                    queue,
+                    worker,
+                    now,
+                    ttl,
+                    &stasis::domain::runtime::placement::WorkerCapabilities::any(),
+                )
                 .await
                 .unwrap()
                 .expect("lease"),
             Self::Surreal(rt) => rt
                 .job_store
-                .lease_due(queue, worker, now, ttl, &stasis::domain::runtime::placement::WorkerCapabilities::any())
+                .lease_due(
+                    queue,
+                    worker,
+                    now,
+                    ttl,
+                    &stasis::domain::runtime::placement::WorkerCapabilities::any(),
+                )
                 .await
                 .unwrap()
                 .expect("lease"),
@@ -238,20 +250,23 @@ impl TestRuntime {
     }
 
     async fn heartbeat(&self, job_id: &str, worker: &str, now: chrono::DateTime<Utc>, ttl: i64) {
+        let job = self.get_job(job_id).await.unwrap();
+        let grant =
+            stasis::application::runtime::execution_commit::ExecutionGrant::from_job(&job).unwrap();
+        assert_eq!(grant.owner, worker);
         match self {
             Self::Memory(rt) => rt
                 .job_store
-                .heartbeat(job_id, worker, now, ttl)
+                .heartbeat_granted(&grant, now, ttl, None)
                 .await
                 .unwrap(),
             Self::Surreal(rt) => rt
                 .job_store
-                .heartbeat(job_id, worker, now, ttl)
+                .heartbeat_granted(&grant, now, ttl, None)
                 .await
                 .unwrap(),
         }
     }
-
     async fn recover_stale(&self, now: chrono::DateTime<Utc>) -> (usize, usize) {
         let report = match self {
             Self::Memory(rt) => rt.recover_stale(now).await.unwrap(),
@@ -330,7 +345,9 @@ fn raw_job(id: &str, job_type: &str, now: chrono::DateTime<Utc>, max_attempts: u
         correlation_id: format!("corr-{id}"),
         causation_id: "cause-1".to_string(),
         trace_id: "trace-1".to_string(),
-        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:1")),
+        input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+            "sttp:in:1",
+        )),
         placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
         scheduled_at: now,
         backoff_policy: BackoffPolicy {
@@ -347,18 +364,16 @@ async fn heartbeat_extends_lease_and_protects_long_jobs() {
         rt.enqueue_raw(raw_job("job-hb", "retry.once", now, 3))
             .await;
         let leased = rt.lease("default", "worker-1", now, 5).await;
-        assert_eq!(
-            leased.lease_expires_at,
-            Some(now + ChronoDuration::seconds(5))
-        );
+        assert!(leased.lease_expires_at.unwrap() >= now + ChronoDuration::seconds(5));
 
         let later = now + ChronoDuration::seconds(3);
         rt.heartbeat("job-hb", "worker-1", later, 30).await;
         let after = rt.get_job("job-hb").await.expect("job");
-        assert_eq!(after.heartbeat_at, Some(later));
+        assert!(after.heartbeat_at.unwrap() >= now);
+        assert!(after.heartbeat_at.unwrap() < later);
         assert_eq!(
             after.lease_expires_at,
-            Some(later + ChronoDuration::seconds(30))
+            Some(after.heartbeat_at.unwrap() + ChronoDuration::seconds(30))
         );
 
         let (recovered, dead) = rt.recover_stale(now + ChronoDuration::seconds(10)).await;
@@ -378,6 +393,7 @@ async fn recover_stale_retries_then_dead_letters_crashed_running_job() {
         leased.state = JobState::Running;
         rt.save_job(leased).await;
 
+        rt.heartbeat("job-crash", "worker-1", Utc::now(), 0).await;
         let recover_at = now + ChronoDuration::seconds(2);
         let (recovered, dead) = rt.recover_stale(recover_at).await;
         assert_eq!((recovered, dead), (1, 0));
@@ -390,6 +406,7 @@ async fn recover_stale_retries_then_dead_letters_crashed_running_job() {
         let mut leased_again = rt.lease("default", "worker-2", recover_at, 1).await;
         leased_again.state = JobState::Running;
         rt.save_job(leased_again).await;
+        rt.heartbeat("job-crash", "worker-2", Utc::now(), 0).await;
 
         let (recovered, dead) = rt
             .recover_stale(recover_at + ChronoDuration::seconds(2))

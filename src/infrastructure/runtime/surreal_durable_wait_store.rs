@@ -37,9 +37,11 @@ impl SurrealDurableWaitStore {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
-struct WaitRow {
+pub(crate) struct WaitRow {
     wait_id: String,
     job_id: String,
+    #[serde(default)]
+    incarnation: Option<u64>,
     signal_type: String,
     correlation_key: String,
     status: String,
@@ -55,6 +57,7 @@ impl From<DurableWaitRecord> for WaitRow {
         Self {
             wait_id: value.wait_id,
             job_id: value.job_id,
+            incarnation: Some(value.incarnation),
             signal_type: value.signal_type,
             correlation_key: value.correlation_key,
             status: match value.status {
@@ -90,6 +93,7 @@ impl TryFrom<WaitRow> for DurableWaitRecord {
         Ok(Self {
             wait_id: value.wait_id,
             job_id: value.job_id,
+            incarnation: value.incarnation.unwrap_or(0),
             signal_type: value.signal_type,
             correlation_key: value.correlation_key,
             status,
@@ -105,6 +109,8 @@ impl TryFrom<WaitRow> for DurableWaitRecord {
 #[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
 struct SignalRow {
     signal_id: String,
+    #[serde(default)]
+    target_incarnations: Option<Vec<String>>,
     signal_type: String,
     correlation_key: String,
     payload_json: String,
@@ -115,6 +121,7 @@ impl From<DurableSignalRecord> for SignalRow {
     fn from(value: DurableSignalRecord) -> Self {
         Self {
             signal_id: value.signal_id,
+            target_incarnations: value.target_incarnations,
             signal_type: value.signal_type,
             correlation_key: value.correlation_key,
             payload_json: value.payload_json,
@@ -127,6 +134,7 @@ impl From<SignalRow> for DurableSignalRecord {
     fn from(value: SignalRow) -> Self {
         Self {
             signal_id: value.signal_id,
+            target_incarnations: value.target_incarnations,
             signal_type: value.signal_type,
             correlation_key: value.correlation_key,
             payload_json: value.payload_json,
@@ -184,6 +192,19 @@ impl DurableWaitStore for SurrealDurableWaitStore {
         Ok(waits.into_iter().find(|wait| wait.job_id == job_id))
     }
 
+    async fn list_by_signal(
+        &self,
+        signal_type: &str,
+        correlation_key: &str,
+    ) -> Result<Vec<DurableWaitRecord>> {
+        let mut response = self.db.query("SELECT * FROM type::table($table) WHERE signal_type = $signal_type AND correlation_key = $correlation_key")
+            .bind(("table",self.wait_table.clone())).bind(("signal_type",signal_type.to_string())).bind(("correlation_key",correlation_key.to_string()))
+            .await.map_err(|e| Self::port_err("signal recipients",e))?;
+        let rows: Vec<WaitRow> = response
+            .take(0)
+            .map_err(|e| Self::port_err("signal recipients", e))?;
+        rows.into_iter().map(DurableWaitRecord::try_from).collect()
+    }
     async fn list_pending_by_signal(
         &self,
         signal_type: &str,

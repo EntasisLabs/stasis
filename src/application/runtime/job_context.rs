@@ -75,7 +75,7 @@ pub struct JobContext {
     pub cancellation: watch::Receiver<bool>,
     pub deadline: Option<DateTime<Utc>>,
     pub fencing_token: Option<FencingToken>,
-    worker_id: String,
+    pub execution_grant: Option<crate::application::runtime::execution_commit::ExecutionGrant>,
     lease_seconds: i64,
     job: Job,
     services: JobContextServices,
@@ -89,15 +89,28 @@ impl JobContext {
         services: JobContextServices,
         lease_seconds: i64,
     ) -> Self {
+        let worker_id = worker_id.into();
+        let execution_grant = crate::domain::runtime::execution::ExecutionGrant::from_job(job)
+            .filter(|grant| {
+                grant.owner == worker_id
+                    && grant.epoch != 0
+                    && matches!(
+                        job.state,
+                        crate::domain::runtime::job::JobState::Leased
+                            | crate::domain::runtime::job::JobState::Running
+                    )
+            });
         Self {
             job_id: job.id.clone(),
-            attempt: job.attempts + 1,
+            attempt: job.attempts.saturating_add(1),
             correlation_id: job.correlation_id.clone(),
             causation_id: Some(job.causation_id.clone()),
             cancellation,
             deadline: None,
-            fencing_token: None,
-            worker_id: worker_id.into(),
+            fencing_token: execution_grant
+                .as_ref()
+                .map(|grant| FencingToken(grant.epoch)),
+            execution_grant,
             lease_seconds,
             job: job.clone(),
             services,
@@ -105,28 +118,49 @@ impl JobContext {
     }
 
     pub async fn heartbeat(&self) -> Result<()> {
+        let grant = self
+            .execution_grant
+            .as_ref()
+            .ok_or_else(|| StasisError::PortFailure("native execution grant missing".into()))?;
         self.services
             .job_store
-            .heartbeat(
-                &self.job_id,
-                &self.worker_id,
+            .heartbeat_granted(grant, self.services.clock.now(), self.lease_seconds, None)
+            .await
+    }
+    pub async fn progress<T: Serialize>(&self, value: T) -> Result<()> {
+        let grant = self
+            .execution_grant
+            .as_ref()
+            .ok_or_else(|| StasisError::PortFailure("native execution grant missing".into()))?;
+        let progress =
+            serde_json::to_string(&value).map_err(|e| StasisError::PortFailure(e.to_string()))?;
+        self.services
+            .job_store
+            .heartbeat_granted(
+                grant,
                 self.services.clock.now(),
                 self.lease_seconds,
+                Some(progress),
             )
             .await
     }
 
-    pub async fn progress<T: Serialize>(&self, value: T) -> Result<()> {
-        let progress_json = serde_json::to_string(&value)
-            .map_err(|err| StasisError::PortFailure(format!("serialize job progress: {err}")))?;
-        let Some(mut job) = self.services.job_store.get(&self.job_id).await? else {
-            return Err(StasisError::PortFailure(format!(
-                "job not found for progress: {}",
-                self.job_id
-            )));
-        };
-        job.progress_json = Some(progress_json);
-        self.services.job_store.save(job).await
+    /// Cleanup-only authority exists only after native cancellation. Evidence is retained for
+    /// this retired execution; it cannot change the job state, output or newer attempt.
+    pub async fn acknowledge_cleanup<T: Serialize>(
+        &self,
+        evidence: T,
+    ) -> Result<crate::application::runtime::execution_commit::CommitResult> {
+        let grant = self
+            .execution_grant
+            .as_ref()
+            .ok_or_else(|| StasisError::PortFailure("native execution grant missing".into()))?;
+        let json = serde_json::to_string(&evidence)
+            .map_err(|e| StasisError::PortFailure(e.to_string()))?;
+        self.services
+            .job_store
+            .acknowledge_cleanup(grant, json)
+            .await
     }
 
     pub async fn publish<E: StasisEvent>(&self, event: E) -> Result<()> {
@@ -137,33 +171,40 @@ impl JobContext {
             .services
             .id_generator
             .next_id(&format!("evt-{}", self.job_id));
+        let grant = self
+            .execution_grant
+            .as_ref()
+            .ok_or_else(|| StasisError::PortFailure("native execution grant missing".into()))?;
         self.services
-            .outbox_store
-            .insert(OutboxEvent {
-                event_id,
-                status: OutboxStatus::Pending,
-                publish_attempts: 0,
-                published_at: None,
-                next_attempt_at: None,
-                last_publish_error: None,
-                event: RuntimeEvent {
-                    event_type: RuntimeEventType::JobPublished,
-                    job_id: self.job_id.clone(),
-                    thread_id: None,
-                    correlation_id: self.correlation_id.clone(),
-                    causation_id: self.job_id.clone(),
-                    trace_id: self.job.trace_id.clone(),
-                    input_provenance: self.job.input_provenance.clone(),
-                    output_provenance: None,
-                    execution_id: None,
-                    input_memory_query_id: None,
-                    input_memory_query_fingerprint: None,
-                    output_memory_node_id: None,
-                    retrieval_path: None,
-                    occurred_at: now,
-                    message: Some(format!("{}:{payload}", E::NAME)),
+            .job_store
+            .publish_granted(
+                grant,
+                OutboxEvent {
+                    event_id,
+                    status: OutboxStatus::Pending,
+                    publish_attempts: 0,
+                    published_at: None,
+                    next_attempt_at: None,
+                    last_publish_error: None,
+                    event: RuntimeEvent {
+                        event_type: RuntimeEventType::JobPublished,
+                        job_id: self.job_id.clone(),
+                        thread_id: None,
+                        correlation_id: self.correlation_id.clone(),
+                        causation_id: self.job_id.clone(),
+                        trace_id: self.job.trace_id.clone(),
+                        input_provenance: self.job.input_provenance.clone(),
+                        output_provenance: None,
+                        execution_id: None,
+                        input_memory_query_id: None,
+                        input_memory_query_fingerprint: None,
+                        output_memory_node_id: None,
+                        retrieval_path: None,
+                        occurred_at: now,
+                        message: Some(format!("{}:{payload}", E::NAME)),
+                    },
                 },
-            })
+            )
             .await
     }
 
@@ -177,9 +218,14 @@ impl JobContext {
             .map_err(|err| StasisError::PortFailure(format!("serialize child job: {err}")))?;
         let now = self.services.clock.now();
         let id = self.services.id_generator.next_id("job");
+        let grant = self
+            .execution_grant
+            .as_ref()
+            .ok_or_else(|| StasisError::PortFailure("native execution grant missing".into()))?;
         self.services
             .job_store
-            .insert(
+            .stage_child(
+                grant,
                 NewJob {
                     id: id.clone(),
                     queue: declared.queue,
@@ -212,6 +258,7 @@ impl JobContext {
             self.services.job_store.clone(),
             self.services.continuation_store.clone(),
         )
+        .execution_grant(self.execution_grant.clone())
     }
 
     pub async fn parent_job_id(&self) -> Result<Option<String>> {
@@ -276,40 +323,15 @@ impl<'a, E: StasisEvent> WaitRequest<'a, E> {
             now + chrono::Duration::from_std(timeout).unwrap_or(chrono::Duration::seconds(0))
         });
 
-        if let Some(existing) = self
-            .ctx
-            .services
-            .wait_store
-            .get_pending_wait(&self.ctx.job_id, E::NAME, &correlation_key)
-            .await?
-        {
-            return settle_wait(&self.ctx.services, existing, now).await;
-        }
-
-        if let Some(signaled) = self
-            .ctx
-            .services
-            .wait_store
-            .get_wait(&wait_id(&self.ctx.job_id, E::NAME, &correlation_key))
-            .await?
-            && signaled.status == DurableWaitStatus::Signaled
-        {
-            return decode_signal(signaled.signal_payload.as_deref());
-        }
-
-        if let Some(signal) = self
-            .ctx
-            .services
-            .wait_store
-            .take_unconsumed_signal(E::NAME, &correlation_key, &[])
-            .await?
-        {
-            return decode_signal(Some(&signal.payload_json));
-        }
-
         let wait = DurableWaitRecord {
-            wait_id: wait_id(&self.ctx.job_id, E::NAME, &correlation_key),
+            wait_id: wait_id(
+                &self.ctx.job_id,
+                self.ctx.job.incarnation,
+                E::NAME,
+                &correlation_key,
+            ),
             job_id: self.ctx.job_id.clone(),
+            incarnation: self.ctx.job.incarnation,
             signal_type: E::NAME.to_string(),
             correlation_key: correlation_key.clone(),
             status: DurableWaitStatus::Pending,
@@ -319,38 +341,24 @@ impl<'a, E: StasisEvent> WaitRequest<'a, E> {
             signal_payload: None,
             consumed_signal_ids: Vec::new(),
         };
-        self.ctx
-            .services
-            .wait_store
-            .insert_wait(wait.clone())
-            .await?;
-
-        if let Some(signal) = self
+        let grant = self
             .ctx
-            .services
-            .wait_store
-            .take_unconsumed_signal(E::NAME, &correlation_key, &[])
-            .await?
-        {
-            let _ = self
-                .ctx
-                .services
-                .wait_store
-                .complete_wait(
-                    &wait.wait_id,
-                    DurableWaitStatus::Signaled,
-                    Some(signal.payload_json.clone()),
-                    Some(signal.signal_id),
-                    now,
-                )
-                .await?;
-            return decode_signal(Some(&signal.payload_json));
+            .execution_grant
+            .as_ref()
+            .ok_or_else(|| StasisError::PortFailure("native execution grant missing".into()))?;
+        let wait = self.ctx.services.job_store.poll_wait(grant, wait).await?;
+        match wait.status {
+            DurableWaitStatus::Signaled => decode_signal(wait.signal_payload.as_deref()),
+            DurableWaitStatus::TimedOut => Err(JobConsumeError::Timeout(format!(
+                "wait for {} timed out",
+                E::NAME
+            ))),
+            DurableWaitStatus::Cancelled => Err(JobConsumeError::Cancelled),
+            DurableWaitStatus::Pending => Err(JobConsumeError::Deferred {
+                scheduled_at: next_poll_at(now, wait.deadline_at),
+                message: format!("waiting for signal {}", E::NAME),
+            }),
         }
-
-        Err(JobConsumeError::Deferred {
-            scheduled_at: next_poll_at(now, deadline),
-            message: format!("waiting for signal {}", E::NAME),
-        })
     }
 }
 
@@ -363,52 +371,6 @@ impl<'a, E: StasisEvent> IntoFuture for WaitRequest<'a, E> {
     }
 }
 
-async fn settle_wait<E: StasisEvent>(
-    services: &JobContextServices,
-    wait: DurableWaitRecord,
-    now: DateTime<Utc>,
-) -> JobResult<E> {
-    if let Some(deadline) = wait.deadline_at
-        && now >= deadline
-    {
-        let _ = services
-            .wait_store
-            .complete_wait(&wait.wait_id, DurableWaitStatus::TimedOut, None, None, now)
-            .await?;
-        return Err(JobConsumeError::Timeout(format!(
-            "wait for {} timed out",
-            wait.signal_type
-        )));
-    }
-
-    if let Some(signal) = services
-        .wait_store
-        .take_unconsumed_signal(
-            &wait.signal_type,
-            &wait.correlation_key,
-            &wait.consumed_signal_ids,
-        )
-        .await?
-    {
-        let _ = services
-            .wait_store
-            .complete_wait(
-                &wait.wait_id,
-                DurableWaitStatus::Signaled,
-                Some(signal.payload_json.clone()),
-                Some(signal.signal_id),
-                now,
-            )
-            .await?;
-        return decode_signal(Some(&signal.payload_json));
-    }
-
-    Err(JobConsumeError::Deferred {
-        scheduled_at: next_poll_at(now, wait.deadline_at),
-        message: format!("waiting for signal {}", wait.signal_type),
-    })
-}
-
 fn decode_signal<E: StasisEvent>(payload: Option<&str>) -> JobResult<E> {
     let Some(payload) = payload else {
         return Err(JobConsumeError::Fatal(
@@ -419,8 +381,8 @@ fn decode_signal<E: StasisEvent>(payload: Option<&str>) -> JobResult<E> {
         .map_err(|err| JobConsumeError::Fatal(format!("decode signal payload: {err}")))
 }
 
-fn wait_id(job_id: &str, signal_type: &str, correlation_key: &str) -> String {
-    format!("wait:{job_id}:{signal_type}:{correlation_key}")
+fn wait_id(job_id: &str, incarnation: u64, signal_type: &str, correlation_key: &str) -> String {
+    format!("wait:{job_id}:incarnation:{incarnation}:{signal_type}:{correlation_key}")
 }
 
 fn next_poll_at(now: DateTime<Utc>, deadline: Option<DateTime<Utc>>) -> DateTime<Utc> {

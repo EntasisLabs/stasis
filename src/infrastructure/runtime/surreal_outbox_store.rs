@@ -29,7 +29,7 @@ impl SurrealOutboxStore {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
-struct OutboxRecord {
+pub(crate) struct OutboxRecord {
     event_id: String,
     status: String,
     publish_attempts: u32,

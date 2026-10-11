@@ -299,13 +299,13 @@ impl JobHandler for AgentTurnWaitableJobHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::domain::runtime::job::{BackoffPolicy, Job, JobState};
     use crate::infrastructure::agent::in_memory_agent_event_ingress::InMemoryAgentEventIngress;
     use crate::infrastructure::agent::in_memory_turn_wait_store::InMemoryTurnWaitStore;
     use crate::infrastructure::agent::json_agent_message_codec::JsonAgentMessageCodec;
     use crate::infrastructure::agent::wait_correlating_agent_event_ingress::WaitCorrelatingAgentEventIngress;
     use crate::ports::outbound::agent::AgentEventIngress;
+    use async_trait::async_trait;
     use chrono::Utc;
 
     fn job(payload: &AgentTurnWaitableJobPayload) -> Job {
@@ -328,6 +328,11 @@ mod tests {
             output_provenance: None,
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: Utc::now(),
+            execution_epoch: 0,
+            incarnation: 0,
+            terminal_cycle: 0,
+            wakeup_pending: false,
+            version: 0,
             lease_owner: None,
             lease_expires_at: None,
             heartbeat_at: None,

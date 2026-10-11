@@ -92,6 +92,13 @@ pub struct ChildJobSpec {
 pub struct JobContinuation {
     pub id: String,
     pub parent_job_id: String,
+    pub parent_incarnation: u64,
+    pub parent_terminal_cycle: u64,
+    /// Earliest native commit version eligible to settle this obligation.
+    /// A lower bound, not equality: ordinary retries/deferrals retain the edge.
+    /// Replay advances version before reopening; earlier terminal/control receipts
+    /// cannot settle newly registered obligations. None is ambiguous legacy data.
+    pub parent_version_floor: Option<u64>,
     pub trigger: ContinuationTrigger,
     pub status: ContinuationStatus,
     pub child: ChildJobSpec,

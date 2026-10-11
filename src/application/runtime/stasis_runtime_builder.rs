@@ -104,6 +104,17 @@ impl JobHandler for DelegatingJobHandler {
         self.inner.execute_with_context(job, ctx).await
     }
 
+    async fn on_lifecycle_committed(
+        &self,
+        job: &crate::domain::runtime::job::Job,
+        event: &crate::application::runtime::job_lifecycle::JobLifecycleEvent,
+        idempotency_key: &str,
+    ) -> Result<()> {
+        self.inner
+            .on_lifecycle_committed(job, event, idempotency_key)
+            .await
+    }
+
     async fn on_lifecycle(
         &self,
         job: &crate::domain::runtime::job::Job,

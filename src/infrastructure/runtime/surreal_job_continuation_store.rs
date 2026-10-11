@@ -35,9 +35,15 @@ impl SurrealJobContinuationStore {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
-struct ContinuationRow {
+pub(crate) struct ContinuationRow {
     continuation_id: String,
     parent_job_id: String,
+    #[serde(default)]
+    parent_incarnation: Option<u64>,
+    #[serde(default)]
+    parent_terminal_cycle: Option<u64>,
+    #[serde(default)]
+    parent_version_floor: Option<u64>,
     trigger: String,
     status: String,
     child_spec_json: String,
@@ -57,6 +63,9 @@ impl TryFrom<JobContinuation> for ContinuationRow {
         Ok(Self {
             continuation_id: value.id,
             parent_job_id: value.parent_job_id,
+            parent_incarnation: Some(value.parent_incarnation),
+            parent_terminal_cycle: Some(value.parent_terminal_cycle),
+            parent_version_floor: value.parent_version_floor,
             trigger: value.trigger.as_str().to_string(),
             status: value.status.as_str().to_string(),
             child_spec_json,
@@ -84,6 +93,9 @@ impl TryFrom<ContinuationRow> for JobContinuation {
         Ok(Self {
             id: value.continuation_id,
             parent_job_id: value.parent_job_id,
+            parent_incarnation: value.parent_incarnation.unwrap_or(0),
+            parent_terminal_cycle: value.parent_terminal_cycle.unwrap_or(0),
+            parent_version_floor: value.parent_version_floor,
             trigger,
             status,
             child,

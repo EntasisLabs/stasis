@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::runtime::placement::PlacementConstraints;
 use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum JobState {
     Enqueued,
     Leased,
@@ -30,7 +30,7 @@ impl Default for BackoffPolicy {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Job {
     pub id: String,
     pub queue: String,
@@ -50,6 +50,20 @@ pub struct Job {
     /// Optional runtime-neutral output lineage.
     pub output_provenance: Option<ProvenanceRef>,
     pub placement: PlacementConstraints,
+    /// Native-issued generation; never derived from attempt count or caller input.
+    pub execution_epoch: u64,
+    /// Native persistent identity issued before the first lease; immutable until deletion.
+    #[serde(default)]
+    pub incarnation: u64,
+    /// Native terminal/replay cycle; retries and deferrals do not change it.
+    /// Zero is ambiguous legacy identity, never adopted by a continuation.
+    #[serde(default)]
+    pub terminal_cycle: u64,
+    /// A signal arrived during this grant; deferral must not overwrite its wakeup.
+    #[serde(default)]
+    pub wakeup_pending: bool,
+    /// Optimistic version for control-plane transitions.
+    pub version: u64,
     pub lease_owner: Option<String>,
     pub lease_expires_at: Option<DateTime<Utc>>,
     pub heartbeat_at: Option<DateTime<Utc>>,
@@ -61,6 +75,31 @@ pub struct Job {
 }
 
 impl Job {
+    /// Materialization accepts a new scheduling specification, never execution authority.
+    pub fn normalize_new(&mut self) -> crate::domain::errors::Result<()> {
+        if self.state != JobState::Enqueued
+            || self.output_provenance.is_some()
+            || self.attempts != 0
+            || self.started_at.is_some()
+            || self.finished_at.is_some()
+            || self.last_error.is_some()
+            || self.progress_json.is_some()
+        {
+            return Err(crate::domain::errors::StasisError::PortFailure(
+                "materialization requires a new enqueued specification without execution output"
+                    .into(),
+            ));
+        }
+        self.execution_epoch = 0;
+        self.version = 0;
+        self.incarnation = 0;
+        self.terminal_cycle = 0;
+        self.lease_owner = None;
+        self.lease_expires_at = None;
+        self.heartbeat_at = None;
+        self.wakeup_pending = false;
+        Ok(())
+    }
     /// Compatibility view of STTP input node id when input provenance uses the STTP scheme.
     pub fn sttp_input_node_id(&self) -> String {
         SttpProvenanceAdapter::to_compat_string(self.input_provenance.as_ref())
@@ -113,6 +152,11 @@ impl NewJob {
             input_provenance: self.input_provenance,
             output_provenance: None,
             placement: self.placement,
+            execution_epoch: 0,
+            incarnation: 0,
+            terminal_cycle: 0,
+            wakeup_pending: false,
+            version: 0,
             lease_owner: None,
             lease_expires_at: None,
             heartbeat_at: None,
