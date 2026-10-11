@@ -1,10 +1,9 @@
-use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::{BackoffPolicy, Job, JobState};
 use crate::domain::runtime::placement::{PlacementConstraints, WorkerCapabilities};
 use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
 use crate::ports::outbound::runtime::job_store::JobStore;
+use chrono::{DateTime, Utc};
 
 use super::codec::{decode_json, decode_time, encode_json, encode_time, sql_err};
 use super::session::SqliteSession;
@@ -99,10 +98,8 @@ fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     let started_at: Option<i64> = row.get(23)?;
     let finished_at: Option<i64> = row.get(24)?;
 
-    let input_provenance = SttpProvenanceAdapter::merge_legacy(
-        decode_provenance(input_provenance_json),
-        &sttp_input,
-    );
+    let input_provenance =
+        SttpProvenanceAdapter::merge_legacy(decode_provenance(input_provenance_json), &sttp_input);
     let output_provenance = decode_provenance(output_provenance_json).or_else(|| {
         sttp_output
             .as_deref()
@@ -180,7 +177,10 @@ fn upsert_sql() -> String {
             finished_at = excluded.finished_at,
             last_error = excluded.last_error,
             progress_json = excluded.progress_json",
-        (1..=27).map(|n| format!("?{n}")).collect::<Vec<_>>().join(", ")
+        (1..=27)
+            .map(|n| format!("?{n}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     )
 }
 
@@ -225,8 +225,10 @@ impl SqliteJobStore {
     fn save_job(&self, job: &Job) -> Result<()> {
         let params = job_params(job)?;
         let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        self.session
-            .execute(&upsert_sql(), rusqlite::params_from_iter(refs.iter().copied()))?;
+        self.session.execute(
+            &upsert_sql(),
+            rusqlite::params_from_iter(refs.iter().copied()),
+        )?;
         Ok(())
     }
 
@@ -239,7 +241,7 @@ impl SqliteJobStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl JobStore for SqliteJobStore {
     async fn insert(&self, job: Job) -> Result<()> {
         self.save_job(&job)
@@ -371,4 +373,5 @@ impl JobStore for SqliteJobStore {
             [encode_time(cutoff)],
         )
     }
+}
 }

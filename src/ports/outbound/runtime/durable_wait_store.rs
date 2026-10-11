@@ -1,13 +1,13 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::Result;
 use crate::domain::runtime::durable_wait::{
     DurableSignalRecord, DurableWaitRecord, DurableWaitStatus,
 };
+use crate::ports::outbound::runtime::store_bounds::StoreBound;
 
-#[async_trait]
-pub trait DurableWaitStore: Send + Sync {
+crate::async_store! {
+pub trait DurableWaitStore: StoreBound {
     async fn insert_wait(&self, record: DurableWaitRecord) -> Result<()>;
     async fn get_wait(&self, wait_id: &str) -> Result<Option<DurableWaitRecord>>;
     async fn get_pending_wait(
@@ -39,4 +39,5 @@ pub trait DurableWaitStore: Send + Sync {
         signal_id: Option<String>,
         updated_at: DateTime<Utc>,
     ) -> Result<bool>;
+}
 }

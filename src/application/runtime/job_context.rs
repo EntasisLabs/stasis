@@ -354,9 +354,17 @@ impl<'a, E: StasisEvent> WaitRequest<'a, E> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+type WaitFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+#[cfg(target_arch = "wasm32")]
+type WaitFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
+
 impl<'a, E: StasisEvent> IntoFuture for WaitRequest<'a, E> {
     type Output = JobResult<E>;
-    type IntoFuture = Pin<Box<dyn Future<Output = JobResult<E>> + Send + 'a>>;
+    /// Native wait futures are `Send`. On `wasm32` they are not, matching the
+    /// store traits (`async_trait(?Send)`), so a `!Send` Durable Object store
+    /// can be awaited from a job.
+    type IntoFuture = WaitFuture<'a, JobResult<E>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(self.poll())

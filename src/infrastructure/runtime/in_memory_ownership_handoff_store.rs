@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::errors::{Result, StasisError};
@@ -40,7 +39,7 @@ impl InMemoryOwnershipHandoffStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl OwnershipHandoffStore for InMemoryOwnershipHandoffStore {
     async fn reserve(
         &self,
@@ -220,4 +219,5 @@ impl OwnershipHandoffStore for InMemoryOwnershipHandoffStore {
             .filter(|h| h.is_active(now))
             .cloned())
     }
+}
 }

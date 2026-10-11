@@ -23,6 +23,7 @@ pub mod resource_lease_store;
 pub mod runtime_metrics;
 pub mod runtime_telemetry;
 pub mod runtime_tracing;
+pub mod store_bounds;
 pub mod thread_store;
 pub mod workflow_definition_store;
 pub mod workflow_engine;

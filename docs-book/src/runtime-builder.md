@@ -5,10 +5,11 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
 - Stability: Stable
-- Last Verified: 2026-09-26
+- Last Verified: 2026-10-11
 - Verified Against:
   - src/application/runtime/stasis_runtime_builder.rs
-    - src/application/composition/runtime_composition.rs
+  - src/application/runtime/store_runtime.rs
+  - src/application/composition/runtime_composition.rs
   - src/infrastructure/runtime/in_memory_thread_store.rs
   - src/infrastructure/runtime/surreal_thread_store.rs
   - src/infrastructure/memory/locus_node_store_factory.rs
@@ -298,7 +299,7 @@ let processed = runtime.process_once("default", "worker-1").await?;
 println!("processed={:?}", processed);
 ```
 
-`RuntimeComposition` exposes the underlying `InMemoryRuntime` or `SurrealRuntime` depending on the backend selected, while `StasisRuntime` (currently implemented by `RuntimeSdk`) provides the backend-agnostic operational facade.
+`RuntimeComposition` exposes the underlying `InMemoryRuntime`, `SurrealRuntime`, or `SqliteRuntime` depending on the backend selected. Those three types are aliases of one `StoreRuntime` over each backend's stores; orchestration is not copied per backend. `StasisRuntime` (currently implemented by `RuntimeSdk`) provides the backend-agnostic operational facade.
 
 ---
 

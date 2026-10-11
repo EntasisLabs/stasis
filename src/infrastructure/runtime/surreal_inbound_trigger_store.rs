@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use surrealdb::{Surreal, engine::any::Any};
@@ -80,7 +79,7 @@ impl From<ReceiptRow> for InboundTriggerReceipt {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl InboundTriggerStore for SurrealInboundTriggerStore {
     async fn insert_if_absent(&self, receipt: InboundTriggerReceipt) -> Result<ReceiptInsert> {
         let id = receipt_record_id(&receipt.idempotency_key);
@@ -125,6 +124,7 @@ impl InboundTriggerStore for SurrealInboundTriggerStore {
             .map_err(|err| Self::port_err("delete inbound trigger", err))?;
         Ok(())
     }
+}
 }
 
 impl SurrealInboundTriggerStore {

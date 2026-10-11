@@ -1,11 +1,11 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::errors::Result;
 use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey, ResourceLease};
+use crate::ports::outbound::runtime::store_bounds::StoreBound;
 
-#[async_trait]
-pub trait ResourceLeaseStore: Send + Sync {
+crate::async_store! {
+pub trait ResourceLeaseStore: StoreBound {
     async fn get(&self, resource: &ResourceKey) -> Result<Option<ResourceLease>>;
     async fn acquire(
         &self,
@@ -45,4 +45,5 @@ pub trait ResourceLeaseStore: Send + Sync {
         fencing_token: FencingToken,
         now: DateTime<Utc>,
     ) -> Result<bool>;
+}
 }

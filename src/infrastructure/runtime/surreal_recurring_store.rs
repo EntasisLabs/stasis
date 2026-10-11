@@ -1,7 +1,6 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::{engine::any::Any, Surreal};
+use surrealdb::{Surreal, engine::any::Any};
 use surrealdb_types::SurrealValue;
 
 use crate::domain::errors::{Result, StasisError};
@@ -91,7 +90,7 @@ impl From<RecurringRecord> for RecurringDefinition {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl RecurringStore for SurrealRecurringStore {
     async fn insert(&self, definition: RecurringDefinition) -> Result<()> {
         let record: RecurringRecord = definition.into();
@@ -170,4 +169,5 @@ impl RecurringStore for SurrealRecurringStore {
 
         Ok(rows.into_iter().map(RecurringDefinition::from).collect())
     }
+}
 }

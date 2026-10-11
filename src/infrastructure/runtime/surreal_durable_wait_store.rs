@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use surrealdb::{Surreal, engine::any::Any};
@@ -135,7 +134,7 @@ impl From<SignalRow> for DurableSignalRecord {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl DurableWaitStore for SurrealDurableWaitStore {
     async fn insert_wait(&self, record: DurableWaitRecord) -> Result<()> {
         let row: WaitRow = record.into();
@@ -345,4 +344,5 @@ impl DurableWaitStore for SurrealDurableWaitStore {
         self.save_wait(wait).await?;
         Ok(true)
     }
+}
 }

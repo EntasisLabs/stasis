@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::{Result, StasisError};
@@ -20,7 +19,7 @@ fn lock_err() -> StasisError {
     StasisError::PortFailure("durable wait store lock poisoned".into())
 }
 
-#[async_trait]
+crate::async_store! {
 impl DurableWaitStore for InMemoryDurableWaitStore {
     async fn insert_wait(&self, record: DurableWaitRecord) -> Result<()> {
         let mut waits = self.waits.write().map_err(|_| lock_err())?;
@@ -149,4 +148,5 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
         wait.updated_at = updated_at;
         Ok(true)
     }
+}
 }

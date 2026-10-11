@@ -5,10 +5,13 @@
 - Document Type: Reference Standard
 - Audience: Engineer, SRE, Architect
 - Stability: Stable
-- Last Verified: 2026-09-26
+- Last Verified: 2026-10-11
 - Verified Against:
+	- src/application/runtime/store_runtime.rs
 	- src/application/runtime/in_memory_runtime.rs
 	- src/application/runtime/surreal_runtime.rs
+	- src/application/runtime/sqlite_runtime.rs
+	- src/ports/outbound/runtime/store_bounds.rs
 	- src/application/use_cases/investigate_runtime_lineage.rs
 	- src/domain/runtime/job.rs
 	- src/domain/runtime/job_attempt.rs
@@ -23,7 +26,7 @@
 
 ## Scope
 
-This document defines the implementation-facing design for the distributed Stasis runtime across in-memory and Surreal backends.
+This document defines the implementation-facing design for the distributed Stasis runtime across in-memory, Surreal, and SQLite backends.
 
 The runtime coordinates:
 - core job lifecycle and scheduling
@@ -290,6 +293,21 @@ Optional lineage extensions:
 - Lease expiration enables recovery after worker crash.
 - Dead-letter records must retain full diagnostics and replay metadata.
 - Policy violations are terminal and classified explicitly for lineage querying.
+
+## Shared store runtime
+
+Enqueue, `process_once`, leases, retries and dead letters, waits and signals, continuations, recurring materialization, and inbound triggers live once in `StoreRuntime<J, R, O, A, W, Cn, I, L>`.
+
+`InMemoryRuntime`, `SurrealRuntime`, and `SqliteRuntime` are type aliases of that engine over their concrete stores. Public fields keep those concrete types, so `runtime.job_store` is still a `SurrealJobStore` or `SqliteJobStore` (`db()` / `session()` unchanged). Constructors (`InMemoryRuntime::new`, `SurrealRuntime::new`, `SqliteRuntime::open_memory` / `open_path`) and `RuntimeBackend` / `RuntimeSdk` are unchanged.
+
+A new backend implements the eight store ports and calls `StoreRuntime::from_stores`. It does not copy orchestration. Side stores (threads, cluster nodes, delivery endpoints, workflow definitions) stay outside the engine and are still wired per backend in `RuntimeComposition`.
+
+Store traits use `StoreBound` plus the `async_store!` macro:
+
+- Native: `Send + Sync` types and `Send` futures. `dyn JobStore` stays `Send`.
+- `wasm32`: no `Send`/`Sync` supertrait, and `async_trait(?Send)` futures, the same split `JobHandler` already uses. A later Durable Object SQLite store can be `!Send`. In-memory stores stay `Send` on both targets because their concrete types are.
+
+`JobContext` wait futures follow that split: `Send` natively, not `Send` on `wasm32`.
 
 ## SurrealDB Notes
 

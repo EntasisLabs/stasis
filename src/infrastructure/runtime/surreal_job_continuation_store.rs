@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use surrealdb::{Surreal, engine::any::Any};
@@ -95,7 +94,7 @@ impl TryFrom<ContinuationRow> for JobContinuation {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl JobContinuationStore for SurrealJobContinuationStore {
     async fn insert(&self, record: JobContinuation) -> Result<()> {
         let row = ContinuationRow::try_from(record)?;
@@ -210,4 +209,5 @@ impl JobContinuationStore for SurrealJobContinuationStore {
             .map(JobContinuation::try_from)
             .transpose()
     }
+}
 }
