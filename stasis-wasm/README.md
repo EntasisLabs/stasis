@@ -304,6 +304,20 @@ const client = await StasisWasmClient.create({
 
 The workspace patches `grapheme-runtime` 0.7.1 to use `web-time::Instant` on wasm32 (`std::time::Instant::now` panics on `wasm32-unknown-unknown`). Drop `vendor/grapheme-runtime` when upstream ships a wasm-safe clock.
 
+## Cloudflare Workers
+
+`StasisDurableSqlite` persists jobs, fenced leases, heartbeats, attempts, inbound idempotency keys, and Grapheme workflow graph state in a Durable Object's SQLite. The in-memory `StasisWasmClient` is unchanged. Outbox, waits, continuations, recurring jobs, and identity rows are not written to this backend, and the lease does not execute Grapheme source; it stores `state_current`.
+
+Build this package, then run the example Worker:
+
+```bash
+npm run build
+cd ../examples/cloudflare-durable-object
+npx wrangler dev
+```
+
+The Worker calls `install_durable_sql_bridge` with `ctx.storage.sql`. Details and curl steps: [Workers Durable Object SQLite](../docs-book/src/workers-durable-sqlite.md).
+
 ## Build
 
 Requires `wasm32-unknown-unknown` and `wasm-bindgen-cli` matching `Cargo.lock`.

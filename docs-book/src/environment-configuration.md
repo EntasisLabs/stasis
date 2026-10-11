@@ -125,7 +125,7 @@ On that profile:
 - Opt-in `llm-openai-http` adds `OpenAiHttpGateway`: OpenAI Chat Completions over `reqwest`/`fetch`. Set `STASIS_OPENAI_API_KEY` (or `OPENAI_API_KEY` / `STASIS_LLM_API_KEY`) and optionally `STASIS_LLM_BASE_URL` for Groq/OpenRouter/Ollama `/v1`. Browser hosts should pass the key into `OpenAiHttpGateway::new` (no process env) and often need a same-origin proxy because of CORS.
 - Opt-in `http-wasm` compiles webhook and cluster HTTP forwarders (`fetch`). Native webhook/TCP paths stay on the default native graph.
 - Opt-in `surreal-ws` compiles remote `wss://` / `ws://` job adapters. `surreal-native` / SurrealKV `compile_error` on wasm32.
-- The `sqlite` feature links rusqlite and is not part of the wasm32 profile. Schema SQL in `infrastructure/sqlite/schema.rs` is driver-free so a later Durable Object store can reuse it.
+- The `sqlite` feature links rusqlite and is not part of the wasm32 profile. Schema SQL in `infrastructure/sqlite/schema.rs` is driver-free. The Durable Object kernel reuses it through `SqlExecutor` without enabling `sqlite`. See [Workers Durable Object SQLite](./workers-durable-sqlite.md).
 - Opt-in `locus-persist` wires `locus-surreal-adapter` (`indxdb://`, `mem://`, `wss://`). Stasis does not reimplement STTP; `locus-wasm` remains the browser persistence implementation.
 - Optional workspace crate `stasis-wasm` exposes `wasm-bindgen` `StasisWasmClient` (in-memory register/invoke + ping job). `npm --prefix stasis-wasm run build` produces the npm package (`pkg/` bundler + `pkg-node/` Node). Publish with `./scripts/publish-npm.sh`.
 

@@ -80,8 +80,8 @@ dashboard-lsp = ["dashboard", "grapheme", "dep:grapheme-lsp"]
 # Shared Surreal adapters (job/outbox/identity stores). Engine features opt in below.
 surreal = ["dep:surrealdb", "dep:surrealdb-types"]
 # Native SQLite runtime (file or in-memory). Schema SQL lives in
-# `infrastructure/sqlite/schema.rs` so a later wasm/Durable Object store can reuse it.
-# Not enabled on wasm32: rusqlite links libsqlite3.
+# `infrastructure/sqlite/schema.rs` and is reused by the wasm Durable Object
+# stores (`SqlExecutor`). Not enabled on wasm32: rusqlite links libsqlite3.
 sqlite = ["dep:rusqlite"]
 # Native engines: filesystem KV + mem + WS + TLS. Not supported on wasm32.
 surreal-native = [

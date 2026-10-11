@@ -1,0 +1,11 @@
+name = "stasis-durable-sqlite"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[[durable_objects.bindings]]
+name = "STASIS"
+class_name = "StasisDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["StasisDurableObject"]

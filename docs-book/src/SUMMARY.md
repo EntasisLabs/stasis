@@ -59,6 +59,7 @@
 
 - [SurrealDB Schema](./surrealdb-schema.md)
 - [SQLite Schema](./sqlite-schema.md)
+- [Workers Durable Object SQLite](./workers-durable-sqlite.md)
 
 ## Decision Records
 

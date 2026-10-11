@@ -10,6 +10,8 @@
     - src/infrastructure/sqlite/schema.rs
     - src/infrastructure/sqlite/session.rs
     - src/application/runtime/sqlite_runtime.rs
+    - src/infrastructure/sqlite/durable.rs
+    - examples/cloudflare-durable-object/wrangler.toml
 
 ## Purpose
 
@@ -62,3 +64,7 @@ Identity rows store the domain record as JSON `payload` plus the columns used in
 Lease claims, continuation claims, and resource-lease mutations run in `BEGIN IMMEDIATE` transactions. Inbound accept uses `INSERT ... ON CONFLICT(idempotency_key) DO NOTHING` and returns the original receipt. Job heartbeats update only the current lease owner. Recurring leases and resource fences follow the Surreal outcomes: stale fences, expired leases, and duplicate inbound keys do not take over.
 
 Turn waits stay process-local, matching the Surreal runtime.
+
+## Cloudflare Durable Objects
+
+The same DDL is applied by `DurableSqliteKernel` on wasm32. Workers storage cannot run `BEGIN` or `PRAGMA`, so those stay out of `schema.rs` and the kernel uses `SqlExecutor::transaction` (`ctx.storage.transactionSync`). Integer columns are selected with `CAST(col AS TEXT)` because JavaScript numbers cannot hold nanosecond timestamps. See [Workers Durable Object SQLite](./workers-durable-sqlite.md).

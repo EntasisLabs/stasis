@@ -1,0 +1,10 @@
+{
+  "name": "stasis-cloudflare-durable-object",
+  "private": true,
+  "type": "module",
+  "description": "Example Cloudflare Worker that persists Stasis jobs in Durable Object SQLite",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dry-run": "wrangler deploy --dry-run"
+  }
+}
