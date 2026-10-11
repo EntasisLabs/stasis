@@ -631,6 +631,8 @@ mod tests {
 
         let rt = match runtime.runtime() {
             RuntimeComposition::InMemory(rt) => rt,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(_) => panic!("expected in-memory"),
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(_) => panic!("expected in-memory"),
         };

@@ -499,7 +499,7 @@ impl StasisRuntimeBuilder {
             )
             .await?;
         let identity_memory_store = self.identity_memory_store;
-        #[cfg(any(feature = "llm-genai", feature = "surreal"))]
+        #[cfg(any(feature = "llm-genai", feature = "surreal", feature = "sqlite"))]
         let default_thread_store = self.thread_store.clone();
         let configured_cluster_store = self.cluster_node_store.clone();
         let configured_endpoint_store = self.delivery_endpoint_store.clone();
@@ -843,6 +843,156 @@ impl StasisRuntimeBuilder {
                     })?;
                 }
             }
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
+                let thread_store =
+                    RuntimeFactory::resolve_thread_store(&runtime, default_thread_store.clone());
+                let cluster_store = RuntimeFactory::resolve_cluster_node_store(
+                    &runtime,
+                    configured_cluster_store.clone(),
+                );
+
+                if self.enable_endpoint_routing_delivery {
+                    let endpoint_store = RuntimeFactory::resolve_delivery_endpoint_store(
+                        &runtime,
+                        configured_endpoint_store.clone(),
+                    );
+                    let status_store = RuntimeFactory::resolve_endpoint_delivery_status_store(
+                        &runtime,
+                        configured_endpoint_status_store.clone(),
+                    );
+
+                    let routing_publisher = RuntimeFactory::build_endpoint_routing_publisher(
+                        endpoint_store,
+                        status_store,
+                        &configured_endpoint_transports,
+                        configured_endpoint_routing_policy.clone(),
+                    );
+
+                    rt.register_event_publisher(routing_publisher)?;
+                }
+
+                #[cfg(feature = "grapheme")]
+                if self.include_grapheme_handlers {
+                    rt.register_handler(
+                        GraphemeJobHandler::new(workflow_engine.clone())
+                            .with_operation_telemetry(operation_telemetry.clone()),
+                    )?;
+                    rt.register_handler(GraphemeHealthcheckJobHandler::new(
+                        workflow_engine.clone(),
+                    ))?;
+                    rt.register_handler(GraphemeEchoJobHandler::new(workflow_engine.clone()))?;
+                    rt.register_handler(GraphemeTextOpsJobHandler::new(workflow_engine.clone()))?;
+                }
+
+                #[cfg(feature = "llm-chat")]
+                if self.include_prompt_handler {
+                    rt.register_handler(PromptChatJobHandler::new_with_memory_and_identity(
+                        chat_client.clone(),
+                        memory_context_reader.clone(),
+                        memory_context_writer.clone(),
+                        identity_memory_store.clone(),
+                    ))?;
+                }
+
+                #[cfg(feature = "llm-chat")]
+                if self.include_tool_loop_handler {
+                    rt.register_handler(ToolLoopJobHandler::new_with_memory_and_identity(
+                        chat_client.clone(),
+                        tool_registry.clone(),
+                        memory_context_reader.clone(),
+                        memory_context_writer.clone(),
+                        identity_memory_store.clone(),
+                    ))?;
+                }
+
+                if self.include_agent_handlers {
+                    #[cfg(feature = "llm-genai")]
+                    {
+                        rt.register_handler(AgentTurnJobHandler::new_with_memory_and_identity(
+                            chat_client.clone(),
+                            tool_registry.clone(),
+                            memory_context_reader.clone(),
+                            memory_context_writer.clone(),
+                            identity_memory_store.clone(),
+                        ))?;
+                        rt.register_handler(AgentSessionJobHandler::new_with_memory_and_identity(
+                            chat_client.clone(),
+                            tool_registry.clone(),
+                            memory_context_reader.clone(),
+                            memory_context_writer.clone(),
+                            identity_memory_store.clone(),
+                        ))?;
+                    }
+                    // Phase 2A/4: wait store is process-local even on Surreal backends unless injected.
+                    let mut waitable = AgentTurnWaitableJobHandler::new(
+                        turn_wait_store.clone(),
+                        agent_message_codec.clone(),
+                        agent_event_ingress.clone(),
+                    );
+                    if let Some(transport) = agent_transport.clone() {
+                        waitable = waitable
+                            .with_endpoint_publish(resolved_endpoint_store.clone(), transport);
+                    }
+                    rt.register_handler(waitable)?;
+                }
+
+                if self.include_memory_operation_handlers {
+                    if let Some(reader) = memory_context_reader.clone() {
+                        rt.register_handler(
+                            MemoryRecallJobHandler::new(reader.clone())
+                                .with_operation_telemetry(operation_telemetry.clone()),
+                        )?;
+                        rt.register_handler(MemoryFindJobHandler::new(reader.clone()))?;
+                        rt.register_handler(MemoryGraphJobHandler::new(reader))?;
+                    }
+                    if let Some(operations) = memory_operations.clone() {
+                        rt.register_handler(MemoryAggregateJobHandler::new(operations.clone()))?;
+                        rt.register_handler(MemoryTransformJobHandler::new(operations.clone()))?;
+                        rt.register_handler(MemoryRollupJobHandler::new(operations.clone()))?;
+                        rt.register_handler(MemoryEvictJobHandler::new(operations.clone()))?;
+                        rt.register_handler(MemoryReflexJobHandler::new(operations.clone()))?;
+                        rt.register_handler(MemorySchemaJobHandler::new(operations))?;
+                    }
+                }
+
+                #[cfg(feature = "llm-genai")]
+                if self.include_orchestration_pattern_handlers {
+                    rt.register_handler(
+                        ConcurrentPatternJobHandler::new_with_thread_store_and_memory(
+                            chat_client.clone(),
+                            tool_registry.clone(),
+                            Some(thread_store.clone()),
+                            memory_context_reader.clone(),
+                            memory_context_writer.clone(),
+                            identity_memory_store.clone(),
+                        ),
+                    )?;
+                    rt.register_handler(HandoffPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store.clone()),
+                    ))?;
+                    rt.register_handler(OrchestratorPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store.clone()),
+                    ))?;
+                    rt.register_handler(SequentialPatternJobHandler::new_with_thread_store(
+                        chat_client.clone(),
+                        Some(thread_store),
+                    ))?;
+                }
+
+                if self.include_cluster_control_handlers {
+                    rt.register_handler(CoordinatorFailoverJobHandler::new(cluster_store.clone()))?;
+                    rt.register_handler(QueueOwnershipRebalanceJobHandler::new(cluster_store))?;
+                }
+
+                for handler in &self.extra_handlers {
+                    rt.register_handler(DelegatingJobHandler {
+                        inner: handler.clone(),
+                    })?;
+                }
+            }
         }
 
         Ok((
@@ -982,6 +1132,8 @@ mod tests {
             RuntimeComposition::InMemory(rt) => rt,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(_) => panic!("expected in-memory runtime composition"),
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(_) => panic!("expected in-memory runtime composition"),
         };
 
         let now = Utc::now();

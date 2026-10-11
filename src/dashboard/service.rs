@@ -35,6 +35,10 @@ use crate::infrastructure::runtime::surreal_cluster_node_store::SurrealClusterNo
 use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeliveryEndpointStore;
 use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
 use crate::infrastructure::runtime::surreal_workflow_definition_store::SurrealWorkflowDefinitionStore;
+use crate::infrastructure::sqlite::cluster_node_store::SqliteClusterNodeStore;
+use crate::infrastructure::sqlite::delivery_endpoint_store::SqliteDeliveryEndpointStore;
+use crate::infrastructure::sqlite::endpoint_delivery_status_store::SqliteEndpointDeliveryStatusStore;
+use crate::infrastructure::sqlite::workflow_definition_store::SqliteWorkflowDefinitionStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
 use crate::ports::outbound::runtime::workflow_definition_store::WorkflowDefinitionStore;
@@ -51,10 +55,14 @@ type DashboardControlPlane = ControlPlaneSdk<DashboardControlStore>;
 type DashboardSurrealControlStore =
     CompositeControlPlaneStore<SurrealDeliveryEndpointStore, SurrealClusterNodeStore>;
 type DashboardSurrealControlPlane = ControlPlaneSdk<DashboardSurrealControlStore>;
+type DashboardSqliteControlStore =
+    CompositeControlPlaneStore<SqliteDeliveryEndpointStore, SqliteClusterNodeStore>;
+type DashboardSqliteControlPlane = ControlPlaneSdk<DashboardSqliteControlStore>;
 
 #[derive(Clone)]
 enum DashboardControlPlaneKind {
     InMemory(Box<DashboardControlPlane>),
+    Sqlite(Box<DashboardSqliteControlPlane>),
     Surreal(Box<DashboardSurrealControlPlane>),
 }
 
@@ -612,6 +620,7 @@ macro_rules! with_runtime {
     ($service:expr, |$rt:ident| $body:expr) => {
         match &$service.runtime {
             RuntimeComposition::InMemory($rt) => $body,
+            RuntimeComposition::Sqlite($rt) => $body,
             RuntimeComposition::Surreal($rt) => $body,
         }
     };
@@ -621,6 +630,7 @@ macro_rules! with_control_plane {
     ($service:expr, |$cp:ident| $body:expr) => {
         match &$service.control_plane {
             DashboardControlPlaneKind::InMemory($cp) => $body,
+            DashboardControlPlaneKind::Sqlite($cp) => $body,
             DashboardControlPlaneKind::Surreal($cp) => $body,
         }
     };
@@ -659,6 +669,26 @@ impl RuntimeDashboardQueryService {
                     control_plane: DashboardControlPlaneKind::InMemory(Box::new(control_plane)),
                     workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
                     workflow_store: Arc::new(InMemoryWorkflowDefinitionStore::default()),
+                    workflow_engine: RuntimeFactory::default_workflow_engine(),
+                }
+            }
+            RuntimeComposition::Sqlite(rt) => {
+                let session = rt.job_store.session();
+                let endpoint_store = SqliteDeliveryEndpointStore::new(session.clone());
+                let cluster_store = SqliteClusterNodeStore::new(session.clone());
+                let status_store = Arc::new(SqliteEndpointDeliveryStatusStore::new(session.clone()));
+                let control_store = CompositeControlPlaneStore::new(endpoint_store, cluster_store);
+                let control_plane =
+                    ControlPlaneSdk::new_with_status_store(control_store, status_store);
+
+                let workflow_store: Arc<dyn WorkflowDefinitionStore> =
+                    Arc::new(SqliteWorkflowDefinitionStore::new(session));
+
+                Self {
+                    runtime: RuntimeComposition::Sqlite(rt),
+                    control_plane: DashboardControlPlaneKind::Sqlite(Box::new(control_plane)),
+                    workflow_reflection: Arc::new(GraphemeSdkWorkflowReflection::new()),
+                    workflow_store,
                     workflow_engine: RuntimeFactory::default_workflow_engine(),
                 }
             }

@@ -128,6 +128,19 @@ impl RuntimeSdk {
         Self::from_builder(StasisRuntimeBuilder::new(backend)).await
     }
 
+
+    /// Builds an in-memory SQLite runtime facade with default wiring.
+    #[cfg(feature = "sqlite")]
+    pub async fn sqlite_memory() -> Result<Self> {
+        Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::sqlite_memory())).await
+    }
+
+    /// Builds a file-backed SQLite runtime facade with default wiring.
+    #[cfg(feature = "sqlite")]
+    pub async fn sqlite_file(path: impl Into<String>) -> Result<Self> {
+        Self::from_builder(StasisRuntimeBuilder::new(RuntimeBackend::sqlite_file(path))).await
+    }
+
     /// Builds a runtime facade from a fully configured runtime builder.
     pub async fn from_builder(builder: StasisRuntimeBuilder) -> Result<Self> {
         let runtime = builder.build().await?;
@@ -161,6 +174,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.enqueue(job).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.enqueue(job).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.enqueue(job).await,
         }
     }
 
@@ -172,6 +187,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.enqueue_job(payload),
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.enqueue_job(payload),
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.enqueue_job(payload),
         }
     }
 
@@ -187,6 +204,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.accept_inbound_json(protocol, body).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.accept_inbound_json(protocol, body).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.accept_inbound_json(protocol, body).await,
         }
     }
 
@@ -208,6 +227,11 @@ impl RuntimeSdk {
                 rt.accept_inbound_job(protocol, idempotency_key, payload)
                     .await
             }
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
+                rt.accept_inbound_job(protocol, idempotency_key, payload)
+                    .await
+            }
         }
     }
 
@@ -223,6 +247,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.continue_with(parent_job_id, child),
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.continue_with(parent_job_id, child),
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.continue_with(parent_job_id, child),
         }
     }
 
@@ -232,6 +258,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.register_handler(handler),
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.register_handler(handler),
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.register_handler(handler),
         }
     }
 
@@ -245,6 +273,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.register_consumer(handler),
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.register_consumer(handler),
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.register_consumer(handler),
         }
     }
 
@@ -254,6 +284,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.cancel(job_id).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.cancel(job_id).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.cancel(job_id).await,
         }
     }
 
@@ -263,6 +295,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.recover_stale_now().await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.recover_stale_now().await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.recover_stale_now().await,
         }
     }
 
@@ -272,6 +306,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.replay_dead_letter_now(job_id).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.replay_dead_letter_now(job_id).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.replay_dead_letter_now(job_id).await,
         }
     }
 
@@ -281,6 +317,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.fail(job_id).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.fail(job_id).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.fail(job_id).await,
         }
     }
 
@@ -290,6 +328,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.delete(job_id).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.delete(job_id).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.delete(job_id).await,
         }
     }
 
@@ -303,6 +343,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.signal(correlation_key, event).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.signal(correlation_key, event).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.signal(correlation_key, event).await,
         }
     }
 
@@ -316,6 +358,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.acquire_lease(resource, owner, ttl).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.acquire_lease(resource, owner, ttl).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.acquire_lease(resource, owner, ttl).await,
         }
     }
 
@@ -329,6 +373,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.force_acquire_lease(resource, owner, ttl).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.force_acquire_lease(resource, owner, ttl).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.force_acquire_lease(resource, owner, ttl).await,
         }
     }
 
@@ -347,6 +393,10 @@ impl RuntimeSdk {
             RuntimeComposition::Surreal(rt) => {
                 rt.renew_lease(resource, owner, fencing_token, ttl).await
             }
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
+                rt.renew_lease(resource, owner, fencing_token, ttl).await
+            }
         }
     }
 
@@ -362,6 +412,10 @@ impl RuntimeSdk {
             }
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {
+                rt.release_lease(resource, owner, fencing_token).await
+            }
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
                 rt.release_lease(resource, owner, fencing_token).await
             }
         }
@@ -385,6 +439,11 @@ impl RuntimeSdk {
                 rt.transfer_lease(resource, from, to, fencing_token, ttl)
                     .await
             }
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
+                rt.transfer_lease(resource, from, to, fencing_token, ttl)
+                    .await
+            }
         }
     }
 
@@ -397,6 +456,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.validate_fence(resource, fencing_token).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.validate_fence(resource, fencing_token).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.validate_fence(resource, fencing_token).await,
         }
     }
 
@@ -405,6 +466,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.watch_lease(resource).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.watch_lease(resource).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.watch_lease(resource).await,
         }
     }
 
@@ -414,6 +477,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.register_recurring(definition).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.register_recurring(definition).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.register_recurring(definition).await,
         }
     }
 
@@ -423,6 +488,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.recurring_store.list().await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.recurring_store.list().await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.recurring_store.list().await,
         }
     }
 
@@ -432,6 +499,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.recurring_store.save(definition).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.recurring_store.save(definition).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.recurring_store.save(definition).await,
         }
     }
 
@@ -459,6 +528,11 @@ impl RuntimeSdk {
                 rt.process_once_with_capabilities(queue, worker_id, now, worker)
                     .await
             }
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
+                rt.process_once_with_capabilities(queue, worker_id, now, worker)
+                    .await
+            }
         }
     }
 
@@ -469,6 +543,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.publish_pending_events(limit, now).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.publish_pending_events(limit, now).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.publish_pending_events(limit, now).await,
         }
     }
 
@@ -478,6 +554,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.materialize_recurring_now(scheduler_id).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.materialize_recurring_now(scheduler_id).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.materialize_recurring_now(scheduler_id).await,
         }
     }
 
@@ -500,6 +578,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.job_store.list_by_state(state).await?,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.job_store.list_by_state(state).await?,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.job_store.list_by_state(state).await?,
         };
         Ok(jobs.len())
     }
@@ -510,6 +590,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.outbox_store.list_pending(limit).await?,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.outbox_store.list_pending(limit).await?,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.outbox_store.list_pending(limit).await?,
         };
         Ok(pending.len())
     }
@@ -520,6 +602,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.recurring_store.list().await?,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.recurring_store.list().await?,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.recurring_store.list().await?,
         };
         Ok(definitions.len())
     }
@@ -530,6 +614,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.job_store.get(job_id).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.job_store.get(job_id).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.job_store.get(job_id).await,
         }
     }
 
@@ -542,6 +628,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.list_job_attempts(job_id).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.list_job_attempts(job_id).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.list_job_attempts(job_id).await,
         }
     }
 
@@ -554,6 +642,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.list_lineage_events(job_id).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.list_lineage_events(job_id).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.list_lineage_events(job_id).await,
         }
     }
 
@@ -566,6 +656,8 @@ impl RuntimeSdk {
             RuntimeComposition::InMemory(rt) => rt.get_replay_report(job_id).await,
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => rt.get_replay_report(job_id).await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => rt.get_replay_report(job_id).await,
         }
     }
 }

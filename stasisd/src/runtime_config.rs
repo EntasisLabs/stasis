@@ -36,6 +36,11 @@ pub fn resolve_stasisd_runtime_backend_from_env() -> Result<RuntimeBackend, Stas
             }
             Ok(backend)
         }
+        "sqlite" | "sqlite-file" | "sqlite_file" => Ok(RuntimeBackend::sqlite_file(env_or(
+            "STASIS_SQLITE_PATH",
+            "./stasisd.sqlite",
+        ))),
+        "sqlite-memory" | "sqlite_memory" | "sqlite-mem" => Ok(RuntimeBackend::sqlite_memory()),
         "surreal-kv" | "surreal_kv" => {
             let path = env_or("STASIS_STASISD_SURREAL_KV_PATH", "./stasisd.surrealkv");
             let mut backend = RuntimeBackend::surreal_kv(

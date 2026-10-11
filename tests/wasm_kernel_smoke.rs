@@ -110,6 +110,8 @@ async fn runtime_sdk_completes_typed_in_memory_job() {
 
     let rt = match runtime.runtime() {
         RuntimeComposition::InMemory(rt) => rt,
+        #[cfg(feature = "sqlite")]
+        RuntimeComposition::Sqlite(_) => panic!("expected in-memory runtime"),
         #[cfg(feature = "surreal")]
         RuntimeComposition::Surreal(_) => panic!("expected in-memory runtime"),
     };
@@ -269,6 +271,8 @@ async fn locus_memory_store_then_recall_job() {
 
     let rt = match runtime.runtime() {
         RuntimeComposition::InMemory(rt) => rt,
+        #[cfg(feature = "sqlite")]
+        RuntimeComposition::Sqlite(_) => panic!("expected in-memory runtime"),
         #[cfg(feature = "surreal")]
         RuntimeComposition::Surreal(_) => panic!("expected in-memory runtime"),
     };

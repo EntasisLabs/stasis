@@ -8,6 +8,8 @@ use surrealdb::engine::any::Any;
 
 use stasis::application::runtime::in_memory_runtime::InMemoryRuntime;
 use stasis::application::runtime::job_context::{JobConsumeError, JobContext, JobResult};
+#[cfg(feature = "sqlite")]
+use stasis::application::runtime::sqlite_runtime::SqliteRuntime;
 use stasis::application::runtime::surreal_runtime::SurrealRuntime;
 use stasis::application::runtime::typed_job::JobConsumer;
 use stasis::domain::runtime::job::{Job, JobState, NewJob};
@@ -143,6 +145,8 @@ impl JobConsumer<HangJob> for HangConsumer {
 enum TestRuntime {
     Memory(InMemoryRuntime),
     Surreal(SurrealRuntime),
+    #[cfg(feature = "sqlite")]
+    Sqlite(SqliteRuntime),
 }
 
 impl TestRuntime {
@@ -162,10 +166,17 @@ impl TestRuntime {
         Self::Surreal(SurrealRuntime::new(db))
     }
 
+    #[cfg(feature = "sqlite")]
+    fn sqlite_memory() -> Self {
+        Self::Sqlite(SqliteRuntime::open_memory().expect("sqlite memory runtime"))
+    }
+
     fn register_echo(&self) {
         match self {
             Self::Memory(rt) => rt.register_consumer(EchoConsumer).unwrap(),
             Self::Surreal(rt) => rt.register_consumer(EchoConsumer).unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.register_consumer(EchoConsumer).unwrap(),
         }
     }
 
@@ -173,6 +184,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.register_consumer(WaitConsumer).unwrap(),
             Self::Surreal(rt) => rt.register_consumer(WaitConsumer).unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.register_consumer(WaitConsumer).unwrap(),
         }
     }
 
@@ -180,6 +193,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.register_consumer(TimeoutWaitConsumer).unwrap(),
             Self::Surreal(rt) => rt.register_consumer(TimeoutWaitConsumer).unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.register_consumer(TimeoutWaitConsumer).unwrap(),
         }
     }
 
@@ -187,6 +202,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.register_consumer(HangConsumer).unwrap(),
             Self::Surreal(rt) => rt.register_consumer(HangConsumer).unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.register_consumer(HangConsumer).unwrap(),
         }
     }
 
@@ -211,6 +228,15 @@ impl TestRuntime {
                 .send()
                 .await
                 .expect("enqueue"),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt
+                .enqueue_job(payload)
+                .queue("replicas")
+                .idempotency_key(format!("idem-{replica_id}"))
+                .retry(RetryPolicy::exponential(8))
+                .send()
+                .await
+                .expect("enqueue"),
         }
     }
 
@@ -221,6 +247,11 @@ impl TestRuntime {
                 .await
                 .expect("process"),
             Self::Surreal(rt) => rt
+                .process_once_now("replicas", "worker-1")
+                .await
+                .expect("process"),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt
                 .process_once_now("replicas", "worker-1")
                 .await
                 .expect("process"),
@@ -237,6 +268,11 @@ impl TestRuntime {
                 .process_once_now("default", "worker-1")
                 .await
                 .expect("process"),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt
+                .process_once_now("default", "worker-1")
+                .await
+                .expect("process"),
         }
     }
 
@@ -244,6 +280,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.job_store.get(id).await.unwrap().unwrap(),
             Self::Surreal(rt) => rt.job_store.get(id).await.unwrap().unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.job_store.get(id).await.unwrap().unwrap(),
         }
     }
 
@@ -251,6 +289,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.list_lineage_events(id).await.unwrap(),
             Self::Surreal(rt) => rt.list_lineage_events(id).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.list_lineage_events(id).await.unwrap(),
         }
     }
 
@@ -261,6 +301,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.signal(replica_id, event).await.unwrap(),
             Self::Surreal(rt) => rt.signal(replica_id, event).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.signal(replica_id, event).await.unwrap(),
         }
     }
 
@@ -268,6 +310,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.cancel(id).await.unwrap(),
             Self::Surreal(rt) => rt.cancel(id).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.cancel(id).await.unwrap(),
         }
     }
 
@@ -275,6 +319,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.enqueue(job).await.unwrap(),
             Self::Surreal(rt) => rt.enqueue(job).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.enqueue(job).await.unwrap(),
         }
     }
 
@@ -288,6 +334,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.acquire_lease(resource, owner, ttl).await,
             Self::Surreal(rt) => rt.acquire_lease(resource, owner, ttl).await,
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.acquire_lease(resource, owner, ttl).await,
         }
     }
 
@@ -300,6 +348,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.force_acquire_lease(resource, owner, ttl).await.unwrap(),
             Self::Surreal(rt) => rt.force_acquire_lease(resource, owner, ttl).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.force_acquire_lease(resource, owner, ttl).await.unwrap(),
         }
     }
 
@@ -314,6 +364,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.renew_lease(resource, owner, token, ttl).await,
             Self::Surreal(rt) => rt.renew_lease(resource, owner, token, ttl).await,
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.renew_lease(resource, owner, token, ttl).await,
         }
     }
 
@@ -321,6 +373,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.release_lease(resource, owner, token).await.unwrap(),
             Self::Surreal(rt) => rt.release_lease(resource, owner, token).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.release_lease(resource, owner, token).await.unwrap(),
         }
     }
 
@@ -341,6 +395,11 @@ impl TestRuntime {
                 .transfer_lease(resource, from, to, token, ttl)
                 .await
                 .unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt
+                .transfer_lease(resource, from, to, token, ttl)
+                .await
+                .unwrap(),
         }
     }
 
@@ -348,6 +407,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.validate_fence(resource, token).await.unwrap(),
             Self::Surreal(rt) => rt.validate_fence(resource, token).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.validate_fence(resource, token).await.unwrap(),
         }
     }
 
@@ -358,6 +419,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.watch_lease(resource).await.unwrap(),
             Self::Surreal(rt) => rt.watch_lease(resource).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.watch_lease(resource).await.unwrap(),
         }
     }
 
@@ -365,6 +428,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => Self::Memory(rt.clone()),
             Self::Surreal(rt) => Self::Surreal(rt.clone()),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => Self::Sqlite(rt.clone()),
         }
     }
 }
@@ -376,6 +441,8 @@ where
 {
     f(TestRuntime::memory()).await;
     f(TestRuntime::surreal(name).await).await;
+    #[cfg(feature = "sqlite")]
+    f(TestRuntime::sqlite_memory()).await;
 }
 
 #[tokio::test]
@@ -411,6 +478,12 @@ async fn typed_enqueue_round_trip_and_causation() {
                 .await
                 .unwrap(),
             TestRuntime::Surreal(inner) => inner
+                .job_store
+                .list_by_state(JobState::Enqueued)
+                .await
+                .unwrap(),
+            #[cfg(feature = "sqlite")]
+            TestRuntime::Sqlite(inner) => inner
                 .job_store
                 .list_by_state(JobState::Enqueued)
                 .await
@@ -516,6 +589,8 @@ async fn cancel_wakes_in_flight_consumer() {
         let id = match &rt {
             TestRuntime::Memory(inner) => inner.enqueue_job(payload).send().await.unwrap(),
             TestRuntime::Surreal(inner) => inner.enqueue_job(payload).send().await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            TestRuntime::Sqlite(inner) => inner.enqueue_job(payload).send().await.unwrap(),
         };
         let worker = rt.clone_runtime();
         let process = tokio::spawn(async move { worker.process_default().await });

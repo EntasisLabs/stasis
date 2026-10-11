@@ -8,6 +8,8 @@ use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 
 use crate::application::runtime::in_memory_runtime::InMemoryRuntime;
+#[cfg(feature = "sqlite")]
+use crate::application::runtime::sqlite_runtime::SqliteRuntime;
 #[cfg(feature = "surreal")]
 use crate::application::runtime::surreal_runtime::SurrealRuntime;
 use crate::domain::errors::Result;
@@ -23,6 +25,14 @@ use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
 use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
 use crate::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
 use crate::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
+#[cfg(feature = "sqlite")]
+use crate::infrastructure::sqlite::cluster_node_store::SqliteClusterNodeStore;
+#[cfg(feature = "sqlite")]
+use crate::infrastructure::sqlite::delivery_endpoint_store::SqliteDeliveryEndpointStore;
+#[cfg(feature = "sqlite")]
+use crate::infrastructure::sqlite::endpoint_delivery_status_store::SqliteEndpointDeliveryStatusStore;
+#[cfg(feature = "sqlite")]
+use crate::infrastructure::sqlite::thread_store::SqliteThreadStore;
 #[cfg(feature = "surreal")]
 use crate::infrastructure::memory::surreal_identity_memory_store::SurrealIdentityMemoryStore;
 use crate::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
@@ -86,6 +96,9 @@ pub enum RuntimeBackend {
         database: String,
         auth: Option<SurrealAuth>,
     },
+    /// Native SQLite runtime. `path` is `:memory:` or a filesystem path.
+    #[cfg(feature = "sqlite")]
+    Sqlite { path: String },
 }
 
 pub use crate::application::composition::surreal_backend_config::SurrealAuth;
@@ -128,6 +141,20 @@ impl RuntimeBackend {
         }
     }
 
+    /// In-process SQLite database. Each runtime owns a private connection.
+    #[cfg(feature = "sqlite")]
+    pub fn sqlite_memory() -> Self {
+        Self::Sqlite {
+            path: ":memory:".to_string(),
+        }
+    }
+
+    /// File-backed SQLite database. Parent directories are created on open.
+    #[cfg(feature = "sqlite")]
+    pub fn sqlite_file(path: impl Into<String>) -> Self {
+        Self::Sqlite { path: path.into() }
+    }
+
     pub fn with_surreal_auth(mut self, auth: SurrealAuth) -> Self {
         match &mut self {
             #[cfg(feature = "surreal-native")]
@@ -137,6 +164,10 @@ impl RuntimeBackend {
             #[cfg(feature = "surreal-native")]
             Self::SurrealKv { auth: slot, .. } => *slot = Some(auth),
             Self::InMemory => {
+                let _ = auth;
+            }
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite { .. } => {
                 let _ = auth;
             }
         }
@@ -151,6 +182,8 @@ impl RuntimeBackend {
 )]
 pub enum RuntimeComposition {
     InMemory(InMemoryRuntime),
+    #[cfg(feature = "sqlite")]
+    Sqlite(SqliteRuntime),
     #[cfg(feature = "surreal")]
     Surreal(SurrealRuntime),
 }
@@ -163,6 +196,8 @@ impl RuntimeComposition {
     ) {
         match self {
             Self::InMemory(runtime) => runtime.replace_telemetry(metrics, tracing),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(runtime) => runtime.replace_telemetry(metrics, tracing),
             #[cfg(feature = "surreal")]
             Self::Surreal(runtime) => runtime.replace_telemetry(metrics, tracing),
         }
@@ -215,6 +250,10 @@ impl RuntimeFactory {
     pub async fn build(config: RuntimeBackend) -> Result<RuntimeComposition> {
         match config {
             RuntimeBackend::InMemory => Ok(RuntimeComposition::InMemory(InMemoryRuntime::new())),
+            #[cfg(feature = "sqlite")]
+            RuntimeBackend::Sqlite { path } => {
+                Ok(RuntimeComposition::Sqlite(SqliteRuntime::open_path(path)?))
+            }
             #[cfg(feature = "surreal-native")]
             RuntimeBackend::SurrealMem {
                 namespace,
@@ -325,6 +364,10 @@ impl RuntimeFactory {
 
         match runtime {
             RuntimeComposition::InMemory(_) => Arc::new(InMemoryThreadStore::default()),
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
+                Arc::new(SqliteThreadStore::new(rt.job_store.session()))
+            }
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => Arc::new(SurrealThreadStore::new(rt.job_store.db())),
         }
@@ -340,6 +383,10 @@ impl RuntimeFactory {
 
         match runtime {
             RuntimeComposition::InMemory(_) => Arc::new(InMemoryClusterNodeStore::default()),
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
+                Arc::new(SqliteClusterNodeStore::new(rt.job_store.session()))
+            }
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {
                 Arc::new(SurrealClusterNodeStore::new(rt.job_store.db()))
@@ -357,6 +404,10 @@ impl RuntimeFactory {
 
         match runtime {
             RuntimeComposition::InMemory(_) => Arc::new(InMemoryDeliveryEndpointStore::default()),
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
+                Arc::new(SqliteDeliveryEndpointStore::new(rt.job_store.session()))
+            }
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {
                 Arc::new(SurrealDeliveryEndpointStore::new(rt.job_store.db()))
@@ -375,6 +426,10 @@ impl RuntimeFactory {
         match runtime {
             RuntimeComposition::InMemory(_) => {
                 Arc::new(InMemoryEndpointDeliveryStatusStore::default())
+            }
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
+                Arc::new(SqliteEndpointDeliveryStatusStore::new(rt.job_store.session()))
             }
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {
