@@ -2,6 +2,9 @@
 //!
 //! Enables an in-memory agent loop: OpenAI HTTP (`llm-openai-http`), tool-loop +
 //! Grapheme (`grapheme-wasm` 0.7.1), Locus memory + identity, and job-store replay.
+//! Durable Object SQLite is a separate entry point ([`durable_sqlite`]).
+
+mod durable_sqlite;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

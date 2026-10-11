@@ -126,6 +126,7 @@ Default features enable the native host bundle (`native`: dashboard, Surreal, ge
 | WASM Surreal WS | `cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features surreal-ws` | Remote `wss://` job runtime (no SurrealKV) |
 | WASM Locus persist | `cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features locus-persist` | IndexedDB / remote WS memory via `locus-surreal-adapter` |
 | WASM bindings | `cargo check -p stasis-wasm --target wasm32-unknown-unknown` | `wasm-bindgen` in-memory client (`stasis-wasm`) |
+| WASM Durable Object SQLite | `examples/cloudflare-durable-object` | Jobs, leases, attempts, inbound keys, and Grapheme graph state in `ctx.storage.sql` |
 | WASM + Grapheme guest | `cargo check -p stasis-rs --target wasm32-unknown-unknown --no-default-features --features llm-openai-http,grapheme` | Tool-loop + `grapheme-wasm` 0.7.1 in-guest engine |
 | WASM npm package | `npm --prefix stasis-wasm run build && npm --prefix stasis-wasm test && npm --prefix stasis-wasm run pack:dry` | Node/bundler package with TypeScript types (`stasis-wasm@0.14.0`; publish with `./scripts/publish-npm.sh`) |
 
@@ -349,7 +350,14 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::sqlite_file("./stasis.sq
     .await?;
 ```
 
-`RuntimeBackend::sqlite_memory()` uses a private in-process database. The `sqlite` cargo feature is part of `native`. In-memory, Surreal, and SQLite runtimes share one `StoreRuntime`; each backend only supplies store adapters. Schema SQL lives in `src/infrastructure/sqlite/schema.rs` so a later Durable Object store can reuse the same DDL and the same engine.
+`RuntimeBackend::sqlite_memory()` uses a private in-process database. The `sqlite` cargo feature is part of `native`. In-memory, Surreal, and SQLite runtimes share one `StoreRuntime`; each backend only supplies store adapters. Schema SQL lives in `src/infrastructure/sqlite/schema.rs`. A Cloudflare Worker reuses that DDL and the same engine without rusqlite: see [Workers Durable Object SQLite](docs-book/src/workers-durable-sqlite.md) and `examples/cloudflare-durable-object`.
+
+```bash
+npm --prefix stasis-wasm run build
+cd examples/cloudflare-durable-object && npx wrangler dev
+```
+
+The example enqueues a job by idempotency key, processes it through `StoreRuntime`, rebuilds the kernel after an eviction, and returns the original job when the same key is posted again. Jobs, fenced leases, heartbeats, attempts, and inbound keys are SQLite stores. Recurring jobs, the outbox, durable waits, and continuations are in-memory fillers. Grapheme workflow state is stored beside the engine. Identity memory is not on this backend.
 - Typed job consumers (`StasisJob` / `JobConsumer` / `JobContext`) with `enqueue_job` builders. `StasisJob::declaration` supplies queue, retry, priority, and placement; `continue_with` runs a child after the parent succeeds, fails, or is canceled. Raw `NewJob` still works.
 - Inbound job triggers (`accept_inbound_json` / `accept_inbound_job`) so a webhook, TCP line, Kafka record, or RabbitMQ delivery can enqueue a job. Duplicate idempotency keys return the original job.
 - Durable `wait_for` / `signal` correlation and cooperative `cancel` for in-flight or deferred jobs.

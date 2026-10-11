@@ -65,7 +65,7 @@
   },
   "scripts": {
     "build": "bash scripts/build-npm.sh",
-    "test": "node --test test/node-smoke.cjs",
+    "test": "node --test test/node-smoke.cjs test/durable-sqlite.mjs",
     "prepack": "bash scripts/ensure-npm-artifacts.sh",
     "prepublishOnly": "bash scripts/ensure-npm-artifacts.sh && npm test",
     "pack:dry": "npm pack --dry-run",

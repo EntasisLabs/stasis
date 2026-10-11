@@ -1,9 +1,11 @@
 //! Versioned SQLite DDL for the Stasis runtime.
 //!
 //! This module is intentionally free of `rusqlite` (and of any SQLite driver).
-//! Native stores execute these statements through `rusqlite`. A later Durable
-//! Object or wasm SQLite backend can apply the same strings without sharing the
-//! native connection type.
+//! Native stores execute these statements through `rusqlite`. The Durable Object
+//! backend applies the same strings one statement at a time: Workers SQLite
+//! rejects `BEGIN` / `PRAGMA`, and integer columns are read with `CAST(... AS TEXT)`
+//! so nanosecond timestamps survive JavaScript's number type. Those adjustments
+//! live in `script` and the executor stores, not in this DDL.
 //!
 //! Timestamps are INTEGER nanoseconds since the Unix epoch (UTC) so ordering
 //! does not depend on RFC3339 formatting. Documents that are awkward to flatten
