@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::errors::{Result, StasisError};
@@ -61,7 +60,7 @@ impl ExecutorResourceLeaseStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl ResourceLeaseStore for ExecutorResourceLeaseStore {
     async fn get(&self, resource: &ResourceKey) -> Result<Option<ResourceLease>> {
         self.load(&resource.0)
@@ -207,4 +206,5 @@ impl ResourceLeaseStore for ExecutorResourceLeaseStore {
             .load(&resource.0)?
             .is_some_and(|lease| !lease.is_expired(now) && lease.fencing_token == fencing_token))
     }
+}
 }

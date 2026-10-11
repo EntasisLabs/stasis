@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::Result;
@@ -241,7 +240,7 @@ impl ExecutorJobStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl JobStore for ExecutorJobStore {
     async fn insert(&self, job: Job) -> Result<()> {
         self.save_job(&job)
@@ -375,4 +374,5 @@ impl JobStore for ExecutorJobStore {
         )?;
         Ok(rows.len())
     }
+}
 }

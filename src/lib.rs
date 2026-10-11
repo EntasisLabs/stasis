@@ -49,6 +49,7 @@ pub mod runtime_prelude {
         RuntimeBackend, RuntimeComposition, RuntimeFactory, SurrealAuth,
     };
     pub use crate::application::runtime::stasis_runtime_builder::StasisRuntimeBuilder;
+    pub use crate::application::runtime::store_runtime::StoreRuntime;
     pub use crate::application::runtime::typed_job::{
         JobConsumer, TypedEnqueueBuilder, TypedJobHandler,
     };

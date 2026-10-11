@@ -306,7 +306,7 @@ The workspace patches `grapheme-runtime` 0.7.1 to use `web-time::Instant` on was
 
 ## Cloudflare Workers
 
-`StasisDurableSqlite` persists jobs, fenced leases, heartbeats, attempts, inbound idempotency keys, and Grapheme workflow graph state in a Durable Object's SQLite. The in-memory `StasisWasmClient` is unchanged. Outbox, waits, continuations, recurring jobs, and identity rows are not written to this backend, and the lease does not execute Grapheme source; it stores `state_current`.
+`StasisDurableSqlite` persists jobs, fenced leases, heartbeats, attempts, and inbound idempotency keys in a Durable Object's SQLite and drives them with `StoreRuntime`. Recurring jobs, the outbox, waits, and continuations are in-memory fillers. Grapheme workflow graph state is stored beside the engine. The in-memory `StasisWasmClient` is unchanged. The lease stores `state_current`; it does not execute Grapheme source.
 
 Build this package, then run the example Worker:
 

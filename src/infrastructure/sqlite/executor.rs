@@ -3,9 +3,8 @@
 //! Native rusqlite and the Workers JavaScript bridge both implement
 //! [`SqlExecutor`]. Statements are synchronous: Durable Object `sql.exec` does
 //! not return a promise, and the store futures therefore stay `Send` without
-//! holding a JavaScript handle across an await. When store traits move to
-//! `stasis::async_store!` (`?Send` on wasm32), these stores keep the same
-//! bodies and change only the attribute.
+//! holding a JavaScript handle across an await. The store impls use
+//! `stasis::async_store!` (`?Send` on wasm32) so they match `StoreRuntime`.
 
 use crate::domain::errors::Result;
 

@@ -1,12 +1,12 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::{Job, JobState};
 use crate::domain::runtime::placement::WorkerCapabilities;
+use crate::ports::outbound::runtime::store_bounds::StoreBound;
 
-#[async_trait]
-pub trait JobStore: Send + Sync {
+crate::async_store! {
+pub trait JobStore: StoreBound {
     async fn insert(&self, job: Job) -> Result<()>;
     async fn save(&self, job: Job) -> Result<()>;
     async fn get(&self, id: &str) -> Result<Option<Job>>;
@@ -29,4 +29,5 @@ pub trait JobStore: Send + Sync {
     async fn list_expired_leases(&self, now: DateTime<Utc>) -> Result<Vec<Job>>;
     async fn delete(&self, id: &str) -> Result<bool>;
     async fn prune_terminal_before(&self, cutoff: DateTime<Utc>) -> Result<usize>;
+}
 }

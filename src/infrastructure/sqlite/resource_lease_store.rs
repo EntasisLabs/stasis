@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::domain::errors::{Result, StasisError};
@@ -70,7 +69,7 @@ impl SqliteResourceLeaseStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl ResourceLeaseStore for SqliteResourceLeaseStore {
     async fn get(&self, resource: &ResourceKey) -> Result<Option<ResourceLease>> {
         self.session
@@ -215,4 +214,5 @@ impl ResourceLeaseStore for SqliteResourceLeaseStore {
             .await?
             .is_some_and(|lease| !lease.is_expired(now) && lease.fencing_token == fencing_token))
     }
+}
 }

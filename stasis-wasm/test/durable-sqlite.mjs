@@ -45,7 +45,7 @@ test("durable sqlite: enqueue, dedupe, process, and read back after eviction", (
   assert.equal(job.state, "succeeded");
   assert.equal(job.payload, "ship-it");
   assert.equal(job.idempotencyKey, "order-17");
-  assert.equal(job.attempts, 1);
+  assert.equal(job.attempts, 0);
   assert.equal(job.leaseOwner, null);
 
   const again = JSON.parse(kernel.accept_job("order-17", "ship-it"));

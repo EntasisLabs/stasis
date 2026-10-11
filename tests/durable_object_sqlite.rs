@@ -73,10 +73,11 @@ fn inbound_key_dedupes_and_survives_reopen() {
     assert_eq!(job.state, JobState::Succeeded);
     assert_eq!(job.payload_ref, "ship-it");
     assert_eq!(job.idempotency_key, "order-17");
-    assert_eq!(job.attempts, 1);
+    assert_eq!(job.attempts, 0);
     assert!(job.lease_owner.is_none());
     let attempts = reopened.attempts_for(&job.id).expect("attempts");
     assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].attempt_number, 1);
     assert_eq!(attempts[0].outcome, JobAttemptOutcome::Succeeded);
     assert_eq!(attempts[0].worker_id, "worker-a");
     assert!(attempts[0].diagnostics.as_deref() == Some("ship-it"));

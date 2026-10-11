@@ -28,16 +28,16 @@ Run the Stasis wasm kernel on Cloudflare Workers and keep the durable job path i
 | Job attempts | Yes |
 | Inbound idempotency keys | Yes |
 | Grapheme workflow graph state (`workflow_definition` / `workflow_revision`, including `state_current` from a `grapheme:json:` payload) | Yes |
-| Outbox, durable waits and signals, continuations, recurring jobs | Not on this backend |
+| Outbox, durable waits and signals, continuations, recurring jobs | In memory, as the `StoreRuntime` fillers |
 | Threads, cluster nodes, delivery endpoints, identity memory | Not on this backend |
 | Turn waits | Process-local, same as Surreal and native SQLite |
-| Grapheme script execution inside the lease | No. The kernel stores the checkpoint. `StasisWasmClient` still runs `grapheme-wasm` in memory |
+| Grapheme script execution inside the lease | The checkpoint handler stores `state_current`. `StasisWasmClient` still runs `grapheme-wasm` in memory |
 
-This branch stays on `main` and keeps a small `DurableSqliteKernel` for the Worker demo. Draft PR #29 (`cursor/store-backed-runtime-d34f`) moves orchestration into one `StoreRuntime<J, R, O, A, W, Cn, I, L>`. The executor stores below already implement the ports that engine takes, so they can be passed to `StoreRuntime::from_stores` after that PR merges. See [Wiring into StoreRuntime](#wiring-into-storeruntime).
+`DurableSqliteKernel::open` builds a `StoreRuntime` and registers a success handler for `durable.job` and `grapheme.workflow`. See [Wiring into StoreRuntime](#wiring-into-storeruntime).
 
 ## Design
 
-Durable Object storage handles are not `Send`. The store traits stay `Send + Sync`, so the kernel does not take `worker::SqlStorage` (that type holds a JavaScript value). The wasm guest keeps the `exec` and `transaction` functions in a thread-local, the same way host tools keep callbacks, and the executor type is an empty `Send` struct. `sql.exec` is synchronous, so those futures never hold a JavaScript value across an await.
+Durable Object storage handles are not `Send`. Store traits use `StoreBound` and `stasis::async_store!`: `Send + Sync` on native, no auto-trait bound and `#[async_trait(?Send)]` on `wasm32`. The kernel still does not take `worker::SqlStorage`. The wasm guest keeps the `exec` and `transaction` functions in a thread-local, the same way host tools keep callbacks, and `JsSqlExecutor` is an empty `Send` struct. `sql.exec` is synchronous, so those futures never hold a JavaScript value across an await. A later store can keep the handle inside the struct because the wasm trait allows `!Send`.
 
 Schema DDL is `MIGRATIONS` from `schema.rs`. Durable Object adjustments stay outside that file:
 
@@ -94,70 +94,36 @@ Store logic is tested on native rusqlite (`tests/durable_object_sqlite.rs`) and 
 
 ## Wiring into StoreRuntime
 
-`StoreRuntime` (draft PR #29, branch `cursor/store-backed-runtime-d34f`) is generic over eight store ports. A backend builds them and calls `StoreRuntime::from_stores`. Store traits on that branch use `StoreBound` and `stasis::async_store!`: `Send + Sync` and `#[async_trait]` on native, no auto-trait bound and `#[async_trait(?Send)]` on `wasm32`. Mixing `#[async_trait]` with `#[async_trait(?Send)]` does not compile, so every impl of those traits has to use the same macro.
+`DurableSqliteKernel::open` is the backend constructor. The four SQLite stores use `stasis::async_store!`, matching the trait definitions. Mixing `#[async_trait]` with `#[async_trait(?Send)]` does not compile.
 
-On this branch the executor stores still use `#[async_trait]`, matching `main`. After #29 merges, switch these impls to `stasis::async_store!`:
+| Port | Store |
+| --- | --- |
+| `JobStore` | `ExecutorJobStore` |
+| `JobAttemptStore` | `ExecutorJobAttemptStore` |
+| `InboundTriggerStore` | `ExecutorInboundTriggerStore` |
+| `ResourceLeaseStore` | `ExecutorResourceLeaseStore` |
+| `RecurringStore` | `InMemoryRecurringStore` |
+| `OutboxStore` | `InMemoryOutboxStore` |
+| `DurableWaitStore` | `InMemoryDurableWaitStore` |
+| `JobContinuationStore` | `InMemoryJobContinuationStore` |
 
-- `ExecutorJobStore` (`JobStore`)
-- `ExecutorJobAttemptStore` (`JobAttemptStore`)
-- `ExecutorInboundTriggerStore` (`InboundTriggerStore`)
-- `ExecutorResourceLeaseStore` (`ResourceLeaseStore`)
+`ExecutorWorkflowDefinitionStore` implements `WorkflowDefinitionStore`, which is not one of the eight ports. The checkpoint handler writes it when a `grapheme:json:` payload is processed. `state_current` also stays in the job payload.
 
-`JsSqlExecutor` stays `Send`. The JavaScript functions live in a thread-local, and the struct does not hold a `JsValue`. The `?Send` attribute is what the wasm trait requires; it also leaves room for a later store that keeps the Durable Object handle inside the struct.
-
-`ExecutorWorkflowDefinitionStore` implements `WorkflowDefinitionStore`. That port is not one of the eight. Keep it beside the engine. Grapheme `state_current` is also stored in the job payload under the `grapheme:json:` prefix.
-
-The other four ports stay in memory until they have SQLite adapters on this executor. Those in-memory types already exist on `main`:
-
-`store_runtime` arrives with #29. The sketch below is the constructor to add then. On the Durable Object, `ids` is the `stasis_id_seq` generator (`SequenceIds` in `durable.rs`). A process-local `AtomicIdGenerator` repeats after eviction. `exec` is `JsSqlExecutor` in the Worker and `RusqliteExecutor` in the native tests.
+`ids` is the `stasis_id_seq` generator (`SequenceIds` in `durable.rs`). A process-local `AtomicIdGenerator` repeats after eviction. `exec` is `JsSqlExecutor` in the Worker and `RusqliteExecutor` in the native tests. `process_once` is `StoreRuntime::process_once_now`. A successful job leaves `job.attempts` at 0 and writes one attempt row; the engine increments `attempts` on retry and dead-letter.
 
 ```rust
-use std::sync::Arc;
-
-use stasis::application::runtime::in_memory_runtime::{
-    InMemoryOutboxStore, InMemoryRecurringStore,
-};
-use stasis::application::runtime::store_runtime::StoreRuntime;
-use stasis::infrastructure::runtime::in_memory_durable_wait_store::InMemoryDurableWaitStore;
-use stasis::infrastructure::runtime::in_memory_job_continuation_store::InMemoryJobContinuationStore;
-use stasis::infrastructure::sqlite::{
-    ExecutorInboundTriggerStore, ExecutorJobAttemptStore, ExecutorJobStore,
-    ExecutorResourceLeaseStore, SqlExecutor,
-};
-use stasis::ports::outbound::runtime::clock::Clock;
-use stasis::ports::outbound::runtime::id_generator::IdGenerator;
-use stasis::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
-use stasis::ports::outbound::runtime::runtime_tracing::RuntimeTracing;
-
-fn runtime_from_executor(
-    exec: Arc<dyn SqlExecutor>,
-    clock: Arc<dyn Clock>,
-    ids: Arc<dyn IdGenerator>,
-    metrics: Arc<dyn RuntimeMetrics>,
-    tracing: Arc<dyn RuntimeTracing>,
-) -> StoreRuntime<
-    ExecutorJobStore,
-    InMemoryRecurringStore,
-    InMemoryOutboxStore,
-    ExecutorJobAttemptStore,
-    InMemoryDurableWaitStore,
-    InMemoryJobContinuationStore,
-    ExecutorInboundTriggerStore,
-    ExecutorResourceLeaseStore,
-> {
-    StoreRuntime::from_stores(
-        ExecutorJobStore::new(exec.clone()),
-        InMemoryRecurringStore::default(),
-        InMemoryOutboxStore::default(),
-        ExecutorJobAttemptStore::new(exec.clone()),
-        InMemoryDurableWaitStore::default(),
-        InMemoryJobContinuationStore::default(),
-        ExecutorInboundTriggerStore::new(exec.clone()),
-        ExecutorResourceLeaseStore::new(exec.clone()),
-        clock,
-        ids,
-        metrics,
-        tracing,
-    )
-}
+StoreRuntime::from_stores(
+    ExecutorJobStore::new(exec.clone()),
+    InMemoryRecurringStore::default(),
+    InMemoryOutboxStore::default(),
+    ExecutorJobAttemptStore::new(exec.clone()),
+    InMemoryDurableWaitStore::default(),
+    InMemoryJobContinuationStore::default(),
+    ExecutorInboundTriggerStore::new(exec.clone()),
+    ExecutorResourceLeaseStore::new(exec),
+    clock,
+    ids,
+    metrics,
+    tracing,
+)
 ```

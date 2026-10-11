@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
-
 use crate::domain::errors::Result;
 use crate::domain::runtime::inbound_trigger::InboundTriggerReceipt;
 use crate::ports::outbound::runtime::inbound_trigger_store::{InboundTriggerStore, ReceiptInsert};
@@ -30,7 +28,7 @@ impl ExecutorInboundTriggerStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl InboundTriggerStore for ExecutorInboundTriggerStore {
     async fn insert_if_absent(&self, receipt: InboundTriggerReceipt) -> Result<ReceiptInsert> {
         let inserted = query_one(
@@ -69,4 +67,5 @@ impl InboundTriggerStore for ExecutorInboundTriggerStore {
         )?;
         Ok(())
     }
+}
 }

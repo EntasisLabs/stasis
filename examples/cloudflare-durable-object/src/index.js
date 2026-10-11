@@ -39,14 +39,16 @@ export class StasisDurableObject extends DurableObject {
         return json({
           service: "stasis-durable-sqlite",
           storage: "durable-object-sqlite",
-          covered: [
+          orchestration: "StoreRuntime",
+          sqlite: [
             "jobs",
             "job-leases",
             "heartbeats",
             "attempts",
             "inbound-idempotency",
-            "grapheme-workflow-state",
           ],
+          besideEngine: ["grapheme-workflow-state"],
+          inMemory: ["recurring", "outbox", "waits", "continuations"],
         });
       }
       if (request.method === "POST" && url.pathname === "/jobs") {

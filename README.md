@@ -350,14 +350,14 @@ let runtime = StasisRuntimeBuilder::new(RuntimeBackend::sqlite_file("./stasis.sq
     .await?;
 ```
 
-`RuntimeBackend::sqlite_memory()` uses a private in-process database. The `sqlite` cargo feature is part of `native`. Schema SQL lives in `src/infrastructure/sqlite/schema.rs`. A Cloudflare Worker can reuse that DDL from wasm without rusqlite: see [Workers Durable Object SQLite](docs-book/src/workers-durable-sqlite.md) and `examples/cloudflare-durable-object`.
+`RuntimeBackend::sqlite_memory()` uses a private in-process database. The `sqlite` cargo feature is part of `native`. In-memory, Surreal, and SQLite runtimes share one `StoreRuntime`; each backend only supplies store adapters. Schema SQL lives in `src/infrastructure/sqlite/schema.rs`. A Cloudflare Worker reuses that DDL and the same engine without rusqlite: see [Workers Durable Object SQLite](docs-book/src/workers-durable-sqlite.md) and `examples/cloudflare-durable-object`.
 
 ```bash
 npm --prefix stasis-wasm run build
 cd examples/cloudflare-durable-object && npx wrangler dev
 ```
 
-The example enqueues a job by idempotency key, processes it, rebuilds the kernel after an eviction, and returns the original job when the same key is posted again. Jobs, fenced leases, heartbeats, attempts, inbound keys, and Grapheme workflow state are stored in the Durable Object. Outbox, waits, continuations, recurring jobs, and identity memory are not.
+The example enqueues a job by idempotency key, processes it through `StoreRuntime`, rebuilds the kernel after an eviction, and returns the original job when the same key is posted again. Jobs, fenced leases, heartbeats, attempts, and inbound keys are SQLite stores. Recurring jobs, the outbox, durable waits, and continuations are in-memory fillers. Grapheme workflow state is stored beside the engine. Identity memory is not on this backend.
 - Typed job consumers (`StasisJob` / `JobConsumer` / `JobContext`) with `enqueue_job` builders. `StasisJob::declaration` supplies queue, retry, priority, and placement; `continue_with` runs a child after the parent succeeds, fails, or is canceled. Raw `NewJob` still works.
 - Inbound job triggers (`accept_inbound_json` / `accept_inbound_job`) so a webhook, TCP line, Kafka record, or RabbitMQ delivery can enqueue a job. Duplicate idempotency keys return the original job.
 - Durable `wait_for` / `signal` correlation and cooperative `cancel` for in-flight or deferred jobs.

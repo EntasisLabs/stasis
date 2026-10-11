@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::Result;
@@ -7,10 +6,7 @@ use crate::domain::runtime::durable_wait::{
 };
 use crate::ports::outbound::runtime::durable_wait_store::DurableWaitStore;
 
-use super::codec::{
-    decode_string_list, decode_time, encode_string_list, encode_time,
-    sql_err,
-};
+use super::codec::{decode_string_list, decode_time, encode_string_list, encode_time, sql_err};
 use super::session::SqliteSession;
 
 #[derive(Clone)]
@@ -123,7 +119,7 @@ impl SqliteDurableWaitStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl DurableWaitStore for SqliteDurableWaitStore {
     async fn insert_wait(&self, record: DurableWaitRecord) -> Result<()> {
         self.save_wait(&record)
@@ -250,4 +246,5 @@ impl DurableWaitStore for SqliteDurableWaitStore {
         self.save_wait(&wait)?;
         Ok(true)
     }
+}
 }

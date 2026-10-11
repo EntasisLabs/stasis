@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
 use crate::domain::errors::Result;
@@ -74,7 +73,7 @@ impl ExecutorJobAttemptStore {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl JobAttemptStore for ExecutorJobAttemptStore {
     async fn insert(&self, attempt: JobAttempt) -> Result<()> {
         let output_json = attempt
@@ -163,4 +162,5 @@ impl JobAttemptStore for ExecutorJobAttemptStore {
         )?;
         Ok(rows.len())
     }
+}
 }

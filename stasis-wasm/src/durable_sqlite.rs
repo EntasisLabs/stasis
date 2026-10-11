@@ -1,10 +1,11 @@
 //! JavaScript bridge from a Durable Object's `ctx.storage.sql` into the
 //! driver-free SQLite kernel.
 //!
-//! `worker::SqlStorage` (and any other `JsValue` handle) is `!Send`. Store
-//! traits stay `Send + Sync`, so the handle lives in a thread-local and the
-//! executor type itself is a unit struct. `sql.exec` is synchronous, so the
-//! store futures never hold a JavaScript value across an await.
+//! `worker::SqlStorage` (and any other `JsValue` handle) is `!Send`. The
+//! handle lives in a thread-local and the executor type itself is a unit
+//! struct, so it satisfies `StoreRuntime` on native and on wasm32. `sql.exec`
+//! is synchronous, so the store futures never hold a JavaScript value across
+//! an await.
 
 use std::cell::RefCell;
 use std::sync::Arc;

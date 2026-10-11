@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use surrealdb::{Surreal, engine::any::Any};
@@ -182,7 +181,7 @@ impl TryFrom<OutboxRecord> for OutboxEvent {
     }
 }
 
-#[async_trait]
+crate::async_store! {
 impl OutboxStore for SurrealOutboxStore {
     async fn insert(&self, event: OutboxEvent) -> Result<()> {
         self.save(event).await
@@ -362,4 +361,5 @@ impl OutboxStore for SurrealOutboxStore {
 
         Ok(removed)
     }
+}
 }

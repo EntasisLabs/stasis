@@ -53,7 +53,7 @@ pub mod thread_store;
 #[cfg(feature = "sqlite")]
 pub mod workflow_definition_store;
 
-pub use durable::{DurableSqliteKernel, ProcessedJob};
+pub use durable::{DurableObjectRuntime, DurableSqliteKernel, ProcessedJob};
 pub use executor::{SqlExecutor, SqlRow, SqlValue};
 pub use executor_attempt_store::ExecutorJobAttemptStore;
 pub use executor_inbound_store::ExecutorInboundTriggerStore;
