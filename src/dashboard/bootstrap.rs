@@ -104,6 +104,10 @@ pub fn resolve_dashboard_runtime_backend() -> RuntimeBackend {
             dashboard_surreal_namespace(),
             dashboard_surreal_database(),
         )),
+        "sqlite" | "sqlite-file" => RuntimeBackend::sqlite_file(
+            std::env::var("STASIS_SQLITE_PATH").unwrap_or_else(|_| "./stasis.sqlite".to_string()),
+        ),
+        "sqlite-memory" | "sqlite-mem" => RuntimeBackend::sqlite_memory(),
         "surreal-kv" | "kv" => apply_surreal_auth(RuntimeBackend::surreal_kv(
             required("STASIS_DASHBOARD_SURREAL_KV_PATH").unwrap_or_else(|_| {
                 panic!(
@@ -132,6 +136,7 @@ pub async fn build_dashboard_query_service(
         RuntimeBackend::InMemory => {
             build_in_memory_dashboard_query_service(options, RuntimeBackend::InMemory).await
         }
+        RuntimeBackend::Sqlite { .. } => build_sqlite_dashboard_query_service(options, backend).await,
         other => build_surreal_dashboard_query_service(options, other).await,
     }
 }
@@ -172,6 +177,22 @@ async fn build_in_memory_dashboard_query_service(
 
     Ok(Arc::new(
         RuntimeDashboardQueryService::from_in_memory_composition(runtime, control_plane),
+    ))
+}
+
+async fn build_sqlite_dashboard_query_service(
+    options: DashboardBootstrapOptions,
+    backend: RuntimeBackend,
+) -> Result<Arc<RuntimeDashboardQueryService>> {
+    if options.seed_demo {
+        eprintln!("dashboard demo seed mode is ignored for sqlite runtime backends");
+    }
+
+    let builder = apply_dashboard_builder_options(StasisRuntimeBuilder::new(backend), &options)?;
+    let runtime = builder.build().await?;
+
+    Ok(Arc::new(
+        RuntimeDashboardQueryService::from_runtime_composition(runtime),
     ))
 }
 

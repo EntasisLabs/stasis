@@ -42,7 +42,8 @@ Defaults:
 
 Backend environment variables:
 
-1. STASIS_DASHBOARD_RUNTIME_BACKEND=in-memory|surreal-mem|surreal-ws|surreal-kv
+1. STASIS_DASHBOARD_RUNTIME_BACKEND=in-memory|sqlite|sqlite-memory|surreal-mem|surreal-ws|surreal-kv
+1b. STASIS_SQLITE_PATH (file path for sqlite; default ./stasis.sqlite)
 2. STASIS_DASHBOARD_SURREAL_NAMESPACE (default stasis)
 3. STASIS_DASHBOARD_SURREAL_DATABASE (default runtime)
 4. STASIS_DASHBOARD_SURREAL_ENDPOINT (required for surreal-ws)

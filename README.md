@@ -243,7 +243,8 @@ The standalone `stasis_dashboard` binary remains available for separate operatio
 
 Dashboard runtime backend selection (for `stasis_dashboard`):
 
-- `STASIS_DASHBOARD_RUNTIME_BACKEND=in-memory|surreal-mem|surreal-ws|surreal-kv`
+- `STASIS_DASHBOARD_RUNTIME_BACKEND=in-memory|sqlite|sqlite-memory|surreal-mem|surreal-ws|surreal-kv`
+- `STASIS_SQLITE_PATH` (file path for `sqlite` / `sqlite-file`; default `./stasis.sqlite`)
 - `STASIS_DASHBOARD_SURREAL_NAMESPACE` (default: `stasis`)
 - `STASIS_DASHBOARD_SURREAL_DATABASE` (default: `runtime`)
 - `STASIS_DASHBOARD_SURREAL_USERNAME` / `STASIS_DASHBOARD_SURREAL_PASSWORD` (optional; root sign-in for remote Surreal backends)
@@ -338,7 +339,17 @@ Typical adoption path:
 
 ## Runtime Capabilities
 
-- Durable backend options for queue/thread state (`surreal-ws` / `surreal-kv`), with `in-memory` for local runs.
+- Durable backend options for queue/thread state (`sqlite`, `surreal-ws`, `surreal-kv`), with `in-memory` and `sqlite-memory` for local runs.
+
+```rust
+use stasis::prelude::*;
+
+let runtime = StasisRuntimeBuilder::new(RuntimeBackend::sqlite_file("./stasis.sqlite"))
+    .build()
+    .await?;
+```
+
+`RuntimeBackend::sqlite_memory()` uses a private in-process database. The `sqlite` cargo feature is part of `native`. Schema SQL lives in `src/infrastructure/sqlite/schema.rs` so a later Durable Object store can reuse the same DDL.
 - Typed job consumers (`StasisJob` / `JobConsumer` / `JobContext`) with `enqueue_job` builders. `StasisJob::declaration` supplies queue, retry, priority, and placement; `continue_with` runs a child after the parent succeeds, fails, or is canceled. Raw `NewJob` still works.
 - Inbound job triggers (`accept_inbound_json` / `accept_inbound_job`) so a webhook, TCP line, Kafka record, or RabbitMQ delivery can enqueue a job. Duplicate idempotency keys return the original job.
 - Durable `wait_for` / `signal` correlation and cooperative `cancel` for in-flight or deferred jobs.

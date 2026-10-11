@@ -56,6 +56,7 @@ When `--healthz-addr` is set:
 `STASIS_STASISD_RUNTIME_BACKEND`:
 
 - `in-memory` (default)
+- `sqlite` / `sqlite-memory` (`STASIS_SQLITE_PATH`, default `./stasisd.sqlite`)
 - `surreal-mem` / `surreal-ws` / `surreal-kv`
 
 HA note: run **one active reconciler** per durable store. Multiple `stasisd` processes against the same Surreal database can race on managed def updates.

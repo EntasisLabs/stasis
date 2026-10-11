@@ -12,6 +12,8 @@ use stasis::application::runtime::in_memory_runtime::{
 };
 use stasis::application::runtime::job_context::{JobContext, JobResult};
 use stasis::application::runtime::job_lifecycle::{JobLifecycleEvent, STALE_LEASE_MESSAGE};
+#[cfg(feature = "sqlite")]
+use stasis::application::runtime::sqlite_runtime::SqliteRuntime;
 use stasis::application::runtime::surreal_runtime::SurrealRuntime;
 use stasis::application::runtime::typed_job::JobConsumer;
 use stasis::domain::runtime::durable_wait::DurableWaitStatus;
@@ -116,6 +118,8 @@ impl JobHandler for RetryOnceHandler {
 enum TestRuntime {
     Memory(InMemoryRuntime),
     Surreal(SurrealRuntime),
+    #[cfg(feature = "sqlite")]
+    Sqlite(SqliteRuntime),
 }
 
 impl TestRuntime {
@@ -135,10 +139,17 @@ impl TestRuntime {
         Self::Surreal(SurrealRuntime::new(db))
     }
 
+    #[cfg(feature = "sqlite")]
+    fn sqlite_memory() -> Self {
+        Self::Sqlite(SqliteRuntime::open_memory().expect("sqlite memory runtime"))
+    }
+
     fn register_recording(&self, consumer: RecordingConsumer) {
         match self {
             Self::Memory(rt) => rt.register_consumer(consumer).unwrap(),
             Self::Surreal(rt) => rt.register_consumer(consumer).unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.register_consumer(consumer).unwrap(),
         }
     }
 
@@ -146,6 +157,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.register_handler(handler).unwrap(),
             Self::Surreal(rt) => rt.register_handler(handler).unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.register_handler(handler).unwrap(),
         }
     }
 
@@ -170,6 +183,15 @@ impl TestRuntime {
                 .send()
                 .await
                 .expect("enqueue"),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt
+                .enqueue_job(payload)
+                .queue("replicas")
+                .idempotency_key(format!("idem-{replica_id}"))
+                .retry(RetryPolicy::exponential(8))
+                .send()
+                .await
+                .expect("enqueue"),
         }
     }
 
@@ -177,6 +199,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.enqueue(job).await.unwrap(),
             Self::Surreal(rt) => rt.enqueue(job).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.enqueue(job).await.unwrap(),
         }
     }
 
@@ -187,6 +211,11 @@ impl TestRuntime {
                 .await
                 .expect("process"),
             Self::Surreal(rt) => rt
+                .process_once_now("replicas", "worker-1")
+                .await
+                .expect("process"),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt
                 .process_once_now("replicas", "worker-1")
                 .await
                 .expect("process"),
@@ -203,6 +232,11 @@ impl TestRuntime {
                 .process_once_now(queue, "worker-1")
                 .await
                 .expect("process"),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt
+                .process_once_now(queue, "worker-1")
+                .await
+                .expect("process"),
         }
     }
 
@@ -210,6 +244,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.job_store.get(id).await.unwrap(),
             Self::Surreal(rt) => rt.job_store.get(id).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.job_store.get(id).await.unwrap(),
         }
     }
 
@@ -217,6 +253,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.job_store.save(job).await.unwrap(),
             Self::Surreal(rt) => rt.job_store.save(job).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.job_store.save(job).await.unwrap(),
         }
     }
 
@@ -229,6 +267,13 @@ impl TestRuntime {
                 .unwrap()
                 .expect("lease"),
             Self::Surreal(rt) => rt
+                .job_store
+                .lease_due(queue, worker, now, ttl, &stasis::domain::runtime::placement::WorkerCapabilities::any())
+                .await
+                .unwrap()
+                .expect("lease"),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt
                 .job_store
                 .lease_due(queue, worker, now, ttl, &stasis::domain::runtime::placement::WorkerCapabilities::any())
                 .await
@@ -249,6 +294,12 @@ impl TestRuntime {
                 .heartbeat(job_id, worker, now, ttl)
                 .await
                 .unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt
+                .job_store
+                .heartbeat(job_id, worker, now, ttl)
+                .await
+                .unwrap(),
         }
     }
 
@@ -256,6 +307,8 @@ impl TestRuntime {
         let report = match self {
             Self::Memory(rt) => rt.recover_stale(now).await.unwrap(),
             Self::Surreal(rt) => rt.recover_stale(now).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.recover_stale(now).await.unwrap(),
         };
         (report.recovered, report.dead_lettered)
     }
@@ -264,6 +317,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.cancel(id).await.unwrap(),
             Self::Surreal(rt) => rt.cancel(id).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.cancel(id).await.unwrap(),
         }
     }
 
@@ -271,6 +326,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.fail(id).await.unwrap(),
             Self::Surreal(rt) => rt.fail(id).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.fail(id).await.unwrap(),
         }
     }
 
@@ -278,6 +335,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.delete(id).await,
             Self::Surreal(rt) => rt.delete(id).await,
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.delete(id).await,
         }
     }
 
@@ -288,6 +347,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.wait_store.list_pending_by_job(job_id).await.unwrap(),
             Self::Surreal(rt) => rt.wait_store.list_pending_by_job(job_id).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.wait_store.list_pending_by_job(job_id).await.unwrap(),
         }
     }
 
@@ -298,6 +359,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.wait_store.get_wait(wait_id).await.unwrap(),
             Self::Surreal(rt) => rt.wait_store.get_wait(wait_id).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.wait_store.get_wait(wait_id).await.unwrap(),
         }
     }
 
@@ -305,6 +368,8 @@ impl TestRuntime {
         match self {
             Self::Memory(rt) => rt.list_lineage_events(id).await.unwrap(),
             Self::Surreal(rt) => rt.list_lineage_events(id).await.unwrap(),
+            #[cfg(feature = "sqlite")]
+            Self::Sqlite(rt) => rt.list_lineage_events(id).await.unwrap(),
         }
     }
 }
@@ -316,6 +381,8 @@ where
 {
     f(TestRuntime::memory()).await;
     f(TestRuntime::surreal(name).await).await;
+    #[cfg(feature = "sqlite")]
+    f(TestRuntime::sqlite_memory()).await;
 }
 
 fn raw_job(id: &str, job_type: &str, now: chrono::DateTime<Utc>, max_attempts: u32) -> NewJob {

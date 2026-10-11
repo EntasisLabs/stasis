@@ -44,6 +44,10 @@ fn resolve_runtime_backend_from_env() -> Result<RuntimeBackend> {
 
     match backend.as_str() {
         "in-memory" | "inmemory" => Ok(RuntimeBackend::InMemory),
+        "sqlite" | "sqlite-file" => Ok(RuntimeBackend::sqlite_file(
+            std::env::var("STASIS_SQLITE_PATH").unwrap_or_else(|_| "./stasis.sqlite".to_string()),
+        )),
+        "sqlite-memory" | "sqlite-mem" => Ok(RuntimeBackend::sqlite_memory()),
         "surreal-mem" | "mem" => Ok(apply_surreal_auth(RuntimeBackend::surreal_mem(
             resolve_surreal_namespace(),
             resolve_surreal_database(),
@@ -95,6 +99,7 @@ fn resolve_runtime_backend_from_env() -> Result<RuntimeBackend> {
 fn describe_backend(backend: &RuntimeBackend) -> String {
     match backend {
         RuntimeBackend::InMemory => "in-memory".to_string(),
+        RuntimeBackend::Sqlite { path } => format!("sqlite path={path}"),
         RuntimeBackend::SurrealMem {
             namespace,
             database,

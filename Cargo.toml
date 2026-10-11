@@ -58,6 +58,7 @@ default = ["native"]
 native = [
 	"dashboard",
 	"surreal-native",
+	"sqlite",
 	"llm-genai",
 	"grapheme-host",
 	"env-fs",
@@ -71,12 +72,17 @@ dashboard = [
 	"dep:rust-embed",
 	"grapheme-host",
 	"surreal-native",
+	"sqlite",
 	"env-fs",
 ]
 dashboard-embedded = ["dashboard"]
 dashboard-lsp = ["dashboard", "grapheme", "dep:grapheme-lsp"]
 # Shared Surreal adapters (job/outbox/identity stores). Engine features opt in below.
 surreal = ["dep:surrealdb", "dep:surrealdb-types"]
+# Native SQLite runtime (file or in-memory). Schema SQL lives in
+# `infrastructure/sqlite/schema.rs` so a later wasm/Durable Object store can reuse it.
+# Not enabled on wasm32: rusqlite links libsqlite3.
+sqlite = ["dep:rusqlite"]
 # Native engines: filesystem KV + mem + WS + TLS. Not supported on wasm32.
 surreal-native = [
 	"surreal",
@@ -152,6 +158,9 @@ opentelemetry_sdk = { version = "0.29", features = ["rt-tokio"], optional = true
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic", "metrics"], optional = true }
 surrealdb = { version = "3", default-features = false, optional = true }
 surrealdb-types = { version = "3", optional = true }
+# 0.32 shares libsqlite3-sys 0.30 with grapheme's sqlx-sqlite 0.8.6 so the
+# workspace links one sqlite3. Newer rusqlite pulls a second libsqlite3-sys.
+rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 locus-surreal-adapter = { version = "0.1.1", optional = true, default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

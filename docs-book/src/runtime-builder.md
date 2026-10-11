@@ -39,6 +39,7 @@ Document the `StasisRuntimeBuilder` API — the single composition point for wir
 | `RuntimeBackend::SurrealMem { namespace, database, auth }` | Surreal in-memory engine with explicit namespace/database and optional root credentials. |
 | `RuntimeBackend::SurrealWs { endpoint, namespace, database, auth }` | Remote SurrealDB over websocket. Use for shared/dev/staging environments where runtime state is centralized. |
 | `RuntimeBackend::SurrealKv { path, namespace, database, auth }` | Embedded SurrealKV on local disk. Use for durable single-node deployments without a remote Surreal service. |
+| `RuntimeBackend::Sqlite { path }` | Native SQLite (`sqlite` feature). `path` is `:memory:` or a file path. Use `sqlite_memory()` or `sqlite_file(path)`. |
 
 Helper constructors (`RuntimeBackend::surreal_mem`, `surreal_ws`, `surreal_kv`) default `auth` to `None`. Use `.with_surreal_auth(SurrealAuth::new(user, pass))` for authenticated remote databases.
 
@@ -62,6 +63,10 @@ let backend = RuntimeBackend::surreal_ws(
 .with_surreal_auth(SurrealAuth::new("root", "root"));
 let builder = StasisRuntimeBuilder::new(backend);
 
+// Native SQLite (file or private in-memory database)
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::sqlite_file("./stasis.sqlite"));
+let builder = StasisRuntimeBuilder::new(RuntimeBackend::sqlite_memory());
+
 // Embedded SurrealKV backend
 let builder = StasisRuntimeBuilder::new(RuntimeBackend::surreal_kv(
     "./data/stasis-runtime",
@@ -80,6 +85,7 @@ Environment variables (dashboard and examples):
 | `STASIS_DASHBOARD_SURREAL_PASSWORD` / `STASIS_EXAMPLE_SURREAL_PASSWORD` | Root password for sign-in |
 | `STASIS_DASHBOARD_SURREAL_ENDPOINT` | Websocket endpoint (required for `surreal-ws`) |
 | `STASIS_DASHBOARD_SURREAL_KV_PATH` | Local KV path (required for `surreal-kv`) |
+| `STASIS_SQLITE_PATH` | SQLite file when the backend is `sqlite` or `sqlite-file` |
 
 Both username and password must be set for authentication to run. If either is omitted, Stasis connects without sign-in (suitable for local/unauthenticated setups).
 

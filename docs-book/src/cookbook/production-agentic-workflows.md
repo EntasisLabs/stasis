@@ -427,13 +427,18 @@ println!(
 );
 ```
 
-## Backend Profiles (In-Memory, Surreal WS, Surreal KV)
+## Backend Profiles (In-Memory, SQLite, Surreal WS, Surreal KV)
 
 Use the dedicated profile bootstrap example when validating runtime storage wiring.
 
 ```bash
 # In-memory
 STASIS_EXAMPLE_RUNTIME_BACKEND=in-memory \
+    cargo run --example runtime_backends_profiles
+
+# SQLite file
+STASIS_EXAMPLE_RUNTIME_BACKEND=sqlite \
+STASIS_SQLITE_PATH=./data/runtime.sqlite \
     cargo run --example runtime_backends_profiles
 
 # Surreal websocket

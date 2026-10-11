@@ -58,6 +58,7 @@
 ## Data Contracts
 
 - [SurrealDB Schema](./surrealdb-schema.md)
+- [SQLite Schema](./sqlite-schema.md)
 
 ## Decision Records
 

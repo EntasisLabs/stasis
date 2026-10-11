@@ -46,7 +46,7 @@ stasisd --config /etc/stasis/agents.d/
 
 ADR-0008 is **Accepted**. Phase 1 loads YAML/TOML `stasisd/v1` schedules, validates (cron/timezone/job_type/duplicates/payload limits), and reconciles managed `stasisd:<id>` recurring definitions (`drain` / `orphan` / `cancel` policies).
 
-Phase 2 adds the long-running host: filesystem watch + debounce, periodic reconcile, and a materialize → process → publish tick loop. Backend selection via `STASIS_STASISD_RUNTIME_BACKEND` (`in-memory` default, `surreal-mem` / `surreal-ws` / `surreal-kv`).
+Phase 2 adds the long-running host: filesystem watch + debounce, periodic reconcile, and a materialize → process → publish tick loop. Backend selection via `STASIS_STASISD_RUNTIME_BACKEND` (`in-memory` default, `sqlite` / `sqlite-memory`, `surreal-mem` / `surreal-ws` / `surreal-kv`). File SQLite uses `STASIS_SQLITE_PATH` (default `./stasisd.sqlite`).
 
 Phase 3 hardens operators: `--strict` quarantine semantics, id-prefix provenance (`stasisd:`), Ctrl-C/SIGTERM shutdown, optional `--healthz-addr` (`/healthz`, `/readyz`), and a systemd/runbook path.
 
