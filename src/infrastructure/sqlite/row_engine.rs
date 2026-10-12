@@ -16,6 +16,7 @@ use crate::domain::runtime::job::{Job, JobState};
 use crate::domain::runtime::job_attempt::JobAttempt;
 use crate::domain::runtime::job_continuation::JobContinuation;
 use crate::domain::runtime::outbox::{OutboxEvent, OutboxStatus};
+use crate::domain::runtime::placement::WorkerCapabilities;
 use crate::domain::runtime::recurring::RecurringDefinition;
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
@@ -43,6 +44,7 @@ pub(crate) enum Scope {
     Due {
         queue: String,
         now_ns: i64,
+        worker: WorkerCapabilities,
     },
     ByState(String),
     Expired {
@@ -216,23 +218,11 @@ pub(crate) fn load(io: &mut dyn SqlIo, scope: &Scope) -> Result<WorkingSet> {
             load_job(io, &mut snap, id)?;
             load_epoch(io, &mut snap, id)?;
         }
-        Scope::Due { queue, now_ns } => {
-            let rows = io.query(
-                "SELECT j.payload, e.job_id, CAST(e.generation AS TEXT) FROM runtime_job j \
-                 LEFT JOIN runtime_epoch e ON e.job_id = j.job_id \
-                 WHERE j.queue = ?1 AND j.state = 'Enqueued' AND j.scheduled_at <= ?2 \
-                 AND (j.lease_expires_at IS NULL OR j.lease_expires_at <= ?2)",
-                &[SqlValue::text(queue), SqlValue::Integer(*now_ns)],
-            )?;
-            for row in rows {
-                put_job(&mut snap, row.text(0)?)?;
-                if let Some(id) = row.text_opt(1)? {
-                    snap.epoch.insert(id, row.i64(2)?);
-                    let generation = u64::try_from(row.i64(2)?).map_err(|_| err("epoch"))?;
-                    snap.state.epochs.insert(row.text(1)?, generation);
-                }
-            }
-        }
+        Scope::Due {
+            queue,
+            now_ns,
+            worker,
+        } => load_due(io, &mut snap, queue, *now_ns, worker)?,
         Scope::ByState(state) => {
             load_jobs_where(io, &mut snap, "state = ?1", &[SqlValue::text(state)])?
         }
@@ -558,6 +548,84 @@ fn like_prefix(prefix: &str) -> String {
     }
     out.push('%');
     out
+}
+
+/// Walk due rows in `(scheduled_at, priority, job_id)` order and keep only the
+/// first placement match. That key is the in-memory `min_by_key`, so stopping
+/// there selects the same job. A lease that matches none still reads every due
+/// row in the queue. Columns that disagree with a selectable payload fail closed.
+fn load_due(
+    io: &mut dyn SqlIo,
+    snap: &mut Snapshot,
+    queue: &str,
+    now_ns: i64,
+    worker: &WorkerCapabilities,
+) -> Result<()> {
+    let mut cursor: Option<(i64, i64, String)> = None;
+    loop {
+        let mut sql = String::from(
+            "SELECT j.payload, e.job_id, CAST(e.generation AS TEXT), \
+             CAST(j.scheduled_at AS TEXT), CAST(j.priority AS TEXT), j.job_id \
+             FROM runtime_job j \
+             LEFT JOIN runtime_epoch e ON e.job_id = j.job_id \
+             WHERE j.queue = ?1 AND j.state = 'Enqueued' AND j.scheduled_at <= ?2 \
+             AND (j.lease_expires_at IS NULL OR j.lease_expires_at <= ?2)",
+        );
+        let mut params = vec![SqlValue::text(queue), SqlValue::Integer(now_ns)];
+        if let Some((scheduled, priority, id)) = &cursor {
+            sql.push_str(
+                " AND (j.scheduled_at > ?3 \
+                 OR (j.scheduled_at = ?3 AND j.priority > ?4) \
+                 OR (j.scheduled_at = ?3 AND j.priority = ?4 AND j.job_id > ?5))",
+            );
+            params.push(SqlValue::Integer(*scheduled));
+            params.push(SqlValue::Integer(*priority));
+            params.push(SqlValue::text(id));
+        }
+        sql.push_str(" ORDER BY j.scheduled_at, j.priority, j.job_id LIMIT 1");
+        let rows = io.query(&sql, &params)?;
+        let Some(row) = rows.into_iter().next() else {
+            return Ok(());
+        };
+        let scheduled = row.i64(3)?;
+        let priority = row.i64(4)?;
+        let job_id = row.text(5)?;
+        let next = (scheduled, priority, job_id);
+        if cursor.as_ref().is_some_and(|previous| previous >= &next) {
+            return Err(err("due scan did not advance"));
+        }
+        let payload = row.text(0)?;
+        check_payload(&payload)?;
+        let job: Job = decode_json(&payload)?;
+        let payload_due = job.queue == queue
+            && job.state == JobState::Enqueued
+            && encode_time(job.scheduled_at) <= now_ns
+            && job
+                .lease_expires_at
+                .map(|expiry| encode_time(expiry) <= now_ns)
+                .unwrap_or(true);
+        let sort_matches = job.id == next.2
+            && i64::from(job.priority) == priority
+            && encode_time(job.scheduled_at) == scheduled;
+        if payload_due && job.placement.matches(worker) {
+            if !sort_matches {
+                return Err(err(
+                    "due row order columns disagree with the job payload; refusing to lease",
+                ));
+            }
+            if let Some(epoch_id) = row.text_opt(1)? {
+                let generation = row.i64(2)?;
+                snap.epoch.insert(epoch_id.clone(), generation);
+                snap.state.epochs.insert(
+                    epoch_id,
+                    u64::try_from(generation).map_err(|_| err("epoch"))?,
+                );
+            }
+            put_job(snap, payload)?;
+            return Ok(());
+        }
+        cursor = Some(next);
+    }
 }
 
 fn load_jobs_where(

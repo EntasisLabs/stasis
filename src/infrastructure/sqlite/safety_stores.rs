@@ -120,7 +120,7 @@ async fn lease_due(
         now: DateTime<Utc>,
         lease_seconds: i64,
         worker: &WorkerCapabilities,
-    ) -> Result<Option<Job>> { self.state.run(Scope::Due { queue: queue.to_string(), now_ns: encode_time(now) }, |v| ready(JobStore::lease_due(&v.jobs, queue, worker_id, now, lease_seconds, worker))) }
+    ) -> Result<Option<Job>> { self.state.run(Scope::Due { queue: queue.to_string(), now_ns: encode_time(now), worker: worker.clone() }, |v| ready(JobStore::lease_due(&v.jobs, queue, worker_id, now, lease_seconds, worker))) }
 async fn heartbeat(
         &self,
         job_id: &str,
@@ -238,7 +238,7 @@ async fn lease_due(
         now: DateTime<Utc>,
         lease_seconds: i64,
         worker: &WorkerCapabilities,
-    ) -> Result<Option<Job>> { self.state.run(Scope::Due { queue: queue.to_string(), now_ns: encode_time(now) }, |v| ready(JobStore::lease_due(&v.jobs, queue, worker_id, now, lease_seconds, worker))) }
+    ) -> Result<Option<Job>> { self.state.run(Scope::Due { queue: queue.to_string(), now_ns: encode_time(now), worker: worker.clone() }, |v| ready(JobStore::lease_due(&v.jobs, queue, worker_id, now, lease_seconds, worker))) }
 async fn heartbeat(
         &self,
         job_id: &str,

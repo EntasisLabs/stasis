@@ -10,6 +10,7 @@ use stasis::domain::errors::{Result, StasisError};
 use stasis::domain::runtime::execution::{CommitResult, ExecutionGrant, JobExecutionOutcome};
 use stasis::domain::runtime::job::{Job, JobState, NewJob};
 use stasis::domain::runtime::job_attempt::JobAttemptOutcome;
+use stasis::domain::runtime::placement::PlacementConstraints;
 use stasis::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
 use stasis::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
 use stasis::infrastructure::sqlite::safety_stores::{
@@ -613,6 +614,82 @@ async fn due_lookup_does_not_read_another_queue() {
         .unwrap();
     assert_eq!(leased.id, "job-41");
     assert_eq!(*seen.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn lease_stops_at_the_first_placement_match() {
+    let now = Utc::now();
+    let mut blocked = make_job(0, 0, 0, now);
+    blocked.placement = PlacementConstraints::default().require_capability("gpu");
+    let open = make_job(1, 0, 0, now);
+    let mut later = Vec::new();
+    for index in 2..40u32 {
+        later.push(make_job(index, 0, 0, now));
+    }
+
+    let memory = InMemoryRuntime::with_dependencies(
+        Arc::new(SharedClock {
+            base: now,
+            offset_secs: AtomicI64::new(0),
+        }),
+        Arc::new(AtomicIdGenerator::new(1)),
+    );
+    memory.job_store.insert(blocked.clone()).await.unwrap();
+    memory.job_store.insert(open.clone()).await.unwrap();
+    for job in &later {
+        memory.job_store.insert(job.clone()).await.unwrap();
+    }
+    let memory_id = memory
+        .job_store
+        .lease_due("q0", "worker", now, 30, &Default::default())
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let seen = Arc::new(Mutex::new(0usize));
+    struct Counting {
+        inner: RusqliteExecutor,
+        seen: Arc<Mutex<usize>>,
+    }
+    impl SqlExecutor for Counting {
+        fn execute(&self, sql: &str, params: &[SqlValue]) -> Result<u64> {
+            self.inner.execute(sql, params)
+        }
+        fn query(&self, sql: &str, params: &[SqlValue]) -> Result<Vec<SqlRow>> {
+            let rows = self.inner.query(sql, params)?;
+            if sql.contains("runtime_job j") && sql.contains("ORDER BY j.scheduled_at") {
+                *self.seen.lock().unwrap() += rows.len();
+            }
+            Ok(rows)
+        }
+        fn transaction(&self, body: &mut dyn FnMut() -> Result<()>) -> Result<()> {
+            self.inner.transaction(body)
+        }
+    }
+    let exec = Arc::new(Counting {
+        inner: RusqliteExecutor::open_in_memory().unwrap(),
+        seen: seen.clone(),
+    });
+    let rt = durable_runtime(
+        exec,
+        Arc::new(stasis::infrastructure::runtime::system_clock::SystemClock),
+    );
+    rt.job_store.insert(blocked).await.unwrap();
+    rt.job_store.insert(open).await.unwrap();
+    for job in later {
+        rt.job_store.insert(job).await.unwrap();
+    }
+    *seen.lock().unwrap() = 0;
+    let leased = rt
+        .job_store
+        .lease_due("q0", "worker", now, 30, &Default::default())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(leased.id, memory_id);
+    assert_eq!(leased.id, "job-1");
+    assert_eq!(*seen.lock().unwrap(), 2);
 }
 
 #[tokio::test]

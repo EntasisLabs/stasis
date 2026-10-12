@@ -40,12 +40,15 @@ a job.
 
 Hot paths use indexes: next runnable job (`queue, state, scheduled_at, priority,
 job_id`), expired leases (`state, lease_expires_at`), undelivered receipts
-(`delivered`), and waits by signal key. Placement is still filtered in memory
-after that index range, so a lease reads the due rows for one queue, not the
-whole database. List-all recurring definitions remains a full read because that
-is the API. Tie-breaks are `(scheduled_at, priority, job_id)` for leases,
-`(next_attempt_at or occurred_at, event_id)` for pending outbox rows, and
-`(created_at, signal_id)` for signal selection.
+(`delivered`), and waits by signal key. A lease walks that index one row at a
+time and stops at the first job whose placement matches the worker. The walk
+order is the lease tie-break `(scheduled_at, priority, job_id)`, which is also
+the in-memory `min_by_key`, so the first match is the same job. A worker that
+matches the earliest due row reads that one row. A worker that matches none
+still reads every due row in the queue. Other queues are not read. List-all
+recurring definitions remains a full read because that is the API. Pending
+outbox tie-break is `(next_attempt_at or occurred_at, event_id)`. Signal
+selection tie-break is `(created_at, signal_id)`.
 
 ## Retention
 
@@ -73,10 +76,11 @@ that duplicate is `Stale` and does not republish effects.
 
 There is no total-state size cap. Each row payload is still refused above
 **1 MiB** on every backend that shares this adapter, including native SQLite,
-with no memory fallback. A queue with many simultaneously due jobs still loads
-that due set on each lease so placement can be applied. A debug-build sample of
-500 inserts was about 45 ms; 20 leases against a due set of up to 500 jobs was
-about 830 ms. Leasing one queue does not read jobs that belong to another queue.
+with no memory fallback. A lease does not load the rest of a due queue after
+the first placement match. The remaining cost is the non-matching prefix: a
+worker that cannot take any due job still reads that queue's due rows. A
+debug-build sample of 500 unrestricted inserts was about 46 ms; 20 leases of
+that due set, each matching the earliest row, was about 6 ms.
 This is not a claim of production throughput, power-loss durability, or live
 Cloudflare eviction.
 
