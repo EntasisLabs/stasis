@@ -98,6 +98,9 @@ pub struct ExecutionReceipt {
     pub lifecycle: JobLifecycleEvent,
     pub output_json: Option<String>,
     pub delivered: bool,
+    /// When this receipt entered retention. `None` is kept until a timestamp exists.
+    #[serde(default)]
+    pub retained_at: Option<DateTime<Utc>>,
 }
 
 /// Native cancellation/failure creates this cleanup-only capability for the retired grant.
@@ -110,4 +113,7 @@ pub struct CleanupRecord {
     #[serde(default)]
     pub return_observations: Vec<String>,
     pub acknowledged_at: Option<DateTime<Utc>>,
+    /// When this cleanup record entered retention. `None` is kept.
+    #[serde(default)]
+    pub retained_at: Option<DateTime<Utc>>,
 }

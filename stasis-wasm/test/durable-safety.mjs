@@ -5,7 +5,10 @@ import test from 'node:test';
 import { createSqlBridge, createNodeSqliteStorage, createDurableObjectStorage } from '../../examples/cloudflare-durable-object/src/sql-bridge.js';
 const wasm = createRequire(import.meta.url)('../pkg-node/stasis_wasm.js');
 function install(storage) { const b=createSqlBridge(storage); wasm.install_durable_sql_bridge(b.exec,b.transaction); return new wasm.StasisDurableSqlite(); }
-function ledger(db) { return JSON.parse(db.prepare('SELECT payload FROM runtime_safety_ledger WHERE id=1').get().payload); }
+function count(db, sql) { return db.prepare(sql).get().n; }
+function jobCount(db) { return count(db, 'SELECT COUNT(*) AS n FROM runtime_job'); }
+function attemptCount(db) { return count(db, 'SELECT COUNT(*) AS n FROM runtime_attempt'); }
+function receiptCount(db) { return count(db, 'SELECT COUNT(*) AS n FROM runtime_receipt'); }
 
 test('DO-shaped synchronous host reconstruction preserves IDs and completed attempt/receipt', () => {
   const db=new DatabaseSync(':memory:'); const native=createNodeSqliteStorage(db); let transactions=0;
@@ -19,9 +22,8 @@ test('DO-shaped synchronous host reconstruction preserves IDs and completed atte
   assert.notEqual(first.jobId,second.jobId);
   assert.equal(JSON.parse(kernel.get_job(first.jobId)).state,'succeeded');
   assert.equal(JSON.parse(kernel.accept_job('first','{}')).disposition,'duplicate');
-  const state=ledger(db).state;
-  assert.equal(Object.values(state.attempts).flat().length,1);
-  assert.equal(state.receipts.length,1);
+  assert.equal(attemptCount(db),1);
+  assert.equal(receiptCount(db),1);
   assert.ok(transactions>1);
   kernel.free(); db.close();
 });
@@ -33,19 +35,19 @@ test('bridge replacement cannot redirect an existing kernel into another object'
   current.accept_job('object-b','{}');
   assert.throws(()=>old.get_job(accepted.jobId));
   assert.throws(()=>old.accept_job('misrouted','{}'));
-  assert.equal(Object.values(ledger(a).state.jobs).length,1);
-  assert.equal(Object.values(ledger(b).state.jobs).length,1);
+  assert.equal(jobCount(a),1);
+  assert.equal(jobCount(b),1);
   old.free(); current.free(); a.close(); b.close();
 });
 
 test('host commit failure rolls back final publication instead of returning success', () => {
   const db=new DatabaseSync(':memory:'); const native=createNodeSqliteStorage(db); let fail=false;
-  const storage={exec(sql,params){ const result=native.exec(sql,params); if(sql.startsWith('INSERT INTO runtime_safety_ledger')) { const state=JSON.parse(params[0]).state; if(Object.values(state.jobs).some(j=>String(j.state).toLowerCase()==='succeeded')) fail=true; } return result; },transaction(fn){ return native.transaction(()=>{fn();if(fail){fail=false;throw new Error('injected host commit failure');}}); }};
+  const storage={exec(sql,params){ const result=native.exec(sql,params); const blob=JSON.stringify(params); if(sql.includes('INSERT INTO runtime_receipt') || (sql.includes('UPDATE runtime_job') && blob.includes('Succeeded'))) fail=true; return result; },transaction(fn){ return native.transaction(()=>{fn();if(fail){fail=false;throw new Error('injected host commit failure');}}); }};
   const kernel=install(storage); const accepted=JSON.parse(kernel.accept_job('commit-failure','{}'));
   assert.throws(()=>kernel.process_once('default','worker'),/injected host commit failure/);
   assert.equal(JSON.parse(kernel.get_job(accepted.jobId)).state,'running');
-  assert.equal(Object.values(ledger(db).state.attempts).flat().length,0);
-  assert.equal(ledger(db).state.receipts.length,0);
+  assert.equal(attemptCount(db),0);
+  assert.equal(receiptCount(db),0);
   kernel.free(); db.close();
 });
 
@@ -55,9 +57,9 @@ test('host that omits transaction callback is explicitly unsupported', () => {
   db.close();
 });
 
-test('oversize DO safety ledger fails closed without storing a job', () => {
+test('oversize row payload fails closed without storing a job', () => {
   const db=new DatabaseSync(':memory:'); const kernel=install(createNodeSqliteStorage(db));
   assert.throws(()=>kernel.accept_job('oversize',JSON.stringify({blob:'x'.repeat(1100*1024)})),/1 MiB/);
-  assert.equal(Object.values(ledger(db).state.jobs).length,0);
+  assert.equal(jobCount(db),0);
   kernel.free(); db.close();
 });

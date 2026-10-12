@@ -1,8 +1,8 @@
-//! Durable safety ledger. The reviewed memory transitions run synchronously inside
-//! the SQL transaction; no job/effect becomes visible before its ledger commits.
-//! This correctness-first adapter serializes the ledger, so its cost is linear in
-//! retained state. It is not an unbounded/high-throughput storage implementation.
-use super::executor::{SqlExecutor, SqlValue, transaction_result};
+//! Durable row store. The reviewed memory transitions run synchronously inside one
+//! SQL transaction against the rows that operation needs. Nothing is visible
+//! before that transaction commits.
+use super::executor::{SqlExecutor, transaction_result};
+use super::row_engine::{self, ExecIo, Scope};
 use crate::application::runtime::in_memory_runtime::{
     InMemoryJobStore, InMemoryRecurringStore, NativeState,
 };
@@ -47,15 +47,11 @@ pub(crate) mod map_entries {
     }
 }
 
-const LOAD: &str = "SELECT payload FROM runtime_safety_ledger WHERE id = 1";
-const SAVE: &str = "INSERT INTO runtime_safety_ledger(id,format,payload) VALUES(1,1,?1) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload";
-const LEGACY: &str = "SELECT (SELECT COUNT(*) FROM job) + (SELECT COUNT(*) FROM job_attempt) + (SELECT COUNT(*) FROM outbox_event) + (SELECT COUNT(*) FROM durable_wait) + (SELECT COUNT(*) FROM durable_signal) + (SELECT COUNT(*) FROM job_continuation)";
-
 #[derive(Default, Serialize, Deserialize)]
-struct Ledger {
-    state: NativeState,
-    recurring: HashMap<String, RecurringDefinition>,
-    sequence: u64,
+pub(crate) struct Ledger {
+    pub(crate) state: NativeState,
+    pub(crate) recurring: HashMap<String, RecurringDefinition>,
+    pub(crate) sequence: u64,
 }
 
 #[derive(Clone)]
@@ -77,7 +73,7 @@ pub(crate) struct Views {
 }
 
 fn err(e: impl std::fmt::Display) -> StasisError {
-    StasisError::PortFailure(format!("runtime safety ledger: {e}"))
+    StasisError::PortFailure(format!("sqlite row store: {e}"))
 }
 
 /// Async reference store operations must be immediately ready. Never block an
@@ -116,52 +112,40 @@ impl AtomicState {
         }
     }
 
-    fn transition<T>(
+    fn apply<T>(
         &self,
-        payload: Option<String>,
-        legacy_count: i64,
-        operation: impl FnOnce(&Views, &mut u64) -> Result<T>,
-    ) -> Result<(T, String)> {
-        if legacy_count != 0 {
-            return Err(err(
-                "legacy v1 runtime rows require explicit offline reconciliation; refusing to hide or reinterpret them",
-            ));
-        }
-        let ledger: Ledger = match payload {
-            Some(s) => serde_json::from_str(&s).map_err(err)?,
-            None => Ledger::default(),
+        io: &mut dyn row_engine::SqlIo,
+        scope: &Scope,
+        operation: impl FnOnce(&Views) -> Result<T>,
+    ) -> Result<T> {
+        let loaded = row_engine::load(io, scope)?;
+        let jobs = InMemoryJobStore {
+            state: Arc::new(RwLock::new(loaded.state)),
+            clock: self.clock.clone(),
         };
-        let mut sequence = ledger.sequence;
+        let recurring = InMemoryRecurringStore {
+            defs: Arc::new(RwLock::new(loaded.recurring)),
+        };
         let views = Views {
-            jobs: InMemoryJobStore {
-                state: Arc::new(RwLock::new(ledger.state)),
-                clock: self.clock.clone(),
-            },
-            recurring: InMemoryRecurringStore {
-                defs: Arc::new(RwLock::new(ledger.recurring)),
-            },
+            jobs: jobs.clone(),
+            recurring: recurring.clone(),
         };
-        let result = operation(&views, &mut sequence)?;
-        let state = views.jobs.state.read().map_err(err)?;
-        let recurring = views.recurring.defs.read().map_err(err)?;
-        #[derive(Serialize)]
-        struct Snapshot<'a> {
-            state: &'a NativeState,
-            recurring: &'a HashMap<String, RecurringDefinition>,
-            sequence: u64,
-        }
-        let payload = serde_json::to_value(&Snapshot {
-            state: &state,
-            recurring: &recurring,
-            sequence,
-        })
-        .map_err(err)?
-        .to_string();
-        Ok((result, payload))
+        let result = operation(&views)?;
+        let state = jobs.state.read().map_err(err)?.clone();
+        let recurring = recurring.defs.read().map_err(err)?.clone();
+        row_engine::flush(
+            io,
+            &row_engine::WorkingSet {
+                before: loaded.before,
+                state,
+                recurring,
+            },
+        )?;
+        Ok(result)
     }
 
-    pub fn run<T>(&self, operation: impl FnOnce(&Views) -> Result<T>) -> Result<T> {
-        self.run_sequence(|v, _| operation(v))
+    pub fn run<T>(&self, scope: Scope, operation: impl FnOnce(&Views) -> Result<T>) -> Result<T> {
+        self.run_checked(scope, operation, || Ok(()))
     }
     /// Recheck the canonical admission after the SQL write, immediately before
     /// committing. An expiry at that boundary rolls back the entire publication.
@@ -174,7 +158,11 @@ impl AtomicState {
         use crate::ports::outbound::runtime::job_store::JobStore;
         let admission = std::cell::RefCell::new(None);
         self.run_checked(
-            |v, _| {
+            Scope::Commit {
+                job_id: snapshot.id.clone(),
+                epoch: snapshot.execution_epoch,
+            },
+            |v| {
                 let canonical = ready(v.jobs.get(&snapshot.id))?;
                 let result = operation(v)?;
                 if result == CommitResult::Committed {
@@ -196,46 +184,22 @@ impl AtomicState {
             },
         )
     }
-    fn run_sequence<T>(&self, operation: impl FnOnce(&Views, &mut u64) -> Result<T>) -> Result<T> {
-        self.run_checked(operation, || Ok(()))
-    }
     fn run_checked<T>(
         &self,
-        operation: impl FnOnce(&Views, &mut u64) -> Result<T>,
+        scope: Scope,
+        operation: impl FnOnce(&Views) -> Result<T>,
         check: impl FnOnce() -> Result<()>,
     ) -> Result<T> {
         match &self.backend {
-            Backend::Executor(e) => {
+            Backend::Executor(executor) => {
                 let mut operation = Some(operation);
                 let mut check = Some(check);
-                transaction_result(e.as_ref(), &mut || {
-                    let format =
-                        e.query("SELECT format FROM runtime_safety_ledger WHERE id=1", &[])?;
-                    if let Some(row) = format.first() {
-                        if row.i64(0)? != 1 {
-                            return Err(err("unsupported ledger format"));
-                        }
-                    }
-                    let rows = e.query(LOAD, &[])?;
-                    let payload = rows.first().map(|r| r.text(0)).transpose()?;
-                    let legacy = e
-                        .query(LEGACY, &[])?
-                        .first()
-                        .ok_or_else(|| err("legacy count missing"))?
-                        .i64(0)?;
+                transaction_result(executor.as_ref(), &mut || {
                     let op = operation
                         .take()
                         .ok_or_else(|| err("transaction callback invoked twice"))?;
-                    let original = payload.clone();
-                    let (result, payload) = self.transition(payload, legacy, op)?;
-                    if payload.len() > 1024 * 1024 {
-                        return Err(err(
-                            "executor ledger exceeds supported 1 MiB profile; no volatile fallback",
-                        ));
-                    }
-                    if original.as_deref() != Some(payload.as_str()) {
-                        e.execute(SAVE, &[SqlValue::Text(payload)])?;
-                    }
+                    let mut io = ExecIo(executor.as_ref());
+                    let result = self.apply(&mut io, &scope, op)?;
                     check
                         .take()
                         .ok_or_else(|| err("transaction callback invoked twice"))?(
@@ -244,40 +208,45 @@ impl AtomicState {
                 })
             }
             #[cfg(feature = "sqlite")]
-            Backend::Native(s) => s.with_tx(|tx| {
-                use rusqlite::OptionalExtension;
-                let format: Option<i64> = tx
-                    .query_row(
-                        "SELECT format FROM runtime_safety_ledger WHERE id=1",
-                        [],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .map_err(err)?;
-                if format.is_some_and(|f| f != 1) {
-                    return Err(err("unsupported ledger format"));
-                }
-                let payload: Option<String> = tx
-                    .query_row(LOAD, [], |r| r.get(0))
-                    .optional()
-                    .map_err(err)?;
-                let legacy: i64 = tx.query_row(LEGACY, [], |r| r.get(0)).map_err(err)?;
-                let original = payload.clone();
-                let (result, payload) = self.transition(payload, legacy, operation)?;
-                if original.as_deref() != Some(payload.as_str()) {
-                    tx.execute(SAVE, [payload]).map_err(err)?;
-                }
+            Backend::Native(session) => session.with_tx(|tx| {
+                let mut io = super::session::TxIo { tx };
+                let result = self.apply(&mut io, &scope, operation)?;
                 check()?;
                 Ok(result)
             }),
         }
     }
     pub fn next_id(&self, prefix: &str) -> Result<String> {
-        self.run_sequence(|_, sequence| {
-            *sequence = sequence
-                .checked_add(1)
-                .ok_or_else(|| err("identifier sequence exhausted"))?;
-            Ok(format!("{prefix}-{}", *sequence))
-        })
+        match &self.backend {
+            Backend::Executor(executor) => {
+                let prefix = prefix.to_string();
+                transaction_result(executor.as_ref(), &mut || {
+                    let mut io = ExecIo(executor.as_ref());
+                    row_engine::allocate_id(&mut io, &prefix)
+                })
+            }
+            #[cfg(feature = "sqlite")]
+            Backend::Native(session) => session.with_tx(|tx| {
+                let mut io = super::session::TxIo { tx };
+                row_engine::allocate_id(&mut io, prefix)
+            }),
+        }
+    }
+    pub fn prune_retained(
+        &self,
+        receipt_cutoff: i64,
+        cleanup_cutoff: i64,
+    ) -> Result<(usize, usize)> {
+        match &self.backend {
+            Backend::Executor(executor) => transaction_result(executor.as_ref(), &mut || {
+                let mut io = ExecIo(executor.as_ref());
+                row_engine::prune_retained(&mut io, receipt_cutoff, cleanup_cutoff)
+            }),
+            #[cfg(feature = "sqlite")]
+            Backend::Native(session) => session.with_tx(|tx| {
+                let mut io = super::session::TxIo { tx };
+                row_engine::prune_retained(&mut io, receipt_cutoff, cleanup_cutoff)
+            }),
+        }
     }
 }

@@ -14,10 +14,162 @@
 
 /// `(version, sql)` migrations applied in order. Each statement batch is idempotent
 /// only through the version table; do not edit a shipped version in place.
-pub const MIGRATIONS: &[(i64, &str)] = &[(1, MIGRATION_V1), (2, MIGRATION_V2)];
+pub const MIGRATIONS: &[(i64, &str)] = &[(1, MIGRATION_V1), (2, MIGRATION_V2), (3, MIGRATION_V3)];
 
-/// Canonical runtime ledger format 1. Populated v1 runtime rows are deliberately
-/// rejected until an operator reconciles old leases, identity and auxiliary data.
+/// One row payload, not the whole runtime. Durable Object SQLite rejects larger rows.
+pub const MAX_ROW_PAYLOAD_BYTES: usize = 1024 * 1024;
+
+/// Row-level native state. Migration code copies v1 tables and a format-1 ledger
+/// into these tables inside the same transaction, then deletes those sources.
+pub const MIGRATION_V3: &str = r#"
+CREATE TABLE runtime_job (
+    job_id TEXT PRIMARY KEY,
+    queue TEXT NOT NULL,
+    state TEXT NOT NULL,
+    priority INTEGER NOT NULL,
+    scheduled_at INTEGER NOT NULL,
+    lease_expires_at INTEGER,
+    finished_at INTEGER,
+    execution_epoch INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    incarnation INTEGER NOT NULL,
+    terminal_cycle INTEGER NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX idx_runtime_job_due ON runtime_job (queue, state, scheduled_at, priority, job_id);
+CREATE INDEX idx_runtime_job_lease ON runtime_job (state, lease_expires_at);
+CREATE INDEX idx_runtime_job_finished ON runtime_job (state, finished_at);
+
+CREATE TABLE runtime_epoch (
+    job_id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL
+);
+
+CREATE TABLE runtime_attempt (
+    attempt_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL,
+    guardrail_code TEXT,
+    execution_id TEXT,
+    finished_at INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX idx_runtime_attempt_job ON runtime_attempt (job_id, seq);
+CREATE INDEX idx_runtime_attempt_guard ON runtime_attempt (guardrail_code);
+CREATE INDEX idx_runtime_attempt_exec ON runtime_attempt (execution_id);
+CREATE INDEX idx_runtime_attempt_finished ON runtime_attempt (finished_at);
+
+CREATE TABLE runtime_event (
+    event_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    thread_id TEXT,
+    execution_id TEXT,
+    occurred_at INTEGER NOT NULL,
+    next_attempt_at INTEGER,
+    payload TEXT NOT NULL
+);
+CREATE INDEX idx_runtime_event_pending ON runtime_event (status, occurred_at, event_id);
+CREATE INDEX idx_runtime_event_job ON runtime_event (job_id, occurred_at);
+CREATE INDEX idx_runtime_event_thread ON runtime_event (thread_id, occurred_at);
+CREATE INDEX idx_runtime_event_exec ON runtime_event (execution_id, occurred_at);
+
+CREATE TABLE runtime_receipt (
+    job_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL,
+    delivered INTEGER NOT NULL,
+    retained_at INTEGER,
+    digest TEXT NOT NULL,
+    snapshot_version INTEGER NOT NULL,
+    snapshot_incarnation INTEGER NOT NULL,
+    snapshot_cycle INTEGER NOT NULL,
+    snapshot_state TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (job_id, epoch)
+);
+CREATE INDEX idx_runtime_receipt_open ON runtime_receipt (delivered);
+CREATE INDEX idx_runtime_receipt_retain ON runtime_receipt (retained_at);
+CREATE INDEX idx_runtime_receipt_identity ON runtime_receipt (
+    job_id, snapshot_version, epoch, snapshot_incarnation, snapshot_cycle, snapshot_state
+);
+
+CREATE TABLE runtime_cancellation (
+    cancel_key TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    delivered INTEGER NOT NULL,
+    retained_at INTEGER,
+    payload TEXT NOT NULL
+);
+CREATE INDEX idx_runtime_cancel_open ON runtime_cancellation (delivered);
+CREATE INDEX idx_runtime_cancel_job ON runtime_cancellation (job_id);
+CREATE INDEX idx_runtime_cancel_retain ON runtime_cancellation (retained_at);
+
+CREATE TABLE runtime_cleanup (
+    job_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL,
+    retained_at INTEGER,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (job_id, epoch)
+);
+CREATE INDEX idx_runtime_cleanup_retain ON runtime_cleanup (retained_at);
+
+CREATE TABLE runtime_staged (
+    parent_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (parent_id, epoch, version)
+);
+
+CREATE TABLE runtime_wait (
+    wait_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    incarnation INTEGER NOT NULL,
+    signal_type TEXT NOT NULL,
+    correlation_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX idx_runtime_wait_signal ON runtime_wait (signal_type, correlation_key, status);
+CREATE INDEX idx_runtime_wait_job ON runtime_wait (job_id, incarnation, status);
+
+CREATE TABLE runtime_signal (
+    signal_id TEXT PRIMARY KEY,
+    signal_type TEXT NOT NULL,
+    correlation_key TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX idx_runtime_signal_key ON runtime_signal (signal_type, correlation_key, created_at, signal_id);
+
+CREATE TABLE runtime_continuation (
+    continuation_id TEXT PRIMARY KEY,
+    parent_job_id TEXT NOT NULL,
+    child_job_id TEXT,
+    status TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX idx_runtime_continuation_parent ON runtime_continuation (parent_job_id, status);
+CREATE INDEX idx_runtime_continuation_child ON runtime_continuation (child_job_id);
+
+CREATE TABLE runtime_recurring (
+    recurring_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL,
+    next_run_at INTEGER NOT NULL,
+    lease_expires_at INTEGER,
+    payload TEXT NOT NULL
+);
+CREATE INDEX idx_runtime_recurring_due ON runtime_recurring (enabled, next_run_at, lease_expires_at);
+
+CREATE TABLE runtime_id_alloc (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    next INTEGER NOT NULL
+);
+"#;
+
+/// Historical snapshot ledger (format 1). Version 3 copies one row into the
+/// `runtime_*` tables and deletes it. New runtime state is not written here.
 pub const MIGRATION_V2: &str = r#"
 CREATE TABLE runtime_safety_ledger (
     id INTEGER PRIMARY KEY CHECK(id = 1),

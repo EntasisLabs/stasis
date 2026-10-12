@@ -106,7 +106,7 @@ impl
     ) -> Self {
         Self::from_stores(
             SqliteJobStore::new(session.clone()).with_clock(clock.clone()),
-            SqliteRecurringStore::new(session.clone()),
+            SqliteRecurringStore::new(session.clone()).with_clock(clock.clone()),
             SqliteOutboxStore::new(session.clone()),
             SqliteJobAttemptStore::new(session.clone()),
             SqliteDurableWaitStore::new(session.clone()),

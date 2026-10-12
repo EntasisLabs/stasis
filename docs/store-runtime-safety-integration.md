@@ -15,43 +15,74 @@ terminal-cycle continuation isolation. The native/WASM async macro split remains
 native futures are Send; wasm store/handler futures can be ?Send.
 
 The SQLite/DO safety adapters execute the same reference state transitions under
-one SQL transaction. The canonical format-1 `runtime_safety_ledger` contains jobs,
-attempts, staged children/events/continuations, completion/control receipts,
-cleanup records, epochs/incarnations, waits and signals. A failed SQL write or
-commit rolls back the whole transition. Completion checks the canonical
-owner/epoch/version and trusted expiration, ignores mutable worker identity in
-publication, and rechecks admission after the ledger write before commit.
-Duplicate completions retain the original receipt rather than emitting effects
-again. Grant-checked wait registration is a durable subscription operation before
-parking (the reviewed signal/wakeup protocol); subsequent completion, recovery
-and cancellation changes to that subscription participate in the job transaction.
-It is not an arbitrary transaction around handler side effects.
+one SQL transaction. Each operation loads only the indexed rows that transition
+reads or writes, runs the in-memory function, and flushes the diff. Updates
+compare-and-swap on the previously read payload (`UPDATE ... WHERE payload = ?
+RETURNING`). A mismatch or a failed commit rolls the whole transition back.
+Nothing is visible before commit. Handler side effects stay outside the
+transaction.
 
-The default SQLite and DO ID allocator persists its sequence in this ledger.
-Callers propagate allocation errors; there is no fixed-string or volatile fallback.
-Insertion is collision-rejecting, not an upsert. Explicit caller-provided IDs can
-still collide and will be rejected rather than overwrite a job.
+Completion checks the canonical owner/epoch/version and trusted expiration,
+ignores mutable worker identity in publication, and rechecks admission after the
+row writes before commit. Duplicate completions return the original receipt
+rather than emitting effects again, for as long as that receipt is retained.
+Staged children, events and continuations commit with the completion that
+publishes them. Grant-checked wait registration is a durable subscription
+operation before parking; later completion, recovery and cancellation of that
+subscription participate in the job transaction.
+
+The default SQLite and DO ID allocator persists a single counter in
+`runtime_id_alloc` and returns `{prefix}-{n}`. Callers propagate allocation
+errors; there is no fixed-string or volatile fallback. A failed transaction does
+not consume an id. Insertion is collision-rejecting, not an upsert. Explicit
+caller-provided IDs can still collide and will be rejected rather than overwrite
+a job.
+
+Hot paths use indexes: next runnable job (`queue, state, scheduled_at, priority,
+job_id`), expired leases (`state, lease_expires_at`), undelivered receipts
+(`delivered`), and waits by signal key. A lease walks that index one row at a
+time and stops at the first job whose placement matches the worker. The walk
+order is the lease tie-break `(scheduled_at, priority, job_id)`, which is also
+the in-memory `min_by_key`, so the first match is the same job. A worker that
+matches the earliest due row reads that one row. A worker that matches none
+still reads every due row in the queue. Other queues are not read. List-all
+recurring definitions remains a full read because that is the API. Pending
+outbox tie-break is `(next_attempt_at or occurred_at, event_id)`. Signal
+selection tie-break is `(created_at, signal_id)`.
+
+## Retention
+
+`RetentionPolicy` defaults are 30 days for terminal jobs, completion/control
+receipts, and cleanup records (`terminal_ttl_days`, `receipt_ttl_days`,
+`cleanup_ttl_days`). `enforce_retention` prunes terminal jobs, attempts and
+non-pending outbox rows on the job cutoff, then deletes receipts, cancellations
+and cleanup rows whose `retained_at` is set and at or before their own cutoff.
+A receipt with no `retained_at` is kept. Pruning a terminal job does not delete
+its receipt. Inside the receipt window, a duplicate completion still returns
+the original receipt after the job row is gone. After the receipt is pruned,
+that duplicate is `Stale` and does not republish effects.
 
 ## Supported profiles and explicit restrictions
 
 - **Memory:** coherent shared NativeState store views, intentionally volatile.
 - **Surreal Mem/KV:** the reviewed native transaction/receipt contracts, driven by
-  the shared engine; legacy identity reconciliation requirements remain.
-- **Native SQLite:** synchronous reference transitions in a rusqlite transaction;
-  files retain IDs and the safety ledger across close/reopen.
-- **DO SqlExecutor:** durable job, attempt, outbox, recurring, wait/signal and
-  continuation adapters. Inbound keys, resource leases and workflow definitions
-  retain their existing durable SQL adapters. There are no volatile runtime
-  auxiliary fillers in this composition.
+  the shared engine. Opening a store runs incarnation backfill and then
+  `reconcile_legacy_identity` (see Migration).
+- **Native SQLite:** the same row transitions inside a rusqlite `BEGIN IMMEDIATE`
+  transaction. Files retain rows and the id counter across close/reopen.
+- **DO SqlExecutor:** the same row schema. Inbound keys, resource leases and
+  workflow definitions retain their existing durable SQL adapters. There are no
+  volatile runtime auxiliary fillers in this composition.
 
-This is a **correctness-first snapshot ledger**, not a high-throughput row-level
-SQLite implementation. Every operation loads the ledger; mutations serialize it.
-The executor/DO profile rejects snapshots larger than **1 MiB** before committing.
-There is no fallback to memory. Unbounded histories, large-payload orchestration,
-large tenants and sustained write throughput require a later row-level adapter
-and performance validation; do not advertise this profile for those workloads.
-Native SQLite does not enforce the DO size cap, but shares the linear-cost design.
-Use retained receipts deliberately; do not truncate them to evade the cap.
+There is no total-state size cap. Each row payload is still refused above
+**1 MiB** on every backend that shares this adapter, including native SQLite,
+with no memory fallback. A lease does not load the rest of a due queue after
+the first placement match. The remaining cost is the non-matching prefix: a
+worker that cannot take any due job still reads that queue's due rows. A
+debug-build sample of 500 unrestricted inserts was about 46 ms; 20 leases of
+that due set, each matching the earliest row, was about 6 ms.
+This is not a claim of production throughput, power-loss durability, or live
+Cloudflare eviction.
 
 The synchronous `DurableSqliteKernel` accepts immediately-ready handlers. A
 handler that suspends returns an explicit unsupported error, not a successful
@@ -74,19 +105,46 @@ are not verified or enabled by this integration.
 
 ## Migration
 
-Migration 1 is unchanged; migration 2 adds the versioned safety ledger. Empty v1
-runtime tables upgrade without inventing grants. **Populated v1 job/attempt/outbox/
-wait/signal/continuation tables are rejected on every ledger operation**, including
-when a ledger already exists. Unsupported ledger formats/corrupt payloads fail.
-The old rows are not deleted, overwritten, or silently ignored.
+Schema version 3 creates the `runtime_*` tables and, in the same transaction,
+imports whichever single legacy source is present. The import is idempotent
+because it runs only while moving to version 3; a failure rolls the version
+stamp and the copied rows back. After a successful import the v1 runtime rows
+and the ledger row are deleted. The old tables stay in the schema so a refused
+database can still be inspected. Non-runtime tables (inbound keys, leases,
+workflows, threads, identity) are not part of this import.
 
-An operator must preserve/export those rows and reconcile old leases, incarnation,
-execution receipts and signal/continuation identities offline before using this
-runtime. This candidate does not provide an automatic legacy-data reconciliation
-utility. Back up the original database; do not delete rows merely to clear the
-error. Raw SQL consumers of the old runtime tables must migrate to the store ports:
-those tables are not mirrors of the new canonical ledger. Existing non-runtime
-SQL stores are unaffected by this runtime ledger restriction.
+- **v1 SQLite** (`job`, `job_attempt`, `outbox_event`, `durable_wait`,
+  `durable_signal`, `job_continuation`, `recurring_definition`): Leased and
+  Running jobs are re-enqueued and their lease columns cleared. They are not
+  trusted. Each job receives incarnation 1, terminal cycle 1, execution epoch 0
+  and version 0. No receipts are invented. Terminal jobs stay terminal.
+  Attempts, events, waits, signals and continuations are copied. A wait or
+  continuation whose parent job is missing is refused. Unknown state, outcome,
+  outbox status, event type, wait status, or continuation trigger/status is
+  refused. Signals stay unbound (`target_incarnations` empty).
+- **Format-1 `runtime_safety_ledger`:** the serialized native state is copied
+  as stored, including an unexpired grant. Missing `retained_at` values are
+  stamped with the upgrade time so the retention window starts then. A format
+  other than 1, or JSON that does not decode, is refused and not imported.
+- **Both sources populated:** refused. The import will not guess which source
+  is canonical.
+- **Id counter:** `runtime_id_alloc` is set to the maximum of the ledger
+  sequence, the old `stasis_id_seq` counters, and any `{prefix}-{n}` suffix
+  already present, so new ids do not reuse old ones.
+- **Durable Objects** use the same import inside `apply_schema`.
+
+Surreal does not use this SQLite migration. `initialize_execution_schema` still
+backfills incarnation 0, then `reconcile_legacy_identity` re-enqueues epoch-zero
+leased/running rows, sets a missing terminal cycle to 1 only when that job has
+no execution receipt, and binds incarnation-zero waits and unbound continuation
+floors to that parent. It refuses a cycle-zero job that already has a receipt,
+a wait or continuation with no parent, and a non-zero edge that disagrees with
+the parent. It does not invent receipts, rewrite signals, or trust an epoch-zero
+lease. Quiesce old writers first; mixed writers are unsupported.
+
+Back up the database before opening it with this runtime. Raw SQL consumers of
+the v1 runtime tables must move to the store ports: those tables are no longer
+the canonical rows.
 
 ## Regression sources and evidence
 
@@ -99,9 +157,13 @@ The retained native review fixture is now real reusable test source in
 backends. No historical logs/checksum files are part of incoming history.
 
 Further tests cover SQL abort/after-write rollback, idempotent retries, durable
-auxiliary reconstruction, retained receipts and cleanup, and fail-closed legacy
-rows. WASM/JS tests cover reconstruction, installed storage identity and host
-transaction failures. Host reconstruction is not a claim of live DO eviction or
-power-loss testing. Exact commands/results, failures encountered, source hashes
-and disk receipts belong to the retained **outside-Git** handoff evidence, not
-this source tree. Independent review and integration remain with the owner.
+auxiliary reconstruction, retained receipts and cleanup, and upgrade refusal.
+`tests/row_level_equivalence.rs` runs 32 seeds of 40 operations each against
+memory, native SQLite and the executor path, including lease expiry, recovery,
+cancel, replay-shaped duplicate completion, and injected rollback.
+`src/infrastructure/sqlite/upgrade_tests.rs` opens real v1 files, format-1
+ledger files, and executor databases and then runs a job. Surreal coverage is
+`tests/surreal_legacy_reconcile.rs`. WASM/JS tests cover reconstruction,
+installed storage identity, host transaction failures, and the per-row 1 MiB
+refusal. Host reconstruction is not a claim of live DO eviction or power-loss
+testing. Independent review remains with the owner.

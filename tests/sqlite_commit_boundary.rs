@@ -38,23 +38,29 @@ struct BoundaryExecutor {
     armed: AtomicBool,
     expired: Arc<AtomicBool>,
 }
+fn completion_write(sql: &str) -> bool {
+    let sql = sql.trim_start();
+    (sql.starts_with("INSERT") || sql.starts_with("UPDATE"))
+        && (sql.contains("runtime_job") || sql.contains("runtime_receipt"))
+}
+
 impl SqlExecutor for BoundaryExecutor {
     fn execute(&self, s: &str, p: &[SqlValue]) -> Result<u64> {
-        let n = self.inner.execute(s, p)?;
-        if self.armed.load(Ordering::SeqCst) && s.starts_with("INSERT INTO runtime_safety_ledger") {
-            self.expired.store(true, Ordering::SeqCst);
-        }
-        Ok(n)
+        self.inner.execute(s, p)
     }
     fn query(&self, s: &str, p: &[SqlValue]) -> Result<Vec<SqlRow>> {
-        self.inner.query(s, p)
+        let rows = self.inner.query(s, p)?;
+        if self.armed.load(Ordering::SeqCst) && completion_write(s) {
+            self.expired.store(true, Ordering::SeqCst);
+        }
+        Ok(rows)
     }
     fn transaction(&self, f: &mut dyn FnMut() -> Result<()>) -> Result<()> {
         self.inner.transaction(f)
     }
 }
 #[tokio::test]
-async fn expiry_after_ledger_write_rolls_back_publication_and_receipt() {
+async fn expiry_after_row_write_rolls_back_publication_and_receipt() {
     let expired = Arc::new(AtomicBool::new(false));
     let now = Utc::now();
     let clock = Arc::new(BoundaryClock {

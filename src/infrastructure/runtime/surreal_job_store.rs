@@ -409,6 +409,7 @@ impl JobStore for SurrealJobStore {
             evidence_json: None,
             return_observations: Vec::new(),
             acknowledged_at: None,
+            retained_at: Some(Utc::now()),
         });
         let cleanup = cleanup.map(CleanupDbRecord::from_cleanup).transpose()?;
         let result = self
@@ -557,6 +558,7 @@ impl JobStore for SurrealJobStore {
             evidence_json: None,
             return_observations: Vec::new(),
             acknowledged_at: None,
+            retained_at: Some(Utc::now()),
         });
         let response = self
             .db
@@ -631,6 +633,7 @@ impl JobStore for SurrealJobStore {
             evidence_json: r.evidence_json,
             return_observations: r.return_observations,
             acknowledged_at: r.acknowledged_at,
+            retained_at: r.retained_at,
         }))
     }
     async fn observe_cleanup(
@@ -861,6 +864,20 @@ impl JobStore for SurrealJobStore {
 
         Ok(removed)
     }
+
+    async fn prune_retained_before(
+        &self,
+        receipt_cutoff: DateTime<Utc>,
+        cleanup_cutoff: DateTime<Utc>,
+    ) -> Result<(usize, usize)> {
+        let deleted_receipts = self
+            .delete_retained(&self.receipt_table(), receipt_cutoff)
+            .await?;
+        let deleted_cleanups = self
+            .delete_retained(&self.cleanup_table(), cleanup_cutoff)
+            .await?;
+        Ok((deleted_receipts, deleted_cleanups))
+    }
 }
 }
 
@@ -878,6 +895,8 @@ struct ReceiptRecord {
     #[serde(default)]
     effective_scheduled_at: Option<DateTime<Utc>>,
     delivered: bool,
+    #[serde(default)]
+    retained_at: Option<DateTime<Utc>>,
 }
 impl ReceiptRecord {
     fn from_receipt(key: &str, receipt: &ExecutionReceipt) -> Result<Self> {
@@ -896,6 +915,7 @@ impl ReceiptRecord {
             )),
             effective_scheduled_at: None,
             delivered: false,
+            retained_at: receipt.retained_at,
         })
     }
     fn decode(&self) -> Result<ExecutionReceipt> {
@@ -934,6 +954,8 @@ struct CleanupDbRecord {
     #[serde(default)]
     return_observations: Vec<String>,
     acknowledged_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    retained_at: Option<DateTime<Utc>>,
 }
 impl CleanupDbRecord {
     fn from_cleanup(record: CleanupRecord) -> Result<Self> {
@@ -944,6 +966,7 @@ impl CleanupDbRecord {
             evidence_json: None,
             return_observations: Vec::new(),
             acknowledged_at: None,
+            retained_at: record.retained_at,
         })
     }
 }
@@ -979,6 +1002,58 @@ impl SurrealJobStore {
         self.db.query("BEGIN TRANSACTION; LET $legacy = SELECT * FROM type::table($table) WHERE (incarnation ?? 0) = 0; FOR $job IN $legacy { LET $generation = UPSERT type::record($generation_table,$job.job_id) SET epoch = math::max([epoch ?? 0,$job.execution_epoch ?? 0]) + 1 RETURN AFTER; UPDATE type::record($table,$job.job_id) SET incarnation = $generation[0].epoch, wakeup_pending = false WHERE (incarnation ?? 0) = 0; }; COMMIT TRANSACTION;")
             .bind(("table",self.table.clone())).bind(("generation_table",format!("{}_execution_generation",self.table)))
             .await.map_err(|e|Self::port_err("native incarnation migration",e))?.check().map_err(|e|Self::port_err("native incarnation migration",e))?;
+        self.reconcile_legacy_identity().await?;
+        Ok(())
+    }
+
+    /// Quiescent upgrade for pre-incarnation Surreal rows.
+    ///
+    /// Epoch-zero leases are re-enqueued and are not trusted. A missing terminal
+    /// cycle becomes 1 only when no execution receipt exists. Waits and
+    /// continuations bind to that single job row. Signals stay unbound.
+    /// Conflicting history is an error and is not rewritten.
+    pub async fn reconcile_legacy_identity(&self) -> Result<()> {
+        let sql = r#"
+BEGIN TRANSACTION;
+LET $bad = SELECT job_id FROM type::table($table) WHERE (terminal_cycle ?? 0) = 0 AND job_id IN (SELECT VALUE job_id FROM type::table($receipt) WHERE job_id != NONE);
+IF array::len($bad) > 0 { THROW 'legacy job has execution receipts but terminal cycle 0; refusing to invent a cycle'; };
+UPDATE type::table($table) SET state = 'enqueued', lease_owner = NONE, lease_expires_at = NONE, heartbeat_at = NONE WHERE (execution_epoch ?? 0) = 0 AND state IN ['leased', 'running'];
+UPDATE type::table($table) SET terminal_cycle = 1 WHERE (terminal_cycle ?? 0) = 0;
+LET $waits = SELECT * FROM durable_wait WHERE (incarnation ?? 0) = 0;
+FOR $wait IN $waits {
+    LET $job = SELECT * FROM ONLY type::record($table, $wait.job_id);
+    IF $job = NONE OR ($job.incarnation ?? 0) = 0 { THROW 'legacy wait has no reconcilable job: ' + $wait.wait_id; };
+    LET $foreign = SELECT job_id FROM type::table($receipt) WHERE job_id = $wait.job_id AND (job_snapshot.incarnation ?? 0) != 0 AND (job_snapshot.incarnation ?? 0) != $job.incarnation;
+    IF array::len($foreign) > 0 { THROW 'legacy wait conflicts with another incarnation receipt: ' + $wait.wait_id; };
+    UPDATE type::record('durable_wait', $wait.wait_id) SET incarnation = $job.incarnation WHERE (incarnation ?? 0) = 0;
+};
+LET $edges = SELECT * FROM job_continuation WHERE (parent_incarnation ?? 0) = 0 OR (parent_terminal_cycle ?? 0) = 0 OR parent_version_floor = NONE;
+FOR $edge IN $edges {
+    LET $job = SELECT * FROM ONLY type::record($table, $edge.parent_job_id);
+    IF $job = NONE OR ($job.incarnation ?? 0) = 0 OR ($job.terminal_cycle ?? 0) = 0 { THROW 'legacy continuation has no reconcilable parent: ' + $edge.continuation_id; };
+    IF ($edge.parent_incarnation ?? 0) != 0 AND $edge.parent_incarnation != $job.incarnation { THROW 'legacy continuation incarnation disagrees with parent: ' + $edge.continuation_id; };
+    IF ($edge.parent_terminal_cycle ?? 0) != 0 AND $edge.parent_terminal_cycle != $job.terminal_cycle { THROW 'legacy continuation cycle disagrees with parent: ' + $edge.continuation_id; };
+    UPDATE type::record('job_continuation', $edge.continuation_id) MERGE { parent_incarnation: $job.incarnation, parent_terminal_cycle: $job.terminal_cycle, parent_version_floor: $edge.parent_version_floor ?? $job.version };
+};
+COMMIT TRANSACTION;
+"#;
+        let mut response = self
+            .db
+            .query(sql)
+            .bind(("table", self.table.clone()))
+            .bind(("receipt", self.receipt_table()))
+            .await
+            .map_err(|e| Self::port_err("legacy identity reconcile", e))?;
+        let errors = response.take_errors();
+        if !errors.is_empty() {
+            return Err(Self::port_err(
+                "legacy identity reconcile",
+                format!("{errors:?}"),
+            ));
+        }
+        response
+            .check()
+            .map_err(|e| Self::port_err("legacy identity reconcile", e))?;
         Ok(())
     }
     async fn commit_once(
@@ -1059,6 +1134,24 @@ impl SurrealJobStore {
     }
     fn receipt_table(&self) -> String {
         format!("{}_execution_receipt", self.table)
+    }
+    async fn delete_retained(&self, table: &str, cutoff: DateTime<Utc>) -> Result<usize> {
+        let mut response = self
+            .db
+            .query("LET $rows = DELETE type::table($table) WHERE retained_at != NONE AND retained_at <= $cutoff RETURN BEFORE; RETURN array::len($rows);")
+            .bind(("table", table.to_string()))
+            .bind(("cutoff", cutoff))
+            .await
+            .map_err(|e| Self::port_err("prune retained rows", e))?
+            .check()
+            .map_err(|e| Self::port_err("prune retained rows", e))?;
+        let mut count = 0usize;
+        for index in 0..response.num_statements() {
+            if let Ok(Some(value)) = response.take::<Option<i64>>(index) {
+                count = usize::try_from(value).unwrap_or(0);
+            }
+        }
+        Ok(count)
     }
     fn cleanup_table(&self) -> String {
         format!("{}_execution_cleanup", self.table)

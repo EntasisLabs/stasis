@@ -7458,6 +7458,7 @@ async fn in_memory_runtime_retention_prunes_terminal_records() {
     runtime
         .configure_retention_policy(RetentionPolicy {
             terminal_ttl_days: 1,
+            ..RetentionPolicy::default()
         })
         .expect("retention policy should configure");
 
@@ -7517,6 +7518,7 @@ async fn surreal_runtime_retention_prunes_terminal_records() {
     runtime
         .configure_retention_policy(RetentionPolicy {
             terminal_ttl_days: 1,
+            ..RetentionPolicy::default()
         })
         .expect("retention policy should configure");
 
