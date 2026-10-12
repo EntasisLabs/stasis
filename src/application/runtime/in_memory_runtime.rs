@@ -122,34 +122,34 @@ use crate::application::runtime::execution_commit::{
     publication,
 };
 use crate::application::runtime::job_lifecycle::STALE_LEASE_MESSAGE;
-#[derive(Default, serde::Serialize, serde::Deserialize)]
-struct StagedEffects {
-    children: Vec<Job>,
-    continuations: Vec<crate::domain::runtime::job_continuation::JobContinuation>,
-    events: Vec<OutboxEvent>,
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct StagedEffects {
+    pub(crate) children: Vec<Job>,
+    pub(crate) continuations: Vec<crate::domain::runtime::job_continuation::JobContinuation>,
+    pub(crate) events: Vec<OutboxEvent>,
 }
 impl StagedEffects {
     fn count(&self) -> usize {
         self.children.len() + self.continuations.len() + self.events.len()
     }
 }
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct NativeState {
-    jobs: HashMap<String, Job>,
+    pub(crate) jobs: HashMap<String, Job>,
     pub(crate) continuations:
         HashMap<String, crate::domain::runtime::job_continuation::JobContinuation>,
     #[serde(with = "crate::infrastructure::sqlite::atomic_state::map_entries")]
-    staged: HashMap<(String, u64, u64), StagedEffects>,
+    pub(crate) staged: HashMap<(String, u64, u64), StagedEffects>,
     pub(crate) waits: HashMap<String, crate::domain::runtime::durable_wait::DurableWaitRecord>,
     pub(crate) signals: HashMap<String, crate::domain::runtime::durable_wait::DurableSignalRecord>,
-    epochs: HashMap<String, u64>,
-    attempts: HashMap<String, Vec<JobAttempt>>,
-    events: HashMap<String, OutboxEvent>,
+    pub(crate) epochs: HashMap<String, u64>,
+    pub(crate) attempts: HashMap<String, Vec<JobAttempt>>,
+    pub(crate) events: HashMap<String, OutboxEvent>,
     #[serde(with = "crate::infrastructure::sqlite::atomic_state::map_entries")]
-    receipts: HashMap<(String, u64), ExecutionReceipt>,
+    pub(crate) receipts: HashMap<(String, u64), ExecutionReceipt>,
     #[serde(with = "crate::infrastructure::sqlite::atomic_state::map_entries")]
-    cleanup: HashMap<(String, u64), CleanupRecord>,
-    cancellations: HashMap<String, ExecutionReceipt>,
+    pub(crate) cleanup: HashMap<(String, u64), CleanupRecord>,
+    pub(crate) cancellations: HashMap<String, ExecutionReceipt>,
 }
 #[derive(Clone)]
 pub struct InMemoryJobStore {
@@ -534,6 +534,7 @@ impl JobStore for InMemoryJobStore {
                     evidence_json: None,
                     return_observations: Vec::new(),
                     acknowledged_at: None,
+                    retained_at: Some(now),
                 },
             );
         }
@@ -854,7 +855,7 @@ impl JobStore for InMemoryJobStore {
                                 && old.consumed_signal_ids.contains(&signal.signal_id)
                         })
                 })
-                .min_by_key(|s| s.created_at)
+                .min_by_key(|s| (s.created_at, s.signal_id.clone()))
             {
                 wait.status = DurableWaitStatus::Signaled;
                 wait.signal_payload = Some(signal.payload_json.clone());
@@ -887,6 +888,7 @@ impl JobStore for InMemoryJobStore {
                     evidence_json: None,
                     return_observations: Vec::new(),
                     acknowledged_at: None,
+                    retained_at: Some(now),
                 },
             );
         }
@@ -998,7 +1000,7 @@ impl JobStore for InMemoryJobStore {
                     && lease_expired
                     && job.placement.matches(worker)
             })
-            .min_by_key(|(_, job)| (job.scheduled_at, job.priority))
+            .min_by_key(|(id, job)| (job.scheduled_at, job.priority, (*id).clone()))
             .map(|(id, _)| id.clone());
 
         let Some(job_id) = selected_id else {
@@ -1113,6 +1115,38 @@ impl JobStore for InMemoryJobStore {
             .collect::<std::collections::HashSet<_>>();
         native.staged.retain(|(id, _, _), _| live.contains(id));
         Ok(removed)
+    }
+
+    async fn prune_retained_before(
+        &self,
+        receipt_cutoff: DateTime<Utc>,
+        cleanup_cutoff: DateTime<Utc>,
+    ) -> Result<(usize, usize)> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
+        let receipts_before = state.receipts.len() + state.cancellations.len();
+        state.receipts.retain(|_, receipt| {
+            receipt
+                .retained_at
+                .is_none_or(|retained| retained > receipt_cutoff)
+        });
+        state.cancellations.retain(|_, receipt| {
+            receipt
+                .retained_at
+                .is_none_or(|retained| retained > receipt_cutoff)
+        });
+        let receipts =
+            receipts_before.saturating_sub(state.receipts.len() + state.cancellations.len());
+        let cleanups_before = state.cleanup.len();
+        state.cleanup.retain(|_, record| {
+            record
+                .retained_at
+                .is_none_or(|retained| retained > cleanup_cutoff)
+        });
+        let cleanups = cleanups_before.saturating_sub(state.cleanup.len());
+        Ok((receipts, cleanups))
     }
 }
 
@@ -1259,7 +1293,11 @@ impl OutboxStore for InMemoryOutboxStore {
             .cloned()
             .collect();
 
-        pending.sort_by_key(|evt| evt.next_attempt_at.unwrap_or(evt.event.occurred_at));
+        pending.sort_by(|a, b| {
+            let left = a.next_attempt_at.unwrap_or(a.event.occurred_at);
+            let right = b.next_attempt_at.unwrap_or(b.event.occurred_at);
+            left.cmp(&right).then_with(|| a.event_id.cmp(&b.event_id))
+        });
         pending.truncate(limit);
         Ok(pending)
     }

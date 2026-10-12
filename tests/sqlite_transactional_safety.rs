@@ -1,5 +1,5 @@
 #![cfg(feature = "sqlite")]
-//! Failure-boundary and reconstruction tests for the new durable safety ledger.
+//! Failure-boundary and reconstruction tests for the row-level runtime tables.
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use stasis::application::runtime::{job_context::JobContext, sqlite_runtime::SqliteRuntime};
@@ -67,20 +67,27 @@ struct FailWrite {
     inner: RusqliteExecutor,
     armed: AtomicBool,
 }
+fn completion_write(sql: &str) -> bool {
+    let sql = sql.trim_start();
+    (sql.starts_with("INSERT") || sql.starts_with("UPDATE") || sql.starts_with("DELETE"))
+        && (sql.contains("runtime_job")
+            || sql.contains("runtime_receipt")
+            || sql.contains("runtime_attempt")
+            || sql.contains("runtime_event")
+            || sql.contains("runtime_continuation"))
+}
+
 impl SqlExecutor for FailWrite {
     fn execute(&self, sql: &str, p: &[SqlValue]) -> Result<u64> {
-        let n = self.inner.execute(sql, p)?;
-        if self.armed.load(Ordering::SeqCst) && sql.starts_with("INSERT INTO runtime_safety_ledger")
-        {
-            Err(StasisError::PortFailure(
-                "injected after ledger write".into(),
-            ))
-        } else {
-            Ok(n)
-        }
+        self.inner.execute(sql, p)
     }
     fn query(&self, sql: &str, p: &[SqlValue]) -> Result<Vec<SqlRow>> {
-        self.inner.query(sql, p)
+        let rows = self.inner.query(sql, p)?;
+        if self.armed.load(Ordering::SeqCst) && completion_write(sql) {
+            Err(StasisError::PortFailure("injected after row write".into()))
+        } else {
+            Ok(rows)
+        }
     }
     fn transaction(&self, body: &mut dyn FnMut() -> Result<()>) -> Result<()> {
         self.inner.transaction(body)
@@ -210,7 +217,7 @@ async fn native_sql_abort_rolls_back_job_attempt_and_staged_child() {
         .await
         .unwrap();
     let session = rt.job_store.session();
-    session.execute("CREATE TRIGGER fail_completion BEFORE UPDATE ON runtime_safety_ledger BEGIN SELECT RAISE(ABORT,'injected native completion'); END",[]).unwrap();
+    session.execute("CREATE TRIGGER fail_completion BEFORE UPDATE ON runtime_job BEGIN SELECT RAISE(ABORT,'injected native completion'); END",[]).unwrap();
     assert!(
         rt.job_store
             .commit_execution(&leased, success())
@@ -349,18 +356,14 @@ async fn executor_reconstruction_retains_auxiliary_state_receipts_and_cleanup() 
 }
 
 #[tokio::test]
-async fn legacy_runtime_rows_fail_closed_without_destructive_migration() {
+async fn retired_v1_table_is_not_the_runtime_after_upgrade() {
     let session = stasis::infrastructure::sqlite::SqliteSession::open(":memory:").unwrap();
-    // A v1 record's ownership/incarnation cannot be inferred from its SQL defaults.
     session.execute("INSERT INTO durable_signal(signal_id,signal_type,correlation_key,payload_json,created_at) VALUES('old','signal','key','{}',0)",[]).unwrap();
     let rt = SqliteRuntime::new(session.clone());
-    assert!(rt.job_store.insert(job("new")).await.is_err());
-    assert_eq!(
-        session
-            .query_opt("SELECT COUNT(*) FROM durable_signal", [], |r| r
-                .get::<_, i64>(0))
-            .unwrap()
-            .unwrap(),
-        1
+    rt.job_store.insert(job("new")).await.unwrap();
+    assert!(rt.job_store.get("new").await.unwrap().is_some());
+    assert!(
+        rt.wait_store.get_signal("old").await.unwrap().is_none(),
+        "rows inserted into the retired v1 table after migration are not runtime state"
     );
 }

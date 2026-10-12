@@ -11,6 +11,8 @@ use crate::domain::errors::Result;
 
 use super::codec::{encode_time, sql_err};
 use super::executor::{SqlExecutor, SqlValue, query_one};
+use super::row_engine::ExecIo;
+use super::runtime_import;
 use super::schema::MIGRATIONS;
 use super::script::split_sql_script;
 
@@ -38,6 +40,10 @@ pub fn apply_schema(executor: &dyn SqlExecutor) -> Result<()> {
                 executor.execute(&statement, &[]).map_err(|err| {
                     sql_err("apply sqlite migration", format!("v{version}: {err}"))
                 })?;
+            }
+            if *version == 3 {
+                let mut io = ExecIo(executor);
+                runtime_import::import_legacy_sources(&mut io)?;
             }
             executor.execute(
                 "INSERT INTO stasis_schema_migration (version, applied_at) VALUES (?1, ?2)",

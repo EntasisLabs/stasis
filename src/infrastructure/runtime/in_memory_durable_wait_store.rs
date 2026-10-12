@@ -144,7 +144,7 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
                     && signal.correlation_key == correlation_key
                     && !consumed_ids.contains(&signal.signal_id)
             })
-            .min_by_key(|signal| signal.created_at)
+            .min_by_key(|signal| (signal.created_at, signal.signal_id.clone()))
             .cloned())
     }
 

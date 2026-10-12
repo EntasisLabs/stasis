@@ -190,6 +190,16 @@ pub trait JobStore: StoreBound {
     async fn list_expired_leases(&self, now: DateTime<Utc>) -> Result<Vec<Job>>;
     async fn delete(&self, id: &str) -> Result<bool>;
     async fn prune_terminal_before(&self, cutoff: DateTime<Utc>) -> Result<usize>;
+    /// Drop retained receipts and cleanup records at or before the cutoffs.
+    /// Receipts inside the window keep duplicate-completion answers.
+    async fn prune_retained_before(
+        &self,
+        receipt_cutoff: DateTime<Utc>,
+        cleanup_cutoff: DateTime<Utc>,
+    ) -> Result<(usize, usize)> {
+        let _ = (receipt_cutoff, cleanup_cutoff);
+        Ok((0, 0))
+    }
 }
 
 }

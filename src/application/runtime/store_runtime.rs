@@ -608,6 +608,7 @@ where
             jobs_pruned: self.job_store.prune_terminal_before(cutoff).await?,
             attempts_pruned: self.job_attempt_store.prune_finished_before(cutoff).await?,
             outbox_events_pruned: self.outbox_store.prune_non_pending_before(cutoff).await?,
+            ..RetentionPruneReport::default()
         })
     }
 
@@ -618,7 +619,16 @@ where
             .map_err(|_| StasisError::PortFailure("retention policy lock poisoned".to_string()))?
             .clone();
         let cutoff = now - Duration::days(policy.terminal_ttl_days.max(0));
-        self.prune_terminal_records(cutoff).await
+        let mut report = self.prune_terminal_records(cutoff).await?;
+        let receipt_cutoff = now - Duration::days(policy.receipt_ttl_days.max(0));
+        let cleanup_cutoff = now - Duration::days(policy.cleanup_ttl_days.max(0));
+        let (receipts, cleanups) = self
+            .job_store
+            .prune_retained_before(receipt_cutoff, cleanup_cutoff)
+            .await?;
+        report.receipts_pruned = receipts;
+        report.cleanups_pruned = cleanups;
+        Ok(report)
     }
 
     pub async fn enforce_retention_now(&self) -> Result<RetentionPruneReport> {

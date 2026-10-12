@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, SRE
 - Stability: Stable
-- Last Verified: 2026-05-15
+- Last Verified: 2026-10-12
 - Verified Against:
   - src/application/runtime/retention.rs
   - src/application/runtime/replay_report.rs
@@ -18,8 +18,8 @@ Document the Stasis retention policy contract and the dead-letter replay interfa
 ## Invariants
 
 1. Retention operates on **terminal** records only. Jobs in `Enqueued`, `Leased`, or `Running` state are never pruned.
-2. The cutoff is computed as `now - terminal_ttl_days`. Records with a terminal timestamp before the cutoff are eligible for pruning.
-3. Prune operations are non-transactional across the three stores (jobs, attempts, outbox events). A partial prune does not roll back.
+2. The job cutoff is `now - terminal_ttl_days`. Receipts and cleanup records use their own cutoffs. A receipt is eligible only when `retained_at` is set and at or before `now - receipt_ttl_days`. A missing `retained_at` is kept.
+3. Job, attempt and outbox prunes are separate store calls. A later failure does not restore rows the earlier call already deleted. Receipt and cleanup pruning is its own call and does not run inside `prune_terminal_records`.
 4. Dead-letter replay resets the job state to `Enqueued` with `attempts = 0`. Prior attempt records are preserved.
 5. `get_replay_report` is a read-only operation — it does not trigger re-execution.
 
@@ -32,18 +32,21 @@ Document the Stasis retention policy contract and the dead-letter replay interfa
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `terminal_ttl_days` | `i64` | `30` | Days to retain terminal job records, attempt records, and non-pending outbox events |
+| `receipt_ttl_days` | `i64` | `30` | Days to retain completion and cancellation receipts after `retained_at` |
+| `cleanup_ttl_days` | `i64` | `30` | Days to retain cleanup observations and acknowledgements after `retained_at` |
 
 ```rust
-use stasis::prelude::RetentionPolicy;
+use stasis::application::runtime::retention::RetentionPolicy;
 
 let policy = RetentionPolicy {
     terminal_ttl_days: 14,
+    ..RetentionPolicy::default()
 };
 
 runtime.configure_retention_policy(policy)?;
 ```
 
-`RetentionPolicy::default()` sets `terminal_ttl_days = 30`.
+`RetentionPolicy::default()` sets all three fields to 30. Deleting a terminal job does not delete its receipt. Inside the receipt window, a duplicate completion of that job still returns the original receipt. After the receipt is pruned, the duplicate is `Stale` and does not republish effects.
 
 ### What "terminal" means per store
 
@@ -96,8 +99,10 @@ Returned by all retention enforcement methods.
 | `jobs_pruned` | `usize` | Number of terminal job records removed |
 | `attempts_pruned` | `usize` | Number of finished attempt records removed |
 | `outbox_events_pruned` | `usize` | Number of non-pending outbox events removed |
+| `receipts_pruned` | `usize` | Completion and cancellation receipts removed by `enforce_retention` |
+| `cleanups_pruned` | `usize` | Cleanup records removed by `enforce_retention` |
 
-All three fields are zero when nothing is eligible for pruning. A zero report is not an error.
+`prune_terminal_records` leaves `receipts_pruned` and `cleanups_pruned` at zero. A zero report is not an error.
 
 ---
 

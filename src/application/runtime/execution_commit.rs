@@ -175,6 +175,7 @@ pub fn publication(
         lifecycle,
         output_json: diagnostics,
         delivered: false,
+        retained_at: Some(now),
     };
     Publication {
         job,

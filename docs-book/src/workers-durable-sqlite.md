@@ -5,7 +5,7 @@
 - Document Type: Reference Standard
 - Audience: Engineer, Architect
 - Stability: Evolving
-- Last Verified: 2026-10-11
+- Last Verified: 2026-10-12
 - Verified Against:
     - src/infrastructure/sqlite/schema.rs
     - src/infrastructure/sqlite/durable.rs
@@ -22,13 +22,13 @@ Run the Stasis wasm kernel on Cloudflare Workers and keep the durable job path i
 
 | Surface | Durable Object SQLite |
 | --- | --- |
-| Jobs, including payload and lease columns | Yes |
-| Job-lease heartbeat (only the current owner) | Yes |
+| Jobs, including payload, grant, incarnation and lease columns | Yes, in `runtime_job` |
+| Heartbeat of an execution grant | Yes |
 | Fenced resource leases (acquire, renew, stale fence, expiry) | Yes |
 | Job attempts | Yes |
 | Inbound idempotency keys | Yes |
 | Grapheme workflow graph state (`workflow_definition` / `workflow_revision`, including `state_current` from a `grapheme:json:` payload) | Yes |
-| Outbox, durable waits and signals, continuations, recurring jobs | In memory, as the `StoreRuntime` fillers |
+| Outbox, durable waits and signals, continuations, recurring jobs, receipts, cleanup | Yes, in the `runtime_*` tables |
 | Threads, cluster nodes, delivery endpoints, identity memory | Not on this backend |
 | Turn waits | Process-local, same as Surreal and native SQLite |
 | Grapheme script execution inside the lease | The checkpoint handler stores `state_current`. `StasisWasmClient` still runs `grapheme-wasm` in memory |
@@ -43,7 +43,9 @@ Schema DDL is `MIGRATIONS` from `schema.rs`. Durable Object adjustments stay out
 
 - Statements are applied one at a time. `BEGIN`, `COMMIT`, `SAVEPOINT`, and `PRAGMA` are rejected. Atomic claim and lease updates go through `SqlExecutor::transaction`, which the Worker maps to `ctx.storage.transactionSync`.
 - Integer columns are read with `CAST(col AS TEXT)`. Nanosecond timestamps do not fit in a JavaScript number. Parameters travel as decimal strings and SQLite INTEGER affinity stores them as 64-bit integers.
-- Job and attempt ids come from `stasis_id_seq`, a table created next to the shared schema. A process-local counter would repeat after the isolate is evicted. That table is not part of `MIGRATIONS`.
+- Runtime ids come from `runtime_id_alloc` (schema version 3) as `{prefix}-{n}`. A process-local counter would repeat after the isolate is evicted. `stasis_id_seq` remains for `next_sequence` and is read during upgrade so new ids do not reuse an old counter.
+- Each runtime operation is one SQL transaction over the rows it needs. Updates compare-and-swap the previously read payload. A row payload above 1 MiB is refused. There is no cap on the number of rows.
+- Opening the kernel runs the version 3 import. A v1 database re-enqueues in-flight leases and copies auxiliary rows. A format-1 `runtime_safety_ledger` is copied as stored, including an unexpired grant. Both sources populated, or a row the import cannot reconcile, fails the open and does not advance the schema version. Back up the database first. Details are in [store-runtime-safety-integration.md](../../docs/store-runtime-safety-integration.md).
 
 Compare-and-swap uses `RETURNING`, not `rowsWritten`. Workers counts index maintenance in `rowsWritten`, so a one-row update can report more than one.
 
@@ -102,23 +104,23 @@ Store logic is tested on native rusqlite (`tests/durable_object_sqlite.rs`) and 
 | `JobAttemptStore` | `ExecutorJobAttemptStore` |
 | `InboundTriggerStore` | `ExecutorInboundTriggerStore` |
 | `ResourceLeaseStore` | `ExecutorResourceLeaseStore` |
-| `RecurringStore` | `InMemoryRecurringStore` |
-| `OutboxStore` | `InMemoryOutboxStore` |
-| `DurableWaitStore` | `InMemoryDurableWaitStore` |
-| `JobContinuationStore` | `InMemoryJobContinuationStore` |
+| `RecurringStore` | `ExecutorRecurringStore` |
+| `OutboxStore` | `ExecutorOutboxStore` |
+| `DurableWaitStore` | `ExecutorDurableWaitStore` |
+| `JobContinuationStore` | `ExecutorJobContinuationStore` |
 
 `ExecutorWorkflowDefinitionStore` implements `WorkflowDefinitionStore`, which is not one of the eight ports. The checkpoint handler writes it when a `grapheme:json:` payload is processed. `state_current` also stays in the job payload.
 
-`ids` is the `stasis_id_seq` generator (`SequenceIds` in `durable.rs`). A process-local `AtomicIdGenerator` repeats after eviction. `exec` is `JsSqlExecutor` in the Worker and `RusqliteExecutor` in the native tests. `process_once` is `StoreRuntime::process_once_now`. A successful job leaves `job.attempts` at 0 and writes one attempt row; the engine increments `attempts` on retry and dead-letter.
+`ids` is `DurableIds`, which allocates `{prefix}-{n}` from `runtime_id_alloc`. A process-local `AtomicIdGenerator` repeats after eviction. `exec` is `JsSqlExecutor` in the Worker and `RusqliteExecutor` in the native tests. `process_once` is `StoreRuntime::process_once_now`. A successful job leaves `job.attempts` at 0 and writes one attempt row; the engine increments `attempts` on retry and dead-letter. Heartbeats use the execution grant from the leased snapshot. An owner name alone is not authority.
 
 ```rust
 StoreRuntime::from_stores(
     ExecutorJobStore::new(exec.clone()),
-    InMemoryRecurringStore::default(),
-    InMemoryOutboxStore::default(),
+    ExecutorRecurringStore::new(exec.clone()),
+    ExecutorOutboxStore::new(exec.clone()),
     ExecutorJobAttemptStore::new(exec.clone()),
-    InMemoryDurableWaitStore::default(),
-    InMemoryJobContinuationStore::default(),
+    ExecutorDurableWaitStore::new(exec.clone()),
+    ExecutorJobContinuationStore::new(exec.clone()),
     ExecutorInboundTriggerStore::new(exec.clone()),
     ExecutorResourceLeaseStore::new(exec),
     clock,

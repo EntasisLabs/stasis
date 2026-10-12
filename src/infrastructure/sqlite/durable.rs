@@ -2,8 +2,9 @@
 //!
 //! Jobs, attempts, inbound keys, and resource leases are SQLite stores passed
 //! to [`StoreRuntime::from_stores`](crate::application::runtime::store_runtime::StoreRuntime::from_stores).
-//! Recurring jobs, outbox, waits/signals, and continuations use the same durable
-//! safety ledger. Grapheme workflow revisions stay beside the engine.
+//! Recurring jobs, outbox, waits/signals, and continuations use the same
+//! row-level `runtime_*` tables as jobs. Grapheme workflow revisions stay
+//! beside the engine.
 //! The synchronous kernel supports immediately-ready handlers; asynchronous
 //! consumers must use the async runtime API, not a volatile substitute.
 //!
@@ -63,7 +64,7 @@ const LEASE_SECONDS: i64 = 30;
 
 /// `StoreRuntime` over the Durable Object SQLite stores.
 ///
-/// All runtime auxiliary views share the transactional durable safety ledger.
+/// Jobs and the auxiliary runtime views share the row-level runtime tables.
 pub type DurableObjectRuntime = StoreRuntime<
     ExecutorJobStore,
     ExecutorRecurringStore,

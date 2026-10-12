@@ -8,6 +8,9 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehav
 use crate::domain::errors::Result;
 
 use super::codec::{encode_time, sql_err};
+use super::executor::{SqlRow, SqlValue};
+use super::row_engine::SqlIo;
+use super::runtime_import;
 use super::schema::MIGRATIONS;
 
 /// Shared native SQLite connection.
@@ -78,6 +81,10 @@ impl SqliteSession {
                 tx.execute_batch(sql).map_err(|err| {
                     sql_err(format!("apply sqlite migration {version}").as_str(), err)
                 })?;
+                if *version == 3 {
+                    let mut io = TxIo { tx };
+                    runtime_import::import_legacy_sources(&mut io)?;
+                }
                 tx.execute(
                     "INSERT INTO stasis_schema_migration (version, applied_at) VALUES (?1, ?2)",
                     rusqlite::params![version, encode_time(Utc::now())],
@@ -140,4 +147,78 @@ impl SqliteSession {
             .lock()
             .map_err(|_| sql_err("sqlite connection", "lock poisoned"))
     }
+}
+
+/// Statement IO on an open rusqlite transaction. `Transaction` is not `Sync`,
+/// so this is not a [`super::executor::SqlExecutor`].
+pub(crate) struct TxIo<'a, 'conn> {
+    pub tx: &'a Transaction<'conn>,
+}
+
+impl SqlIo for TxIo<'_, '_> {
+    fn exec(&mut self, sql: &str, params: &[SqlValue]) -> Result<u64> {
+        let bound = bind(params);
+        let refs: Vec<&dyn rusqlite::types::ToSql> =
+            bound.iter().map(|value| value.as_ref()).collect();
+        let changed = self
+            .tx
+            .execute(sql, rusqlite::params_from_iter(refs))
+            .map_err(|err| sql_err("sqlite execute", err))?;
+        Ok(u64::try_from(changed).unwrap_or(0))
+    }
+
+    fn query(&mut self, sql: &str, params: &[SqlValue]) -> Result<Vec<SqlRow>> {
+        let mut statement = self
+            .tx
+            .prepare(sql)
+            .map_err(|err| sql_err("sqlite prepare", err))?;
+        let bound = bind(params);
+        let refs: Vec<&dyn rusqlite::types::ToSql> =
+            bound.iter().map(|value| value.as_ref()).collect();
+        let mut rows = statement
+            .query(rusqlite::params_from_iter(refs))
+            .map_err(|err| sql_err("sqlite query", err))?;
+        let mut out = Vec::new();
+        loop {
+            match rows.next() {
+                Ok(Some(row)) => out.push(read_row(row)?),
+                Ok(None) => break,
+                Err(err) => return Err(sql_err("sqlite read row", err)),
+            }
+        }
+        Ok(out)
+    }
+}
+
+fn bind(params: &[SqlValue]) -> Vec<Box<dyn rusqlite::types::ToSql>> {
+    params
+        .iter()
+        .map(|value| -> Box<dyn rusqlite::types::ToSql> {
+            match value {
+                SqlValue::Null => Box::new(rusqlite::types::Null),
+                SqlValue::Integer(value) => Box::new(*value),
+                SqlValue::Text(value) => Box::new(value.clone()),
+            }
+        })
+        .collect()
+}
+
+fn read_row(row: &rusqlite::Row<'_>) -> Result<SqlRow> {
+    use rusqlite::types::ValueRef;
+    let count = row.as_ref().column_count();
+    let mut values = Vec::with_capacity(count);
+    for index in 0..count {
+        let value = row
+            .get_ref(index)
+            .map_err(|err| sql_err("sqlite column", err))?;
+        values.push(match value {
+            ValueRef::Null => SqlValue::Null,
+            ValueRef::Integer(value) => SqlValue::Integer(value),
+            ValueRef::Real(value) => SqlValue::Text(value.to_string()),
+            ValueRef::Text(bytes) | ValueRef::Blob(bytes) => {
+                SqlValue::Text(String::from_utf8_lossy(bytes).into_owned())
+            }
+        });
+    }
+    Ok(SqlRow { values })
 }

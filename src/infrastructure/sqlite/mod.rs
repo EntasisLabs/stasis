@@ -17,9 +17,14 @@ pub mod executor_job_store;
 pub mod executor_lease_store;
 pub mod executor_workflow_store;
 pub mod migrate;
+mod row_engine;
+mod runtime_import;
 pub mod safety_stores;
 pub mod schema;
 pub mod script;
+
+#[cfg(all(test, feature = "sqlite"))]
+mod upgrade_tests;
 
 #[cfg(feature = "sqlite")]
 pub mod cluster_forward_outcome_store;
