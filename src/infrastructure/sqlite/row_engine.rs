@@ -563,9 +563,13 @@ fn load_due(
 ) -> Result<()> {
     let mut cursor: Option<(i64, i64, String)> = None;
     loop {
+        // Aliases stay unique. The JS bridge turns a row into an object, so two
+        // columns named job_id collapse and the scan reads the wrong field.
         let mut sql = String::from(
-            "SELECT j.payload, e.job_id, CAST(e.generation AS TEXT), \
-             CAST(j.scheduled_at AS TEXT), CAST(j.priority AS TEXT), j.job_id \
+            "SELECT j.payload AS payload, e.job_id AS epoch_job_id, \
+             CAST(e.generation AS TEXT) AS generation, \
+             CAST(j.scheduled_at AS TEXT) AS scheduled_at, \
+             CAST(j.priority AS TEXT) AS priority, j.job_id AS due_job_id \
              FROM runtime_job j \
              LEFT JOIN runtime_epoch e ON e.job_id = j.job_id \
              WHERE j.queue = ?1 AND j.state = 'Enqueued' AND j.scheduled_at <= ?2 \
