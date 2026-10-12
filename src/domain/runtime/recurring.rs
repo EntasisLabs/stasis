@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use crate::domain::errors::{Result, StasisError};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RecurringDefinition {
     pub id: String,
     pub queue: String,

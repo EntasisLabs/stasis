@@ -19,7 +19,9 @@ impl SqliteWorkflowDefinitionStore {
 
     fn map_definition(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowDefinition> {
         let conv = |err: crate::domain::errors::StasisError| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                err.to_string(),
+            )))
         };
         Ok(WorkflowDefinition {
             workflow_id: row.get(0)?,
@@ -32,7 +34,9 @@ impl SqliteWorkflowDefinitionStore {
 
     fn map_revision(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowRevision> {
         let conv = |err: crate::domain::errors::StasisError| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                err.to_string(),
+            )))
         };
         let graph_state: Option<String> = row.get(3)?;
         let compiler: Option<String> = row.get(4)?;

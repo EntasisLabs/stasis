@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Duration, Utc};
 
+use crate::application::runtime::runtime_job_dx;
 use crate::application::runtime::store_runtime::StoreRuntime;
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::job::{Job, JobState};
@@ -89,13 +90,17 @@ impl
         metrics: Arc<dyn RuntimeMetrics>,
         tracing: Arc<dyn RuntimeTracing>,
     ) -> Self {
+        let job_store = InMemoryJobStore {
+            state: Default::default(),
+            clock: clock.clone(),
+        };
         Self::from_stores(
-            InMemoryJobStore::default(),
+            job_store.clone(),
             InMemoryRecurringStore::default(),
-            InMemoryOutboxStore::default(),
-            InMemoryJobAttemptStore::default(),
-            InMemoryDurableWaitStore::default(),
-            InMemoryJobContinuationStore::default(),
+            job_store.native_outbox_store(),
+            job_store.native_attempt_store(),
+            job_store.native_wait_store(),
+            job_store.native_continuation_store(),
             InMemoryInboundTriggerStore::default(),
             InMemoryResourceLeaseStore::default(),
             clock,
@@ -112,45 +117,854 @@ impl Default for InMemoryRuntime {
     }
 }
 
-/// Concrete in-memory stores are `Send` on native and on wasm32.
-#[allow(dead_code)]
-fn in_memory_runtime_is_send_sync() {
-    fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<InMemoryRuntime>();
+use crate::application::runtime::execution_commit::{
+    CleanupRecord, CommitResult, ExecutionGrant, ExecutionReceipt, cancellation, outcome_digest,
+    publication,
+};
+use crate::application::runtime::job_lifecycle::STALE_LEASE_MESSAGE;
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct StagedEffects {
+    children: Vec<Job>,
+    continuations: Vec<crate::domain::runtime::job_continuation::JobContinuation>,
+    events: Vec<OutboxEvent>,
 }
-
-#[derive(Clone, Default)]
+impl StagedEffects {
+    fn count(&self) -> usize {
+        self.children.len() + self.continuations.len() + self.events.len()
+    }
+}
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct NativeState {
+    jobs: HashMap<String, Job>,
+    pub(crate) continuations:
+        HashMap<String, crate::domain::runtime::job_continuation::JobContinuation>,
+    #[serde(with = "crate::infrastructure::sqlite::atomic_state::map_entries")]
+    staged: HashMap<(String, u64, u64), StagedEffects>,
+    pub(crate) waits: HashMap<String, crate::domain::runtime::durable_wait::DurableWaitRecord>,
+    pub(crate) signals: HashMap<String, crate::domain::runtime::durable_wait::DurableSignalRecord>,
+    epochs: HashMap<String, u64>,
+    attempts: HashMap<String, Vec<JobAttempt>>,
+    events: HashMap<String, OutboxEvent>,
+    #[serde(with = "crate::infrastructure::sqlite::atomic_state::map_entries")]
+    receipts: HashMap<(String, u64), ExecutionReceipt>,
+    #[serde(with = "crate::infrastructure::sqlite::atomic_state::map_entries")]
+    cleanup: HashMap<(String, u64), CleanupRecord>,
+    cancellations: HashMap<String, ExecutionReceipt>,
+}
+#[derive(Clone)]
 pub struct InMemoryJobStore {
-    jobs: Arc<RwLock<HashMap<String, Job>>>,
+    pub(crate) state: Arc<RwLock<NativeState>>,
+    pub(crate) clock: Arc<dyn Clock>,
+}
+impl Default for InMemoryJobStore {
+    fn default() -> Self {
+        Self {
+            state: Default::default(),
+            clock: Arc::new(SystemClock),
+        }
+    }
 }
 
-crate::async_store! {
+impl InMemoryJobStore {
+    /// Native views share this store's single transaction boundary. Do not mix unrelated defaults.
+    pub fn native_outbox_store(&self) -> InMemoryOutboxStore {
+        InMemoryOutboxStore {
+            state: self.state.clone(),
+        }
+    }
+    pub fn native_attempt_store(&self) -> InMemoryJobAttemptStore {
+        InMemoryJobAttemptStore {
+            state: self.state.clone(),
+        }
+    }
+    pub fn native_continuation_store(&self) -> InMemoryJobContinuationStore {
+        InMemoryJobContinuationStore::from_native(self.state.clone())
+    }
+    pub fn native_wait_store(&self) -> InMemoryDurableWaitStore {
+        InMemoryDurableWaitStore::from_native(self.state.clone())
+    }
+
+    async fn commit_native(
+        &self,
+        snapshot: &Job,
+        outcome: JobExecutionOutcome,
+        recovery: bool,
+    ) -> Result<CommitResult> {
+        let Some(grant) = ExecutionGrant::from_job(snapshot) else {
+            return Ok(CommitResult::Stale);
+        };
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let key = (snapshot.id.clone(), grant.epoch);
+        let staged_key = (snapshot.id.clone(), grant.epoch, grant.version);
+        let digest = outcome_digest(&outcome);
+        if let Some(receipt) = state.receipts.get(&key) {
+            return Ok(if receipt.grant == grant && receipt.digest == digest {
+                CommitResult::AlreadyCommittedSameDigest
+            } else {
+                CommitResult::Conflict
+            });
+        }
+        let now = self.clock.now(); // Read INSIDE native lock, never worker's process timestamp.
+        let Some(current) = state.jobs.get(&snapshot.id) else {
+            return Ok(CommitResult::Stale);
+        };
+        let valid = if recovery {
+            grant.matches(current)
+                && matches!(current.state, JobState::Running | JobState::Leased)
+                && current.lease_expires_at.is_some_and(|expiry| expiry <= now)
+        } else {
+            grant.permits(current, now)
+        };
+        if !valid {
+            return Ok(CommitResult::Stale);
+        }
+        // The worker snapshot supplies only a grant; all job metadata and counters
+        // come from the canonical row held under this same native commit lock.
+        let mut snapshot = current.clone();
+        let outcome = match outcome {
+            JobExecutionOutcome::Deferred {
+                message,
+                execution_id,
+                diagnostics,
+                ..
+            } if current.wakeup_pending => JobExecutionOutcome::Deferred {
+                scheduled_at: now,
+                message,
+                execution_id,
+                diagnostics,
+            },
+            other => other,
+        };
+        snapshot.wakeup_pending = false;
+        let mut publication = publication(&snapshot, outcome, now);
+        // Receipt digest identifies the submitted outcome, not the native wakeup adjustment.
+        publication.receipt.digest = digest;
+        if !recovery {
+            if let Some(staged) = state.staged.get(&staged_key) {
+                let mut child_ids = std::collections::HashSet::new();
+                if staged.children.iter().any(|j| {
+                    state.jobs.contains_key(&j.id)
+                        || !child_ids.insert(j.id.clone())
+                        || state.epochs.get(&j.id).copied() == Some(u64::MAX)
+                }) || staged
+                    .continuations
+                    .iter()
+                    .any(|c| state.continuations.contains_key(&c.id))
+                    || staged
+                        .events
+                        .iter()
+                        .any(|e| state.events.contains_key(&e.event_id))
+                {
+                    return Err(StasisError::PortFailure(
+                        "staged canonical identity conflict".into(),
+                    ));
+                }
+            }
+        }
+        let staged = state.staged.remove(&staged_key).unwrap_or_default();
+        state
+            .staged
+            .retain(|(id, epoch, _), _| id != &snapshot.id || *epoch != grant.epoch);
+        if !recovery {
+            for mut child in staged.children {
+                issue_incarnation(&mut state, &mut child)?;
+                state.jobs.insert(child.id.clone(), child);
+            }
+            for continuation in staged.continuations {
+                state
+                    .continuations
+                    .insert(continuation.id.clone(), continuation);
+            }
+            for event in staged.events {
+                state.events.insert(event.event_id.clone(), event);
+            }
+        }
+        state.jobs.insert(snapshot.id.clone(), publication.job);
+        state
+            .attempts
+            .entry(snapshot.id.clone())
+            .or_default()
+            .push(publication.attempt);
+        state
+            .events
+            .insert(publication.outbox.event_id.clone(), publication.outbox);
+        state.receipts.insert(key, publication.receipt);
+        Ok(CommitResult::Committed)
+    }
+
+    pub fn cleanup_record(&self, job_id: &str, epoch: u64) -> Result<Option<CleanupRecord>> {
+        let state = self
+            .state
+            .read()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        Ok(state.cleanup.get(&(job_id.into(), epoch)).cloned())
+    }
+}
+
+fn issue_incarnation(state: &mut NativeState, job: &mut Job) -> Result<()> {
+    job.normalize_new()?;
+    let generation = state.epochs.entry(job.id.clone()).or_default();
+    *generation = generation
+        .checked_add(1)
+        .ok_or_else(|| StasisError::PortFailure("native incarnation exhausted".into()))?;
+    job.incarnation = *generation;
+    job.terminal_cycle = 1;
+    job.wakeup_pending = false;
+    Ok(())
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobStore for InMemoryJobStore {
-    async fn insert(&self, job: Job) -> Result<()> {
+    async fn pending_lifecycle(&self) -> Result<Vec<(String, ExecutionReceipt)>> {
+        let state = self
+            .state
+            .read()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let mut receipts = Vec::new();
+        for ((id, epoch), receipt) in &state.receipts {
+            if !receipt.delivered {
+                receipts.push((
+                    serde_json::to_string(&(id, epoch))
+                        .map_err(|e| StasisError::PortFailure(e.to_string()))?,
+                    receipt.clone(),
+                ));
+            }
+        }
+        for (id, receipt) in &state.cancellations {
+            if !receipt.delivered {
+                receipts.push((format!("control:{id}"), receipt.clone()));
+            }
+        }
+        Ok(receipts)
+    }
+    async fn mark_lifecycle_delivered(&self, key: &str, digest: &str) -> Result<()> {
         let mut state = self
-            .jobs
+            .state
             .write()
-            .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
-
-        state.insert(job.id.clone(), job);
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let receipt = if let Some(id) = key.strip_prefix("control:") {
+            state.cancellations.get_mut(id)
+        } else {
+            let key: (String, u64) =
+                serde_json::from_str(key).map_err(|e| StasisError::PortFailure(e.to_string()))?;
+            state.receipts.get_mut(&key)
+        };
+        if let Some(receipt) = receipt.filter(|r| r.digest == digest) {
+            receipt.delivered = true;
+        }
         Ok(())
     }
-
-    async fn save(&self, job: Job) -> Result<()> {
+    async fn insert(&self, mut job: Job) -> Result<()> {
+        if job.state != JobState::Enqueued || job.output_provenance.is_some() {
+            return Err(StasisError::PortFailure(
+                "insert requires a new enqueued job without terminal output".into(),
+            ));
+        }
+        job.lease_owner = None;
+        job.lease_expires_at = None;
+        job.heartbeat_at = None;
         let mut state = self
-            .jobs
+            .state
             .write()
-            .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
-
-        state.insert(job.id.clone(), job);
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        if state.jobs.contains_key(&job.id) {
+            return Err(StasisError::PortFailure("job already exists".into()));
+        }
+        issue_incarnation(&mut state, &mut job)?;
+        job.wakeup_pending = false;
+        job.execution_epoch = 0;
+        job.version = 0;
+        state.jobs.insert(job.id.clone(), job);
         Ok(())
     }
+    async fn save(&self, mut job: Job) -> Result<()> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let current = state
+            .jobs
+            .get(&job.id)
+            .ok_or_else(|| StasisError::PortFailure("job missing".into()))?;
+        if runtime_job_dx::is_terminal(&job.state)
+            || (runtime_job_dx::is_terminal(&current.state)
+                && !(current.state == JobState::DeadLetter && job.state == JobState::Enqueued))
+            || job.incarnation != current.incarnation
+            || job.terminal_cycle != current.terminal_cycle
+            || job.lease_owner != current.lease_owner
+            || job.lease_expires_at != current.lease_expires_at
+            || job.heartbeat_at != current.heartbeat_at
+            || (matches!(current.state, JobState::Leased | JobState::Running)
+                && !ExecutionGrant::from_job(&job)
+                    .is_some_and(|g| g.permits(current, self.clock.now())))
+        {
+            return Err(StasisError::PortFailure(
+                "save is control-plane CAS only; terminal publication requires native commit"
+                    .into(),
+            ));
+        }
+        if job.version != current.version
+            || job.execution_epoch != current.execution_epoch
+            || (job.state == JobState::Running
+                && !ExecutionGrant::from_job(&job)
+                    .is_some_and(|g| g.permits(current, self.clock.now())))
+        {
+            return Err(StasisError::PortFailure("stale job snapshot".into()));
+        }
+        if current.state == JobState::DeadLetter && job.state == JobState::Enqueued {
+            if current.terminal_cycle == 0 {
+                return Err(StasisError::PortFailure(
+                    "legacy terminal cycle requires reconciliation".into(),
+                ));
+            }
+            job.terminal_cycle = current
+                .terminal_cycle
+                .checked_add(1)
+                .ok_or_else(|| StasisError::PortFailure("terminal cycle exhausted".into()))?;
+        }
+        job.wakeup_pending = current.wakeup_pending;
+        if current.wakeup_pending {
+            job.scheduled_at = current.scheduled_at;
+        }
+        job.version = job
+            .version
+            .checked_add(1)
+            .ok_or_else(|| StasisError::PortFailure("version exhausted".into()))?;
+        state.jobs.insert(job.id.clone(), job);
+        Ok(())
+    }
+    async fn wake_incarnation(&self, job_id: &str, incarnation: u64) -> Result<()> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        if let Some(job) = state.jobs.get_mut(job_id).filter(|j| {
+            j.incarnation == incarnation
+                && incarnation != 0
+                && !runtime_job_dx::is_terminal(&j.state)
+        }) {
+            job.scheduled_at = self.clock.now();
+            job.wakeup_pending = matches!(job.state, JobState::Leased | JobState::Running);
+        }
+        Ok(())
+    }
+    async fn wake_execution(&self, job_id: &str) -> Result<()> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        if let Some(job) = state
+            .jobs
+            .get_mut(job_id)
+            .filter(|j| !runtime_job_dx::is_terminal(&j.state))
+        {
+            job.scheduled_at = self.clock.now();
+            job.wakeup_pending = matches!(job.state, JobState::Leased | JobState::Running);
+        }
+        Ok(())
+    }
+    async fn commit_execution(
+        &self,
+        snapshot: &Job,
+        outcome: JobExecutionOutcome,
+    ) -> Result<CommitResult> {
+        self.commit_native(snapshot, outcome, false).await
+    }
+    async fn recover_execution(&self, snapshot: &Job) -> Result<CommitResult> {
+        self.commit_native(
+            snapshot,
+            JobExecutionOutcome::RetryableFailure {
+                message: STALE_LEASE_MESSAGE.into(),
+                execution_id: None,
+                diagnostics: None,
+            },
+            true,
+        )
+        .await
+    }
+    async fn heartbeat_granted(
+        &self,
+        grant: &ExecutionGrant,
+        _now: DateTime<Utc>,
+        lease_seconds: i64,
+        progress: Option<String>,
+    ) -> Result<()> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let now = self.clock.now();
+        let Some(job) = state.jobs.get_mut(&grant.job_id) else {
+            return Err(StasisError::PortFailure("stale execution grant".into()));
+        };
+        if !grant.permits(job, now) {
+            return Err(StasisError::PortFailure("stale execution grant".into()));
+        }
+        if let Some(progress) = progress {
+            job.progress_json = Some(progress);
+        } else {
+            job.heartbeat_at = Some(now);
+            job.lease_expires_at = Some(now + Duration::seconds(lease_seconds.max(0)));
+        }
+        Ok(())
+    }
+    async fn cancel_execution(&self, job_id: &str) -> Result<Option<Job>> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let Some(current) = state
+            .jobs
+            .get(job_id)
+            .cloned()
+            .filter(|j| !runtime_job_dx::is_terminal(&j.state))
+        else {
+            return Ok(None);
+        };
+        let now = self.clock.now();
+        if let Some(grant) = ExecutionGrant::from_job(&current) {
+            state.cleanup.insert(
+                (job_id.into(), grant.epoch),
+                CleanupRecord {
+                    grant,
+                    evidence_json: None,
+                    return_observations: Vec::new(),
+                    acknowledged_at: None,
+                },
+            );
+        }
+        for wait in state.waits.values_mut().filter(|w| {
+            w.job_id == job_id
+                && w.incarnation == current.incarnation
+                && w.status == crate::domain::runtime::durable_wait::DurableWaitStatus::Pending
+        }) {
+            wait.status = crate::domain::runtime::durable_wait::DurableWaitStatus::Cancelled;
+            wait.updated_at = now;
+        }
+        state
+            .staged
+            .retain(|(id, epoch, _), _| id != job_id || *epoch != current.execution_epoch);
+        let (job, event, receipt) = cancellation(&current, now);
+        state.jobs.insert(job_id.into(), job.clone());
+        state.events.insert(event.event_id.clone(), event);
+        state.cancellations.insert(
+            format!(
+                "{}:incarnation:{}:cancel:{}",
+                current.id, current.incarnation, current.version
+            ),
+            receipt,
+        );
+        Ok(Some(job))
+    }
+    async fn acknowledge_cleanup(
+        &self,
+        grant: &ExecutionGrant,
+        evidence_json: String,
+    ) -> Result<CommitResult> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let Some(record) = state
+            .cleanup
+            .get_mut(&(grant.job_id.clone(), grant.epoch))
+            .filter(|r| r.grant == *grant)
+        else {
+            return Ok(CommitResult::Stale);
+        };
+        if let Some(existing) = &record.evidence_json {
+            return Ok(if existing == &evidence_json {
+                CommitResult::AlreadyCommittedSameDigest
+            } else {
+                CommitResult::Conflict
+            });
+        }
+        record.evidence_json = Some(evidence_json);
+        record.acknowledged_at = Some(self.clock.now());
+        Ok(CommitResult::Committed)
+    }
+    async fn publish_granted(&self, grant: &ExecutionGrant, event: OutboxEvent) -> Result<()> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        if !state
+            .jobs
+            .get(&grant.job_id)
+            .is_some_and(|j| grant.permits(j, self.clock.now()))
+            || event.event.job_id != grant.job_id
+        {
+            return Err(StasisError::PortFailure(
+                "stale execution publication".into(),
+            ));
+        }
+        let count = state
+            .staged
+            .iter()
+            .filter(|((id, epoch, _), _)| id == &grant.job_id && *epoch == grant.epoch)
+            .map(|(_, effects)| effects.count())
+            .sum::<usize>();
+        if count >= 128 {
+            return Err(StasisError::PortFailure(
+                "execution staging limit exceeded".into(),
+            ));
+        }
+        let staged = state
+            .staged
+            .entry((grant.job_id.clone(), grant.epoch, grant.version))
+            .or_default();
+        if staged.count() >= 128 {
+            return Err(StasisError::PortFailure(
+                "execution staging limit exceeded".into(),
+            ));
+        }
+        staged.events.push(event);
+        Ok(())
+    }
+    async fn stage_child(&self, grant: &ExecutionGrant, mut child: Job) -> Result<()> {
+        child.normalize_new()?;
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        if !state
+            .jobs
+            .get(&grant.job_id)
+            .is_some_and(|j| grant.permits(j, self.clock.now()))
+        {
+            return Err(StasisError::PortFailure("stale execution child".into()));
+        }
+        let count = state
+            .staged
+            .iter()
+            .filter(|((id, epoch, _), _)| id == &grant.job_id && *epoch == grant.epoch)
+            .map(|(_, effects)| effects.count())
+            .sum::<usize>();
+        if count >= 128 {
+            return Err(StasisError::PortFailure(
+                "execution staging limit exceeded".into(),
+            ));
+        }
+        let staged = state
+            .staged
+            .entry((grant.job_id.clone(), grant.epoch, grant.version))
+            .or_default();
+        if staged.count() >= 128 {
+            return Err(StasisError::PortFailure(
+                "execution staging limit exceeded".into(),
+            ));
+        }
+        staged.children.push(child);
+        Ok(())
+    }
+    async fn stage_continuation(
+        &self,
+        grant: &ExecutionGrant,
+        continuation: crate::domain::runtime::job_continuation::JobContinuation,
+    ) -> Result<()> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        if continuation.parent_job_id != grant.job_id
+            || !state.jobs.get(&grant.job_id).is_some_and(|j| {
+                j.incarnation == continuation.parent_incarnation
+                    && continuation.parent_version_floor == Some(j.version)
+                    && continuation.parent_terminal_cycle == j.terminal_cycle
+                    && j.terminal_cycle != 0
+            })
+            || !state
+                .jobs
+                .get(&grant.job_id)
+                .is_some_and(|j| grant.permits(j, self.clock.now()))
+        {
+            return Err(StasisError::PortFailure(
+                "stale execution continuation".into(),
+            ));
+        }
+        let count = state
+            .staged
+            .iter()
+            .filter(|((id, epoch, _), _)| id == &grant.job_id && *epoch == grant.epoch)
+            .map(|(_, effects)| effects.count())
+            .sum::<usize>();
+        if count >= 128 {
+            return Err(StasisError::PortFailure(
+                "execution staging limit exceeded".into(),
+            ));
+        }
+        let staged = state
+            .staged
+            .entry((grant.job_id.clone(), grant.epoch, grant.version))
+            .or_default();
+        if staged.count() >= 128 {
+            return Err(StasisError::PortFailure(
+                "execution staging limit exceeded".into(),
+            ));
+        }
+        staged.continuations.push(continuation);
+        Ok(())
+    }
+    async fn settle_continuation(
+        &self,
+        parent: &Job,
+        mut record: crate::domain::runtime::job_continuation::JobContinuation,
+        child: Option<Job>,
+        detail: Option<String>,
+    ) -> Result<bool> {
+        use crate::domain::runtime::job_continuation::ContinuationStatus;
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let matches_parent = |j: &Job| {
+            j.id == parent.id
+                && j.version == parent.version
+                && j.execution_epoch == parent.execution_epoch
+                && j.incarnation == parent.incarnation
+                && j.terminal_cycle == parent.terminal_cycle
+                && j.state == parent.state
+                && runtime_job_dx::is_terminal(&j.state)
+        };
+        let retained = state
+            .receipts
+            .values()
+            .chain(state.cancellations.values())
+            .any(|r| serde_json::from_str::<Job>(&r.job_json).is_ok_and(|j| matches_parent(&j)));
+        if !state.jobs.get(&parent.id).is_some_and(matches_parent) && !retained {
+            return Ok(false);
+        }
+        let Some(current) = state.continuations.get(&record.id) else {
+            return Ok(false);
+        };
+        if current.parent_job_id != parent.id
+            || current.parent_incarnation != parent.incarnation
+            || record.parent_incarnation != current.parent_incarnation
+            || current.parent_terminal_cycle == 0
+            || current.parent_terminal_cycle != parent.terminal_cycle
+            || record.parent_terminal_cycle != current.parent_terminal_cycle
+            || current.parent_version_floor.is_none()
+            || current.parent_version_floor != record.parent_version_floor
+            || current
+                .parent_version_floor
+                .is_some_and(|floor| parent.version < floor)
+        {
+            return Ok(false);
+        }
+        let actual = match parent.state {
+            JobState::Succeeded => {
+                crate::domain::runtime::job_continuation::ContinuationTrigger::Succeeded
+            }
+            JobState::Canceled => {
+                crate::domain::runtime::job_continuation::ContinuationTrigger::Canceled
+            }
+            _ => crate::domain::runtime::job_continuation::ContinuationTrigger::Failed,
+        };
+        if child.is_some() != current.trigger.matches_actual(actual) {
+            return Ok(false);
+        }
+        record = current.clone();
+        if current.status == ContinuationStatus::Materialized
+            || current.status == ContinuationStatus::Discarded
+        {
+            return Ok(false);
+        }
+        if let Some(mut child) = child {
+            child.normalize_new()?;
+            if state.jobs.contains_key(&child.id) {
+                return Err(StasisError::PortFailure(
+                    "continuation child identity conflict".into(),
+                ));
+            }
+            issue_incarnation(&mut state, &mut child)?;
+            record.child_job_id = Some(child.id.clone());
+            state.jobs.insert(child.id.clone(), child);
+            record.status = ContinuationStatus::Materialized;
+        } else {
+            record.status = ContinuationStatus::Discarded;
+        }
+        record.parent_output_json = detail;
+        record.claim_token = None;
+        state.continuations.insert(record.id.clone(), record);
+        Ok(true)
+    }
+    async fn poll_wait(
+        &self,
+        grant: &ExecutionGrant,
+        template: crate::domain::runtime::durable_wait::DurableWaitRecord,
+    ) -> Result<crate::domain::runtime::durable_wait::DurableWaitRecord> {
+        use crate::domain::runtime::durable_wait::DurableWaitStatus;
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let now = self.clock.now();
+        if state
+            .waits
+            .values()
+            .any(|w| w.job_id == grant.job_id && w.incarnation == 0)
+        {
+            return Err(StasisError::PortFailure(
+                "legacy wait identity requires reconciliation".into(),
+            ));
+        }
+        if template.job_id != grant.job_id
+            || !state
+                .jobs
+                .get(&grant.job_id)
+                .is_some_and(|j| j.incarnation == template.incarnation && template.incarnation != 0)
+            || !state
+                .jobs
+                .get(&grant.job_id)
+                .is_some_and(|j| grant.permits(j, now))
+        {
+            return Err(StasisError::PortFailure("stale execution wait".into()));
+        }
+        let is_new = !state.waits.contains_key(&template.wait_id);
+        let mut wait = state
+            .waits
+            .get(&template.wait_id)
+            .cloned()
+            .unwrap_or(template);
+        if wait.job_id != grant.job_id || wait.incarnation != state.jobs[&grant.job_id].incarnation
+        {
+            return Err(StasisError::PortFailure("wait identity conflict".into()));
+        }
+        if wait.status == DurableWaitStatus::Pending {
+            if !is_new && wait.deadline_at.is_some_and(|d| d <= now) {
+                wait.status = DurableWaitStatus::TimedOut;
+            } else if let Some(signal) = state
+                .signals
+                .values()
+                .filter(|signal| {
+                    signal.signal_type == wait.signal_type
+                        && signal.correlation_key == wait.correlation_key
+                        && signal
+                            .target_incarnations
+                            .as_ref()
+                            .is_none_or(|targets| targets.contains(&wait.target_identity()))
+                        && !wait.consumed_signal_ids.contains(&signal.signal_id)
+                        && !state.waits.values().any(|old| {
+                            old.job_id == wait.job_id
+                                && old.incarnation != wait.incarnation
+                                && old.consumed_signal_ids.contains(&signal.signal_id)
+                        })
+                })
+                .min_by_key(|s| s.created_at)
+            {
+                wait.status = DurableWaitStatus::Signaled;
+                wait.signal_payload = Some(signal.payload_json.clone());
+                wait.consumed_signal_ids.push(signal.signal_id.clone());
+            }
+            wait.updated_at = now;
+            state.waits.insert(wait.wait_id.clone(), wait.clone());
+        }
+        Ok(wait)
+    }
+    async fn fail_execution(&self, job_id: &str) -> Result<Option<Job>> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let Some(current) = state
+            .jobs
+            .get(job_id)
+            .cloned()
+            .filter(|j| !runtime_job_dx::is_terminal(&j.state))
+        else {
+            return Ok(None);
+        };
+        let now = self.clock.now();
+        if let Some(grant) = ExecutionGrant::from_job(&current) {
+            state.cleanup.insert(
+                (job_id.into(), grant.epoch),
+                CleanupRecord {
+                    grant,
+                    evidence_json: None,
+                    return_observations: Vec::new(),
+                    acknowledged_at: None,
+                },
+            );
+        }
+        let p = crate::application::runtime::execution_commit::operator_failure(&current, now);
+        state
+            .staged
+            .retain(|(id, epoch, _), _| id != job_id || *epoch != current.execution_epoch);
+        for wait in state.waits.values_mut().filter(|w| {
+            w.job_id == job_id
+                && w.incarnation == current.incarnation
+                && w.status == crate::domain::runtime::durable_wait::DurableWaitStatus::Pending
+        }) {
+            wait.status = crate::domain::runtime::durable_wait::DurableWaitStatus::Cancelled;
+            wait.updated_at = now;
+        }
+        let job = p.job.clone();
+        state.jobs.insert(job_id.into(), p.job);
+        state
+            .attempts
+            .entry(job_id.into())
+            .or_default()
+            .push(p.attempt);
+        state.events.insert(p.outbox.event_id.clone(), p.outbox);
+        state.cancellations.insert(
+            format!(
+                "{}:incarnation:{}:operator-fail:{}",
+                current.id, current.incarnation, current.version
+            ),
+            p.receipt,
+        );
+        Ok(Some(job))
+    }
+    async fn execution_receipt(
+        &self,
+        job_id: &str,
+        epoch: u64,
+    ) -> Result<Option<ExecutionReceipt>> {
+        let state = self
+            .state
+            .read()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        Ok(state.receipts.get(&(job_id.into(), epoch)).cloned())
+    }
+    async fn cleanup_receipt(&self, job_id: &str, epoch: u64) -> Result<Option<CleanupRecord>> {
+        self.cleanup_record(job_id, epoch)
+    }
 
+    async fn observe_cleanup(
+        &self,
+        grant: &ExecutionGrant,
+        observation: String,
+    ) -> Result<CommitResult> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| StasisError::PortFailure("native state poisoned".into()))?;
+        let Some(record) = state
+            .cleanup
+            .get_mut(&(grant.job_id.clone(), grant.epoch))
+            .filter(|r| r.grant == *grant)
+        else {
+            return Ok(CommitResult::Stale);
+        };
+        if record.return_observations.contains(&observation) {
+            return Ok(CommitResult::AlreadyCommittedSameDigest);
+        }
+        if observation.len() > 65536 || record.return_observations.len() >= 8 {
+            return Ok(CommitResult::Conflict);
+        }
+        record.return_observations.push(observation);
+        Ok(CommitResult::Committed)
+    }
     async fn get(&self, id: &str) -> Result<Option<Job>> {
         let state = self
-            .jobs
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
+        let state = &state.jobs;
 
         Ok(state.get(id).cloned())
     }
@@ -164,9 +978,11 @@ impl JobStore for InMemoryJobStore {
         worker: &crate::domain::runtime::placement::WorkerCapabilities,
     ) -> Result<Option<Job>> {
         let mut state = self
-            .jobs
+            .state
             .write()
             .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
+        let native = &mut *state;
+        let state = &mut native.jobs;
 
         let selected_id = state
             .iter()
@@ -193,43 +1009,41 @@ impl JobStore for InMemoryJobStore {
             return Ok(None);
         };
 
+        let epoch = native.epochs.entry(job_id.clone()).or_default();
+        *epoch = epoch
+            .checked_add(1)
+            .ok_or_else(|| StasisError::PortFailure("execution epoch exhausted".into()))?;
+        job.execution_epoch = *epoch;
+        job.version = job
+            .version
+            .checked_add(1)
+            .ok_or_else(|| StasisError::PortFailure("version exhausted".into()))?;
         job.state = JobState::Leased;
         job.lease_owner = Some(worker_id.to_string());
-        job.lease_expires_at = Some(now + Duration::seconds(lease_seconds));
-        job.heartbeat_at = Some(now);
+        job.lease_expires_at = Some(self.clock.now() + Duration::seconds(lease_seconds));
+        job.heartbeat_at = Some(self.clock.now());
 
         Ok(Some(job.clone()))
     }
 
     async fn heartbeat(
         &self,
-        job_id: &str,
-        worker_id: &str,
-        now: DateTime<Utc>,
-        lease_seconds: i64,
+        _job_id: &str,
+        _worker_id: &str,
+        _now: DateTime<Utc>,
+        _lease_seconds: i64,
     ) -> Result<()> {
-        let mut state = self
-            .jobs
-            .write()
-            .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
-
-        let Some(job) = state.get_mut(job_id) else {
-            return Ok(());
-        };
-
-        if job.lease_owner.as_deref() == Some(worker_id) {
-            job.heartbeat_at = Some(now);
-            job.lease_expires_at = Some(now + Duration::seconds(lease_seconds.max(0)));
-        }
-
-        Ok(())
+        Err(StasisError::PortFailure(
+            "owner-only heartbeat retired; use ExecutionGrant".into(),
+        ))
     }
 
     async fn list_by_state(&self, state_filter: JobState) -> Result<Vec<Job>> {
         let state = self
-            .jobs
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
+        let state = &state.jobs;
 
         Ok(state
             .values()
@@ -240,9 +1054,10 @@ impl JobStore for InMemoryJobStore {
 
     async fn list_expired_leases(&self, now: DateTime<Utc>) -> Result<Vec<Job>> {
         let state = self
-            .jobs
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
+        let state = &state.jobs;
         Ok(state
             .values()
             .filter(|job| {
@@ -258,17 +1073,27 @@ impl JobStore for InMemoryJobStore {
 
     async fn delete(&self, id: &str) -> Result<bool> {
         let mut state = self
-            .jobs
+            .state
             .write()
             .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
-        Ok(state.remove(id).is_some())
+        let removed = state
+            .jobs
+            .get(id)
+            .is_some_and(|j| runtime_job_dx::is_terminal(&j.state));
+        if removed {
+            state.jobs.remove(id);
+            state.staged.retain(|(parent, _, _), _| parent != id);
+        }
+        Ok(removed)
     }
 
     async fn prune_terminal_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
-        let mut state = self
-            .jobs
+        let state = self
+            .state
             .write()
             .map_err(|_| StasisError::PortFailure("job store lock poisoned".to_string()))?;
+        let mut native = state;
+        let state = &mut native.jobs;
 
         let before = state.len();
         state.retain(|_, job| {
@@ -280,24 +1105,30 @@ impl JobStore for InMemoryJobStore {
             !(terminal && old_enough)
         });
 
-        Ok(before.saturating_sub(state.len()))
+        let removed = before.saturating_sub(state.len());
+        let live = native
+            .jobs
+            .keys()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        native.staged.retain(|(id, _, _), _| live.contains(id));
+        Ok(removed)
     }
-}
 }
 
 #[derive(Clone, Default)]
 pub struct InMemoryRecurringStore {
-    defs: Arc<RwLock<HashMap<String, RecurringDefinition>>>,
+    pub(crate) defs: Arc<RwLock<HashMap<String, RecurringDefinition>>>,
 }
 
 #[derive(Clone, Default)]
 pub struct InMemoryOutboxStore {
-    events: Arc<RwLock<HashMap<String, OutboxEvent>>>,
+    state: Arc<RwLock<NativeState>>,
 }
 
 #[derive(Clone, Default)]
 pub struct InMemoryJobAttemptStore {
-    attempts: Arc<RwLock<HashMap<String, Vec<JobAttempt>>>>,
+    state: Arc<RwLock<NativeState>>,
 }
 
 impl InMemoryJobAttemptStore {
@@ -306,9 +1137,10 @@ impl InMemoryJobAttemptStore {
         F: Fn(&JobAttempt) -> bool,
     {
         let state = self
-            .attempts
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
+        let state = &state.attempts;
 
         let mut attempts: Vec<JobAttempt> = state
             .values()
@@ -321,13 +1153,15 @@ impl InMemoryJobAttemptStore {
     }
 }
 
-crate::async_store! {
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl JobAttemptStore for InMemoryJobAttemptStore {
     async fn insert(&self, attempt: JobAttempt) -> Result<()> {
         let mut state = self
-            .attempts
+            .state
             .write()
             .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
+        let state = &mut state.attempts;
 
         state
             .entry(attempt.job_id.clone())
@@ -338,9 +1172,10 @@ impl JobAttemptStore for InMemoryJobAttemptStore {
 
     async fn list_by_job_id(&self, job_id: &str) -> Result<Vec<JobAttempt>> {
         let state = self
-            .attempts
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
+        let state = &state.attempts;
 
         let mut attempts = state.get(job_id).cloned().unwrap_or_default();
         attempts.sort_by_key(|attempt| attempt.attempt_number);
@@ -359,9 +1194,10 @@ impl JobAttemptStore for InMemoryJobAttemptStore {
 
     async fn prune_finished_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
         let mut state = self
-            .attempts
+            .state
             .write()
             .map_err(|_| StasisError::PortFailure("job attempt store lock poisoned".to_string()))?;
+        let state = &mut state.attempts;
 
         let mut removed = 0usize;
         for attempts in state.values_mut() {
@@ -374,15 +1210,16 @@ impl JobAttemptStore for InMemoryJobAttemptStore {
         Ok(removed)
     }
 }
-}
 
-crate::async_store! {
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl OutboxStore for InMemoryOutboxStore {
     async fn insert(&self, event: OutboxEvent) -> Result<()> {
         let mut state = self
-            .events
+            .state
             .write()
             .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+        let state = &mut state.events;
 
         state.insert(event.event_id.clone(), event);
         Ok(())
@@ -390,9 +1227,10 @@ impl OutboxStore for InMemoryOutboxStore {
 
     async fn save(&self, event: OutboxEvent) -> Result<()> {
         let mut state = self
-            .events
+            .state
             .write()
             .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+        let state = &mut state.events;
 
         state.insert(event.event_id.clone(), event);
         Ok(())
@@ -400,18 +1238,20 @@ impl OutboxStore for InMemoryOutboxStore {
 
     async fn get(&self, event_id: &str) -> Result<Option<OutboxEvent>> {
         let state = self
-            .events
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+        let state = &state.events;
 
         Ok(state.get(event_id).cloned())
     }
 
     async fn list_pending(&self, limit: usize) -> Result<Vec<OutboxEvent>> {
         let state = self
-            .events
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+        let state = &state.events;
 
         let mut pending: Vec<OutboxEvent> = state
             .values()
@@ -426,9 +1266,10 @@ impl OutboxStore for InMemoryOutboxStore {
 
     async fn list_by_job_id(&self, job_id: &str) -> Result<Vec<OutboxEvent>> {
         let state = self
-            .events
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+        let state = &state.events;
 
         let mut events: Vec<OutboxEvent> = state
             .values()
@@ -442,9 +1283,10 @@ impl OutboxStore for InMemoryOutboxStore {
 
     async fn list_by_thread_id(&self, thread_id: &str) -> Result<Vec<OutboxEvent>> {
         let state = self
-            .events
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+        let state = &state.events;
 
         let mut events: Vec<OutboxEvent> = state
             .values()
@@ -458,9 +1300,10 @@ impl OutboxStore for InMemoryOutboxStore {
 
     async fn list_by_thread_prefix(&self, thread_prefix: &str) -> Result<Vec<OutboxEvent>> {
         let state = self
-            .events
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+        let state = &state.events;
 
         let mut events: Vec<OutboxEvent> = state
             .values()
@@ -480,9 +1323,10 @@ impl OutboxStore for InMemoryOutboxStore {
 
     async fn list_by_execution_id(&self, execution_id: &str) -> Result<Vec<OutboxEvent>> {
         let state = self
-            .events
+            .state
             .read()
             .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+        let state = &state.events;
 
         let mut events: Vec<OutboxEvent> = state
             .values()
@@ -496,9 +1340,10 @@ impl OutboxStore for InMemoryOutboxStore {
 
     async fn prune_non_pending_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
         let mut state = self
-            .events
+            .state
             .write()
             .map_err(|_| StasisError::PortFailure("outbox store lock poisoned".to_string()))?;
+        let state = &mut state.events;
 
         let before = state.len();
         state.retain(|_, evt| {
@@ -510,9 +1355,9 @@ impl OutboxStore for InMemoryOutboxStore {
         Ok(before.saturating_sub(state.len()))
     }
 }
-}
 
-crate::async_store! {
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl RecurringStore for InMemoryRecurringStore {
     async fn insert(&self, definition: RecurringDefinition) -> Result<()> {
         let mut state = self
@@ -572,25 +1417,22 @@ impl RecurringStore for InMemoryRecurringStore {
         Ok(state.values().cloned().collect())
     }
 }
-}
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::runtime::{job::NewJob, outbox::OutboxPublishPolicy};
+    use crate::ports::outbound::runtime::event_publisher::EventPublisher;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use async_trait::async_trait;
     use chrono::{Duration, Utc};
-
-    use crate::domain::runtime::job::NewJob;
-    use crate::domain::runtime::outbox::OutboxPublishPolicy;
-    use crate::ports::outbound::runtime::event_publisher::EventPublisher;
 
     use super::*;
 
     struct AlwaysSuccessHandler;
 
-    #[async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl JobHandler for AlwaysSuccessHandler {
         fn job_type(&self) -> &'static str {
             "test.success"
@@ -621,7 +1463,8 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl JobHandler for FlakyHandler {
         fn job_type(&self) -> &'static str {
             "test.flaky"
@@ -650,7 +1493,8 @@ mod tests {
 
     struct AlwaysFatalHandler;
 
-    #[async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl JobHandler for AlwaysFatalHandler {
         fn job_type(&self) -> &'static str {
             "test.fatal"
@@ -671,7 +1515,8 @@ mod tests {
         calls: Arc<AtomicUsize>,
     }
 
-    #[async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl EventPublisher for FlakyPublisher {
         async fn publish(&self, _event: &OutboxEvent) -> Result<()> {
             let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;

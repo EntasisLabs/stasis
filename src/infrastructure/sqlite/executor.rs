@@ -153,8 +153,11 @@ pub fn transaction_result<T>(
             Err(sql_err("sqlite transaction", "aborted"))
         }
     });
-    match outcome {
-        Some(result) => result,
-        None => tx.map(|()| unreachable!("transaction body did not produce a value")),
+    match (tx, outcome) {
+        // A commit failure must never masquerade as a successful publication.
+        (Err(_), Some(Err(body_error))) => Err(body_error),
+        (Err(commit_error), _) => Err(commit_error),
+        (Ok(()), Some(result)) => result,
+        (Ok(()), None) => Err(sql_err("sqlite transaction", "body was not invoked")),
     }
 }

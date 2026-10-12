@@ -20,6 +20,7 @@ use stasis::infrastructure::sqlite::codec::sql_err;
 use stasis::infrastructure::sqlite::{DurableSqliteKernel, SqlExecutor, SqlRow, SqlValue};
 
 struct SqlBridge {
+    generation: u64,
     exec: js_sys::Function,
     transaction: js_sys::Function,
 }
@@ -34,31 +35,45 @@ thread_local! {
 /// `transaction(callback)` runs `callback` inside `ctx.storage.transactionSync`
 /// and throws when `callback` returns `false`, so the storage call rolls back.
 #[wasm_bindgen]
-pub fn install_durable_sql_bridge(exec: &js_sys::Function, transaction: &js_sys::Function) {
+pub fn install_durable_sql_bridge(
+    exec: &js_sys::Function,
+    transaction: &js_sys::Function,
+) -> Result<(), JsValue> {
     BRIDGE.with(|slot| {
-        *slot.borrow_mut() = Some(SqlBridge {
+        let mut slot = slot.borrow_mut();
+        let generation = slot
+            .as_ref()
+            .map_or(0, |b| b.generation)
+            .checked_add(1)
+            .ok_or_else(|| js_err("SQL bridge generation exhausted"))?;
+        *slot = Some(SqlBridge {
+            generation,
             exec: exec.clone(),
             transaction: transaction.clone(),
         });
-    });
+        Ok(())
+    })
 }
 
 #[derive(Clone, Copy)]
-struct JsSqlExecutor;
+struct JsSqlExecutor {
+    generation: u64,
+}
 
 impl SqlExecutor for JsSqlExecutor {
     fn execute(&self, sql: &str, params: &[SqlValue]) -> StasisResult<u64> {
-        Ok(call_exec(sql, params)?.rows_written)
+        Ok(call_exec(self.generation, sql, params)?.rows_written)
     }
 
     fn query(&self, sql: &str, params: &[SqlValue]) -> StasisResult<Vec<SqlRow>> {
-        Ok(call_exec(sql, params)?.rows)
+        Ok(call_exec(self.generation, sql, params)?.rows)
     }
 
     fn transaction(&self, body: &mut dyn FnMut() -> StasisResult<()>) -> StasisResult<()> {
         let transaction = BRIDGE.with(|slot| {
             slot.borrow()
                 .as_ref()
+                .filter(|bridge| bridge.generation == self.generation)
                 .map(|bridge| bridge.transaction.clone())
         });
         let Some(transaction) = transaction else {
@@ -85,16 +100,25 @@ impl SqlExecutor for JsSqlExecutor {
             (Some(Err(err)), Err(_)) => Err(err),
             (Some(Ok(())), Err(err)) => Err(sql_err("durable sql transaction", js_error(err))),
             (None, Err(err)) => Err(sql_err("durable sql transaction", js_error(err))),
-            (None, Ok(_)) => Ok(()),
+            (None, Ok(_)) => Err(sql_err(
+                "durable sql transaction",
+                "host did not invoke transaction callback",
+            )),
         }
     }
 }
 
 fn call_exec(
+    generation: u64,
     sql: &str,
     params: &[SqlValue],
 ) -> StasisResult<stasis::infrastructure::sqlite::bridge_codec::ExecResponse> {
-    let exec = BRIDGE.with(|slot| slot.borrow().as_ref().map(|bridge| bridge.exec.clone()));
+    let exec = BRIDGE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .filter(|bridge| bridge.generation == generation)
+            .map(|bridge| bridge.exec.clone())
+    });
     let Some(exec) = exec else {
         return Err(sql_err(
             "durable sql",
@@ -182,7 +206,11 @@ pub struct StasisDurableSqlite {
 impl StasisDurableSqlite {
     #[wasm_bindgen(constructor)]
     pub fn open() -> Result<StasisDurableSqlite, JsValue> {
-        let inner = DurableSqliteKernel::open(Arc::new(JsSqlExecutor)).map_err(js_err)?;
+        let generation = BRIDGE
+            .with(|slot| slot.borrow().as_ref().map(|b| b.generation))
+            .ok_or_else(|| js_err("install SQL bridge before opening kernel"))?;
+        let inner =
+            DurableSqliteKernel::open(Arc::new(JsSqlExecutor { generation })).map_err(js_err)?;
         Ok(Self { inner })
     }
 

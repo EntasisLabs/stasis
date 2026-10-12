@@ -45,7 +45,9 @@ impl SqliteDeliveryEndpointStore {
         let created_at: i64 = row.get(6)?;
         let updated_at: i64 = row.get(7)?;
         let conv = |err: StasisError| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                err.to_string(),
+            )))
         };
         Ok(DeliveryEndpoint {
             endpoint_id: row.get(0)?,

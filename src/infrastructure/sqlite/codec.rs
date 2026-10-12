@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::domain::errors::{Result, StasisError};
 

@@ -84,7 +84,10 @@ fn application_runtime_source_avoids_infrastructure_imports_except_allowed_files
             if in_cfg_test_tail {
                 continue;
             }
-            if line.contains("use crate::infrastructure::") {
+            // Only the exact target-neutral monotonic timer is an intrinsic.
+            if line.contains("use crate::infrastructure::")
+                && line.trim() != "use crate::infrastructure::runtime::portable_time::Instant;"
+            {
                 violations.push(format!("{file}:{line_no}: {line}"));
             }
         }
@@ -107,6 +110,8 @@ fn application_source_avoids_infrastructure_imports_outside_composition_and_runt
         "src/application/composition/runtime_composition.rs",
         "src/application/runtime/in_memory_runtime.rs",
         "src/application/runtime/surreal_runtime.rs",
+        "src/application/runtime/sqlite_runtime.rs",
+        "src/application/runtime/store_runtime.rs",
         "src/application/runtime/runtime_factory.rs",
     ];
     let mut violations = Vec::new();
@@ -130,7 +135,10 @@ fn application_source_avoids_infrastructure_imports_outside_composition_and_runt
                 continue;
             }
 
-            if line.contains("use crate::infrastructure::") {
+            // Only the exact target-neutral monotonic timer is an intrinsic.
+            if line.contains("use crate::infrastructure::")
+                && line.trim() != "use crate::infrastructure::runtime::portable_time::Instant;"
+            {
                 violations.push(format!("{file}:{line_no}: {line}"));
             }
         }

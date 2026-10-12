@@ -15,10 +15,11 @@ use crate::infrastructure::memory::identity_memory_store_shared::{
 };
 use crate::ports::outbound::memory::identity_memory_models::{
     ChannelProfileEntity, CommitEntityUpdateRequest, CommitEntityUpdateResponse, CommitOutcomeCode,
-    ContactEntity, EntityUpdateProposalRecord, GetIdentityContextRequest, GetIdentityContextResponse,
-    IdentityEntityType, ListEntityHistoryRequest, ListEntityHistoryResponse, PersonaEntity,
-    PolicyProfileEntity, ProposalState, ProposeEntityUpdateRequest, ProposeEntityUpdateResponse,
-    RelationshipEntity, RelationshipStatus, RelationshipTransitionEvent, RollbackEntityVersionRequest,
+    ContactEntity, EntityUpdateProposalRecord, GetIdentityContextRequest,
+    GetIdentityContextResponse, IdentityEntityType, ListEntityHistoryRequest,
+    ListEntityHistoryResponse, PersonaEntity, PolicyProfileEntity, ProposalState,
+    ProposeEntityUpdateRequest, ProposeEntityUpdateResponse, RelationshipEntity,
+    RelationshipStatus, RelationshipTransitionEvent, RollbackEntityVersionRequest,
     RollbackEntityVersionResponse, UpdateTier, UserEntity,
 };
 use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
@@ -56,16 +57,24 @@ impl SqliteIdentityMemoryStore {
 
     fn classify_field_path(path: &str) -> UpdateTier {
         match path {
-            "status" | "trust_level" | "autonomy_scope.allow" | "autonomy_scope.deny"
-            | "autonomy_scope.approval_required" | "approval_profile_id"
-            | "escalation_policy.mode" | "parent_relationship_id"
-            | "governing_relationship_ids" | "source_entity_ref.entity_type"
-            | "source_entity_ref.entity_id" | "target_entity_ref.entity_type"
+            "status"
+            | "trust_level"
+            | "autonomy_scope.allow"
+            | "autonomy_scope.deny"
+            | "autonomy_scope.approval_required"
+            | "approval_profile_id"
+            | "escalation_policy.mode"
+            | "parent_relationship_id"
+            | "governing_relationship_ids"
+            | "source_entity_ref.entity_type"
+            | "source_entity_ref.entity_id"
+            | "target_entity_ref.entity_type"
             | "target_entity_ref.entity_id" => UpdateTier::ApprovalRequired,
-            "interruption_policy.quiet_hours" | "interruption_policy.allow_urgent_only"
-            | "escalation_policy.fallback" | "policy_tags" | "relationship_kind" => {
-                UpdateTier::ConfirmRequired
-            }
+            "interruption_policy.quiet_hours"
+            | "interruption_policy.allow_urgent_only"
+            | "escalation_policy.fallback"
+            | "policy_tags"
+            | "relationship_kind" => UpdateTier::ConfirmRequired,
             _ => UpdateTier::AutoCommit,
         }
     }
@@ -161,7 +170,9 @@ impl SqliteIdentityMemoryStore {
         sql: &str,
         params: impl rusqlite::Params,
     ) -> Result<Option<T>> {
-        let raw = self.session.query_opt(sql, params, |row| row.get::<_, String>(0))?;
+        let raw = self
+            .session
+            .query_opt(sql, params, |row| row.get::<_, String>(0))?;
         raw.map(|json| decode_json(&json)).transpose()
     }
 
@@ -257,11 +268,7 @@ impl SqliteIdentityMemoryStore {
              ON CONFLICT(version_id) DO UPDATE SET
                 relationship_id = excluded.relationship_id,
                 payload = excluded.payload",
-            rusqlite::params![
-                version_id,
-                relationship.relationship_id,
-                encode_json(&doc)?,
-            ],
+            rusqlite::params![version_id, relationship.relationship_id, encode_json(&doc)?,],
         )?;
         Ok(())
     }
@@ -572,9 +579,9 @@ impl SqliteIdentityMemoryStore {
 }
 
 fn parse_string_array(value: &Value, field: &str) -> Result<Vec<String>> {
-    let items = value.as_array().ok_or_else(|| {
-        StasisError::PortFailure(format!("{field} must be an array of strings"))
-    })?;
+    let items = value
+        .as_array()
+        .ok_or_else(|| StasisError::PortFailure(format!("{field} must be an array of strings")))?;
     let mut out = Vec::with_capacity(items.len());
     for item in items {
         let text = item.as_str().ok_or_else(|| {
@@ -696,11 +703,10 @@ impl IdentityMemoryStore for SqliteIdentityMemoryStore {
             }
         }
 
-        let (graph_depth_used, flattened_claims) = compute_graph_depth_with_cap(
-            &relationships,
-            DEFAULT_GRAPH_MAX_DEPTH,
-            || Self::now_id("claim"),
-        );
+        let (graph_depth_used, flattened_claims) =
+            compute_graph_depth_with_cap(&relationships, DEFAULT_GRAPH_MAX_DEPTH, || {
+                Self::now_id("claim")
+            });
 
         let contact_ids = collect_contact_ids(&relationships);
         let mut resolved_contacts = Vec::with_capacity(contact_ids.len());
@@ -1017,9 +1023,7 @@ impl IdentityMemoryStore for SqliteIdentityMemoryStore {
             }
             _ => Ok(RollbackEntityVersionResponse {
                 rolled_back: false,
-                rationale: Some(
-                    "rollback for this entity type is not implemented yet".to_string(),
-                ),
+                rationale: Some("rollback for this entity type is not implemented yet".to_string()),
                 ..Default::default()
             }),
         }
@@ -1236,7 +1240,10 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(expired_commit.code, Some(CommitOutcomeCode::ExpiredProposal));
+        assert_eq!(
+            expired_commit.code,
+            Some(CommitOutcomeCode::ExpiredProposal)
+        );
     }
 
     #[tokio::test]

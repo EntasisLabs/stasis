@@ -299,7 +299,6 @@ impl JobHandler for AgentTurnWaitableJobHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::domain::runtime::job::{BackoffPolicy, Job, JobState};
     use crate::infrastructure::agent::in_memory_agent_event_ingress::InMemoryAgentEventIngress;
     use crate::infrastructure::agent::in_memory_turn_wait_store::InMemoryTurnWaitStore;
@@ -328,6 +327,11 @@ mod tests {
             output_provenance: None,
             placement: crate::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: Utc::now(),
+            execution_epoch: 0,
+            incarnation: 0,
+            terminal_cycle: 0,
+            wakeup_pending: false,
+            version: 0,
             lease_owner: None,
             lease_expires_at: None,
             heartbeat_at: None,
@@ -672,7 +676,8 @@ mod tests {
 
     struct LocalFakeHandler;
 
-    #[async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl JobHandler for LocalFakeHandler {
         fn job_type(&self) -> &'static str {
             "workflow.stasis.fake_local"

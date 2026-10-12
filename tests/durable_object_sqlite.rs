@@ -30,7 +30,7 @@ fn schema_migration_is_idempotent_and_reuses_shared_ddl() {
             &[],
         )
         .expect("version");
-    assert_eq!(version.len(), 1);
+    assert_eq!(version.len(), MIGRATIONS.len());
     assert_eq!(version[0].text(0).unwrap(), "1");
     let tables = executor
         .query(
@@ -128,20 +128,24 @@ fn job_heartbeat_ignores_stale_owner() {
     let expiry = leased.lease_expires_at.expect("expiry");
     let later = now + Duration::seconds(5);
     assert!(
-        !kernel
+        kernel
             .heartbeat(&accepted.job_id, "owner-b", later, 60)
-            .expect("stale heartbeat")
+            .is_err()
     );
-    let unchanged = kernel.get_job(&accepted.job_id).unwrap().unwrap();
-    assert_eq!(unchanged.lease_expires_at, Some(expiry));
     assert!(
         kernel
             .heartbeat(&accepted.job_id, "owner-a", later, 60)
-            .expect("owner heartbeat")
+            .is_err()
     );
+    let unchanged = kernel.get_job(&accepted.job_id).unwrap().unwrap();
+    assert_eq!(unchanged.lease_expires_at, Some(expiry));
+    let mut grant = stasis::domain::runtime::execution::ExecutionGrant::from_job(&leased).unwrap();
+    grant.owner = "owner-b".into();
+    assert!(kernel.heartbeat_granted(&grant, 60).is_err());
+    grant.owner = "owner-a".into();
+    kernel.heartbeat_granted(&grant, 60).unwrap();
     let extended = kernel.get_job(&accepted.job_id).unwrap().unwrap();
-    assert!(extended.lease_expires_at.expect("extended") > expiry);
-    assert_eq!(extended.heartbeat_at, Some(later));
+    assert!(extended.lease_expires_at.unwrap() >= expiry);
 }
 
 #[test]

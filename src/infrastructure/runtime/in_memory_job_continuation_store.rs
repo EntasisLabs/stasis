@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::domain::errors::{Result, StasisError};
@@ -7,7 +6,15 @@ use crate::ports::outbound::runtime::job_continuation_store::JobContinuationStor
 
 #[derive(Clone, Default)]
 pub struct InMemoryJobContinuationStore {
-    records: Arc<RwLock<HashMap<String, JobContinuation>>>,
+    records: Arc<RwLock<crate::application::runtime::in_memory_runtime::NativeState>>,
+}
+
+impl InMemoryJobContinuationStore {
+    pub(crate) fn from_native(
+        records: Arc<RwLock<crate::application::runtime::in_memory_runtime::NativeState>>,
+    ) -> Self {
+        Self { records }
+    }
 }
 
 fn lock_err() -> StasisError {
@@ -17,7 +24,8 @@ fn lock_err() -> StasisError {
 crate::async_store! {
 impl JobContinuationStore for InMemoryJobContinuationStore {
     async fn insert(&self, record: JobContinuation) -> Result<()> {
-        let mut records = self.records.write().map_err(|_| lock_err())?;
+        let mut state = self.records.write().map_err(|_| lock_err())?;
+        let records = &mut state.continuations;
         if records.contains_key(&record.id) {
             return Err(StasisError::PortFailure(format!(
                 "job continuation already exists: {}",
@@ -29,12 +37,14 @@ impl JobContinuationStore for InMemoryJobContinuationStore {
     }
 
     async fn get(&self, id: &str) -> Result<Option<JobContinuation>> {
-        let records = self.records.read().map_err(|_| lock_err())?;
+        let state = self.records.read().map_err(|_| lock_err())?;
+        let records = &state.continuations;
         Ok(records.get(id).cloned())
     }
 
     async fn save(&self, record: JobContinuation) -> Result<()> {
-        let mut records = self.records.write().map_err(|_| lock_err())?;
+        let mut state = self.records.write().map_err(|_| lock_err())?;
+        let records = &mut state.continuations;
         if !records.contains_key(&record.id) {
             return Err(StasisError::PortFailure(format!(
                 "job continuation not found: {}",
@@ -46,7 +56,8 @@ impl JobContinuationStore for InMemoryJobContinuationStore {
     }
 
     async fn list_pending_by_parent(&self, parent_job_id: &str) -> Result<Vec<JobContinuation>> {
-        let records = self.records.read().map_err(|_| lock_err())?;
+        let state = self.records.read().map_err(|_| lock_err())?;
+        let records = &state.continuations;
         Ok(records
             .values()
             .filter(|record| {
@@ -58,7 +69,8 @@ impl JobContinuationStore for InMemoryJobContinuationStore {
     }
 
     async fn try_claim(&self, id: &str, claim_token: &str) -> Result<bool> {
-        let mut records = self.records.write().map_err(|_| lock_err())?;
+        let mut state = self.records.write().map_err(|_| lock_err())?;
+        let records = &mut state.continuations;
         let Some(record) = records.get_mut(id) else {
             return Ok(false);
         };
@@ -71,7 +83,8 @@ impl JobContinuationStore for InMemoryJobContinuationStore {
     }
 
     async fn get_by_child(&self, child_job_id: &str) -> Result<Option<JobContinuation>> {
-        let records = self.records.read().map_err(|_| lock_err())?;
+        let state = self.records.read().map_err(|_| lock_err())?;
+        let records = &state.continuations;
         Ok(records
             .values()
             .find(|record| record.child_job_id.as_deref() == Some(child_job_id))

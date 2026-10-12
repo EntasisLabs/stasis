@@ -10,6 +10,7 @@
 //! `SurrealJobStore` on the Surreal alias), so adapter helpers such as
 //! `job_store.db()` and `job_store.session()` stay available.
 
+use crate::application::runtime::execution_commit::{CommitResult, ExecutionGrant};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -20,14 +21,11 @@ use crate::application::runtime::inbound_trigger::{
 };
 use crate::application::runtime::job_context::JobContextServices;
 use crate::application::runtime::job_continuation::{ContinuationBuilder, settle_continuations};
-use crate::application::runtime::job_handler::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::job_lifecycle::{
-    DEFAULT_JOB_LEASE_SECONDS, JobLifecycleEvent, STALE_LEASE_MESSAGE, StaleRecoverReport,
-    apply_retryable_failure,
+    DEFAULT_JOB_LEASE_SECONDS, JobLifecycleEvent, StaleRecoverReport,
 };
 use crate::application::runtime::replay_report::ReplayReport;
 use crate::application::runtime::retention::{RetentionPolicy, RetentionPruneReport};
-use crate::application::runtime::runtime_diagnostics_helpers;
 use crate::application::runtime::runtime_job_dx::{self, InFlightMap};
 use crate::application::runtime::runtime_job_identity_context::RuntimeJobIdentityContext;
 use crate::application::runtime::typed_job::{JobConsumer, TypedEnqueueBuilder, TypedJobHandler};
@@ -46,21 +44,16 @@ use crate::application::use_cases::investigate_runtime_lineage::{
 use crate::domain::errors::{Result, StasisError};
 use crate::domain::runtime::inbound_trigger::{InboundAccept, InboundProtocol};
 use crate::domain::runtime::job::{Job, JobState, NewJob};
-use crate::domain::runtime::job_attempt::{JobAttempt, JobAttemptOutcome};
-use crate::domain::runtime::outbox::{
-    OutboxEvent, OutboxPublishPolicy, OutboxStatus, RuntimeEvent, RuntimeEventType,
-};
+use crate::domain::runtime::job_attempt::JobAttempt;
+use crate::domain::runtime::outbox::{OutboxEvent, OutboxPublishPolicy, OutboxStatus};
 use crate::domain::runtime::recurring::RecurringDefinition;
 use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey, ResourceLease};
 use crate::domain::runtime::typed_contract::{StasisEvent, StasisJob};
 use crate::infrastructure::runtime::portable_time::Instant;
 use crate::ports::outbound::runtime::clock::Clock;
-use crate::ports::outbound::runtime::durable_wait_store::DurableWaitStore;
 use crate::ports::outbound::runtime::event_publisher::EventPublisher;
 use crate::ports::outbound::runtime::id_generator::IdGenerator;
-use crate::ports::outbound::runtime::inbound_trigger_store::InboundTriggerStore;
 use crate::ports::outbound::runtime::job_attempt_store::JobAttemptStore;
-use crate::ports::outbound::runtime::job_continuation_store::JobContinuationStore;
 use crate::ports::outbound::runtime::job_store::JobStore;
 use crate::ports::outbound::runtime::outbox_store::OutboxStore;
 use crate::ports::outbound::runtime::recurring_store::RecurringStore;
@@ -68,6 +61,11 @@ use crate::ports::outbound::runtime::resource_lease_store::ResourceLeaseStore;
 use crate::ports::outbound::runtime::runtime_metrics::RuntimeMetrics;
 use crate::ports::outbound::runtime::runtime_tracing::{OtelAttribute, RuntimeTracing};
 
+use crate::application::runtime::job_handler::{JobExecutionOutcome, JobHandler};
+use crate::ports::outbound::runtime::{
+    durable_wait_store::DurableWaitStore, inbound_trigger_store::InboundTriggerStore,
+    job_continuation_store::JobContinuationStore,
+};
 /// Store parameters: job, recurring, outbox, attempt, wait, continuation, inbound, lease.
 #[derive(Clone)]
 pub struct StoreRuntime<J, R, O, A, W, Cn, I, L> {
@@ -88,6 +86,7 @@ pub struct StoreRuntime<J, R, O, A, W, Cn, I, L> {
     tracing: Arc<dyn RuntimeTracing>,
     retention_policy: Arc<RwLock<RetentionPolicy>>,
     in_flight: InFlightMap,
+    lifecycle_delivery: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl<J, R, O, A, W, Cn, I, L> StoreRuntime<J, R, O, A, W, Cn, I, L>
@@ -139,6 +138,7 @@ where
             tracing,
             retention_policy: Arc::new(RwLock::new(RetentionPolicy::default())),
             in_flight: runtime_job_dx::new_in_flight_map(),
+            lifecycle_delivery: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -258,10 +258,6 @@ where
         Ok(handlers.get(job_type).cloned())
     }
 
-    async fn emit_lifecycle(&self, job: &Job, event: JobLifecycleEvent) -> Result<()> {
-        self.emit_lifecycle_with_output(job, event, None).await
-    }
-
     async fn emit_lifecycle_with_output(
         &self,
         job: &Job,
@@ -269,17 +265,20 @@ where
         parent_output_json: Option<String>,
     ) -> Result<()> {
         if let Some(handler) = self.handler_for(&job.job_type)? {
-            if let Err(err) = handler.on_lifecycle(job, &event).await {
+            if let Err(err) = handler
+                .on_lifecycle_committed(
+                    job,
+                    &event,
+                    &format!(
+                        "{}:{}:{}:{}",
+                        job.id, job.incarnation, job.execution_epoch, job.version
+                    ),
+                )
+                .await
+            {
                 self.metrics
                     .incr_counter(metric_keys::JOB_LIFECYCLE_HOOK_FAILURE_TOTAL, 1);
-                if let Some(mut current) = self.job_store.get(&job.id).await? {
-                    let note = format!("lifecycle hook failed: {err}");
-                    current.last_error = Some(match current.last_error {
-                        Some(existing) => format!("{existing}; {note}"),
-                        None => note,
-                    });
-                    self.job_store.save(current).await?;
-                }
+                return Err(err);
             }
         }
         settle_continuations(
@@ -301,156 +300,54 @@ where
     pub async fn recover_stale(&self, now: DateTime<Utc>) -> Result<StaleRecoverReport> {
         let expired = self.job_store.list_expired_leases(now).await?;
         let mut report = StaleRecoverReport::default();
-        let empty = Self::extract_diagnostics_envelope(None);
-        for mut job in expired {
-            if runtime_job_dx::is_terminal(&job.state) {
-                continue;
+        for job in expired {
+            let result = self.job_store.recover_execution(&job).await?;
+            if result == CommitResult::Committed {
+                let current = self.job_store.get(&job.id).await?.unwrap();
+                if current.state == JobState::DeadLetter {
+                    report.dead_lettered += 1;
+                } else {
+                    report.recovered += 1;
+                }
             }
-            let identity = RuntimeJobIdentityContext::from(&job);
-            let attempt_number = job.attempts + 1;
-            let dead_lettered = apply_retryable_failure(&mut job, now, STALE_LEASE_MESSAGE);
-            self.job_store.save(job.clone()).await?;
-            if dead_lettered {
-                self.append_outbox(
-                    RuntimeEventType::JobDeadLettered,
-                    &identity,
-                    None,
-                    Some(STALE_LEASE_MESSAGE.to_string()),
-                    now,
-                    Some(identity.job_id.clone()),
-                    &empty,
-                )
-                .await?;
-                self.emit_lifecycle(
-                    &job,
-                    JobLifecycleEvent::DeadLettered {
-                        message: STALE_LEASE_MESSAGE.to_string(),
-                    },
-                )
-                .await?;
-                self.metrics
-                    .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
-                report.dead_lettered += 1;
-            } else {
-                self.append_outbox(
-                    RuntimeEventType::JobRetryScheduled,
-                    &identity,
-                    None,
-                    Some(STALE_LEASE_MESSAGE.to_string()),
-                    now,
-                    Some(identity.job_id.clone()),
-                    &empty,
-                )
-                .await?;
-                self.emit_lifecycle(
-                    &job,
-                    JobLifecycleEvent::RetryScheduled {
-                        attempt: job.attempts,
-                        message: STALE_LEASE_MESSAGE.to_string(),
-                    },
-                )
-                .await?;
-                self.metrics
-                    .incr_counter(metric_keys::JOB_RETRY_SCHEDULED_TOTAL, 1);
-                report.recovered += 1;
-            }
-            self.append_job_attempt(
-                &identity.job_id,
-                "stale-recover",
-                attempt_number,
-                now,
-                now,
-                JobAttemptOutcome::RetryableFailure,
-                Some(STALE_LEASE_MESSAGE.to_string()),
-                None,
-                Some(identity.job_id.clone()),
-                &empty,
-                None,
-            )
-            .await?;
-            self.metrics
-                .incr_counter(metric_keys::JOB_RETRYABLE_FAILURE_TOTAL, 1);
-            self.metrics
-                .incr_counter(metric_keys::JOB_STALE_RECOVERED_TOTAL, 1);
         }
+        self.replay_lifecycle().await?;
         Ok(report)
     }
 
     pub async fn cancel(&self, job_id: &str) -> Result<bool> {
-        let Some(job) = runtime_job_dx::cancel_job(
-            &self.job_store,
-            &self.wait_store,
-            &self.in_flight,
-            self.clock.as_ref(),
-            job_id,
-        )
-        .await?
-        else {
+        let Some(job) = self.job_store.cancel_execution(job_id).await? else {
             return Ok(false);
         };
-        let now = job.finished_at.unwrap_or_else(|| self.clock.now());
-        let identity = RuntimeJobIdentityContext::from(&job);
-        let empty = Self::extract_diagnostics_envelope(None);
-        self.append_outbox(
-            RuntimeEventType::JobCanceled,
-            &identity,
-            None,
-            Some("job cancelled".into()),
-            now,
-            Some(job.id.clone()),
-            &empty,
-        )
-        .await?;
-        self.emit_lifecycle(
-            &job,
-            JobLifecycleEvent::Canceled {
-                reason: "job cancelled".into(),
-            },
-        )
-        .await?;
-        self.metrics
-            .incr_counter(metric_keys::JOB_CANCELED_TOTAL, 1);
+        runtime_job_dx::request_cancel(&self.in_flight, job_id, job.execution_epoch);
+        self.replay_lifecycle().await?;
         Ok(true)
     }
 
+    pub async fn replay_lifecycle(&self) -> Result<usize> {
+        let _delivery = self.lifecycle_delivery.lock().await;
+        let pending = self.job_store.pending_lifecycle().await?;
+        let count = pending.len();
+        for (key, receipt) in pending {
+            let job: Job = serde_json::from_str(&receipt.job_json)
+                .map_err(|e| StasisError::PortFailure(e.to_string()))?;
+            self.emit_lifecycle_with_output(&job, receipt.lifecycle, receipt.output_json)
+                .await?;
+            self.job_store
+                .mark_lifecycle_delivered(&key, &receipt.digest)
+                .await?;
+        }
+        Ok(count)
+    }
+
     pub async fn fail(&self, job_id: &str) -> Result<bool> {
-        let Some(mut job) = self.job_store.get(job_id).await? else {
+        let Some(job) = self.job_store.fail_execution(job_id).await? else {
             return Ok(false);
         };
-        if runtime_job_dx::is_terminal(&job.state) {
-            return Ok(false);
-        }
-        let now = self.clock.now();
-        let identity = RuntimeJobIdentityContext::from(&job);
-        job.attempts = job.attempts.saturating_add(1);
-        job.state = JobState::DeadLetter;
-        job.last_error = Some("operator fail".into());
-        job.finished_at = Some(now);
-        job.lease_owner = None;
-        job.lease_expires_at = None;
-        job.heartbeat_at = None;
-        self.job_store.save(job.clone()).await?;
-        let empty = Self::extract_diagnostics_envelope(None);
-        self.append_outbox(
-            RuntimeEventType::JobDeadLettered,
-            &identity,
-            None,
-            Some("operator fail".into()),
-            now,
-            Some(job.id.clone()),
-            &empty,
-        )
-        .await?;
-        self.emit_lifecycle(
-            &job,
-            JobLifecycleEvent::DeadLettered {
-                message: "operator fail".into(),
-            },
-        )
-        .await?;
+        runtime_job_dx::request_cancel(&self.in_flight, job_id, job.execution_epoch);
+        self.replay_lifecycle().await?;
         self.metrics
             .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
-        runtime_job_dx::request_cancel(&self.in_flight, job_id);
         Ok(true)
     }
 
@@ -745,7 +642,7 @@ where
                 continue;
             }
 
-            let id = self.id_generator.next_id(&definition.id).to_string();
+            let id = self.id_generator.try_next_id(&definition.id)?.to_string();
 
             let scheduled_at = now + Duration::seconds(definition.jitter_seconds.max(0));
 
@@ -817,6 +714,8 @@ where
             .incr_counter(metric_keys::WORKER_PROCESS_ONCE_TOTAL, 1);
 
         self.recover_stale(now).await?;
+        // Native recovery may schedule an immediate retry after the caller sampled `now`.
+        let now = now.max(self.clock.now());
 
         let Some(mut job) = self
             .job_store
@@ -832,9 +731,11 @@ where
 
         job.state = JobState::Running;
         job.started_at = job.started_at.or(Some(now));
-        job.heartbeat_at = Some(now);
         let job_identity = RuntimeJobIdentityContext::from(&job);
-        self.job_store.save(job.clone()).await?;
+        let Some(running) = runtime_job_dx::running_snapshot(&self.job_store, job).await? else {
+            return Ok(None);
+        };
+        job = running;
         let processing_started = Instant::now();
 
         let handler = {
@@ -862,300 +763,36 @@ where
                 &self.in_flight,
             )
             .await?;
-            if runtime_job_dx::job_was_canceled(&self.job_store, &self.in_flight, &job.id).await? {
-                self.metrics.observe_duration_ms(
-                    metric_keys::WORKER_PROCESS_ONCE_DURATION_MS,
-                    worker_started.elapsed().as_millis() as u64,
-                );
-                return Ok(Some(job_identity.job_id));
-            }
-            if let Some(latest) = self.job_store.get(&job.id).await? {
-                job.progress_json = latest.progress_json;
-            }
             outcome
         };
 
-        let attempt_number = job.attempts + 1;
-        let attempt_started_at = now;
-
-        match outcome {
-            JobExecutionOutcome::Success {
-                output_provenance,
-                execution_id,
-                diagnostics,
-            } => {
-                let diagnostics_envelope =
-                    Self::extract_diagnostics_envelope(diagnostics.as_deref());
-                job.state = JobState::Succeeded;
-                job.output_provenance = output_provenance.clone();
-                job.finished_at = Some(now);
-                job.lease_owner = None;
-                job.lease_expires_at = None;
-                job.heartbeat_at = None;
-                self.job_store.save(job.clone()).await?;
-                self.emit_lifecycle_with_output(
-                    &job,
-                    JobLifecycleEvent::Succeeded,
-                    diagnostics.clone(),
-                )
-                .await?;
-
-                self.append_outbox(
-                    RuntimeEventType::JobSucceeded,
-                    &job_identity,
-                    output_provenance.clone(),
-                    None,
-                    now,
-                    execution_id.clone(),
-                    &diagnostics_envelope,
-                )
-                .await?;
-
-                self.append_job_attempt(
-                    &job_identity.job_id,
-                    worker_id,
-                    attempt_number,
-                    attempt_started_at,
-                    now,
-                    JobAttemptOutcome::Succeeded,
-                    None,
-                    output_provenance,
-                    execution_id,
-                    &diagnostics_envelope,
-                    diagnostics,
-                )
-                .await?;
-
-                self.metrics
-                    .incr_counter(metric_keys::JOB_SUCCEEDED_TOTAL, 1);
-                self.metrics.observe_duration_ms(
-                    metric_keys::JOB_PROCESS_DURATION_MS,
-                    processing_started.elapsed().as_millis() as u64,
-                );
+        let counter = match &outcome {
+            JobExecutionOutcome::Success { .. } => metric_keys::JOB_SUCCEEDED_TOTAL,
+            JobExecutionOutcome::RetryableFailure { .. } => {
+                metric_keys::JOB_RETRYABLE_FAILURE_TOTAL
             }
-            JobExecutionOutcome::RetryableFailure {
-                message,
-                execution_id,
-                diagnostics,
-            } => {
-                let diagnostics_envelope =
-                    Self::extract_diagnostics_envelope(diagnostics.as_deref());
-                let guardrail_failure = diagnostics
-                    .as_deref()
-                    .map(|v| v.contains("\"guardrail_code\""))
-                    .unwrap_or(false);
-                job.attempts += 1;
-                job.last_error = Some(message.clone());
-                job.lease_owner = None;
-                job.lease_expires_at = None;
-                job.heartbeat_at = None;
-
-                if job.attempts >= job.max_attempts {
-                    job.state = JobState::DeadLetter;
-                    job.finished_at = Some(now);
-                    self.append_outbox(
-                        RuntimeEventType::JobDeadLettered,
-                        &job_identity,
-                        None,
-                        Some(message.clone()),
-                        now,
-                        execution_id.clone(),
-                        &diagnostics_envelope,
-                    )
-                    .await?;
-
-                    self.metrics
-                        .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
-                } else {
-                    job.state = JobState::Enqueued;
-                    let exponent = job.attempts - 1;
-                    let mut delay = job
-                        .backoff_policy
-                        .base_delay_seconds
-                        .saturating_mul(2_i64.saturating_pow(exponent));
-                    delay = delay.min(job.backoff_policy.max_delay_seconds);
-                    job.scheduled_at = now + Duration::seconds(delay.max(0));
-
-                    self.append_outbox(
-                        RuntimeEventType::JobRetryScheduled,
-                        &job_identity,
-                        None,
-                        Some(message.clone()),
-                        now,
-                        execution_id.clone(),
-                        &diagnostics_envelope,
-                    )
-                    .await?;
-
-                    self.metrics
-                        .incr_counter(metric_keys::JOB_RETRY_SCHEDULED_TOTAL, 1);
-                }
-
-                self.job_store.save(job.clone()).await?;
-                let lifecycle = if job.state == JobState::DeadLetter {
-                    JobLifecycleEvent::DeadLettered {
-                        message: message.clone(),
-                    }
-                } else {
-                    JobLifecycleEvent::RetryScheduled {
-                        attempt: job.attempts,
-                        message: message.clone(),
-                    }
-                };
-                self.emit_lifecycle(&job, lifecycle).await?;
-
-                self.append_job_attempt(
-                    &job_identity.job_id,
-                    worker_id,
-                    attempt_number,
-                    attempt_started_at,
-                    now,
-                    JobAttemptOutcome::RetryableFailure,
-                    Some(message),
-                    None,
-                    execution_id,
-                    &diagnostics_envelope,
-                    diagnostics,
-                )
-                .await?;
-
-                self.metrics
-                    .incr_counter(metric_keys::JOB_RETRYABLE_FAILURE_TOTAL, 1);
-                self.metrics.observe_duration_ms(
-                    metric_keys::JOB_PROCESS_DURATION_MS,
-                    processing_started.elapsed().as_millis() as u64,
-                );
-                if guardrail_failure {
-                    self.metrics
-                        .incr_counter(metric_keys::GRAPHEME_GUARDRAIL_FAILURE_TOTAL, 1);
-                }
+            JobExecutionOutcome::FatalFailure { .. } => metric_keys::JOB_FATAL_FAILURE_TOTAL,
+            JobExecutionOutcome::Deferred { .. } => metric_keys::JOB_DEFERRED_TOTAL,
+        };
+        self.metrics.observe_duration_ms(
+            metric_keys::JOB_PROCESS_DURATION_MS,
+            processing_started.elapsed().as_millis() as u64,
+        );
+        let observation =
+            serde_json::to_string(&outcome).map_err(|e| StasisError::PortFailure(e.to_string()))?;
+        let committed = self.job_store.commit_execution(&job, outcome).await;
+        if !matches!(
+            &committed,
+            Ok(CommitResult::Committed | CommitResult::AlreadyCommittedSameDigest)
+        ) {
+            if let Some(grant) = ExecutionGrant::from_job(&job) {
+                self.job_store.observe_cleanup(&grant, observation).await?;
             }
-            JobExecutionOutcome::Deferred {
-                scheduled_at,
-                message,
-                execution_id,
-                diagnostics,
-            } => {
-                let diagnostics_envelope =
-                    Self::extract_diagnostics_envelope(diagnostics.as_deref());
-                // Deferred waits do not consume attempts.
-                job.state = JobState::Enqueued;
-                job.scheduled_at = scheduled_at;
-                job.last_error = Some(message.clone());
-                job.lease_owner = None;
-                job.lease_expires_at = None;
-                job.heartbeat_at = None;
-                self.job_store.save(job.clone()).await?;
-                self.emit_lifecycle(
-                    &job,
-                    JobLifecycleEvent::Deferred {
-                        scheduled_at,
-                        message: message.clone(),
-                    },
-                )
-                .await?;
-
-                self.append_outbox(
-                    RuntimeEventType::JobRetryScheduled,
-                    &job_identity,
-                    None,
-                    Some(message.clone()),
-                    now,
-                    execution_id.clone(),
-                    &diagnostics_envelope,
-                )
-                .await?;
-
-                self.append_job_attempt(
-                    &job_identity.job_id,
-                    worker_id,
-                    attempt_number,
-                    attempt_started_at,
-                    now,
-                    JobAttemptOutcome::Deferred,
-                    Some(message),
-                    None,
-                    execution_id,
-                    &diagnostics_envelope,
-                    diagnostics,
-                )
-                .await?;
-
-                self.metrics
-                    .incr_counter(metric_keys::JOB_DEFERRED_TOTAL, 1);
-                self.metrics
-                    .incr_counter(metric_keys::JOB_RETRY_SCHEDULED_TOTAL, 1);
-                self.metrics.observe_duration_ms(
-                    metric_keys::JOB_PROCESS_DURATION_MS,
-                    processing_started.elapsed().as_millis() as u64,
-                );
-            }
-            JobExecutionOutcome::FatalFailure {
-                message,
-                execution_id,
-                diagnostics,
-            } => {
-                let diagnostics_envelope =
-                    Self::extract_diagnostics_envelope(diagnostics.as_deref());
-                let guardrail_failure = diagnostics
-                    .as_deref()
-                    .map(|v| v.contains("\"guardrail_code\""))
-                    .unwrap_or(false);
-                job.attempts += 1;
-                job.state = JobState::DeadLetter;
-                job.last_error = Some(message.clone());
-                job.finished_at = Some(now);
-                job.lease_owner = None;
-                job.lease_expires_at = None;
-                job.heartbeat_at = None;
-                self.job_store.save(job.clone()).await?;
-                self.emit_lifecycle(
-                    &job,
-                    JobLifecycleEvent::DeadLettered {
-                        message: message.clone(),
-                    },
-                )
-                .await?;
-
-                self.append_outbox(
-                    RuntimeEventType::JobDeadLettered,
-                    &job_identity,
-                    None,
-                    Some(message.clone()),
-                    now,
-                    execution_id.clone(),
-                    &diagnostics_envelope,
-                )
-                .await?;
-
-                self.append_job_attempt(
-                    &job_identity.job_id,
-                    worker_id,
-                    attempt_number,
-                    attempt_started_at,
-                    now,
-                    JobAttemptOutcome::FatalFailure,
-                    Some(message),
-                    None,
-                    execution_id,
-                    &diagnostics_envelope,
-                    diagnostics,
-                )
-                .await?;
-
-                self.metrics
-                    .incr_counter(metric_keys::JOB_FATAL_FAILURE_TOTAL, 1);
-                self.metrics
-                    .incr_counter(metric_keys::JOB_DEAD_LETTER_TOTAL, 1);
-                self.metrics.observe_duration_ms(
-                    metric_keys::JOB_PROCESS_DURATION_MS,
-                    processing_started.elapsed().as_millis() as u64,
-                );
-                if guardrail_failure {
-                    self.metrics
-                        .incr_counter(metric_keys::GRAPHEME_GUARDRAIL_FAILURE_TOTAL, 1);
-                }
-            }
+        }
+        let committed = committed?;
+        if committed == CommitResult::Committed {
+            self.metrics.incr_counter(counter, 1);
+            self.replay_lifecycle().await?;
         }
 
         self.metrics.observe_duration_ms(
@@ -1262,88 +899,5 @@ where
         }
 
         Ok(published)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn append_outbox(
-        &self,
-        event_type: RuntimeEventType,
-        job_identity: &RuntimeJobIdentityContext,
-        output_provenance: Option<crate::domain::runtime::provenance::ProvenanceRef>,
-        message: Option<String>,
-        now: DateTime<Utc>,
-        execution_id: Option<String>,
-        diagnostics: &runtime_diagnostics_helpers::RuntimeDiagnosticsEnvelope,
-    ) -> Result<()> {
-        let event = OutboxEvent {
-            event_id: self
-                .id_generator
-                .next_id(&format!("evt-{}", job_identity.job_id)),
-            status: OutboxStatus::Pending,
-            publish_attempts: 0,
-            published_at: None,
-            next_attempt_at: None,
-            last_publish_error: None,
-            event: RuntimeEvent {
-                event_type,
-                job_id: job_identity.job_id.clone(),
-                thread_id: diagnostics.thread_id.clone(),
-                correlation_id: job_identity.correlation_id.clone(),
-                causation_id: job_identity.causation_id.clone(),
-                trace_id: job_identity.trace_id.clone(),
-                input_provenance: job_identity.input_provenance.clone(),
-                output_provenance,
-                execution_id,
-                input_memory_query_id: diagnostics.input_memory_query_id.clone(),
-                input_memory_query_fingerprint: diagnostics.input_memory_query_fingerprint.clone(),
-                output_memory_node_id: diagnostics.output_memory_node_id.clone(),
-                retrieval_path: diagnostics.retrieval_path.clone(),
-                occurred_at: now,
-                message,
-            },
-        };
-
-        self.outbox_store.insert(event).await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn append_job_attempt(
-        &self,
-        job_id: &str,
-        worker_id: &str,
-        attempt_number: u32,
-        started_at: DateTime<Utc>,
-        finished_at: DateTime<Utc>,
-        outcome: JobAttemptOutcome,
-        error_message: Option<String>,
-        output_provenance: Option<crate::domain::runtime::provenance::ProvenanceRef>,
-        execution_id: Option<String>,
-        diagnostics_envelope: &runtime_diagnostics_helpers::RuntimeDiagnosticsEnvelope,
-        diagnostics: Option<String>,
-    ) -> Result<()> {
-        let attempt = JobAttempt {
-            attempt_id: self.id_generator.next_id(&format!("attempt-{job_id}")),
-            job_id: job_id.to_string(),
-            attempt_number,
-            worker_id: worker_id.to_string(),
-            started_at,
-            finished_at,
-            outcome,
-            error_message,
-            output_provenance,
-            execution_id,
-            guardrail_code: diagnostics_envelope.guardrail_code.clone(),
-            policy_reason: diagnostics_envelope.policy_reason.clone(),
-            duration_ms: diagnostics_envelope.duration_ms,
-            diagnostics,
-        };
-
-        self.job_attempt_store.insert(attempt).await
-    }
-
-    fn extract_diagnostics_envelope(
-        diagnostics: Option<&str>,
-    ) -> runtime_diagnostics_helpers::RuntimeDiagnosticsEnvelope {
-        runtime_diagnostics_helpers::extract_runtime_diagnostics_envelope(diagnostics)
     }
 }

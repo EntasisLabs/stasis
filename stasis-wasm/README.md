@@ -306,7 +306,11 @@ The workspace patches `grapheme-runtime` 0.7.1 to use `web-time::Instant` on was
 
 ## Cloudflare Workers
 
-`StasisDurableSqlite` persists jobs, fenced leases, heartbeats, attempts, and inbound idempotency keys in a Durable Object's SQLite and drives them with `StoreRuntime`. Recurring jobs, the outbox, waits, and continuations are in-memory fillers. Grapheme workflow graph state is stored beside the engine. The in-memory `StasisWasmClient` is unchanged. The lease stores `state_current`; it does not execute Grapheme source.
+`StasisDurableSqlite` drives the shared `StoreRuntime` with durable job, attempt, outbox, recurring, wait/signal and continuation adapters. Execution completion and its native effects share a versioned SQLite safety ledger; inbound keys, resource leases and workflow graph state retain their durable SQL adapters. There are no in-memory runtime auxiliary fillers in this composition.
+
+This is a bounded, correctness-first snapshot profile: **1 MiB maximum executor ledger**, linear load/serialization cost, and explicit errors rather than volatile fallback. Populated pre-safety runtime tables require offline reconciliation. Installing another SQL bridge invalidates existing kernels; reconstruct them or use separate WASM module instances per concurrently resident DO. The synchronous kernel requires immediately-ready handlers and real synchronous transaction/rollback behavior. Arbitrary workflow/handler effects are not included in native completion, and Grapheme source execution is not implemented here. The `StasisWasmClient` remains the intentionally in-memory client API.
+
+See [`store-runtime-safety-integration.md`](../docs/store-runtime-safety-integration.md) for the transaction contract, migration restrictions, unsupported profiles and review scope. Reconstruction/DO-shaped host tests are not live Cloudflare eviction or deployment validation.
 
 Build this package, then run the example Worker:
 

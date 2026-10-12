@@ -25,6 +25,8 @@ pub struct ContinuationReceipt {
 
 pub struct ContinuationBuilder<C> {
     parent_job_id: String,
+    execution_grant: Option<crate::application::runtime::execution_commit::ExecutionGrant>,
+    worker_mode: bool,
     payload: C,
     trigger: ContinuationTrigger,
     queue: Option<String>,
@@ -50,6 +52,8 @@ impl<C: StasisJob> ContinuationBuilder<C> {
     ) -> Self {
         Self {
             parent_job_id,
+            execution_grant: None,
+            worker_mode: false,
             payload,
             trigger: ContinuationTrigger::Succeeded,
             queue: None,
@@ -63,6 +67,19 @@ impl<C: StasisJob> ContinuationBuilder<C> {
             job_store,
             continuations,
         }
+    }
+
+    /// Enter worker mode, including when the captured grant is absent.
+    /// `None` fails closed on send and never restores producer authority.
+    /// `new` without this method is the runtime producer API.
+    pub fn execution_grant(
+        mut self,
+        grant: Option<crate::application::runtime::execution_commit::ExecutionGrant>,
+    ) -> Self {
+        // Once worker-scoped, an optional setter can never restore producer authority.
+        self.worker_mode = true;
+        self.execution_grant = grant;
+        self
     }
 
     pub fn trigger(mut self, trigger: ContinuationTrigger) -> Self {
@@ -101,20 +118,37 @@ impl<C: StasisJob> ContinuationBuilder<C> {
     }
 
     pub async fn send(self) -> Result<ContinuationReceipt> {
-        if self.job_store.get(&self.parent_job_id).await?.is_none() {
-            return Err(StasisError::PortFailure(format!(
-                "parent job not found for continuation: {}",
-                self.parent_job_id
-            )));
+        if self.worker_mode && self.execution_grant.is_none() {
+            return Err(StasisError::PortFailure(
+                "native execution grant missing for worker continuation".into(),
+            ));
+        }
+        let captured_parent = self
+            .job_store
+            .get(&self.parent_job_id)
+            .await?
+            .ok_or_else(|| {
+                StasisError::PortFailure(format!(
+                    "parent job not found for continuation: {}",
+                    self.parent_job_id
+                ))
+            })?;
+        if captured_parent.incarnation == 0 || captured_parent.terminal_cycle == 0 {
+            return Err(StasisError::PortFailure(
+                "legacy continuation parent identity requires reconciliation".into(),
+            ));
         }
         let declared = C::declaration();
         let retry = self.retry.unwrap_or(declared.retry);
         let payload_ref = encode_typed_payload(&self.payload)?;
-        let id = self.id_generator.next_id("continuation");
+        let id = self.id_generator.try_next_id("continuation")?;
         let created_at = self.clock.now();
         let record = JobContinuation {
             id: id.clone(),
             parent_job_id: self.parent_job_id.clone(),
+            parent_incarnation: captured_parent.incarnation,
+            parent_terminal_cycle: captured_parent.terminal_cycle,
+            parent_version_floor: Some(captured_parent.version),
             trigger: self.trigger,
             status: ContinuationStatus::Pending,
             child: ChildJobSpec {
@@ -133,6 +167,13 @@ impl<C: StasisJob> ContinuationBuilder<C> {
             claim_token: None,
             created_at,
         };
+        if let Some(grant) = self.execution_grant {
+            self.job_store.stage_continuation(&grant, record).await?;
+            return Ok(ContinuationReceipt {
+                continuation_id: id,
+                child_job_id: None,
+            });
+        }
         self.continuations.insert(record).await?;
         let parent = self
             .job_store
@@ -174,7 +215,7 @@ pub async fn settle_continuations(
     continuations: &dyn JobContinuationStore,
     jobs: &dyn JobStore,
     clock: &dyn Clock,
-    ids: &dyn IdGenerator,
+    _ids: &dyn IdGenerator,
     parent: &Job,
     event: &JobLifecycleEvent,
     parent_output_json: Option<String>,
@@ -184,31 +225,46 @@ pub async fn settle_continuations(
     };
     let detail = parent_output_json.or_else(|| detail_from_event(event));
     let pending = continuations.list_pending_by_parent(&parent.id).await?;
-    for mut record in pending {
-        let token = ids.next_id("continuation-claim");
-        if !continuations.try_claim(&record.id, &token).await? {
+    for record in pending {
+        if record.parent_incarnation == 0
+            || record.parent_terminal_cycle == 0
+            || record.parent_version_floor.is_none()
+            || parent.terminal_cycle == 0
+        {
+            return Err(StasisError::PortFailure(
+                "legacy continuation identity requires reconciliation".into(),
+            ));
+        }
+        if record.parent_incarnation != parent.incarnation
+            || record.parent_terminal_cycle != parent.terminal_cycle
+            || record
+                .parent_version_floor
+                .is_some_and(|floor| parent.version < floor)
+        {
             continue;
         }
-        if !record.trigger.matches_actual(actual) {
-            record.status = ContinuationStatus::Discarded;
-            record.claim_token = Some(token);
-            continuations.save(record).await?;
-            continue;
+        let child = if record.trigger.matches_actual(actual) {
+            let id = format!("continuation-child-{}", record.id);
+            Some(child_job(&record, parent, id, clock.now()))
+        } else {
+            None
+        };
+        let record_id = record.id.clone();
+        if !jobs
+            .settle_continuation(parent, record, child, detail.clone())
+            .await?
+        {
+            if continuations.get(&record_id).await?.is_none_or(|r| {
+                matches!(
+                    r.status,
+                    ContinuationStatus::Pending | ContinuationStatus::Settling
+                )
+            }) {
+                return Err(StasisError::PortFailure(
+                    "continuation settlement not committed; retain lifecycle delivery".into(),
+                ));
+            }
         }
-        let child_id = ids.next_id("job");
-        let now = clock.now();
-        let child = child_job(&record, parent, child_id.clone(), now);
-        if let Err(err) = jobs.insert(child).await {
-            record.status = ContinuationStatus::Pending;
-            record.claim_token = None;
-            let _ = continuations.save(record).await;
-            return Err(err);
-        }
-        record.status = ContinuationStatus::Materialized;
-        record.child_job_id = Some(child_id);
-        record.parent_output_json = detail.clone();
-        record.claim_token = Some(token);
-        continuations.save(record).await?;
     }
     Ok(())
 }

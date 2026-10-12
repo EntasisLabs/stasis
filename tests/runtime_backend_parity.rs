@@ -5959,7 +5959,24 @@ async fn in_memory_runtime_uses_injected_clock_and_id_generator() {
         .expect("replay report should load");
     assert_eq!(report.attempts.len(), 1);
     assert_eq!(report.attempts[0].started_at, fixed_now);
-    assert!(report.attempts[0].attempt_id.starts_with("custom-id-"));
+    let canonical = runtime
+        .job_store
+        .get("job-test.success")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        report.attempts[0].attempt_id,
+        format!("{}:execution:{}", canonical.id, canonical.execution_epoch)
+    );
+    assert!(
+        runtime
+            .job_context_services()
+            .id_generator
+            .try_next_id("probe")
+            .unwrap()
+            .starts_with("custom-id-")
+    );
 
     let lineage = runtime
         .list_lineage_events("job-test.success")
@@ -5967,7 +5984,7 @@ async fn in_memory_runtime_uses_injected_clock_and_id_generator() {
         .expect("lineage should load");
     assert_eq!(lineage.len(), 1);
     assert_eq!(lineage[0].event.occurred_at, fixed_now);
-    assert!(lineage[0].event_id.starts_with("custom-id-"));
+    assert_eq!(lineage[0].event_id, report.attempts[0].attempt_id);
 }
 
 #[tokio::test]
@@ -6508,7 +6525,9 @@ async fn surreal_job_lease_expiry_allows_recovery_by_another_worker() {
         .expect("second lease call should succeed");
     assert!(during_lease.is_none());
 
-    let later = now + Duration::seconds(2);
+    // Caller time cannot retire a live native owner. Wait for stored expiry.
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    let later = Utc::now();
     let report = runtime
         .recover_stale(later)
         .await
@@ -7428,11 +7447,11 @@ async fn in_memory_runtime_retention_prunes_terminal_records() {
         .await
         .expect("job should enqueue");
     runtime
-        .process_once("default", "worker-retention", old)
+        .process_once("default", "worker-retention", now)
         .await
         .expect("processing should succeed");
     runtime
-        .publish_pending_events(10, old + Duration::seconds(1))
+        .publish_pending_events(10, now + Duration::seconds(1))
         .await
         .expect("publish should succeed");
 
@@ -7443,7 +7462,7 @@ async fn in_memory_runtime_retention_prunes_terminal_records() {
         .expect("retention policy should configure");
 
     let report = runtime
-        .enforce_retention(now)
+        .enforce_retention(now + Duration::days(2))
         .await
         .expect("retention should enforce");
 
@@ -7487,11 +7506,11 @@ async fn surreal_runtime_retention_prunes_terminal_records() {
         .await
         .expect("job should enqueue");
     runtime
-        .process_once("default", "worker-retention", old)
+        .process_once("default", "worker-retention", now)
         .await
         .expect("processing should succeed");
     runtime
-        .publish_pending_events(10, old + Duration::seconds(1))
+        .publish_pending_events(10, now + Duration::seconds(1))
         .await
         .expect("publish should succeed");
 
@@ -7502,7 +7521,7 @@ async fn surreal_runtime_retention_prunes_terminal_records() {
         .expect("retention policy should configure");
 
     let report = runtime
-        .enforce_retention(now)
+        .enforce_retention(now + Duration::days(2))
         .await
         .expect("retention should enforce");
 

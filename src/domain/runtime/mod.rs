@@ -3,6 +3,7 @@ pub mod cluster_node;
 pub mod delivery_endpoint;
 pub mod durable_wait;
 pub mod endpoint_delivery_status;
+pub mod execution;
 pub mod federation;
 pub mod inbound_trigger;
 pub mod job;

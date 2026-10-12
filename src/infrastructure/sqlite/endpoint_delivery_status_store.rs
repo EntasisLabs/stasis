@@ -20,7 +20,9 @@ impl SqliteEndpointDeliveryStatusStore {
 
     fn map_status(row: &rusqlite::Row<'_>) -> rusqlite::Result<EndpointDeliveryStatus> {
         let conv = |err: crate::domain::errors::StasisError| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                err.to_string(),
+            )))
         };
         let last_success: Option<i64> = row.get(5)?;
         let last_failure: Option<i64> = row.get(6)?;
@@ -68,7 +70,12 @@ impl SqliteEndpointDeliveryStatusStore {
 
 #[async_trait]
 impl EndpointDeliveryStatusStore for SqliteEndpointDeliveryStatusStore {
-    async fn record_success(&self, endpoint_id: &str, event_id: &str, at: DateTime<Utc>) -> Result<()> {
+    async fn record_success(
+        &self,
+        endpoint_id: &str,
+        event_id: &str,
+        at: DateTime<Utc>,
+    ) -> Result<()> {
         let mut record = self
             .get(endpoint_id)
             .await?

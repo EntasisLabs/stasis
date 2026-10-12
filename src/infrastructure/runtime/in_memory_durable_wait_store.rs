@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Utc};
@@ -11,8 +10,15 @@ use crate::ports::outbound::runtime::durable_wait_store::DurableWaitStore;
 
 #[derive(Clone, Default)]
 pub struct InMemoryDurableWaitStore {
-    waits: Arc<RwLock<HashMap<String, DurableWaitRecord>>>,
-    signals: Arc<RwLock<HashMap<String, DurableSignalRecord>>>,
+    state: Arc<RwLock<crate::application::runtime::in_memory_runtime::NativeState>>,
+}
+
+impl InMemoryDurableWaitStore {
+    pub(crate) fn from_native(
+        state: Arc<RwLock<crate::application::runtime::in_memory_runtime::NativeState>>,
+    ) -> Self {
+        Self { state }
+    }
 }
 
 fn lock_err() -> StasisError {
@@ -22,7 +28,8 @@ fn lock_err() -> StasisError {
 crate::async_store! {
 impl DurableWaitStore for InMemoryDurableWaitStore {
     async fn insert_wait(&self, record: DurableWaitRecord) -> Result<()> {
-        let mut waits = self.waits.write().map_err(|_| lock_err())?;
+        let mut state = self.state.write().map_err(|_| lock_err())?;
+        let waits = &mut state.waits;
         if waits.contains_key(&record.wait_id) {
             return Err(StasisError::PortFailure(format!(
                 "durable wait already exists: {}",
@@ -34,7 +41,8 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
     }
 
     async fn get_wait(&self, wait_id: &str) -> Result<Option<DurableWaitRecord>> {
-        let waits = self.waits.read().map_err(|_| lock_err())?;
+        let state = self.state.read().map_err(|_| lock_err())?;
+        let waits = &state.waits;
         Ok(waits.get(wait_id).cloned())
     }
 
@@ -44,7 +52,8 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
         signal_type: &str,
         correlation_key: &str,
     ) -> Result<Option<DurableWaitRecord>> {
-        let waits = self.waits.read().map_err(|_| lock_err())?;
+        let state = self.state.read().map_err(|_| lock_err())?;
+        let waits = &state.waits;
         Ok(waits
             .values()
             .find(|wait| {
@@ -56,12 +65,26 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
             .cloned())
     }
 
+    async fn list_by_signal(
+        &self,
+        signal_type: &str,
+        correlation_key: &str,
+    ) -> Result<Vec<DurableWaitRecord>> {
+        let state = self.state.read().map_err(|_| lock_err())?;
+        Ok(state
+            .waits
+            .values()
+            .filter(|w| w.signal_type == signal_type && w.correlation_key == correlation_key)
+            .cloned()
+            .collect())
+    }
     async fn list_pending_by_signal(
         &self,
         signal_type: &str,
         correlation_key: &str,
     ) -> Result<Vec<DurableWaitRecord>> {
-        let waits = self.waits.read().map_err(|_| lock_err())?;
+        let state = self.state.read().map_err(|_| lock_err())?;
+        let waits = &state.waits;
         Ok(waits
             .values()
             .filter(|wait| {
@@ -74,7 +97,8 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
     }
 
     async fn list_pending_by_job(&self, job_id: &str) -> Result<Vec<DurableWaitRecord>> {
-        let waits = self.waits.read().map_err(|_| lock_err())?;
+        let state = self.state.read().map_err(|_| lock_err())?;
+        let waits = &state.waits;
         Ok(waits
             .values()
             .filter(|wait| wait.job_id == job_id && wait.status == DurableWaitStatus::Pending)
@@ -83,13 +107,15 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
     }
 
     async fn save_wait(&self, record: DurableWaitRecord) -> Result<()> {
-        let mut waits = self.waits.write().map_err(|_| lock_err())?;
+        let mut state = self.state.write().map_err(|_| lock_err())?;
+        let waits = &mut state.waits;
         waits.insert(record.wait_id.clone(), record);
         Ok(())
     }
 
     async fn insert_signal(&self, record: DurableSignalRecord) -> Result<bool> {
-        let mut signals = self.signals.write().map_err(|_| lock_err())?;
+        let mut state = self.state.write().map_err(|_| lock_err())?;
+        let signals = &mut state.signals;
         if signals.contains_key(&record.signal_id) {
             return Ok(false);
         }
@@ -98,7 +124,8 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
     }
 
     async fn get_signal(&self, signal_id: &str) -> Result<Option<DurableSignalRecord>> {
-        let signals = self.signals.read().map_err(|_| lock_err())?;
+        let state = self.state.read().map_err(|_| lock_err())?;
+        let signals = &state.signals;
         Ok(signals.get(signal_id).cloned())
     }
 
@@ -108,7 +135,8 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
         correlation_key: &str,
         consumed_ids: &[String],
     ) -> Result<Option<DurableSignalRecord>> {
-        let signals = self.signals.read().map_err(|_| lock_err())?;
+        let state = self.state.read().map_err(|_| lock_err())?;
+        let signals = &state.signals;
         Ok(signals
             .values()
             .filter(|signal| {
@@ -133,7 +161,8 @@ impl DurableWaitStore for InMemoryDurableWaitStore {
                 "cannot complete durable wait as pending".into(),
             ));
         }
-        let mut waits = self.waits.write().map_err(|_| lock_err())?;
+        let mut state = self.state.write().map_err(|_| lock_err())?;
+        let waits = &mut state.waits;
         let Some(wait) = waits.get_mut(wait_id) else {
             return Ok(false);
         };

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum JobAttemptOutcome {
     Succeeded,
     RetryableFailure,
@@ -11,7 +11,7 @@ pub enum JobAttemptOutcome {
     Deferred,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct JobAttempt {
     pub attempt_id: String,
     pub job_id: String,
