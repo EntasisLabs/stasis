@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use crate::application::runtime::store_runtime::StoreRuntime;
-use crate::infrastructure::runtime::atomic_id_generator::AtomicIdGenerator;
 use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
 use crate::infrastructure::runtime::system_clock::SystemClock;
+use crate::infrastructure::sqlite::durable_ids::DurableIds;
 use crate::infrastructure::sqlite::durable_wait_store::SqliteDurableWaitStore;
 use crate::infrastructure::sqlite::inbound_trigger_store::SqliteInboundTriggerStore;
 use crate::infrastructure::sqlite::job_attempt_store::SqliteJobAttemptStore;
@@ -53,14 +53,16 @@ impl
     }
 
     pub fn open_path(path: impl AsRef<str>) -> crate::domain::errors::Result<Self> {
-        Ok(Self::new(SqliteSession::open(path.as_ref())?))
+        let runtime = Self::new(SqliteSession::open(path.as_ref())?);
+        runtime.job_store.validate()?;
+        Ok(runtime)
     }
 
     pub fn new(session: SqliteSession) -> Self {
         Self::with_dependencies_and_telemetry(
-            session,
+            session.clone(),
             Arc::new(SystemClock),
-            Arc::new(AtomicIdGenerator::new(1)),
+            Arc::new(DurableIds::native(session)),
             Arc::new(NoopRuntimeMetrics),
             Arc::new(NoopRuntimeTracing),
         )
@@ -103,7 +105,7 @@ impl
         tracing: Arc<dyn RuntimeTracing>,
     ) -> Self {
         Self::from_stores(
-            SqliteJobStore::new(session.clone()),
+            SqliteJobStore::new(session.clone()).with_clock(clock.clone()),
             SqliteRecurringStore::new(session.clone()),
             SqliteOutboxStore::new(session.clone()),
             SqliteJobAttemptStore::new(session.clone()),

@@ -4,24 +4,7 @@ use crate::domain::runtime::job::Job;
 
 pub const DEFAULT_JOB_LEASE_SECONDS: i64 = 30;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum JobLifecycleEvent {
-    Succeeded,
-    Deferred {
-        scheduled_at: DateTime<Utc>,
-        message: String,
-    },
-    RetryScheduled {
-        attempt: u32,
-        message: String,
-    },
-    DeadLettered {
-        message: String,
-    },
-    Canceled {
-        reason: String,
-    },
-}
+pub use crate::domain::runtime::execution::JobLifecycleEvent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct StaleRecoverReport {

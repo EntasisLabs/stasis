@@ -46,7 +46,9 @@ impl SqliteClusterNodeStore {
         let created_at: i64 = row.get(8)?;
         let updated_at: i64 = row.get(9)?;
         let conv = |err: StasisError| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                err.to_string(),
+            )))
         };
         Ok(ClusterNode {
             node_id: row.get(0)?,

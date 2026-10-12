@@ -104,6 +104,17 @@ impl JobHandler for DelegatingJobHandler {
         self.inner.execute_with_context(job, ctx).await
     }
 
+    async fn on_lifecycle_committed(
+        &self,
+        job: &crate::domain::runtime::job::Job,
+        event: &crate::application::runtime::job_lifecycle::JobLifecycleEvent,
+        idempotency_key: &str,
+    ) -> Result<()> {
+        self.inner
+            .on_lifecycle_committed(job, event, idempotency_key)
+            .await
+    }
+
     async fn on_lifecycle(
         &self,
         job: &crate::domain::runtime::job::Job,
@@ -1030,7 +1041,6 @@ impl StasisRuntimeBuilder {
 mod tests {
     use std::sync::{Arc, RwLock};
 
-    use async_trait::async_trait;
     use chrono::Utc;
 
     use crate::application::runtime::in_memory_runtime::{JobExecutionOutcome, JobHandler};
@@ -1050,7 +1060,8 @@ mod tests {
     #[derive(Clone)]
     struct SuccessHandler;
 
-    #[async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl JobHandler for SuccessHandler {
         fn job_type(&self) -> &'static str {
             "test.success"
@@ -1075,7 +1086,8 @@ mod tests {
         calls: Arc<RwLock<Vec<String>>>,
     }
 
-    #[async_trait]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
     impl EndpointTransportPublisher for RecordingTransport {
         fn supports(&self, protocol: &DeliveryProtocol) -> bool {
             matches!(protocol, DeliveryProtocol::HttpWebhook)

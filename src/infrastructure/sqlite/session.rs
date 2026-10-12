@@ -75,8 +75,9 @@ impl SqliteSession {
                 if *version <= current {
                     continue;
                 }
-                tx.execute_batch(sql)
-                    .map_err(|err| sql_err(format!("apply sqlite migration {version}").as_str(), err))?;
+                tx.execute_batch(sql).map_err(|err| {
+                    sql_err(format!("apply sqlite migration {version}").as_str(), err)
+                })?;
                 tx.execute(
                     "INSERT INTO stasis_schema_migration (version, applied_at) VALUES (?1, ?2)",
                     rusqlite::params![version, encode_time(Utc::now())],

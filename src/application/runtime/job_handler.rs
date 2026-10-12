@@ -1,35 +1,9 @@
-use chrono::{DateTime, Utc};
-
 use crate::application::runtime::job_context::JobContext;
 use crate::application::runtime::job_lifecycle::JobLifecycleEvent;
 use crate::domain::errors::Result;
 use crate::domain::runtime::job::Job;
 
-#[derive(Clone, Debug)]
-pub enum JobExecutionOutcome {
-    Success {
-        output_provenance: Option<crate::domain::runtime::provenance::ProvenanceRef>,
-        execution_id: Option<String>,
-        diagnostics: Option<String>,
-    },
-    RetryableFailure {
-        message: String,
-        execution_id: Option<String>,
-        diagnostics: Option<String>,
-    },
-    FatalFailure {
-        message: String,
-        execution_id: Option<String>,
-        diagnostics: Option<String>,
-    },
-    /// Re-enqueue without consuming an attempt (durable external wait).
-    Deferred {
-        scheduled_at: DateTime<Utc>,
-        message: String,
-        execution_id: Option<String>,
-        diagnostics: Option<String>,
-    },
-}
+pub use crate::domain::runtime::execution::JobExecutionOutcome;
 
 crate::async_store! {
 pub trait JobHandler: Send + Sync {
@@ -41,6 +15,15 @@ pub trait JobHandler: Send + Sync {
         _ctx: JobContext,
     ) -> Result<JobExecutionOutcome> {
         self.execute(job).await
+    }
+
+    async fn on_lifecycle_committed(
+        &self,
+        job: &Job,
+        event: &JobLifecycleEvent,
+        _idempotency_key: &str,
+    ) -> Result<()> {
+        self.on_lifecycle(job, event).await
     }
 
     async fn on_lifecycle(&self, job: &Job, event: &JobLifecycleEvent) -> Result<()> {

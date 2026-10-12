@@ -2,8 +2,10 @@
 //!
 //! Jobs, attempts, inbound keys, and resource leases are SQLite stores passed
 //! to [`StoreRuntime::from_stores`](crate::application::runtime::store_runtime::StoreRuntime::from_stores).
-//! Recurring jobs, the outbox, durable waits, and continuations are in-memory
-//! fillers. Grapheme workflow revisions stay beside the engine.
+//! Recurring jobs, outbox, waits/signals, and continuations use the same durable
+//! safety ledger. Grapheme workflow revisions stay beside the engine.
+//! The synchronous kernel supports immediately-ready handlers; asynchronous
+//! consumers must use the async runtime API, not a volatile substitute.
 //!
 //! The four SQLite impls use [`crate::async_store!`]. `JsSqlExecutor` is still
 //! `Send`: the JavaScript handle lives in a thread-local.
@@ -15,7 +17,6 @@ use std::task::{Context, Poll, Waker};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
-use crate::application::runtime::in_memory_runtime::{InMemoryOutboxStore, InMemoryRecurringStore};
 use crate::application::runtime::inbound_trigger::accept_inbound_trigger;
 use crate::application::runtime::job_handler::{JobExecutionOutcome, JobHandler};
 use crate::application::runtime::store_runtime::StoreRuntime;
@@ -28,8 +29,7 @@ use crate::domain::runtime::job_attempt::JobAttempt;
 use crate::domain::runtime::placement::WorkerCapabilities;
 use crate::domain::runtime::resource_lease::{FencingToken, OwnerId, ResourceKey, ResourceLease};
 use crate::domain::runtime::workflow_definition::{WorkflowDefinition, WorkflowRevision};
-use crate::infrastructure::runtime::in_memory_durable_wait_store::InMemoryDurableWaitStore;
-use crate::infrastructure::runtime::in_memory_job_continuation_store::InMemoryJobContinuationStore;
+
 use crate::infrastructure::runtime::noop_runtime_metrics::NoopRuntimeMetrics;
 use crate::infrastructure::runtime::system_clock::SystemClock;
 use crate::infrastructure::telemetry::NoopRuntimeTracing;
@@ -42,13 +42,18 @@ use crate::ports::outbound::runtime::runtime_tracing::RuntimeTracing;
 use crate::ports::outbound::runtime::workflow_definition_store::WorkflowDefinitionStore;
 
 use super::codec::sql_err;
+use super::durable_ids::DurableIds;
 use super::executor::SqlExecutor;
 use super::executor_attempt_store::ExecutorJobAttemptStore;
 use super::executor_inbound_store::ExecutorInboundTriggerStore;
 use super::executor_job_store::ExecutorJobStore;
 use super::executor_lease_store::ExecutorResourceLeaseStore;
 use super::executor_workflow_store::ExecutorWorkflowDefinitionStore;
-use super::migrate::{apply_schema, next_sequence};
+use super::migrate::apply_schema;
+use super::safety_stores::{
+    ExecutorDurableWaitStore, ExecutorJobContinuationStore, ExecutorOutboxStore,
+    ExecutorRecurringStore,
+};
 
 const DEFAULT_QUEUE: &str = "default";
 const DEFAULT_JOB_TYPE: &str = "durable.job";
@@ -58,38 +63,28 @@ const LEASE_SECONDS: i64 = 30;
 
 /// `StoreRuntime` over the Durable Object SQLite stores.
 ///
-/// Recurring, outbox, wait, and continuation ports are in memory.
+/// All runtime auxiliary views share the transactional durable safety ledger.
 pub type DurableObjectRuntime = StoreRuntime<
     ExecutorJobStore,
-    InMemoryRecurringStore,
-    InMemoryOutboxStore,
+    ExecutorRecurringStore,
+    ExecutorOutboxStore,
     ExecutorJobAttemptStore,
-    InMemoryDurableWaitStore,
-    InMemoryJobContinuationStore,
+    ExecutorDurableWaitStore,
+    ExecutorJobContinuationStore,
     ExecutorInboundTriggerStore,
     ExecutorResourceLeaseStore,
 >;
 
-fn ready<T>(future: impl Future<Output = T>) -> T {
+fn ready<T>(future: impl Future<Output = Result<T>>) -> Result<T> {
     let mut future = Box::pin(future);
     let waker = Waker::noop();
     let mut context = Context::from_waker(waker);
     match future.as_mut().poll(&mut context) {
         Poll::Ready(value) => value,
-        Poll::Pending => unreachable!("durable sqlite stores do not yield"),
-    }
-}
-
-struct SequenceIds {
-    executor: Arc<dyn SqlExecutor>,
-}
-
-impl IdGenerator for SequenceIds {
-    fn next_id(&self, prefix: &str) -> String {
-        match next_sequence(self.executor.as_ref(), prefix) {
-            Ok(value) => format!("{prefix}-{value}"),
-            Err(_) => format!("{prefix}-fallback"),
-        }
+        Poll::Pending => Err(sql_err(
+            "durable sqlite synchronous kernel",
+            "async handler unsupported here; use the async runtime and recover the acquired lease",
+        )),
     }
 }
 
@@ -152,20 +147,19 @@ pub struct DurableSqliteKernel {
 impl DurableSqliteKernel {
     pub fn open(executor: Arc<dyn SqlExecutor>) -> Result<Self> {
         apply_schema(executor.as_ref())?;
+        ExecutorJobStore::new(executor.clone()).validate()?;
         let workflows = ExecutorWorkflowDefinitionStore::new(executor.clone());
-        let ids: Arc<dyn IdGenerator> = Arc::new(SequenceIds {
-            executor: executor.clone(),
-        });
+        let ids: Arc<dyn IdGenerator> = Arc::new(DurableIds::executor(executor.clone()));
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         let metrics: Arc<dyn RuntimeMetrics> = Arc::new(NoopRuntimeMetrics);
         let tracing: Arc<dyn RuntimeTracing> = Arc::new(NoopRuntimeTracing);
         let runtime = StoreRuntime::from_stores(
-            ExecutorJobStore::new(executor.clone()),
-            InMemoryRecurringStore::default(),
-            InMemoryOutboxStore::default(),
+            ExecutorJobStore::new(executor.clone()).with_clock(clock.clone()),
+            ExecutorRecurringStore::new(executor.clone()),
+            ExecutorOutboxStore::new(executor.clone()),
             ExecutorJobAttemptStore::new(executor.clone()),
-            InMemoryDurableWaitStore::default(),
-            InMemoryJobContinuationStore::default(),
+            ExecutorDurableWaitStore::new(executor.clone()),
+            ExecutorJobContinuationStore::new(executor.clone()),
             ExecutorInboundTriggerStore::new(executor.clone()),
             ExecutorResourceLeaseStore::new(executor),
             clock.clone(),
@@ -187,6 +181,10 @@ impl DurableSqliteKernel {
             ids,
             clock,
         })
+    }
+
+    pub fn into_runtime(self) -> DurableObjectRuntime {
+        self.runtime
     }
 
     pub fn accept_job(&self, idempotency_key: &str, payload: &str) -> Result<InboundAccept> {
@@ -257,6 +255,20 @@ impl DurableSqliteKernel {
         ))
     }
 
+    /// Worker authority is an immutable execution grant, never just an owner name.
+    pub fn heartbeat_granted(
+        &self,
+        grant: &crate::domain::runtime::execution::ExecutionGrant,
+        lease_seconds: i64,
+    ) -> Result<()> {
+        ready(self.runtime.job_store.heartbeat_granted(
+            grant,
+            self.clock.now(),
+            lease_seconds,
+            None,
+        ))
+    }
+
     pub fn heartbeat(
         &self,
         job_id: &str,
@@ -264,9 +276,11 @@ impl DurableSqliteKernel {
         now: DateTime<Utc>,
         lease_seconds: i64,
     ) -> Result<bool> {
-        self.runtime
-            .job_store
-            .heartbeat_if_owner(job_id, worker_id, now, lease_seconds)
+        let _ = (job_id, worker_id, now, lease_seconds);
+        Err(sql_err(
+            "heartbeat",
+            "owner-only heartbeat retired; use execution grant",
+        ))
     }
 
     pub fn attempts_for(&self, job_id: &str) -> Result<Vec<JobAttempt>> {
@@ -376,7 +390,7 @@ async fn save_grapheme_state(
     let _: Value =
         serde_json::from_str(state_json).map_err(|err| sql_err("grapheme state", err))?;
     let now = clock.now();
-    let revision_id = ids.next_id("rev");
+    let revision_id = ids.try_next_id("rev")?;
     let existing = workflows.get_definition(workflow_id).await?;
     let definition = WorkflowDefinition {
         workflow_id: workflow_id.to_string(),

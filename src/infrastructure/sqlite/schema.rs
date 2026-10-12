@@ -14,7 +14,17 @@
 
 /// `(version, sql)` migrations applied in order. Each statement batch is idempotent
 /// only through the version table; do not edit a shipped version in place.
-pub const MIGRATIONS: &[(i64, &str)] = &[(1, MIGRATION_V1)];
+pub const MIGRATIONS: &[(i64, &str)] = &[(1, MIGRATION_V1), (2, MIGRATION_V2)];
+
+/// Canonical runtime ledger format 1. Populated v1 runtime rows are deliberately
+/// rejected until an operator reconciles old leases, identity and auxiliary data.
+pub const MIGRATION_V2: &str = r#"
+CREATE TABLE runtime_safety_ledger (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    format INTEGER NOT NULL,
+    payload TEXT NOT NULL
+);
+"#;
 
 pub const MIGRATION_V1: &str = r#"
 CREATE TABLE job (

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::runtime::provenance::{ProvenanceRef, SttpProvenanceAdapter};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OutboxPublishPolicy {
     pub max_attempts: u32,
     pub base_delay_seconds: i64,
@@ -19,7 +19,7 @@ impl Default for OutboxPublishPolicy {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum RuntimeEventType {
     JobSucceeded,
     JobRetryScheduled,
@@ -28,7 +28,7 @@ pub enum RuntimeEventType {
     JobCanceled,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeEvent {
     pub event_type: RuntimeEventType,
     pub job_id: String,
@@ -57,14 +57,14 @@ impl RuntimeEvent {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum OutboxStatus {
     Pending,
     Published,
     Failed,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OutboxEvent {
     pub event_id: String,
     pub status: OutboxStatus,

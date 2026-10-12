@@ -31,6 +31,14 @@ impl<T, H> TypedJobHandler<T, H> {
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 pub trait JobConsumer<T: StasisJob>: Send + Sync {
     async fn consume(&self, job: T, ctx: JobContext) -> JobResult<T::Output>;
+    async fn on_lifecycle_committed(
+        &self,
+        job: &Job,
+        event: &JobLifecycleEvent,
+        _idempotency_key: &str,
+    ) -> Result<()> {
+        self.on_lifecycle(job, event).await
+    }
     async fn on_lifecycle(&self, job: &Job, event: &JobLifecycleEvent) -> Result<()> {
         let _ = (job, event);
         Ok(())
@@ -123,6 +131,16 @@ where
         }
     }
 
+    async fn on_lifecycle_committed(
+        &self,
+        job: &Job,
+        event: &JobLifecycleEvent,
+        idempotency_key: &str,
+    ) -> Result<()> {
+        self.handler
+            .on_lifecycle_committed(job, event, idempotency_key)
+            .await
+    }
     async fn on_lifecycle(&self, job: &Job, event: &JobLifecycleEvent) -> Result<()> {
         self.handler.on_lifecycle(job, event).await
     }
@@ -238,7 +256,7 @@ impl<T: StasisJob> TypedEnqueueBuilder<T> {
 
     pub async fn send(self) -> Result<String> {
         let payload_ref = encode_typed_payload(&self.payload)?;
-        let id = self.id_generator.next_id("job");
+        let id = self.id_generator.try_next_id("job")?;
         let scheduled_at = self.scheduled_at.unwrap_or_else(|| self.clock.now());
         let idempotency_key = self.idempotency_key.unwrap_or_else(|| format!("idem-{id}"));
         let correlation_id = self.correlation_id.unwrap_or_else(|| id.clone());
