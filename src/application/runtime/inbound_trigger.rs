@@ -137,7 +137,7 @@ pub async fn accept_inbound_trigger(
     ids: &dyn IdGenerator,
     trigger: InboundJobTrigger,
 ) -> Result<InboundAccept> {
-    let job_id = ids.next_id("job");
+    let job_id = ids.try_next_id("job")?;
     let now = clock.now();
     let receipt = InboundTriggerReceipt {
         idempotency_key: trigger.idempotency_key.clone(),
