@@ -78,6 +78,12 @@ Version 2 creates `runtime_safety_ledger`, the historical one-row snapshot. Vers
 
 Indexes cover the next runnable job (`queue, state, scheduled_at, priority, job_id`), expired leases (`state, lease_expires_at`), pending outbox order, waits and signals by key, and receipt/cleanup retention. Each `payload` is limited to 1 MiB. There is no limit on how many rows the database holds.
 
+Version 4 creates the Locus tables used by `.with_locus_memory()` on SQLite and on Durable Objects. Timestamps in these tables are unix milliseconds, matching `locus-sqlite-adapter` 0.1.0:
+
+- `temporal_node`, `calibration`, `sync_checkpoint`, `semantic_tag_index`
+
+Identity rows from version 1 are read by `SqliteIdentityMemoryStore`, which the SQLite runtime attaches when the builder does not set another identity store.
+
 ## Durability
 
 Runtime operations (insert, claim, heartbeat, complete, cancel, recover, replay, waits, continuations, cleanup, lifecycle delivery, id allocation) run in one `BEGIN IMMEDIATE` transaction. The transaction loads the indexed rows that transition needs, runs the in-memory transition, and compare-and-swaps each changed payload. A mismatch or a failed commit rolls the transition back. Heartbeats require an execution grant. Inbound accept uses `INSERT ... ON CONFLICT(idempotency_key) DO NOTHING` and returns the original receipt. Resource fences follow the Surreal outcomes: stale fences, expired leases, and duplicate inbound keys do not take over.

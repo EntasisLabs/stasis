@@ -9999,7 +9999,7 @@ dependencies = [
 
 [[package]]
 name = "stasis-rs"
-version = "0.13.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "askama",
@@ -10061,7 +10061,7 @@ dependencies = [
 
 [[package]]
 name = "stasis-wasm"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "async-trait",
  "chrono",

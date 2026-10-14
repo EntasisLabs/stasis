@@ -269,7 +269,7 @@ async fn executor_v1_database_upgrades_inside_apply_schema() {
             &[],
         )
         .unwrap();
-    assert_eq!(version[0].i64(0).unwrap(), 3);
+    assert_eq!(version[0].i64(0).unwrap(), 4);
     let leftover = exec
         .query("SELECT CAST(COUNT(*) AS TEXT) FROM job", &[])
         .unwrap();

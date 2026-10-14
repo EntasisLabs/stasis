@@ -228,6 +228,8 @@ async fn main() -> stasis::domain::errors::Result<()> {
 
 Surreal schema for identity tables (including `identity_contact` and `identity_user.preferences`) is documented in [SurrealDB Schema](./surrealdb-schema.md#identity-memory-tables) and `docs/architecture/surrealdb-schema.md`.
 
+A SQLite `StasisRuntimeBuilder` attaches `SqliteIdentityMemoryStore` on the job database when `.with_identity_memory_store` is omitted. A Surreal builder attaches `SurrealIdentityMemoryStore` the same way. Pass an in-memory store explicitly for `RuntimeBackend::InMemory`. Durable Objects use `SqliteIdentityMemoryStore` over `SqlExecutor`.
+
 ## Production Checklist
 
 1. Decide ownership model for approver identities and receipt IDs.

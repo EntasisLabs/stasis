@@ -46,9 +46,10 @@ export class StasisDurableObject extends DurableObject {
             "heartbeats",
             "attempts",
             "inbound-idempotency",
+            "locus-memory",
+            "identity",
           ],
           besideEngine: ["grapheme-workflow-state"],
-          inMemory: ["recurring", "outbox", "waits", "continuations"],
         });
       }
       if (request.method === "POST" && url.pathname === "/jobs") {
@@ -66,6 +67,33 @@ export class StasisDurableObject extends DurableObject {
           body.queue || "default",
           body.workerId || "worker",
         );
+        return json(JSON.parse(raw));
+      }
+      if (request.method === "POST" && url.pathname === "/memory") {
+        const body = await readJson(request);
+        if (typeof body.content !== "string") {
+          return json({ error: "content is required" }, 400);
+        }
+        const raw = await this.kernel.store_memory(
+          String(body.sessionId || "default"),
+          body.content,
+        );
+        return json(JSON.parse(raw));
+      }
+      if (request.method === "GET" && url.pathname === "/memory") {
+        const raw = await this.kernel.recall_memory(
+          url.searchParams.get("session") || "default",
+          url.searchParams.get("q") || "",
+        );
+        return json(JSON.parse(raw));
+      }
+      if (request.method === "POST" && url.pathname === "/identity") {
+        const body = await readJson(request);
+        if (!body.userId || !body.displayName) {
+          return json({ error: "userId and displayName are required" }, 400);
+        }
+        this.kernel.upsert_identity(String(body.userId), String(body.displayName));
+        const raw = await this.kernel.identity_context(String(body.userId));
         return json(JSON.parse(raw));
       }
       if (request.method === "POST" && url.pathname === "/evict") {

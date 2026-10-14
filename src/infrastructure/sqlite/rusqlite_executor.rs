@@ -5,8 +5,8 @@
 //! `BEGIN IMMEDIATE` so the mutex is not locked twice.
 
 use std::cell::Cell;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, Row, TransactionBehavior, params_from_iter, types::ValueRef};
 
@@ -43,16 +43,21 @@ impl Drop for ClearTx {
 
 pub struct RusqliteExecutor {
     id: u64,
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl RusqliteExecutor {
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory().map_err(|err| sql_err("open sqlite", err))?;
-        Ok(Self {
+        Ok(Self::from_shared(Arc::new(Mutex::new(conn))))
+    }
+
+    /// Share a connection that [`SqliteSession`](super::session::SqliteSession) already owns.
+    pub fn from_shared(conn: Arc<Mutex<Connection>>) -> Self {
+        Self {
             id: NEXT_EXECUTOR_ID.fetch_add(1, Ordering::Relaxed),
-            conn: Mutex::new(conn),
-        })
+            conn,
+        }
     }
 
     fn with_conn<T>(&self, body: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {

@@ -24,19 +24,17 @@ use crate::infrastructure::llm::mock_chat_client::MockAiChatClient;
 use crate::infrastructure::memory::locus_context_reader::LocusContextReader;
 use crate::infrastructure::memory::locus_context_writer::LocusContextWriter;
 use crate::infrastructure::memory::locus_memory_operations::LocusMemoryOperations;
-use crate::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
-#[cfg(feature = "sqlite")]
-use crate::infrastructure::sqlite::cluster_node_store::SqliteClusterNodeStore;
-#[cfg(feature = "sqlite")]
-use crate::infrastructure::sqlite::delivery_endpoint_store::SqliteDeliveryEndpointStore;
-#[cfg(feature = "sqlite")]
-use crate::infrastructure::sqlite::endpoint_delivery_status_store::SqliteEndpointDeliveryStatusStore;
-#[cfg(feature = "sqlite")]
-use crate::infrastructure::sqlite::thread_store::SqliteThreadStore;
+use crate::infrastructure::memory::locus_node_store_factory::{
+    LocusMemoryStore, LocusNodeStoreFactory,
+};
 #[cfg(feature = "surreal")]
 use crate::infrastructure::memory::surreal_identity_memory_store::SurrealIdentityMemoryStore;
 use crate::infrastructure::runtime::endpoint_routing_event_publisher::EndpointRoutingEventPublisher;
-#[cfg(all(feature = "grapheme", feature = "grapheme-host", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "grapheme",
+    feature = "grapheme-host",
+    not(target_arch = "wasm32")
+))]
 use crate::infrastructure::runtime::grapheme_sdk_workflow_engine::GraphemeSdkWorkflowEngine;
 #[cfg(all(
     feature = "grapheme",
@@ -55,10 +53,21 @@ use crate::infrastructure::runtime::surreal_delivery_endpoint_store::SurrealDeli
 use crate::infrastructure::runtime::surreal_endpoint_delivery_status_store::SurrealEndpointDeliveryStatusStore;
 #[cfg(feature = "surreal")]
 use crate::infrastructure::runtime::surreal_thread_store::SurrealThreadStore;
+#[cfg(feature = "sqlite")]
+use crate::infrastructure::sqlite::cluster_node_store::SqliteClusterNodeStore;
+#[cfg(feature = "sqlite")]
+use crate::infrastructure::sqlite::delivery_endpoint_store::SqliteDeliveryEndpointStore;
+#[cfg(feature = "sqlite")]
+use crate::infrastructure::sqlite::endpoint_delivery_status_store::SqliteEndpointDeliveryStatusStore;
+#[cfg(feature = "sqlite")]
+use crate::infrastructure::sqlite::identity_memory_store::SqliteIdentityMemoryStore;
+#[cfg(feature = "sqlite")]
+use crate::infrastructure::sqlite::thread_store::SqliteThreadStore;
 use crate::ports::outbound::agent::message_codec::AgentMessageCodec;
 use crate::ports::outbound::agent::turn_wait_store::TurnWaitStore;
 #[cfg(feature = "llm-chat")]
 use crate::ports::outbound::ai_chat_client::AiChatClient;
+use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 use crate::ports::outbound::memory::memory_context_reader::MemoryContextReader;
 use crate::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
 use crate::ports::outbound::memory::memory_operations::MemoryOperations;
@@ -98,7 +107,9 @@ pub enum RuntimeBackend {
     },
     /// Native SQLite runtime. `path` is `:memory:` or a filesystem path.
     #[cfg(feature = "sqlite")]
-    Sqlite { path: String },
+    Sqlite {
+        path: String,
+    },
 }
 
 pub use crate::application::composition::surreal_backend_config::SurrealAuth;
@@ -307,7 +318,11 @@ impl RuntimeFactory {
         Arc::new(JsonAgentMessageCodec::v1())
     }
 
-    #[cfg(all(feature = "grapheme", feature = "grapheme-host", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "grapheme",
+        feature = "grapheme-host",
+        not(target_arch = "wasm32")
+    ))]
     pub fn default_workflow_engine() -> Arc<dyn WorkflowEngine> {
         Arc::new(GraphemeSdkWorkflowEngine::new())
     }
@@ -320,7 +335,22 @@ impl RuntimeFactory {
         Arc::new(GraphemeWasmWorkflowEngine::new())
     }
 
+    pub async fn locus_memory_for(runtime: &RuntimeComposition) -> Result<Arc<LocusMemoryStore>> {
+        match runtime {
+            RuntimeComposition::InMemory(_) => LocusNodeStoreFactory::in_memory().await,
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => {
+                LocusNodeStoreFactory::from_sqlite_session(rt.job_store.session())
+            }
+            #[cfg(feature = "surreal")]
+            RuntimeComposition::Surreal(rt) => {
+                LocusNodeStoreFactory::from_surreal_db(rt.job_store.db()).await
+            }
+        }
+    }
+
     pub async fn ensure_locus_memory_adapters(
+        runtime: &RuntimeComposition,
         enable_locus_memory: bool,
         mut memory_context_reader: Option<Arc<dyn MemoryContextReader>>,
         mut memory_context_writer: Option<Arc<dyn MemoryContextWriter>>,
@@ -335,7 +365,7 @@ impl RuntimeFactory {
                 || memory_context_writer.is_none()
                 || memory_operations.is_none())
         {
-            let memory = LocusNodeStoreFactory::in_memory().await?;
+            let memory = Self::locus_memory_for(runtime).await?;
             if memory_context_reader.is_none() {
                 memory_context_reader = Some(Arc::new(LocusContextReader::new(memory.clone())));
             }
@@ -352,6 +382,33 @@ impl RuntimeFactory {
             memory_context_writer,
             memory_operations,
         ))
+    }
+
+    /// Identity store for the runtime backend when the caller did not set one.
+    ///
+    /// SQLite and Surreal use the same database as the job store. The in-memory
+    /// runtime leaves identity unset until `.with_identity_memory_store` so an
+    /// empty snapshot is not injected into every prompt.
+    pub async fn resolve_identity_memory_store(
+        runtime: &RuntimeComposition,
+        configured: Option<Arc<dyn IdentityMemoryStore>>,
+    ) -> Result<Option<Arc<dyn IdentityMemoryStore>>> {
+        if configured.is_some() {
+            return Ok(configured);
+        }
+        match runtime {
+            RuntimeComposition::InMemory(_) => Ok(None),
+            #[cfg(feature = "sqlite")]
+            RuntimeComposition::Sqlite(rt) => Ok(Some(Arc::new(
+                SqliteIdentityMemoryStore::from_session(rt.job_store.session()),
+            ))),
+            #[cfg(feature = "surreal")]
+            RuntimeComposition::Surreal(rt) => {
+                let store = SurrealIdentityMemoryStore::new(rt.job_store.db());
+                store.ensure_schema().await?;
+                Ok(Some(Arc::new(store)))
+            }
+        }
     }
 
     pub fn resolve_thread_store(
@@ -428,9 +485,9 @@ impl RuntimeFactory {
                 Arc::new(InMemoryEndpointDeliveryStatusStore::default())
             }
             #[cfg(feature = "sqlite")]
-            RuntimeComposition::Sqlite(rt) => {
-                Arc::new(SqliteEndpointDeliveryStatusStore::new(rt.job_store.session()))
-            }
+            RuntimeComposition::Sqlite(rt) => Arc::new(SqliteEndpointDeliveryStatusStore::new(
+                rt.job_store.session(),
+            )),
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {
                 Arc::new(SurrealEndpointDeliveryStatusStore::new(rt.job_store.db()))

@@ -14,7 +14,12 @@
 
 /// `(version, sql)` migrations applied in order. Each statement batch is idempotent
 /// only through the version table; do not edit a shipped version in place.
-pub const MIGRATIONS: &[(i64, &str)] = &[(1, MIGRATION_V1), (2, MIGRATION_V2), (3, MIGRATION_V3)];
+pub const MIGRATIONS: &[(i64, &str)] = &[
+    (1, MIGRATION_V1),
+    (2, MIGRATION_V2),
+    (3, MIGRATION_V3),
+    (4, MIGRATION_V4),
+];
 
 /// One row payload, not the whole runtime. Durable Object SQLite rejects larger rows.
 pub const MAX_ROW_PAYLOAD_BYTES: usize = 1024 * 1024;
@@ -485,4 +490,94 @@ CREATE TABLE identity_relationship_transition (
     payload TEXT NOT NULL
 );
 CREATE INDEX idx_identity_transition_rel_time ON identity_relationship_transition (relationship_id, occurred_at);
+"#;
+
+/// Locus node store and semantic index. The columns match `locus-sqlite-adapter`
+/// 0.1.0 and `locus-durable-object` 0.1.0 (`temporal_node`, `calibration`,
+/// `sync_checkpoint`, `semantic_tag_index`). Timestamps are unix milliseconds.
+pub const MIGRATION_V4: &str = r#"
+CREATE TABLE IF NOT EXISTS temporal_node (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL,
+    raw TEXT NOT NULL,
+    tier TEXT NOT NULL,
+    timestamp_ms INTEGER NOT NULL,
+    compression_depth INTEGER NOT NULL,
+    parent_node_id TEXT,
+    sync_key TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    source_metadata TEXT,
+    context_summary TEXT,
+    semantic_tags TEXT,
+    semantic_links TEXT,
+    embedding TEXT,
+    embedding_model TEXT,
+    embedding_dimensions INTEGER,
+    embedded_at_ms INTEGER,
+    psi REAL NOT NULL,
+    rho REAL NOT NULL,
+    kappa REAL NOT NULL,
+    user_stability REAL NOT NULL,
+    user_friction REAL NOT NULL,
+    user_logic REAL NOT NULL,
+    user_autonomy REAL NOT NULL,
+    user_psi REAL NOT NULL,
+    model_stability REAL NOT NULL,
+    model_friction REAL NOT NULL,
+    model_logic REAL NOT NULL,
+    model_autonomy REAL NOT NULL,
+    model_psi REAL NOT NULL,
+    comp_stability REAL NOT NULL,
+    comp_friction REAL NOT NULL,
+    comp_logic REAL NOT NULL,
+    comp_autonomy REAL NOT NULL,
+    comp_psi REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS calibration (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL,
+    stability REAL NOT NULL,
+    friction REAL NOT NULL,
+    logic REAL NOT NULL,
+    autonomy REAL NOT NULL,
+    psi REAL NOT NULL,
+    trigger TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sync_checkpoint (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL,
+    connector_id TEXT NOT NULL,
+    cursor_updated_at_ms INTEGER,
+    cursor_sync_key TEXT,
+    metadata TEXT,
+    updated_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS semantic_tag_index (
+    tenant_id TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    sync_key TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    embedding TEXT,
+    embedding_model TEXT,
+    embedding_dimensions INTEGER,
+    embedded_at_ms INTEGER,
+    updated_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, sync_key, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_node_session ON temporal_node (session_id);
+CREATE INDEX IF NOT EXISTS idx_node_tenant_session ON temporal_node (tenant_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_node_tier ON temporal_node (tier);
+CREATE INDEX IF NOT EXISTS idx_node_timestamp ON temporal_node (timestamp_ms);
+CREATE INDEX IF NOT EXISTS idx_node_change_cursor ON temporal_node (tenant_id, session_id, updated_at_ms, sync_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_sync_identity ON temporal_node (tenant_id, session_id, sync_key);
+CREATE INDEX IF NOT EXISTS idx_tag_lookup ON semantic_tag_index (tenant_id, tag);
+CREATE INDEX IF NOT EXISTS idx_tag_node ON semantic_tag_index (tenant_id, node_id);
+CREATE INDEX IF NOT EXISTS idx_cal_session ON calibration (session_id);
+CREATE INDEX IF NOT EXISTS idx_cal_tenant_session ON calibration (tenant_id, session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_checkpoint_scope ON sync_checkpoint (tenant_id, session_id, connector_id);
 "#;

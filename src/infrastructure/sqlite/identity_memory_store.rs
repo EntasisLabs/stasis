@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -25,7 +26,8 @@ use crate::ports::outbound::memory::identity_memory_models::{
 use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 
 use super::codec::{decode_json, encode_json, encode_time, sql_err};
-use super::session::SqliteSession;
+use super::executor::{SqlExecutor, SqlValue, query_one};
+use super::migrate::apply_schema;
 
 const DEFAULT_GRAPH_MAX_DEPTH: usize = 2;
 const DEFAULT_TRUST_DELTA_MAX_PER_WINDOW: f32 = 0.03;
@@ -39,16 +41,41 @@ struct RelationshipVersionDoc {
 
 #[derive(Clone)]
 pub struct SqliteIdentityMemoryStore {
-    session: SqliteSession,
+    executor: Arc<dyn SqlExecutor>,
 }
 
 impl SqliteIdentityMemoryStore {
-    pub fn new(session: SqliteSession) -> Self {
-        Self { session }
+    pub fn new(executor: Arc<dyn SqlExecutor>) -> Self {
+        Self { executor }
+    }
+
+    /// Native helper. The session and this store share one connection.
+    #[cfg(feature = "sqlite")]
+    pub fn from_session(session: super::session::SqliteSession) -> Self {
+        Self::new(session.executor())
     }
 
     pub fn ensure_schema(&self) -> Result<()> {
-        self.session.migrate()
+        apply_schema(self.executor.as_ref())
+    }
+
+    fn exec(&self, sql: &str, params: &[SqlValue]) -> Result<()> {
+        self.executor.execute(sql, params).map(|_| ())
+    }
+
+    fn query_texts(&self, sql: &str, params: &[SqlValue]) -> Result<Vec<String>> {
+        self.executor
+            .query(sql, params)?
+            .into_iter()
+            .map(|row| row.text(0))
+            .collect()
+    }
+
+    fn query_text_opt(&self, sql: &str, params: &[SqlValue]) -> Result<Option<String>> {
+        match query_one(self.executor.as_ref(), sql, params)? {
+            Some(row) => row.text_opt(0),
+            None => Ok(None),
+        }
     }
 
     fn now_id(prefix: &str) -> String {
@@ -168,44 +195,42 @@ impl SqliteIdentityMemoryStore {
     fn load_json<T: for<'de> Deserialize<'de>>(
         &self,
         sql: &str,
-        params: impl rusqlite::Params,
+        params: &[SqlValue],
     ) -> Result<Option<T>> {
-        let raw = self
-            .session
-            .query_opt(sql, params, |row| row.get::<_, String>(0))?;
+        let raw = self.query_text_opt(sql, params)?;
         raw.map(|json| decode_json(&json)).transpose()
     }
 
     fn load_policy_profile(&self, policy_profile_id: &str) -> Result<Option<PolicyProfileEntity>> {
         self.load_json(
             "SELECT payload FROM identity_policy_profile WHERE policy_profile_id = ?1",
-            rusqlite::params![policy_profile_id],
+            &[SqlValue::text(policy_profile_id)],
         )
     }
 
     fn load_contact(&self, contact_id: &str) -> Result<Option<ContactEntity>> {
         self.load_json(
             "SELECT payload FROM identity_contact WHERE contact_id = ?1",
-            rusqlite::params![contact_id],
+            &[SqlValue::text(contact_id)],
         )
     }
 
     fn load_relationship(&self, relationship_id: &str) -> Result<Option<RelationshipEntity>> {
         self.load_json(
             "SELECT payload FROM identity_relationship WHERE relationship_id = ?1",
-            rusqlite::params![relationship_id],
+            &[SqlValue::text(relationship_id)],
         )
     }
 
     fn load_proposal(&self, proposal_id: &str) -> Result<Option<EntityUpdateProposalRecord>> {
         self.load_json(
             "SELECT payload FROM identity_entity_update_proposal WHERE proposal_id = ?1",
-            rusqlite::params![proposal_id],
+            &[SqlValue::text(proposal_id)],
         )
     }
 
     fn save_proposal(&self, proposal: &EntityUpdateProposalRecord) -> Result<()> {
-        self.session.execute(
+        self.exec(
             "INSERT INTO identity_entity_update_proposal (
                 proposal_id, entity_type, entity_id, state, created_at, payload
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -215,20 +240,19 @@ impl SqliteIdentityMemoryStore {
                 state = excluded.state,
                 created_at = excluded.created_at,
                 payload = excluded.payload",
-            rusqlite::params![
-                proposal.proposal_id,
-                identity_entity_type_str(&proposal.entity_type),
-                proposal.entity_id,
-                proposal_state_str(proposal.state),
-                encode_time(proposal.created_at),
-                encode_json(proposal)?,
+            &[
+                SqlValue::text(&proposal.proposal_id),
+                SqlValue::text(identity_entity_type_str(&proposal.entity_type)),
+                SqlValue::text(&proposal.entity_id),
+                SqlValue::text(proposal_state_str(proposal.state)),
+                SqlValue::from(encode_time(proposal.created_at)),
+                SqlValue::text(encode_json(proposal)?),
             ],
-        )?;
-        Ok(())
+        )
     }
 
     fn save_relationship_row(&self, relationship: &RelationshipEntity) -> Result<()> {
-        self.session.execute(
+        self.exec(
             "INSERT INTO identity_relationship (
                 relationship_id, status, source_entity_type, source_entity_id,
                 target_entity_type, target_entity_id, relationship_kind, payload
@@ -241,18 +265,17 @@ impl SqliteIdentityMemoryStore {
                 target_entity_id = excluded.target_entity_id,
                 relationship_kind = excluded.relationship_kind,
                 payload = excluded.payload",
-            rusqlite::params![
-                relationship.relationship_id,
-                relationship_status_str(relationship.status),
-                relationship.source_entity_ref.entity_type,
-                relationship.source_entity_ref.entity_id,
-                relationship.target_entity_ref.entity_type,
-                relationship.target_entity_ref.entity_id,
-                relationship.relationship_kind.as_str(),
-                encode_json(relationship)?,
+            &[
+                SqlValue::text(&relationship.relationship_id),
+                SqlValue::text(relationship_status_str(relationship.status)),
+                SqlValue::text(&relationship.source_entity_ref.entity_type),
+                SqlValue::text(&relationship.source_entity_ref.entity_id),
+                SqlValue::text(&relationship.target_entity_ref.entity_type),
+                SqlValue::text(&relationship.target_entity_ref.entity_id),
+                SqlValue::text(relationship.relationship_kind.as_str()),
+                SqlValue::text(encode_json(relationship)?),
             ],
-        )?;
-        Ok(())
+        )
     }
 
     fn save_relationship_version(&self, relationship: &RelationshipEntity) -> Result<()> {
@@ -262,19 +285,22 @@ impl SqliteIdentityMemoryStore {
             snapshot: relationship.clone(),
             created_at: Utc::now(),
         };
-        self.session.execute(
+        self.exec(
             "INSERT INTO identity_relationship_version (version_id, relationship_id, payload)
              VALUES (?1, ?2, ?3)
              ON CONFLICT(version_id) DO UPDATE SET
                 relationship_id = excluded.relationship_id,
                 payload = excluded.payload",
-            rusqlite::params![version_id, relationship.relationship_id, encode_json(&doc)?,],
-        )?;
-        Ok(())
+            &[
+                SqlValue::text(version_id),
+                SqlValue::text(&relationship.relationship_id),
+                SqlValue::text(encode_json(&doc)?),
+            ],
+        )
     }
 
     fn save_transition(&self, event: &RelationshipTransitionEvent) -> Result<()> {
-        self.session.execute(
+        self.exec(
             "INSERT INTO identity_relationship_transition (
                 event_id, relationship_id, occurred_at, payload
              ) VALUES (?1, ?2, ?3, ?4)
@@ -282,14 +308,13 @@ impl SqliteIdentityMemoryStore {
                 relationship_id = excluded.relationship_id,
                 occurred_at = excluded.occurred_at,
                 payload = excluded.payload",
-            rusqlite::params![
-                event.event_id,
-                event.relationship_id,
-                encode_time(event.occurred_at),
-                encode_json(event)?,
+            &[
+                SqlValue::text(&event.event_id),
+                SqlValue::text(&event.relationship_id),
+                SqlValue::from(encode_time(event.occurred_at)),
+                SqlValue::text(encode_json(event)?),
             ],
-        )?;
-        Ok(())
+        )
     }
 
     fn trust_delta_max_for_relationship(&self, relationship: &RelationshipEntity) -> f32 {
@@ -478,16 +503,15 @@ impl SqliteIdentityMemoryStore {
     }
 
     fn validate_replacement_continuity(&self, relationship: &RelationshipEntity) -> Result<()> {
-        let existing: Option<String> = self.session.query_opt(
+        let existing = self.query_text_opt(
             "SELECT relationship_id FROM identity_relationship WHERE relationship_id = ?1",
-            rusqlite::params![relationship.relationship_id],
-            |row| row.get(0),
+            &[SqlValue::text(&relationship.relationship_id)],
         )?;
         if existing.is_some() {
             return Ok(());
         }
 
-        let predecessors: Vec<String> = self.session.query_map(
+        let predecessors = self.query_texts(
             "SELECT relationship_id FROM identity_relationship
              WHERE status = 'revoked'
                AND source_entity_type = ?1
@@ -495,14 +519,13 @@ impl SqliteIdentityMemoryStore {
                AND target_entity_type = ?3
                AND target_entity_id = ?4
                AND relationship_kind = ?5",
-            rusqlite::params![
-                relationship.source_entity_ref.entity_type,
-                relationship.source_entity_ref.entity_id,
-                relationship.target_entity_ref.entity_type,
-                relationship.target_entity_ref.entity_id,
-                relationship.relationship_kind.as_str(),
+            &[
+                SqlValue::text(&relationship.source_entity_ref.entity_type),
+                SqlValue::text(&relationship.source_entity_ref.entity_id),
+                SqlValue::text(&relationship.target_entity_ref.entity_type),
+                SqlValue::text(&relationship.target_entity_ref.entity_id),
+                SqlValue::text(relationship.relationship_kind.as_str()),
             ],
-            |row| row.get(0),
         )?;
 
         if predecessors.is_empty() {
@@ -526,48 +549,58 @@ impl SqliteIdentityMemoryStore {
     }
 
     pub fn upsert_persona(&self, persona: PersonaEntity) -> Result<()> {
-        self.session.execute(
+        self.exec(
             "INSERT INTO identity_persona (persona_id, payload) VALUES (?1, ?2)
              ON CONFLICT(persona_id) DO UPDATE SET payload = excluded.payload",
-            rusqlite::params![persona.persona_id, encode_json(&persona)?],
-        )?;
-        Ok(())
+            &[
+                SqlValue::text(&persona.persona_id),
+                SqlValue::text(encode_json(&persona)?),
+            ],
+        )
     }
 
     pub fn upsert_user(&self, user: UserEntity) -> Result<()> {
-        self.session.execute(
+        self.exec(
             "INSERT INTO identity_user (user_id, payload) VALUES (?1, ?2)
              ON CONFLICT(user_id) DO UPDATE SET payload = excluded.payload",
-            rusqlite::params![user.user_id, encode_json(&user)?],
-        )?;
-        Ok(())
+            &[
+                SqlValue::text(&user.user_id),
+                SqlValue::text(encode_json(&user)?),
+            ],
+        )
     }
 
     pub fn upsert_contact(&self, contact: ContactEntity) -> Result<()> {
-        self.session.execute(
+        self.exec(
             "INSERT INTO identity_contact (contact_id, payload) VALUES (?1, ?2)
              ON CONFLICT(contact_id) DO UPDATE SET payload = excluded.payload",
-            rusqlite::params![contact.contact_id, encode_json(&contact)?],
-        )?;
-        Ok(())
+            &[
+                SqlValue::text(&contact.contact_id),
+                SqlValue::text(encode_json(&contact)?),
+            ],
+        )
     }
 
     pub fn upsert_channel(&self, channel: ChannelProfileEntity) -> Result<()> {
-        self.session.execute(
+        self.exec(
             "INSERT INTO identity_channel_profile (channel_id, payload) VALUES (?1, ?2)
              ON CONFLICT(channel_id) DO UPDATE SET payload = excluded.payload",
-            rusqlite::params![channel.channel_id, encode_json(&channel)?],
-        )?;
-        Ok(())
+            &[
+                SqlValue::text(&channel.channel_id),
+                SqlValue::text(encode_json(&channel)?),
+            ],
+        )
     }
 
     pub fn upsert_policy(&self, policy: PolicyProfileEntity) -> Result<()> {
-        self.session.execute(
+        self.exec(
             "INSERT INTO identity_policy_profile (policy_profile_id, payload) VALUES (?1, ?2)
              ON CONFLICT(policy_profile_id) DO UPDATE SET payload = excluded.payload",
-            rusqlite::params![policy.policy_profile_id, encode_json(&policy)?],
-        )?;
-        Ok(())
+            &[
+                SqlValue::text(&policy.policy_profile_id),
+                SqlValue::text(encode_json(&policy)?),
+            ],
+        )
     }
 
     pub fn upsert_relationship(&self, relationship: RelationshipEntity) -> Result<()> {
@@ -641,19 +674,19 @@ impl IdentityMemoryStore for SqliteIdentityMemoryStore {
     ) -> Result<GetIdentityContextResponse> {
         let persona: Option<PersonaEntity> = self.load_json(
             "SELECT payload FROM identity_persona WHERE persona_id = ?1",
-            rusqlite::params![request.persona_id],
+            &[SqlValue::text(&request.persona_id)],
         )?;
         let user: Option<UserEntity> = self.load_json(
             "SELECT payload FROM identity_user WHERE user_id = ?1",
-            rusqlite::params![request.user_id],
+            &[SqlValue::text(&request.user_id)],
         )?;
         let channel: Option<ChannelProfileEntity> = self.load_json(
             "SELECT payload FROM identity_channel_profile WHERE channel_id = ?1",
-            rusqlite::params![request.channel_id],
+            &[SqlValue::text(&request.channel_id)],
         )?;
 
         let limit = i64::try_from(request.relationship_limit.max(1)).unwrap_or(i64::MAX);
-        let payloads: Vec<String> = self.session.query_map(
+        let payloads = self.query_texts(
             "SELECT payload FROM identity_relationship
              WHERE status = 'active'
                AND ((source_entity_type = 'PersonaEntity' AND source_entity_id = ?1
@@ -666,13 +699,12 @@ impl IdentityMemoryStore for SqliteIdentityMemoryStore {
                      AND source_entity_type = 'ContactEntity')
                  OR source_entity_id = ?1)
              LIMIT ?4",
-            rusqlite::params![
-                request.persona_id,
-                request.user_id,
-                request.channel_id,
-                limit
+            &[
+                SqlValue::text(&request.persona_id),
+                SqlValue::text(&request.user_id),
+                SqlValue::text(&request.channel_id),
+                SqlValue::from(limit),
             ],
-            |row| row.get(0),
         )?;
         let mut relationships = Vec::with_capacity(payloads.len());
         for payload in payloads {
@@ -948,16 +980,15 @@ impl IdentityMemoryStore for SqliteIdentityMemoryStore {
         request: &ListEntityHistoryRequest,
     ) -> Result<ListEntityHistoryResponse> {
         let limit = i64::try_from(request.limit.max(1)).unwrap_or(i64::MAX);
-        let proposal_payloads: Vec<String> = self.session.query_map(
+        let proposal_payloads = self.query_texts(
             "SELECT payload FROM identity_entity_update_proposal
              WHERE entity_type = ?1 AND entity_id = ?2
              ORDER BY created_at DESC LIMIT ?3",
-            rusqlite::params![
-                identity_entity_type_str(&request.entity_type),
-                request.entity_id,
-                limit
+            &[
+                SqlValue::text(identity_entity_type_str(&request.entity_type)),
+                SqlValue::text(&request.entity_id),
+                SqlValue::from(limit),
             ],
-            |row| row.get(0),
         )?;
         let mut proposals = Vec::with_capacity(proposal_payloads.len());
         for payload in proposal_payloads {
@@ -965,12 +996,11 @@ impl IdentityMemoryStore for SqliteIdentityMemoryStore {
         }
 
         let transitions = if request.entity_type == IdentityEntityType::RelationshipEntity {
-            let payloads: Vec<String> = self.session.query_map(
+            let payloads = self.query_texts(
                 "SELECT payload FROM identity_relationship_transition
                  WHERE relationship_id = ?1
                  ORDER BY occurred_at DESC LIMIT ?2",
-                rusqlite::params![request.entity_id, limit],
-                |row| row.get(0),
+                &[SqlValue::text(&request.entity_id), SqlValue::from(limit)],
             )?;
             let mut events = Vec::with_capacity(payloads.len());
             for payload in payloads {
@@ -996,7 +1026,7 @@ impl IdentityMemoryStore for SqliteIdentityMemoryStore {
                 let version_id = format!("{}:{}", request.entity_id, request.target_version);
                 let Some(doc) = self.load_json::<RelationshipVersionDoc>(
                     "SELECT payload FROM identity_relationship_version WHERE version_id = ?1",
-                    rusqlite::params![version_id],
+                    &[SqlValue::text(version_id)],
                 )?
                 else {
                     return Ok(RollbackEntityVersionResponse {
@@ -1030,7 +1060,7 @@ impl IdentityMemoryStore for SqliteIdentityMemoryStore {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite"))]
 mod tests {
     use chrono::{Duration, Utc};
     use serde_json::json;
@@ -1045,7 +1075,7 @@ mod tests {
     use crate::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
 
     fn store() -> SqliteIdentityMemoryStore {
-        SqliteIdentityMemoryStore::new(SqliteSession::open(":memory:").expect("sqlite"))
+        SqliteIdentityMemoryStore::from_session(SqliteSession::open(":memory:").expect("sqlite"))
     }
 
     fn relationship(id: &str, status: RelationshipStatus) -> RelationshipEntity {

@@ -8,7 +8,7 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehav
 use crate::domain::errors::Result;
 
 use super::codec::{encode_time, sql_err};
-use super::executor::{SqlRow, SqlValue};
+use super::executor::{SqlExecutor, SqlRow, SqlValue};
 use super::row_engine::SqlIo;
 use super::runtime_import;
 use super::schema::MIGRATIONS;
@@ -140,6 +140,13 @@ impl SqliteSession {
         tx.commit()
             .map_err(|err| sql_err("commit sqlite transaction", err))?;
         Ok(value)
+    }
+
+    /// Driver-free view of this connection for stores that also run on Durable Objects.
+    pub fn executor(&self) -> Arc<dyn SqlExecutor> {
+        Arc::new(super::rusqlite_executor::RusqliteExecutor::from_shared(
+            self.conn.clone(),
+        ))
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
