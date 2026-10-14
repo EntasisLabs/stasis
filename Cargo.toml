@@ -82,7 +82,7 @@ surreal = ["dep:surrealdb", "dep:surrealdb-types"]
 # Native SQLite runtime (file or in-memory). Schema SQL lives in
 # `infrastructure/sqlite/schema.rs` and is reused by the wasm Durable Object
 # stores (`SqlExecutor`). Not enabled on wasm32: rusqlite links libsqlite3.
-sqlite = ["dep:rusqlite"]
+sqlite = ["dep:rusqlite", "dep:locus-sqlite-adapter"]
 # Native engines: filesystem KV + mem + WS + TLS. Not supported on wasm32.
 surreal-native = [
 	"surreal",
@@ -158,15 +158,18 @@ opentelemetry_sdk = { version = "0.29", features = ["rt-tokio"], optional = true
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic", "metrics"], optional = true }
 surrealdb = { version = "3", default-features = false, optional = true }
 surrealdb-types = { version = "3", optional = true }
-# 0.32 shares libsqlite3-sys 0.30 with grapheme's sqlx-sqlite 0.8.6 so the
-# workspace links one sqlite3. Newer rusqlite pulls a second libsqlite3-sys.
-rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+# 0.37 matches locus-sqlite-adapter 0.1.0. grapheme's sqlx-sqlite 0.8.6 is
+# patched in vendor/sqlx-sqlite to the same libsqlite3-sys 0.35, so the
+# workspace still links one sqlite3.
+rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 locus-surreal-adapter = { version = "0.1.1", optional = true, default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 locus-surreal-adapter = { version = "0.1.1", optional = true, default-features = false, features = ["native"] }
+# rusqlite does not build for wasm32. The Durable Object path keeps SqlExecutor.
+locus-sqlite-adapter = { version = "0.1.0", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
@@ -190,3 +193,4 @@ wasm-bindgen-test = "0.3"
 # wasm32-unknown-unknown. Drop this patch when upstream uses a wasm-safe clock.
 [patch.crates-io]
 grapheme-runtime = { path = "vendor/grapheme-runtime" }
+sqlx-sqlite = { path = "vendor/sqlx-sqlite" }

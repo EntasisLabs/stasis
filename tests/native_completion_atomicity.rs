@@ -30,6 +30,7 @@ use std::sync::{
 use tokio::sync::Notify;
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 enum Runtime {
     Memory(InMemoryRuntime),
     #[cfg(feature = "surreal-native")]
@@ -473,7 +474,8 @@ async fn surreal_crash_at_each_canonical_write_rolls_back_every_index() {
 #[cfg(feature = "surreal-native")]
 #[tokio::test]
 async fn actual_surreal_kv_restart_retains_grants_receipts_cleanup_and_pending_hook() {
-    let root = std::env::temp_dir().join("stasis-store-runtime-safety-regressions")
+    let root = std::env::temp_dir()
+        .join("stasis-store-runtime-safety-regressions")
         .join(format!(
             "restart-{}",
             std::time::SystemTime::now()

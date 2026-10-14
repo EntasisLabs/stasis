@@ -534,6 +534,7 @@ CREATE TABLE IF NOT EXISTS temporal_node (
     comp_autonomy REAL NOT NULL,
     comp_psi REAL NOT NULL
 );
+
 CREATE TABLE IF NOT EXISTS calibration (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL DEFAULT '',
@@ -546,6 +547,7 @@ CREATE TABLE IF NOT EXISTS calibration (
     trigger TEXT NOT NULL,
     created_at_ms INTEGER NOT NULL
 );
+
 CREATE TABLE IF NOT EXISTS sync_checkpoint (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL DEFAULT '',
@@ -556,6 +558,7 @@ CREATE TABLE IF NOT EXISTS sync_checkpoint (
     metadata TEXT,
     updated_at_ms INTEGER NOT NULL
 );
+
 CREATE TABLE IF NOT EXISTS semantic_tag_index (
     tenant_id TEXT NOT NULL DEFAULT '',
     session_id TEXT NOT NULL,
@@ -569,6 +572,7 @@ CREATE TABLE IF NOT EXISTS semantic_tag_index (
     updated_at_ms INTEGER NOT NULL,
     PRIMARY KEY (tenant_id, sync_key, tag)
 );
+
 CREATE INDEX IF NOT EXISTS idx_node_session ON temporal_node (session_id);
 CREATE INDEX IF NOT EXISTS idx_node_tenant_session ON temporal_node (tenant_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_node_tier ON temporal_node (tier);

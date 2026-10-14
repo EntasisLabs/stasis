@@ -155,9 +155,11 @@ fn outcome(kind: u8) -> JobExecutionOutcome {
     }
 }
 
+type JobColumns = (String, String, u64, u64, u64, u64, Option<String>);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct View {
-    jobs: Vec<(String, String, u64, u64, u64, u64, Option<String>)>,
+    jobs: Vec<JobColumns>,
     attempts: Vec<(String, String, u8)>,
     events: Vec<(String, String)>,
     receipts: Vec<(String, u64, String)>,

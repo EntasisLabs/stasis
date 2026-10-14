@@ -1,9 +1,9 @@
 //! Locus `NodeStore` and `SemanticIndexStore` over [`SqlExecutor`](crate::infrastructure::sqlite::SqlExecutor).
 //!
-//! The tables match `locus-sqlite-adapter` 0.1.0 and `locus-durable-object` 0.1.0.
-//! Native SQLite and the Durable Object kernel share this implementation.
-//! `locus-sqlite-adapter` itself cannot be linked: it requires `rusqlite` 0.37
-//! (`libsqlite3-sys` 0.35), which conflicts with this crate's `rusqlite` 0.32.
+//! The tables and ranking match `locus-sqlite-adapter` 0.1.0 and
+//! `locus-durable-object` 0.1.0. Native SQLite uses that adapter. This store
+//! is the wasm32 / Durable Object path: the adapter links rusqlite and does
+//! not build for `wasm32`. `MIGRATION_V4` is the adapter `SCHEMA`.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;

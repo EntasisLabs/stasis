@@ -187,10 +187,6 @@ impl RuntimeBackend {
 }
 
 #[derive(Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "boxing a public variant would break downstream construction and pattern matching"
-)]
 pub enum RuntimeComposition {
     InMemory(InMemoryRuntime),
     #[cfg(feature = "sqlite")]
@@ -340,7 +336,7 @@ impl RuntimeFactory {
             RuntimeComposition::InMemory(_) => LocusNodeStoreFactory::in_memory().await,
             #[cfg(feature = "sqlite")]
             RuntimeComposition::Sqlite(rt) => {
-                LocusNodeStoreFactory::from_sqlite_session(rt.job_store.session())
+                LocusNodeStoreFactory::from_sqlite_session(rt.job_store.session()).await
             }
             #[cfg(feature = "surreal")]
             RuntimeComposition::Surreal(rt) => {

@@ -42,9 +42,9 @@ impl LocusMemoryStore {
 
     /// Persist Locus nodes and the semantic index through a [`SqlExecutor`].
     ///
-    /// Native SQLite passes the session's executor. Durable Objects pass
-    /// `JsSqlExecutor`. The tables are migration v4 (`temporal_node`,
-    /// `calibration`, `sync_checkpoint`, `semantic_tag_index`).
+    /// Durable Objects pass `JsSqlExecutor`. Native tests use this to prove the
+    /// executor schema matches `locus-sqlite-adapter`. The tables are migration
+    /// v4 (`temporal_node`, `calibration`, `sync_checkpoint`, `semantic_tag_index`).
     pub fn from_executor(executor: Arc<dyn SqlExecutor>) -> Result<Arc<Self>> {
         let node_store = Arc::new(ExecutorLocusNodeStore::new(executor.clone()));
         node_store.initialize().map_err(|err| {
@@ -60,9 +60,35 @@ impl LocusMemoryStore {
         }))
     }
 
+    /// Native Locus memory on `locus-sqlite-adapter`.
+    ///
+    /// The adapter opens its own connection to [`SqliteSession::path`]. File
+    /// databases share the file. In-memory sessions use a shared-cache URI so
+    /// this connection and the session see one database. Identity and Stasis
+    /// migrations stay on the session: `SqliteDatabase` has no constructor that
+    /// accepts an existing `rusqlite` connection, and the two connections do
+    /// not share a transaction.
     #[cfg(feature = "sqlite")]
-    pub fn from_sqlite_session(session: SqliteSession) -> Result<Arc<Self>> {
-        Self::from_executor(session.executor())
+    pub async fn from_sqlite_session(session: SqliteSession) -> Result<Arc<Self>> {
+        use locus_sqlite_adapter::{SqliteDatabase, SqliteNodeStore, SqliteSemanticIndexStore};
+
+        let db = SqliteDatabase::open(session.path())
+            .map_err(|err| StasisError::PortFailure(format!("open locus sqlite adapter: {err}")))?;
+        let db = Arc::new(db);
+        let node_store = Arc::new(SqliteNodeStore::new(db.clone()));
+        let node_initializer: Arc<dyn NodeStoreInitializer> = node_store.clone();
+        node_initializer.initialize_async().await.map_err(|err| {
+            StasisError::PortFailure(format!("initialize locus sqlite adapter: {err}"))
+        })?;
+        let semantic_index = Arc::new(SqliteSemanticIndexStore::new(db));
+        let index_initializer: Arc<dyn SemanticIndexStoreInitializer> = semantic_index.clone();
+        index_initializer.initialize_async().await.map_err(|err| {
+            StasisError::PortFailure(format!("initialize locus sqlite semantic index: {err}"))
+        })?;
+        Ok(Arc::new(Self {
+            node_store,
+            semantic_index,
+        }))
     }
 
     /// Persist Locus memory in the Surreal database the runtime is already using.
@@ -156,8 +182,8 @@ impl LocusNodeStoreFactory {
     }
 
     #[cfg(feature = "sqlite")]
-    pub fn from_sqlite_session(session: SqliteSession) -> Result<Arc<LocusMemoryStore>> {
-        LocusMemoryStore::from_sqlite_session(session)
+    pub async fn from_sqlite_session(session: SqliteSession) -> Result<Arc<LocusMemoryStore>> {
+        LocusMemoryStore::from_sqlite_session(session).await
     }
 
     #[cfg(feature = "surreal")]

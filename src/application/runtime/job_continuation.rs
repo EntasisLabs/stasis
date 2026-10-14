@@ -253,17 +253,16 @@ pub async fn settle_continuations(
         if !jobs
             .settle_continuation(parent, record, child, detail.clone())
             .await?
-        {
-            if continuations.get(&record_id).await?.is_none_or(|r| {
+            && continuations.get(&record_id).await?.is_none_or(|r| {
                 matches!(
                     r.status,
                     ContinuationStatus::Pending | ContinuationStatus::Settling
                 )
-            }) {
-                return Err(StasisError::PortFailure(
-                    "continuation settlement not committed; retain lifecycle delivery".into(),
-                ));
-            }
+            })
+        {
+            return Err(StasisError::PortFailure(
+                "continuation settlement not committed; retain lifecycle delivery".into(),
+            ));
         }
     }
     Ok(())

@@ -78,7 +78,7 @@ Version 2 creates `runtime_safety_ledger`, the historical one-row snapshot. Vers
 
 Indexes cover the next runnable job (`queue, state, scheduled_at, priority, job_id`), expired leases (`state, lease_expires_at`), pending outbox order, waits and signals by key, and receipt/cleanup retention. Each `payload` is limited to 1 MiB. There is no limit on how many rows the database holds.
 
-Version 4 creates the Locus tables used by `.with_locus_memory()` on SQLite and on Durable Objects. Timestamps in these tables are unix milliseconds, matching `locus-sqlite-adapter` 0.1.0:
+Version 4 creates the Locus tables used by `.with_locus_memory()` on SQLite and on Durable Objects. Native SQLite reads and writes them with `locus-sqlite-adapter` 0.1.0. Durable Objects use the `SqlExecutor` store. Timestamps in these tables are unix milliseconds, matching the adapter:
 
 - `temporal_node`, `calibration`, `sync_checkpoint`, `semantic_tag_index`
 
