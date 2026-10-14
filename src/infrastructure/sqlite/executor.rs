@@ -112,6 +112,29 @@ impl SqlRow {
             }
         }
     }
+
+    pub fn f64(&self, index: usize) -> Result<f64> {
+        match self.get(index)? {
+            SqlValue::Integer(value) => Ok(*value as f64),
+            SqlValue::Text(value) => value
+                .parse::<f64>()
+                .map_err(|err| sql_err("sqlite real", err)),
+            SqlValue::Null => Err(sql_err("sqlite real", format!("column {index} is null"))),
+        }
+    }
+
+    pub fn f64_opt(&self, index: usize) -> Result<Option<f64>> {
+        match self.get(index)? {
+            SqlValue::Null => Ok(None),
+            SqlValue::Text(value) if value.is_empty() => Ok(None),
+            other => {
+                let row = SqlRow {
+                    values: vec![other.clone()],
+                };
+                Ok(Some(row.f64(0)?))
+            }
+        }
+    }
 }
 
 /// Synchronous SQL session.

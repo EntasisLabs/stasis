@@ -503,13 +503,16 @@ impl StasisRuntimeBuilder {
             .unwrap_or_else(RuntimeFactory::default_chat_client);
         let (memory_context_reader, memory_context_writer, memory_operations) =
             RuntimeFactory::ensure_locus_memory_adapters(
+                &runtime,
                 self.enable_locus_memory,
                 self.memory_context_reader,
                 self.memory_context_writer,
                 self.memory_operations,
             )
             .await?;
-        let identity_memory_store = self.identity_memory_store;
+        let identity_memory_store =
+            RuntimeFactory::resolve_identity_memory_store(&runtime, self.identity_memory_store)
+                .await?;
         #[cfg(any(feature = "llm-genai", feature = "surreal", feature = "sqlite"))]
         let default_thread_store = self.thread_store.clone();
         let configured_cluster_store = self.cluster_node_store.clone();

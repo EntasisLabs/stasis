@@ -2,6 +2,10 @@
 //! primitives, and memory integration adapters.
 //! Use the [prelude] module for a batteries-included public API surface.
 
+// `async_trait` marks the generated method `#[must_use]` and the boxed future
+// is already `#[must_use]`. Clippy reports that pair on every async trait method.
+#![allow(clippy::double_must_use)]
+
 #[cfg(all(target_arch = "wasm32", feature = "native"))]
 compile_error!(
     "the `native` feature (default) is not supported on wasm32; build with `--no-default-features`"

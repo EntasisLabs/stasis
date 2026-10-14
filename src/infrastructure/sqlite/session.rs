@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,7 +9,7 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehav
 use crate::domain::errors::Result;
 
 use super::codec::{encode_time, sql_err};
-use super::executor::{SqlRow, SqlValue};
+use super::executor::{SqlExecutor, SqlRow, SqlValue};
 use super::row_engine::SqlIo;
 use super::runtime_import;
 use super::schema::MIGRATIONS;
@@ -21,36 +22,55 @@ use super::schema::MIGRATIONS;
 #[derive(Clone)]
 pub struct SqliteSession {
     conn: Arc<Mutex<Connection>>,
+    /// Filesystem path, or a `file:…?mode=memory&cache=shared` URI.
+    ///
+    /// `:memory:` is rewritten to a named shared-cache URI so
+    /// `locus-sqlite-adapter` can open a second connection to the same
+    /// database. The adapter owns that connection; it cannot take this one.
+    path: String,
+}
+
+static MEMORY_NAMES: AtomicU64 = AtomicU64::new(1);
+
+fn open_path(requested: &str) -> String {
+    if requested == ":memory:" {
+        let id = MEMORY_NAMES.fetch_add(1, Ordering::Relaxed);
+        format!("file:stasis-mem-{id}?mode=memory&cache=shared")
+    } else {
+        requested.to_string()
+    }
+}
+
+fn is_memory_path(path: &str) -> bool {
+    path == ":memory:" || path.contains("mode=memory")
 }
 
 impl SqliteSession {
     pub fn open(path: &str) -> Result<Self> {
-        if path != ":memory:"
-            && let Some(parent) = Path::new(path).parent()
+        let path = open_path(path);
+        let memory = is_memory_path(&path);
+        if !memory
+            && let Some(parent) = Path::new(&path).parent()
             && !parent.as_os_str().is_empty()
         {
             std::fs::create_dir_all(parent)
                 .map_err(|err| sql_err("create sqlite directory", err))?;
         }
 
-        let conn = if path == ":memory:" {
-            Connection::open_in_memory()
-        } else {
-            Connection::open(path)
-        }
-        .map_err(|err| sql_err("open sqlite", err))?;
+        let conn = Connection::open(&path).map_err(|err| sql_err("open sqlite", err))?;
 
         conn.busy_timeout(Duration::from_secs(5))
             .map_err(|err| sql_err("set sqlite busy timeout", err))?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .map_err(|err| sql_err("enable sqlite foreign keys", err))?;
-        if path != ":memory:" {
+        if !memory {
             conn.execute_batch("PRAGMA journal_mode = WAL;")
                 .map_err(|err| sql_err("enable sqlite wal", err))?;
         }
 
         let session = Self {
             conn: Arc::new(Mutex::new(conn)),
+            path,
         };
         session.migrate()?;
         Ok(session)
@@ -140,6 +160,18 @@ impl SqliteSession {
         tx.commit()
             .map_err(|err| sql_err("commit sqlite transaction", err))?;
         Ok(value)
+    }
+
+    /// Path passed to SQLite. In-memory sessions use a shared-cache URI.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Driver-free view of this connection for stores that also run on Durable Objects.
+    pub fn executor(&self) -> Arc<dyn SqlExecutor> {
+        Arc::new(super::rusqlite_executor::RusqliteExecutor::from_shared(
+            self.conn.clone(),
+        ))
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {

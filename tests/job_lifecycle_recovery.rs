@@ -111,10 +111,7 @@ impl JobHandler for RetryOnceHandler {
     }
 }
 
-#[expect(
-    clippy::large_enum_variant,
-    reason = "the test enum keeps both runtime backends directly accessible"
-)]
+#[allow(clippy::large_enum_variant)]
 enum TestRuntime {
     Memory(InMemoryRuntime),
     Surreal(SurrealRuntime),

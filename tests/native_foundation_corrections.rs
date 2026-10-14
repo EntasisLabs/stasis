@@ -108,6 +108,7 @@ fn context(j: &Job, owner: &str, s: JobContextServices) -> JobContext {
     JobContext::new(j, owner, rx, s, 120)
 }
 
+#[allow(clippy::large_enum_variant)]
 enum Runtime {
     Memory(InMemoryRuntime),
     #[cfg(feature = "surreal-native")]
@@ -503,11 +504,12 @@ async fn controls(rt: Runtime) {
         6,
         "old undelivered native control journals lost"
     );
-    let keys = hooks.lock().unwrap();
-    assert_eq!(keys.len(), 6);
-    let unique: std::collections::HashSet<_> = keys.iter().collect();
-    assert_eq!(unique.len(), 6, "hook identity reused");
-    drop(keys);
+    {
+        let keys = hooks.lock().unwrap();
+        assert_eq!(keys.len(), 6);
+        let unique: std::collections::HashSet<_> = keys.iter().collect();
+        assert_eq!(unique.len(), 6, "hook identity reused");
+    }
     assert_eq!(rt.replay().await, 0);
 }
 async fn continuations(rt: Runtime) {
@@ -667,7 +669,8 @@ async fn actual_kv_reopen_preserves_control_incarnations_and_signal_receipt() {
             .and_then(|v| v.as_u64())
             .unwrap_or(0)
     }
-    let root = std::env::temp_dir().join("stasis-store-runtime-safety-regressions")
+    let root = std::env::temp_dir()
+        .join("stasis-store-runtime-safety-regressions")
         .join(format!(
             "correction-kv-{}",
             std::time::SystemTime::now()

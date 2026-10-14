@@ -29,7 +29,9 @@ Run the Stasis wasm kernel on Cloudflare Workers and keep the durable job path i
 | Inbound idempotency keys | Yes |
 | Grapheme workflow graph state (`workflow_definition` / `workflow_revision`, including `state_current` from a `grapheme:json:` payload) | Yes |
 | Outbox, durable waits and signals, continuations, recurring jobs, receipts, cleanup | Yes, in the `runtime_*` tables |
-| Threads, cluster nodes, delivery endpoints, identity memory | Not on this backend |
+| Locus nodes, calibration, checkpoints, semantic tags | Yes, migration v4 (`StasisDurableSqlite.store_memory` / `recall_memory`) |
+| Identity personas, users, relationships, proposals | Yes (`upsert_identity` / `identity_context`) |
+| Threads, cluster nodes, delivery endpoints and status, ownership handoff | Not on this backend |
 | Turn waits | Process-local, same as Surreal and native SQLite |
 | Grapheme script execution inside the lease | The checkpoint handler stores `state_current`. `StasisWasmClient` still runs `grapheme-wasm` in memory |
 
