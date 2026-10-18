@@ -17,7 +17,10 @@ export function encodeCell(value) {
   if (value === null || value === undefined) return null;
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "number") {
-    if (!Number.isSafeInteger(value)) {
+    if (!Number.isFinite(value)) {
+      throw new Error("SQLite returned a non-finite number");
+    }
+    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
       throw new Error(
         "SQLite integer exceeded Number.MAX_SAFE_INTEGER; CAST the column to TEXT",
       );

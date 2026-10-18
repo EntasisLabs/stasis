@@ -24,7 +24,7 @@ Document the `StasisRuntimeBuilder` API — the single composition point for wir
 1. `StasisRuntimeBuilder::new(backend)` is the only supported entry point for runtime composition.
 2. All handler groups are **included by default**. Use `without_*` methods to opt out.
 3. If no chat client is provided, `GenaiChatClient::from_env()` is used — model selection is then driven by environment variables.
-4. If `.with_locus_memory()` is called and no explicit memory ports are provided, an in-memory Locus store is bootstrapped automatically.
+4. If `.with_locus_memory()` is called and no explicit memory ports are provided, Locus is bootstrapped on the runtime backend: in-memory, SQLite, or the Surreal database already open.
 5. Middleware is applied in registration order — first registered wraps outermost.
 6. `build()` is async and must be awaited. It wires all handlers into the runtime before returning `RuntimeComposition`.
 
@@ -206,7 +206,9 @@ Tools must implement the `StasisTool` trait. Input schema validation (required f
 
 ### Automatic Locus bootstrap
 
-`.with_locus_memory()` bootstraps a shared `LocusMemoryStore` (node store + semantic index) and wires `LocusContextReader`, `LocusContextWriter`, and `LocusMemoryOperations` if none are provided explicitly. When memory operation handlers are enabled, this registers nine workflows: recall, find, graph, aggregate, transform, rollup, schema, evict, and reflex.
+`.with_locus_memory()` bootstraps a shared `LocusMemoryStore` (node store + semantic index) and wires `LocusContextReader`, `LocusContextWriter`, and `LocusMemoryOperations` if none are provided explicitly. The store follows the runtime: in-memory for `RuntimeBackend::InMemory`, SQLite migration v4 for `RuntimeBackend::Sqlite`, and the open Surreal database for Surreal backends. IndexedDB or a separate Surreal endpoint still uses `LocusNodeStoreFactory::from_surreal_endpoint` with the `locus-persist` feature. When memory operation handlers are enabled, this registers nine workflows: recall, find, graph, aggregate, transform, rollup, schema, evict, and reflex.
+
+A SQLite runtime also attaches `SqliteIdentityMemoryStore` on that same database when identity was not set. A Surreal runtime attaches `SurrealIdentityMemoryStore`. The in-memory runtime leaves identity unset until `.with_identity_memory_store`.
 
 ```rust
 let runtime = StasisRuntimeBuilder::new(RuntimeBackend::InMemory)

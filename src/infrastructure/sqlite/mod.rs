@@ -16,6 +16,7 @@ pub mod executor_inbound_store;
 pub mod executor_job_store;
 pub mod executor_lease_store;
 pub mod executor_workflow_store;
+pub mod identity_memory_store;
 pub mod migrate;
 mod row_engine;
 mod runtime_import;
@@ -36,8 +37,6 @@ pub mod delivery_endpoint_store;
 pub mod durable_wait_store;
 #[cfg(feature = "sqlite")]
 pub mod endpoint_delivery_status_store;
-#[cfg(feature = "sqlite")]
-pub mod identity_memory_store;
 #[cfg(feature = "sqlite")]
 pub mod inbound_trigger_store;
 #[cfg(feature = "sqlite")]

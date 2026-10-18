@@ -568,4 +568,4 @@ Stasis pins Locus crates to prevent resolution drift:
 - `locus-sdk = 0.5.0`
 - memory schema `locus-sdk.memory.v4`
 
-The default `.with_locus_memory()` bootstrap uses in-memory Locus adapters. Replace any port with your own implementation via `.with_memory_context_reader(...)`, `.with_memory_context_writer(...)`, or `.with_memory_operations(...)`.
+`.with_locus_memory()` stores nodes on the runtime backend. In-memory stays in memory. SQLite writes migration v4. Surreal writes the database the runtime already opened. Explicit `.with_memory_context_reader(...)`, `.with_memory_context_writer(...)`, or `.with_memory_operations(...)` replace that bootstrap. `locus-persist` remains the path for `indxdb://` and a Surreal endpoint that is not the runtime database.

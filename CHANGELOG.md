@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-14
+
+### Added
+
+- **SQLite and Durable Object memory.** `.with_locus_memory()` follows the runtime backend. In-memory stays in memory. Native SQLite uses `locus-sqlite-adapter` 0.1.0 on the job database (migration v4: `temporal_node`, `calibration`, `sync_checkpoint`, `semantic_tag_index`). Surreal uses the database the runtime already opened. Durable Objects keep the `SqlExecutor` store, because the adapter does not build for `wasm32`.
+- **SQLite identity on the runtime.** A SQLite runtime attaches `SqliteIdentityMemoryStore` when the builder does not set one. A Surreal runtime attaches `SurrealIdentityMemoryStore`. The in-memory runtime still waits for `.with_identity_memory_store`. `SqliteIdentityMemoryStore` talks to `SqlExecutor`, so native rusqlite and the Durable Object bridge share one implementation.
+- `StasisDurableSqlite.store_memory`, `recall_memory`, `upsert_identity`, and `identity_context`. Those rows survive rebuilding the kernel on the same SQLite database.
+
+### Changed
+
+- `stasis-rs` and npm `stasis-wasm` are **0.15.0**.
+- Native SQLite depends on `locus-sqlite-adapter` 0.1.0 and `rusqlite` 0.37 (`bundled`). grapheme's `sqlx-sqlite` 0.8.6 is patched onto `libsqlite3-sys` 0.35 so the workspace links one sqlite3. The adapter opens its own connection: file paths share the job database file, and in-memory sessions use a shared-cache URI. Identity and Stasis migrations stay on `SqliteSession`. The Durable Object store still applies migration v4 through `SqlExecutor`. `locus-durable-object` 0.1.0 is a private npm package; the SQL layout matches the published SQLite adapter.
+
 ## [0.14.0] - 2026-10-03
 
 ### Added

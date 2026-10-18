@@ -138,10 +138,7 @@ impl JobConsumer<HangJob> for HangConsumer {
     }
 }
 
-#[expect(
-    clippy::large_enum_variant,
-    reason = "the test enum keeps both runtime backends directly accessible"
-)]
+#[allow(clippy::large_enum_variant)]
 enum TestRuntime {
     Memory(InMemoryRuntime),
     Surreal(SurrealRuntime),
@@ -512,7 +509,9 @@ async fn malformed_typed_payload_is_fatal() {
             correlation_id: "corr-bad".into(),
             causation_id: "cause-bad".into(),
             trace_id: "trace-bad".into(),
-            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp("sttp:in:bad")),
+            input_provenance: Some(stasis::domain::runtime::provenance::ProvenanceRef::sttp(
+                "sttp:in:bad",
+            )),
             placement: stasis::domain::runtime::placement::PlacementConstraints::default(),
             scheduled_at: now,
             backoff_policy: Default::default(),

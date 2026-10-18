@@ -174,7 +174,7 @@ impl AtomicState {
                 if let Some(job) = admission.borrow().as_ref() {
                     let grant = ExecutionGrant::from_job(snapshot)
                         .ok_or_else(|| err("missing completion grant"))?;
-                    if !grant.permits(&job, self.clock.now()) {
+                    if !grant.permits(job, self.clock.now()) {
                         return Err(err(
                             "execution lease expired at commit; all effects rolled back",
                         ));

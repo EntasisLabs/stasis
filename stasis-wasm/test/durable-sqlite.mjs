@@ -53,6 +53,24 @@ test("durable sqlite: enqueue, dedupe, process, and read back after eviction", (
   assert.equal(again.jobId, accepted.jobId);
 });
 
+test("durable sqlite: locus memory and identity survive eviction", async () => {
+  const { kernel: open } = openKernel();
+  let kernel = open();
+  const stored = JSON.parse(await kernel.store_memory("session-a", "remember the dock"));
+  assert.equal(stored.valid, true);
+  kernel.upsert_identity("user-a", "Ada");
+
+  kernel = open();
+  const recall = JSON.parse(await kernel.recall_memory("session-a", "dock"));
+  assert.ok(recall.retrieved >= 1);
+  assert.ok(recall.snippets.some((snippet) => String(snippet).includes("dock")));
+  const identity = JSON.parse(await kernel.identity_context("user-a"));
+  assert.equal(identity.userPresent, true);
+  assert.equal(identity.userId, "user-a");
+  assert.equal(identity.personaPresent, true);
+  assert.equal(identity.personaName, "Ada");
+});
+
 test("durable sqlite: grapheme workflow state survives eviction", () => {
   const { kernel: open } = openKernel();
   let kernel = open();

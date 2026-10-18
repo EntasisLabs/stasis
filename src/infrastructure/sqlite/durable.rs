@@ -141,6 +141,7 @@ pub struct ProcessedJob {
 pub struct DurableSqliteKernel {
     runtime: DurableObjectRuntime,
     workflows: ExecutorWorkflowDefinitionStore,
+    executor: Arc<dyn SqlExecutor>,
     ids: Arc<dyn IdGenerator>,
     clock: Arc<dyn Clock>,
 }
@@ -162,7 +163,7 @@ impl DurableSqliteKernel {
             ExecutorDurableWaitStore::new(executor.clone()),
             ExecutorJobContinuationStore::new(executor.clone()),
             ExecutorInboundTriggerStore::new(executor.clone()),
-            ExecutorResourceLeaseStore::new(executor),
+            ExecutorResourceLeaseStore::new(executor.clone()),
             clock.clone(),
             ids.clone(),
             metrics,
@@ -179,9 +180,15 @@ impl DurableSqliteKernel {
         Ok(Self {
             runtime,
             workflows,
+            executor,
             ids,
             clock,
         })
+    }
+
+    /// Shared SQL session. Locus and identity stores use this same executor.
+    pub fn executor(&self) -> Arc<dyn SqlExecutor> {
+        self.executor.clone()
     }
 
     pub fn into_runtime(self) -> DurableObjectRuntime {

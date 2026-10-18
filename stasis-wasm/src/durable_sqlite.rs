@@ -11,13 +11,30 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use serde::Serialize;
+use serde_json::json;
 use wasm_bindgen::prelude::*;
 
+use stasis::application::runtime::memory_persistence_helpers::{
+    SttpPromptNodeFormat, render_prompt_response_sttp_node,
+};
 use stasis::domain::errors::Result as StasisResult;
 use stasis::domain::runtime::job::JobState;
+use stasis::infrastructure::memory::locus_context_reader::LocusContextReader;
+use stasis::infrastructure::memory::locus_context_writer::LocusContextWriter;
+use stasis::infrastructure::memory::locus_node_store_factory::LocusNodeStoreFactory;
 use stasis::infrastructure::sqlite::bridge_codec::{decode_response, encode_params};
 use stasis::infrastructure::sqlite::codec::sql_err;
+use stasis::infrastructure::sqlite::identity_memory_store::SqliteIdentityMemoryStore;
 use stasis::infrastructure::sqlite::{DurableSqliteKernel, SqlExecutor, SqlRow, SqlValue};
+use stasis::ports::outbound::memory::identity_memory_models::{
+    GetIdentityContextRequest, IdentityContextMode, PersonaEntity, UserEntity,
+};
+use stasis::ports::outbound::memory::identity_memory_store::IdentityMemoryStore;
+use stasis::ports::outbound::memory::memory_context_reader::MemoryContextReader;
+use stasis::ports::outbound::memory::memory_context_writer::MemoryContextWriter;
+use stasis::ports::outbound::memory::memory_models::{
+    MemoryRecallRequest, MemoryScope, MemoryStoreRequest,
+};
 
 struct SqlBridge {
     generation: u64,
@@ -197,9 +214,15 @@ fn state_name(state: JobState) -> &'static str {
 }
 
 /// Kernel bound to the installed Durable Object SQL bridge.
+///
+/// Jobs, Locus memory, and identity share that bridge. Rebuilding this struct
+/// after isolate eviction reads the same SQLite tables.
 #[wasm_bindgen]
 pub struct StasisDurableSqlite {
     inner: DurableSqliteKernel,
+    memory_writer: LocusContextWriter,
+    memory_reader: LocusContextReader,
+    identity: SqliteIdentityMemoryStore,
 }
 
 #[wasm_bindgen]
@@ -211,7 +234,125 @@ impl StasisDurableSqlite {
             .ok_or_else(|| js_err("install SQL bridge before opening kernel"))?;
         let inner =
             DurableSqliteKernel::open(Arc::new(JsSqlExecutor { generation })).map_err(js_err)?;
-        Ok(Self { inner })
+        let executor = inner.executor();
+        let memory = LocusNodeStoreFactory::from_executor(executor.clone()).map_err(js_err)?;
+        Ok(Self {
+            identity: SqliteIdentityMemoryStore::new(executor),
+            memory_writer: LocusContextWriter::new(memory.clone()),
+            memory_reader: LocusContextReader::new(memory),
+            inner,
+        })
+    }
+
+    /// Store an STTP memory node. The row lives in Durable Object SQLite.
+    pub async fn store_memory(
+        &self,
+        session_id: String,
+        content: String,
+    ) -> Result<String, JsValue> {
+        let raw_node = render_prompt_response_sttp_node(
+            &session_id,
+            "durable.memory.store",
+            &content,
+            SttpPromptNodeFormat::TaggedSchema,
+        );
+        let stored = self
+            .memory_writer
+            .store_context(&MemoryStoreRequest {
+                session_id,
+                raw_node,
+            })
+            .await
+            .map_err(js_err)?;
+        Ok(json!({
+            "nodeId": stored.node_id,
+            "valid": stored.valid,
+            "psi": stored.psi,
+        })
+        .to_string())
+    }
+
+    /// Recall nodes written by [`Self::store_memory`], including after reopen.
+    pub async fn recall_memory(
+        &self,
+        session_id: String,
+        query: String,
+    ) -> Result<String, JsValue> {
+        let response = self
+            .memory_reader
+            .recall(&MemoryRecallRequest {
+                scope: MemoryScope {
+                    session_ids: Some(vec![session_id]),
+                    ..MemoryScope::default()
+                },
+                query_text: Some(query),
+                ..MemoryRecallRequest::default()
+            })
+            .await
+            .map_err(js_err)?;
+        let snippets: Vec<String> = response
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                node.context_summary.clone().or_else(|| {
+                    if node.raw.is_empty() {
+                        None
+                    } else {
+                        Some(node.raw.clone())
+                    }
+                })
+            })
+            .collect();
+        Ok(json!({
+            "retrieved": response.retrieved,
+            "snippets": snippets,
+        })
+        .to_string())
+    }
+
+    /// Upsert the default persona and a user into Durable Object SQLite.
+    pub fn upsert_identity(&self, user_id: &str, display_name: &str) -> Result<(), JsValue> {
+        self.identity
+            .upsert_user(UserEntity {
+                user_id: user_id.to_string(),
+                timezone: "UTC".into(),
+                language_variant: Some("en".into()),
+                preferences: Default::default(),
+                status: "active".into(),
+                version: 1,
+                updated_at: chrono::Utc::now(),
+            })
+            .map_err(js_err)?;
+        self.identity
+            .upsert_persona(PersonaEntity {
+                persona_id: "persona:default".into(),
+                display_name: display_name.to_string(),
+                status: "active".into(),
+                version: 1,
+                updated_at: chrono::Utc::now(),
+            })
+            .map_err(js_err)
+    }
+
+    pub async fn identity_context(&self, user_id: String) -> Result<String, JsValue> {
+        let context = self
+            .identity
+            .get_identity_context(&GetIdentityContextRequest {
+                user_id,
+                persona_id: "persona:default".into(),
+                channel_id: "channel:default".into(),
+                relationship_limit: 8,
+                mode: IdentityContextMode::Cognitive,
+            })
+            .await
+            .map_err(js_err)?;
+        Ok(json!({
+            "personaPresent": context.persona.is_some(),
+            "userPresent": context.user.is_some(),
+            "personaName": context.persona.as_ref().map(|persona| persona.display_name.clone()),
+            "userId": context.user.as_ref().map(|user| user.user_id.clone()),
+        })
+        .to_string())
     }
 
     pub fn accept_job(&self, idempotency_key: &str, payload: &str) -> Result<String, JsValue> {

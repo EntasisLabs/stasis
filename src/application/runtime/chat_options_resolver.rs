@@ -1,13 +1,11 @@
-#[cfg(feature = "llm-genai")]
-use genai::chat::{ChatOptions, ReasoningEffort};
 #[cfg(all(feature = "llm-chat", not(feature = "llm-genai")))]
 use crate::ports::outbound::portable_chat::ChatOptions;
+#[cfg(feature = "llm-genai")]
+use genai::chat::{ChatOptions, ReasoningEffort};
 
 use crate::application::orchestration::prompt_pipeline::PromptExecutionContext;
 
-const REASONING_KEYWORDS: &[&str] = &[
-    "none", "minimal", "low", "medium", "high", "xhigh", "max",
-];
+const REASONING_KEYWORDS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 fn validate_reasoning_effort_keyword(raw: &str) -> Result<(), String> {
     let raw = raw.trim();
@@ -16,9 +14,10 @@ fn validate_reasoning_effort_keyword(raw: &str) -> Result<(), String> {
     }
 
     if let Some(budget) = raw.strip_prefix("budget:") {
-        budget.trim().parse::<u32>().map_err(|_| {
-            format!("invalid reasoning_effort budget value in '{raw}'")
-        })?;
+        budget
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| format!("invalid reasoning_effort budget value in '{raw}'"))?;
         return Ok(());
     }
 
@@ -37,9 +36,10 @@ pub fn parse_reasoning_effort_keyword(raw: &str) -> Result<ReasoningEffort, Stri
     let raw = raw.trim();
 
     if let Some(budget) = raw.strip_prefix("budget:") {
-        let budget = budget.trim().parse::<u32>().map_err(|_| {
-            format!("invalid reasoning_effort budget value in '{raw}'")
-        })?;
+        let budget = budget
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| format!("invalid reasoning_effort budget value in '{raw}'"))?;
         return Ok(ReasoningEffort::Budget(budget));
     }
 
@@ -62,14 +62,13 @@ pub fn validate_reasoning_effort(value: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
-pub fn resolve_reasoning_effort(
-    branch: Option<String>,
-    default: Option<String>,
-) -> Option<String> {
+pub fn resolve_reasoning_effort(branch: Option<String>, default: Option<String>) -> Option<String> {
     branch.or(default)
 }
 
-pub fn chat_options_for_context(context: &PromptExecutionContext) -> Result<Option<ChatOptions>, String> {
+pub fn chat_options_for_context(
+    context: &PromptExecutionContext,
+) -> Result<Option<ChatOptions>, String> {
     let Some(raw) = context
         .reasoning_effort
         .as_deref()
@@ -82,15 +81,15 @@ pub fn chat_options_for_context(context: &PromptExecutionContext) -> Result<Opti
     #[cfg(feature = "llm-genai")]
     {
         let effort = parse_reasoning_effort_keyword(raw)?;
-        return Ok(Some(ChatOptions::default().with_reasoning_effort(effort)));
+        Ok(Some(ChatOptions::default().with_reasoning_effort(effort)))
     }
 
     #[cfg(not(feature = "llm-genai"))]
     {
         validate_reasoning_effort_keyword(raw)?;
-        return Ok(Some(ChatOptions {
+        Ok(Some(ChatOptions {
             reasoning_effort: Some(raw.to_string()),
-        }));
+        }))
     }
 }
 

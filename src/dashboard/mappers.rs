@@ -11,7 +11,7 @@ pub fn map_job_to_row(job: &Job) -> JobRowDto {
         id: job.id.clone(),
         job_type: job.job_type.clone(),
         queue: job.queue.clone(),
-        status: map_job_state(job.state.clone()),
+        status: map_job_state(job.state),
         priority: job.priority,
         attempts: job.attempts,
         lease_owner: job.lease_owner.clone(),
