@@ -67,14 +67,14 @@ RUSTUP_TOOLCHAIN=stable ./scripts/publish-crates.sh
 
 `cargo publish --dry-run` packages the crate and builds it from the tarball. It does not upload and does not consume a publish token.
 
-## Dry-run results (2026-10-24, 0.15.0)
+## Dry-run results (2026-10-24, rustc 1.99.1, 0.15.0)
 
-Filled in after `RUSTUP_TOOLCHAIN=stable ./scripts/publish-crates.sh` on this branch. No crates.io token is used; uploads are aborted.
+Run with `RUSTUP_TOOLCHAIN=stable ./scripts/publish-crates.sh` from a clean tree. No crates.io token was used; uploads were aborted. The packaged `stasis-rs` build uses crates.io dependencies only (no `vendor/` patch) and links one `libsqlite3-sys` 0.35.
 
 | Crate | Result | Notes |
 | --- | --- | --- |
-| `stasis-rs-macros` 0.1.0 | pending | Already on crates.io. Do not upload. |
-| `stasis-rs` 0.15.0 | pending | Must resolve crates.io deps only (no `vendor/` patch) and link one `libsqlite3-sys`. |
+| `stasis-rs-macros` 0.1.0 | **dry-run OK** | Warns `crate stasis-rs-macros@0.1.0 already exists on crates.io index`. Packaged 20 files, 39.6KiB (11.1KiB compressed). Verify compile 2.3s. **Do not upload.** |
+| `stasis-rs` 0.15.0 | **dry-run OK** | Packaged 413 files, 4.5MiB (755.7KiB compressed). Verify compile 4m 50s from the tarball. Depends on `grapheme-*` **0.7.2**, `locus-core-rs` **0.5.2**, and `locus-sdk` **0.5.1**. `build.rs` fell back to prebuilt `dashboard.css` (no local Tailwind). Upload aborted (`--dry-run`). |
 
 ## Dry-run results (2026-09-28, rustc 1.98.1, 0.13.0)
 
