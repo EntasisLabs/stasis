@@ -2,7 +2,7 @@
 name = "stasis-rs"
 version = "0.15.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.94"
 description = "Durable AI orchestration framework with runtime jobs, lineage, and memory integration"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -106,14 +106,19 @@ http-wasm = ["reqwest"]
 # Locus IndexedDB / remote WS memory adapters (`locus-surreal-adapter`).
 locus-persist = ["dep:locus-surreal-adapter"]
 # Workflow handlers + engine. Native process hosts should also enable `grapheme-host`
-# (`grapheme-sdk` host). WASM / slim guests use published `grapheme-wasm` 0.7.1
+# (`grapheme-sdk` host). WASM / slim guests use published `grapheme-wasm` 0.7.2
 # (in-process compile + execute; wasm-safe stdlib core/json/csv/yaml/html).
+# Upstream skips `@timeout` on wasm32-unknown-unknown instead of calling
+# `std::time::Instant::now`.
 grapheme = ["dep:grapheme-sdk", "dep:grapheme-compiler", "dep:grapheme-wasm"]
 grapheme-host = ["grapheme", "grapheme-sdk/host"]
 grapheme-full = [
 	"grapheme-host",
 	"grapheme-sdk/full",
 	"grapheme-compiler/full",
+	# wasmer (via grapheme wasix) still allows rkyv 0.8.16 and yanked enumset 1.1.11/1.1.12.
+	"dep:rkyv",
+	"dep:enumset",
 ]
 env-fs = ["dep:dotenvy"]
 otel = [
@@ -136,18 +141,18 @@ rust-embed = { version = "8", optional = true }
 regex = "1"
 sha2 = "0.10"
 hex = "0.4"
-locus-core-rs = { version = "=0.5.1", default-features = false }
-locus-sdk = { version = "=0.5.0", default-features = false }
+locus-core-rs = { version = "=0.5.2", default-features = false }
+locus-sdk = { version = "=0.5.1", default-features = false }
 genai = { version = "0.6.5", default-features = false, optional = true }
 async-trait = "0.1"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 cron = "0.12"
-grapheme-sdk = { version = "0.7.1", default-features = false, optional = true }
-grapheme-compiler = { version = "0.7.1", default-features = false, optional = true }
-grapheme-wasm = { version = "0.7.1", optional = true }
-grapheme-lsp = { version = "0.7.1", optional = true, default-features = false }
+grapheme-sdk = { version = "0.7.2", default-features = false, optional = true }
+grapheme-compiler = { version = "0.7.2", default-features = false, optional = true }
+grapheme-wasm = { version = "0.7.2", optional = true }
+grapheme-lsp = { version = "0.7.2", optional = true, default-features = false }
 futures-util = "0.3"
 lapin = { version = "2", optional = true }
 rskafka = { version = "0.5", optional = true }
@@ -156,23 +161,48 @@ stasis-macros = { package = "stasis-rs-macros", version = "0.1.0", path = "stasi
 opentelemetry = { version = "0.29", optional = true }
 opentelemetry_sdk = { version = "0.29", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic", "metrics"], optional = true }
-surrealdb = { version = "3", default-features = false, optional = true }
-surrealdb-types = { version = "3", optional = true }
-# 0.37 matches locus-sqlite-adapter 0.1.0. grapheme's sqlx-sqlite 0.8.6 is
-# patched in vendor/sqlx-sqlite to the same libsqlite3-sys 0.35, so the
-# workspace still links one sqlite3.
+# 3.3.x inflates async state enough to overflow the default 2 MiB test thread
+# on the Surreal runtime paths. 3.0.5 is the release this tree already runs.
+# grapheme-stdlib's `^3.0.5` requirement still resolves here.
+surrealdb = { version = "=3.0.5", default-features = false, optional = true }
+surrealdb-types = { version = "=3.0.5", optional = true }
+# rusqlite 0.37 (locus-sqlite-adapter 0.1.0) and grapheme 0.7.2's sqlx 0.9
+# both accept libsqlite3-sys 0.35, so one sqlite3 links without a vendor patch.
 rusqlite = { version = "0.37", features = ["bundled"], optional = true }
+# RUSTSEC-2026-0204. Transitive crossbeam still allows 0.9.18.
+crossbeam-epoch = "0.9.20"
+# chacha20 0.10.0 and 0.10.1 are yanked.
+chacha20 = "0.10.2"
 locus-surreal-adapter = { version = "0.1.1", optional = true, default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util"] }
+# RUSTSEC-2026-0386 is fixed in 1.53.3. 1.54.0 is yanked and is RUSTSEC-2026-0384.
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Floors for crates the published native graph can still resolve below the
+# patched release (reqwest, surrealdb, hyper, quinn, sqlx, iroh).
+# rustls default-features stay off so this floor does not force aws-lc-rs.
+rustls = { version = "0.23.46", default-features = false }
+rustls-webpki = { version = "0.103.16", default-features = false }
+webpki-roots = "1.0.10"
+webpki-root-certs = "1.0.11"
+h2 = "0.4.16"
+quinn-proto = "0.11.18"
+ammonia = "4.2.4"
+ctutils = "0.4.4"
+# spin 0.9.8 and 0.10.0 are yanked. Both lines are in the native graph.
+spin = "0.9.9"
+spin10 = { package = "spin", version = "0.10.1" }
 locus-surreal-adapter = { version = "0.1.1", optional = true, default-features = false, features = ["native"] }
 # rusqlite does not build for wasm32. The Durable Object path keeps SqlExecutor.
 locus-sqlite-adapter = { version = "0.1.0", optional = true }
+# RUSTSEC-2026-0233/0234/0235. Activated with grapheme-full (wasmer / wasix).
+rkyv = { version = "0.8.17", default-features = false, optional = true }
+# enumset 1.1.11 and 1.1.12 are yanked.
+enumset = { version = "1.1.13", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1.54.1", features = ["macros", "rt", "sync", "time"] }
 getrandom = { version = "0.2", features = ["js"] }
 chrono = { version = "0.4", features = ["serde", "wasmbind"] }
 web-time = "1"
@@ -188,9 +218,3 @@ tower = { version = "0.5", features = ["util"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
-
-# grapheme-runtime 0.7.1 panics on std::time::Instant::now() on
-# wasm32-unknown-unknown. Drop this patch when upstream uses a wasm-safe clock.
-[patch.crates-io]
-grapheme-runtime = { path = "vendor/grapheme-runtime" }
-sqlx-sqlite = { path = "vendor/sqlx-sqlite" }

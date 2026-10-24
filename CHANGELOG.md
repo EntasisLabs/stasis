@@ -17,8 +17,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- `stasis-rs` and npm `stasis-wasm` are **0.15.0**.
-- Native SQLite depends on `locus-sqlite-adapter` 0.1.0 and `rusqlite` 0.37 (`bundled`). grapheme's `sqlx-sqlite` 0.8.6 is patched onto `libsqlite3-sys` 0.35 so the workspace links one sqlite3. The adapter opens its own connection: file paths share the job database file, and in-memory sessions use a shared-cache URI. Identity and Stasis migrations stay on `SqliteSession`. The Durable Object store still applies migration v4 through `SqlExecutor`. `locus-durable-object` 0.1.0 is a private npm package; the SQL layout matches the published SQLite adapter.
+- `stasis-rs` and npm `stasis-wasm` are **0.15.0**. `rust-version` is **1.94** (Grapheme 0.7.2). `stasis-rs-macros` stays **0.1.0**.
+- **Grapheme 0.7.2.** `grapheme-sdk`, `grapheme-compiler`, `grapheme-wasm`, and `grapheme-lsp` move to **0.7.2**. `grapheme-artifact` stays **0.3.0**. Grapheme's host stack is sqlx **0.9** (`libsqlite3-sys` `>=0.30.1, <0.38`), so it links the same sqlite as `rusqlite` 0.37 / `libsqlite3-sys` 0.35. The `vendor/sqlx-sqlite` patch is gone, and so is the `grapheme-runtime` wasm clock patch: upstream skips `@timeout` on `wasm32-unknown-unknown` instead of panicking in `Instant::now`. `websearch`, `reqwest` 0.11, `rustls-webpki` 0.101, and `webpki-roots` 0.25 leave the tree.
+- **Locus 0.5.2 / 0.5.1.** `locus-core-rs` is pinned to **=0.5.2** and `locus-sdk` to **=0.5.1**. `locus-sqlite-adapter` stays **0.1.0**. `locus-surreal-adapter` stays **0.1.1**.
+- Native SQLite still depends on `locus-sqlite-adapter` 0.1.0 and `rusqlite` 0.37 (`bundled`). The adapter opens its own connection: file paths share the job database file, and in-memory sessions use a shared-cache URI. Identity and Stasis migrations stay on `SqliteSession`. The Durable Object store still applies migration v4 through `SqlExecutor`. `locus-durable-object` 0.1.0 is a private npm package; the SQL layout matches the published SQLite adapter.
+
+### Security
+
+- Manifest floors stop a crates.io consumer from staying on a vulnerable release that the old ranges still allowed: `tokio` **1.54.1** (RUSTSEC-2026-0386; 1.54.0 is yanked, RUSTSEC-2026-0384), `rustls` **0.23.46**, `rustls-webpki` **0.103.16** (RUSTSEC-2026-0382), `webpki-roots` **1.0.10** (RUSTSEC-2026-0381), `webpki-root-certs` **1.0.11**, `h2` **0.4.16**, `quinn-proto` **0.11.18**, `ammonia` **4.2.4**, `crossbeam-epoch` **0.9.20**, `ctutils` **0.4.4**, `rkyv` **0.8.17** (with `grapheme-full`), and non-yanked `chacha20` **0.10.2**, `spin` **0.9.9** / **0.10.1**, and `enumset` **1.1.13**.
+- `rsa` 0.9.10 (RUSTSEC-2023-0071, Marvin Attack) has no patched release. SurrealDB's `jsonwebtoken` 10 still depends on it.
+- `ruzstd` 0.8.3 (RUSTSEC-2026-0344) stays because `wasmer-compiler` 7.2.1 and `ar_archive_writer` 0.5 require `object` ^0.39, which requires `ruzstd` ^0.8. The fix is `ruzstd` >= 0.9 (`object` 0.40). `quick-xml` 0.39 is not in this resolve; the only copy is 0.42.0.
+- `.github/workflows/wasm.yml` already installs Node 22. There is no Node 20 workflow to bump.
+- `surrealdb` and `surrealdb-types` stay pinned at **3.0.5**. 3.3.4 is inside the old `version = "3"` range, but it enlarges async state enough to overflow the default 2 MiB stack on Surreal runtime tests. Grapheme's `^3.0.5` requirement accepts this pin.
 
 ## [0.14.0] - 2026-10-03
 

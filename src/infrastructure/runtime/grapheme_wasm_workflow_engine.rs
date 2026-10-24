@@ -1,4 +1,4 @@
-//! In-guest Grapheme engine using published `grapheme-wasm` 0.7.1.
+//! In-guest Grapheme engine using published `grapheme-wasm` 0.7.2.
 //!
 //! Compiles source and executes it in-process with the wasm-safe stdlib
 //! (`core` / `json` / `csv` / `yaml` / `html`). Host-only ops (`http`, `sql`, …)

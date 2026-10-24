@@ -2,7 +2,7 @@
 
 Optional `wasm-bindgen` bindings for the Stasis in-memory kernel (ADR-0009).
 
-This crate wraps `stasis-rs --no-default-features` plus `llm-openai-http` and `grapheme`. It does **not** compile the dashboard, `stasisd`, or SurrealKV. Grapheme runs in-guest via published [`grapheme-wasm` 0.7.1](https://crates.io/crates/grapheme-wasm) (stdlib: `core` / `json` / `csv` / `yaml` / `html`).
+This crate wraps `stasis-rs --no-default-features` plus `llm-openai-http` and `grapheme`. It does **not** compile the dashboard, `stasisd`, or SurrealKV. Grapheme runs in-guest via published [`grapheme-wasm` 0.7.2](https://crates.io/crates/grapheme-wasm) (stdlib: `core` / `json` / `csv` / `yaml` / `html`).
 
 The npm package name is `stasis-wasm` (version `0.14.0`). The Rust crate of the same name stays unpublished (`publish = false` on crates.io).
 
@@ -299,10 +299,8 @@ const client = await StasisWasmClient.create({
 
 - `grapheme:file:` payloads (no filesystem on `wasm32-unknown-unknown`)
 - Host-only ops (`http`, `sql`, `pdf`, `image`, …) fail in-guest
-- `execution_timeout` is not preemptively enforced (no `spawn_blocking` / worker threads)
+- `execution_timeout` is not preemptively enforced (no `spawn_blocking` / worker threads). Grapheme 0.7.2 also skips its own `@timeout` clock on `wasm32-unknown-unknown`.
 - `max_steps` / `max_call_depth` use `grapheme-wasm` `RuntimeOptions` defaults
-
-The workspace patches `grapheme-runtime` 0.7.1 to use `web-time::Instant` on wasm32 (`std::time::Instant::now` panics on `wasm32-unknown-unknown`). Drop `vendor/grapheme-runtime` when upstream ships a wasm-safe clock.
 
 ## Cloudflare Workers
 

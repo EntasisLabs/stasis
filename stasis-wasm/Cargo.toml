@@ -2,6 +2,7 @@
 name = "stasis-wasm"
 version = "0.15.0"
 edition = "2024"
+rust-version = "1.94"
 description = "Optional wasm-bindgen bindings for the Stasis in-memory kernel"
 license = "MIT OR Apache-2.0"
 publish = false

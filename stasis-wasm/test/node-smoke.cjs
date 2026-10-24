@@ -51,7 +51,7 @@ test("mock capabilities advertise grapheme-wasm and cors note", async () => {
   assert.equal(caps.hostToolCallbackTimeoutMaxMs, 600000);
   assert.equal(caps.hostToolAbortSignal, true);
   assert.equal(caps.grapheme, true);
-  assert.equal(caps.graphemeEngine, "grapheme-wasm-0.7.1");
+  assert.equal(caps.graphemeEngine, "grapheme-wasm-0.7.2");
   assert.ok(Array.isArray(caps.graphemeStdlib));
   assert.ok(caps.graphemeStdlib.includes("core"));
   assert.equal(caps.memory, "locus-in-memory");

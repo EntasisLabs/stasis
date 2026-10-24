@@ -564,8 +564,8 @@ The default decider is the offline heuristic. Pass `system1Response` (a Laya / s
 
 Stasis pins Locus crates to prevent resolution drift:
 
-- `locus-core-rs = 0.5.1`
-- `locus-sdk = 0.5.0`
+- `locus-core-rs = 0.5.2`
+- `locus-sdk = 0.5.1`
 - memory schema `locus-sdk.memory.v4`
 
 `.with_locus_memory()` stores nodes on the runtime backend. In-memory stays in memory. SQLite writes migration v4. Surreal writes the database the runtime already opened. Explicit `.with_memory_context_reader(...)`, `.with_memory_context_writer(...)`, or `.with_memory_operations(...)` replace that bootstrap. `locus-persist` remains the path for `indxdb://` and a Surreal endpoint that is not the runtime database.
