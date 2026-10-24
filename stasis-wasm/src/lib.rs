@@ -1,7 +1,7 @@
 //! Browser bindings for the slim Stasis kernel.
 //!
 //! Enables an in-memory agent loop: OpenAI HTTP (`llm-openai-http`), tool-loop +
-//! Grapheme (`grapheme-wasm` 0.7.1), Locus memory + identity, and job-store replay.
+//! Grapheme (`grapheme-wasm` 0.7.2), Locus memory + identity, and job-store replay.
 //! Durable Object SQLite is a separate entry point ([`durable_sqlite`]).
 
 mod durable_sqlite;
@@ -486,7 +486,7 @@ impl StasisWasmClient {
             "hostToolCallbackTimeoutMaxMs": MAX_CALLBACK_TIMEOUT_MS,
             "hostToolAbortSignal": true,
             "grapheme": true,
-            "graphemeEngine": "grapheme-wasm-0.7.1",
+            "graphemeEngine": "grapheme-wasm-0.7.2",
             "graphemeStdlib": ["core", "json", "csv", "yaml", "html"],
             "graphemeGaps": [
                 "grapheme:file: payloads (no filesystem)",

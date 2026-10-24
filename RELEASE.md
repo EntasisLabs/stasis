@@ -4,19 +4,19 @@ This workspace already publishes under the `stasis-rs*` names because [`stasis`]
 
 ## What is published
 
-| Crate | Version in tree | Registry (as of 2026-10-03) | Action |
+| Crate | Version in tree | Registry (as of 2026-10-24) | Action |
 | --- | --- | --- | --- |
 | `stasis-rs-macros` | 0.1.0 | crates.io **0.1.0** | Do **not** republish unless the macros crate is bumped |
-| `stasis-rs` | 0.13.0 | crates.io latest **0.12.0** (2026-09-22) | Publish **0.13.0** |
+| `stasis-rs` | 0.15.0 | crates.io latest **0.13.0** (2026-09-28). **0.14.0** and **0.15.0** are not published | Publish **0.15.0** |
 | `stasisd` | 0.1.0 | not published | `publish = false` (workspace binary only) |
-| `stasis-wasm` | 0.14.0 | crates.io `publish = false`; npm latest **0.12.0** (checked 2026-10-03) | Publish npm **0.14.0** (built against kernel 0.13.0) |
+| `stasis-wasm` | 0.15.0 | crates.io `publish = false`; npm latest **0.14.0** (checked 2026-10-24) | Publish npm **0.15.0** (built against kernel 0.15.0) |
 
 Owner of both crates.io packages: [`theelevators`](https://github.com/theelevators) (Tom Vazquez). Publishing requires that account (or a new owner) plus a crates.io API token and 2FA.
 
 ## Ordered publish sequence
 
-1. **`stasis-rs-macros` 0.1.0** — skip upload. Already on crates.io; source is unchanged. `stasis-rs 0.13.0` still depends on `stasis-rs-macros = "0.1.0"`.
-2. **`stasis-rs` 0.13.0** — this is the release to upload. crates.io already has **0.12.0**; a second 0.12.0 upload will be rejected.
+1. **`stasis-rs-macros` 0.1.0** — skip upload. Already on crates.io; source is unchanged. `stasis-rs 0.15.0` still depends on `stasis-rs-macros = "0.1.0"`.
+2. **`stasis-rs` 0.15.0** — this is the release to upload. crates.io already has **0.13.0**; 0.15.0 is not on the index yet. Do not republish 0.13.0.
 
 If macros ever change, bump `stasis-macros/Cargo.toml` first (for example `0.1.1`), publish that version, then point `stasis-rs` at the new macros version and publish `stasis-rs`.
 
@@ -44,7 +44,7 @@ cargo publish -p stasis-rs
 To yank a mistaken upload (does not delete; only hides from new resolvers):
 
 ```bash
-cargo yank --vers 0.13.0 stasis-rs
+cargo yank --vers 0.15.0 stasis-rs
 ```
 
 ## Blockers that require the crate owner
@@ -61,11 +61,20 @@ cargo yank --vers 0.13.0 stasis-rs
 ## Local verification
 
 ```bash
-rustc --version   # need 1.85+ (edition 2024); MSRV is declared as rust-version = "1.85"
-./scripts/publish-crates.sh
+rustc --version   # need 1.94+ (Grapheme 0.7.2); MSRV is rust-version = "1.94"
+RUSTUP_TOOLCHAIN=stable ./scripts/publish-crates.sh
 ```
 
 `cargo publish --dry-run` packages the crate and builds it from the tarball. It does not upload and does not consume a publish token.
+
+## Dry-run results (2026-10-24, 0.15.0)
+
+Filled in after `RUSTUP_TOOLCHAIN=stable ./scripts/publish-crates.sh` on this branch. No crates.io token is used; uploads are aborted.
+
+| Crate | Result | Notes |
+| --- | --- | --- |
+| `stasis-rs-macros` 0.1.0 | pending | Already on crates.io. Do not upload. |
+| `stasis-rs` 0.15.0 | pending | Must resolve crates.io deps only (no `vendor/` patch) and link one `libsqlite3-sys`. |
 
 ## Dry-run results (2026-09-28, rustc 1.98.1, 0.13.0)
 
@@ -98,7 +107,7 @@ Scratch files (`showtest.md`, `*.gr`) were not in the tarball. `stasisd` was not
 
 ## npm (`stasis-wasm`)
 
-The registry name `stasis-wasm` is taken by this project. The Rust crate stays `publish = false`. npm **0.12.0** is already uploaded. This release publishes npm **`stasis-wasm@0.14.0`**, built against kernel `stasis-rs` **0.13.0**.
+The registry name `stasis-wasm` is taken by this project. The Rust crate stays `publish = false`. npm **0.14.0** is already uploaded. This release publishes npm **`stasis-wasm@0.15.0`**, built against kernel `stasis-rs` **0.15.0**. Do not upload it from this change; the runbook is the procedure.
 
 `pkg/` and `pkg-node/` are gitignored; they are produced on the machine that publishes. `prepack` / `prepublishOnly` build them if missing, then run the Node smoke test.
 
@@ -129,8 +138,8 @@ CONFIRM_PUBLISH=yes ./scripts/publish-npm.sh --execute
 To unpublish within 72 hours (npm policy; prefer deprecate for anything already downloaded):
 
 ```bash
-npm unpublish stasis-wasm@0.14.0
-npm deprecate stasis-wasm@0.14.0 "reason"
+npm unpublish stasis-wasm@0.15.0
+npm deprecate stasis-wasm@0.15.0 "reason"
 ```
 
 ### Blockers that require you
@@ -138,7 +147,7 @@ npm deprecate stasis-wasm@0.14.0 "reason"
 - **npm login** on the account that should own `stasis-wasm`
 - **2FA** on that npm account
 - Actual `npm publish` (this repo only dry-runs)
-- `wasm32-unknown-unknown` target and `wasm-bindgen-cli` matching `Cargo.lock` (0.2.122 as of this writing)
+- `wasm32-unknown-unknown` target and `wasm-bindgen-cli` matching `Cargo.lock` (0.2.129 as of this writing)
 
 ## npm dry-run results (2026-10-03, 0.14.0)
 

@@ -20,17 +20,17 @@
 
 Embed the Stasis **kernel** in a browser or wasm-bindgen host: in-memory jobs, injected LLM, and Locus memory — without the dashboard, `stasisd`, or SurrealKV.
 
-This is **Story B** (Stasis *is* Wasm). Grapheme Stage B (Stasis *hosts* Wasm artifacts) remains native (`grapheme-host`). The WASM guest runs workflows through published `grapheme-wasm` 0.7.1.
+This is **Story B** (Stasis *is* Wasm). Grapheme Stage B (Stasis *hosts* Wasm artifacts) remains native (`grapheme-host`). The WASM guest runs workflows through published `grapheme-wasm` 0.7.2.
 
 ## Recipe
 
 ### 1. Depend on the slim profile
 
 ```toml
-stasis-rs = { version = "0.13", default-features = false }
+stasis-rs = { version = "0.15", default-features = false }
 # optional:
 # features = ["llm-openai-http"]   # fetch → OpenAI-spec /v1/chat/completions
-# features = ["grapheme"]          # handlers + grapheme-wasm 0.7.1 in-guest engine
+# features = ["grapheme"]          # handlers + grapheme-wasm 0.7.2 in-guest engine
 # features = ["http-wasm"]         # webhook / cluster forwarder
 # features = ["surreal-ws"]        # remote wss:// job runtime
 # features = ["locus-persist"]     # indxdb:// or wss:// Locus stores
